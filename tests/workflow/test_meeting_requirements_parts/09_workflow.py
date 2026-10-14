@@ -81,7 +81,8 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         app_source = read_module_source('app.py')
         self.assertIn("import market_study", app_source)
         self.assertIn("@app.route('/api/market-study/competitors'", app_source)
-        self.assertIn("'type': 'openrouter:web_search',", app_source)
+        self.assertIn('run_browse_agent', app_source)
+        self.assertNotIn('openrouter:web_search', app_source)
         self.assertIn('def _start_market_job(kind, executor):', app_source)
 
         self.assertIn('project_idea', {field['key'] for field in db.PREBUILT_FIELDS})
@@ -334,36 +335,46 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertNotIn('تلقائي حسب نوع المشروع', index_source)
         self.assertIn('<option value="10" selected>10 كم</option>', index_source)
 
-    def test_market_study_searches_before_it_falls_back_to_json_mode(self):
+    def test_market_search_layer_is_the_browse_agent(self):
+        """The paid OpenRouter/Exa layer was deleted outright — every market
+        web task rides one self-hosted Chromium agent driven by the task's own
+        model. The old seam must never come back."""
         module = self.application_module
-        responses = [
-            {'error': {'message': 'web search response was empty'}},
-            {'choices': [{'message': {'content': 'not valid json'}}]},
-            {'choices': [{'message': {'content': 'still not json'}}]},
-            {'choices': [{'message': {'content': '{"competitors": []}'}}]},
-        ]
-        calls = []
+        self.assertFalse(hasattr(module, '_call_market_study_model'))
+        self.assertFalse(hasattr(module, 'MARKET_SEARCH_ENGINE'))
+        app_source = read_module_source('app.py')
+        self.assertNotIn('openrouter:web_search', app_source)
+        self.assertNotIn("'id': 'web'", app_source)
+        self.assertIn('_browse_agent_call(', app_source)
 
-        def fake_call(system_prompt, user_content, **kwargs):
-            calls.append(kwargs)
-            return responses.pop(0)
+    def test_browse_agent_call_sends_task_model_and_full_task(self):
+        """``_browse_agent_call`` is the seam: it composes system+user into the
+        agent task and forwards the market model plus the caller's usage ctx."""
+        import agent
+        module = self.application_module
+        seen = {}
 
-        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call) as call:
-            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
+        def fake_run(task, **kwargs):
+            seen['task'] = task
+            seen.update(kwargs)
+            return {'choices': [{'message': {'content': '{}'}}]}
 
-        self.assertTrue(module._has_chat_choices(response))
-        self.assertEqual(call.call_count, 4)
-        # Gemini answers a tools + JSON-mode call with reasoning only, so searching with
-        # JSON mode off must be the first attempt or no search ever runs.
-        self.assertIsNotNone(calls[0]['tools'])
-        self.assertIsNone(calls[0]['response_format'])
-        self.assertIsNotNone(calls[1]['tools'])
-        self.assertEqual(calls[1]['response_format'], {'type': 'json_object'})
-        self.assertIsNone(calls[2]['tools'])
-        self.assertEqual(calls[2]['response_format'], {'type': 'json_object'})
-        self.assertIsNone(calls[3]['tools'])
-        self.assertIsNone(calls[3]['response_format'])
-        self.assertEqual(error, '')
+        ctx = {'tenant_id': 't-1', 'flow': 'market'}
+        with patch.object(agent, 'run_browse_agent', side_effect=fake_run):
+            res = module._browse_agent_call('SYS-BRIEF', 'USER-ASK', ctx)
+        self.assertIn('SYS-BRIEF', seen['task'])
+        self.assertIn('USER-ASK', seen['task'])
+        self.assertEqual(seen.get('model'), module.MARKET_STUDY_MODEL)
+        self.assertIs(seen.get('usage_ctx'), ctx)
+        self.assertEqual(
+            res['choices'][0]['message']['content'], '{}')
+
+        # A module-level failure still comes back as an explicit error dict,
+        # never an exception the callers must catch.
+        with patch.object(agent, 'run_browse_agent',
+                          side_effect=RuntimeError('launch_failed')):
+            res = module._browse_agent_call('s', 'u')
+        self.assertIn('browse_agent', res['error']['message'])
 
     def test_market_study_uses_the_retrieved_page_for_homepage_links(self):
         import market_study
@@ -481,7 +492,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             'usage': {'server_tool_use': {'web_search_requests': 1}},
         }
         row = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار', 'row_source': 'ai'}
-        with patch.object(module, '_call_market_study_model', return_value=(response, '')):
+        with patch.object(module, '_browse_agent_call', return_value=response):
             module._verify_competitor_row(row, {'city': 'جدة'}, {})
         self.assertEqual(row.get('price_value'), '45000')
         self.assertEqual(row.get('price_type'), 'إيجار الوحدة السنوي')
@@ -504,13 +515,13 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             'usage': {'server_tool_use': {'web_search_requests': 1}},
         }
         rejected = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار', 'row_source': 'ai'}
-        with patch.object(module, '_call_market_study_model', return_value=(ghost, '')):
+        with patch.object(module, '_browse_agent_call', return_value=ghost):
             module._verify_competitor_row(rejected, {'city': 'جدة'}, {})
         self.assertFalse(rejected.get('price_value'))
         # An evidence-backed price from the main pass is never overwritten.
         filled = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار',
                   'price_value': '30000', 'row_source': 'ai'}
-        with patch.object(module, '_call_market_study_model', return_value=(response, '')):
+        with patch.object(module, '_browse_agent_call', return_value=response):
             module._verify_competitor_row(filled, {'city': 'جدة'}, {})
         self.assertEqual(filled.get('price_value'), '30000')
         # Same-name projects in other Arab markets are not evidence: a Dubai
@@ -529,7 +540,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             'usage': {'server_tool_use': {'web_search_requests': 1}},
         }
         foreign = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار', 'row_source': 'ai'}
-        with patch.object(module, '_call_market_study_model', return_value=(foreign_res, '')):
+        with patch.object(module, '_browse_agent_call', return_value=foreign_res):
             module._verify_competitor_row(foreign, {'city': 'جدة'}, {})
         self.assertTrue(foreign.get('no_search_evidence'))
         self.assertEqual(foreign.get('verify_state'), 'no_match')
@@ -552,7 +563,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         # fabricated name — it must not be mislabeled as unverified.
         silent = {'choices': [{'message': {'content': '{"exists": true}'}}]}
         quiet = {'name': 'مشروع علو الرحاب', 'operation_type': 'إيجار', 'row_source': 'ai'}
-        with patch.object(module, '_call_market_study_model', return_value=(silent, '')):
+        with patch.object(module, '_browse_agent_call', return_value=silent):
             module._verify_competitor_row(quiet, {'city': 'جدة'}, {})
         self.assertEqual(quiet.get('verify_state'), 'search_not_run')
         self.assertFalse(quiet.get('no_search_evidence'))
@@ -575,12 +586,11 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertIn('متوسط سعر الغرفة ADR', prompt)
         self.assertIn('إيجار المتر السنوي', prompt)
         app_source = read_module_source('app.py')
-        self.assertIn("'max_uses': 10", app_source)
-        self.assertIn("MARKET_SEARCH_ENGINE", app_source)
-        # The `web` plugin grounds every market call once — the server tool
-        # alone left the search decision to the model, which could skip it.
-        self.assertIn("'id': 'web'", app_source)
-        self.assertIn("plugins=plugins", app_source)
+        # The browse agent is the only search layer — its per-task budgets are
+        # explicit call-site constants, not provider-side search settings.
+        self.assertIn('_COMPETITORS_SEARCH_BUDGET', app_source)
+        self.assertIn('search_budget=', app_source)
+        self.assertNotIn("'id': 'web'", app_source)
 
     def test_market_study_prompt_carries_financial_and_site_context(self):
         import market_study
@@ -620,25 +630,20 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         bare = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
         self.assertNotIn('مؤشرات الدراسة المالية', bare)
 
-    def test_market_study_lowers_token_cap_when_credit_is_limited(self):
+    def test_market_fatal_refusal_reports_credit(self):
+        """A deterministic wallet/key refusal from the agent keeps its fatal
+        code through _execute_market_competitors — insufficient_credit, not a
+        generic generation failure."""
         module = self.application_module
-        refusal = {'error': {'message': 'You requested up to 6000 tokens, but can only afford 3000'}}
-        success = {
-            'choices': [{'message': {'content': '{"competitors": []}'}}],
-            'usage': {'server_tool_use': {'web_search_requests': 1}},
-        }
-        caps = []
-
-        def fake_call(system_prompt, user_content, **kwargs):
-            caps.append(kwargs['max_tokens'])
-            return refusal if len(caps) == 1 else success
-
-        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call):
-            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
-
-        self.assertTrue(module._has_chat_choices(response))
-        self.assertEqual(error, '')
-        self.assertEqual(caps, [6000, 2550])
+        fatal = {'error': {'fatal': True, 'message': 'استُنفد الرصيد',
+                           'error_code': 'INSUFFICIENT_CREDITS',
+                           'http_status': 402}}
+        with patch.object(module, '_browse_agent_call', return_value=dict(fatal)):
+            result = module._execute_market_competitors(
+                {'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate'})
+        self.assertFalse(result['success'])
+        self.assertEqual(result.get('failureReason'), 'insufficient_credit')
+        self.assertIn('الرصيد', result.get('providerError') or result.get('error') or '')
 
     def test_market_study_endpoints_queue_or_run_without_deleting_rows(self):
         client = self.app.test_client()
@@ -665,10 +670,10 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}],
             'usage': {'server_tool_use': {'web_search_requests': 3}},
         }
-        with patch.object(self.application_module, '_call_market_study_model', return_value=(
-            fake_response,
-            '',
-        )), patch.object(self.application_module, '_verify_market_urls', return_value=set()):
+        with patch.object(self.application_module, '_browse_agent_call',
+                          return_value=fake_response), \
+                patch.object(self.application_module, '_verify_market_urls',
+                             return_value=set()):
             generated = client.post('/api/market-study/competitors', headers=headers, json={
                 'projectType': 'سكني',
                 'city': 'الرياض',
@@ -722,9 +727,8 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         memory_response = {
             'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}],
         }
-        with patch.object(self.application_module, '_call_market_study_model', return_value=(
-            memory_response, '',
-        )):
+        with patch.object(self.application_module, '_browse_agent_call',
+                          return_value=memory_response):
             res = client.post('/api/market-study/competitors', headers=headers, json={
                 'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
             })
@@ -761,10 +765,10 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             'choices': [{'message': {'content': json.dumps(fake, ensure_ascii=False)}}],
             'usage': {'server_tool_use': {'web_search_requests': 2}},
         }
-        with patch.object(self.application_module, '_call_market_study_model', return_value=(
-            verified_response, '',
-        )), patch.object(self.application_module, '_verify_market_urls',
-                         return_value={'https://dead.example/gone'}):
+        with patch.object(self.application_module, '_browse_agent_call',
+                          return_value=verified_response), \
+                patch.object(self.application_module, '_verify_market_urls',
+                             return_value={'https://dead.example/gone'}):
             res = client.post('/api/market-study/competitors', headers=headers, json={
                 'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
             })
@@ -807,56 +811,49 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertFalse(sources[0].get('outside_data_period'))
         self.assertFalse(sources[2].get('outside_data_period'))
 
-    def test_market_study_model_retries_when_search_never_ran(self):
+    def test_market_search_ran_counts_only_opened_pages(self):
+        """Under the browse agent a reply is "searched" only when the Chromium
+        workers actually opened pages — url_citation annotations — not merely
+        because the model produced JSON."""
         module = self.application_module
         memory = {'choices': [{'message': {'content': '{"competitors": []}'}}]}
-        searched = {
-            'choices': [{'message': {'content': '{"competitors": []}'}}],
-            'usage': {'server_tool_use': {'web_search_requests': 1}},
-        }
-        calls = []
+        browsed = {'choices': [{'message': {
+            'content': '{"competitors": []}',
+            'annotations': [{'url_citation': {
+                'url': 'https://rei.rega.gov.sa/ar', 'title': 'صفحة'}}],
+        }}]}
+        self.assertFalse(module._market_search_ran(memory))
+        self.assertTrue(module._market_search_ran(browsed))
 
-        def fake_call(system_prompt, user_content, **kwargs):
-            calls.append(kwargs.get('tools'))
-            return memory if len(calls) == 1 else searched
-
-        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call):
-            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
-        self.assertEqual(error, '')
-        self.assertIs(response, searched)
-        self.assertTrue(all(calls), 'tool attempts must keep the search tool')
-        self.assertEqual(len(calls), 2)
-
-    def test_market_study_model_accepts_memory_answer_as_last_resort(self):
+    def test_verify_row_marks_agent_failure_as_search_not_run(self):
+        """A hard agent error — transport or launch — is an explicit
+        search_not_run carrying the failure, never a fabricated-name verdict
+        and never a silent paid fallback."""
         module = self.application_module
-        memory = {'choices': [{'message': {'content': '{"competitors": []}'}}]}
+        row = {'name': 'مجمع الفرسان', 'row_source': 'ai', 'id': 'r1'}
+        failed = {'error': {'message': 'browse_agent: launch_failed'}}
+        with patch.object(module, '_browse_agent_call', return_value=dict(failed)):
+            module._verify_competitor_row(row, {'city': 'الرياض'}, {})
+        self.assertEqual(row.get('verify_state'), 'search_not_run')
+        self.assertIn('launch_failed', row.get('verify_provider_error') or '')
+        self.assertFalse(row.get('no_search_evidence'))
 
-        with patch.object(module, 'call_openrouter_chat', return_value=memory):
-            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
-        self.assertEqual(error, '')
-        self.assertIs(response, memory)
-
-    def test_market_study_model_rejects_malformed_function_call(self):
-        """JSON parseable out of reasoning is not an answer when the provider
-        aborted — it used to be accepted and surfaced as a silent success."""
+    def test_verify_row_rides_the_task_model(self):
+        """Every verify run forwards MARKET_STUDY_MODEL — the same big mind —
+        not a separate agent model."""
+        import agent
         module = self.application_module
-        malformed = {
-            'choices': [{
-                'native_finish_reason': 'MALFORMED_FUNCTION_CALL',
-                'message': {
-                    'content': '',
-                    'reasoning': '{"competitors": [{"name": "برج الوهم"}]}',
-                    'annotations': [{'url_citation': {
-                        'url': 'https://developer.example/x', 'title': 'صفحة'}}],
-                },
-            }],
-        }
-        with patch.object(module, 'call_openrouter_chat', return_value=malformed) as fake_call:
-            response, error = module._call_market_study_model('system', 'user', max_tokens=6000)
-        self.assertTrue(error)
-        self.assertIn('MALFORMED_FUNCTION_CALL', error)
-        self.assertFalse(response.get('choices'))
-        self.assertGreaterEqual(fake_call.call_count, 2)
+        seen = {}
+
+        def fake_run(task, **kwargs):
+            seen.update(kwargs)
+            return {'choices': [{'message': {'content': '{"exists": false}'}}]}
+
+        row = {'name': 'مجمع الفرسان', 'row_source': 'ai', 'id': 'r1'}
+        with patch.object(agent, 'run_browse_agent', side_effect=fake_run):
+            module._verify_competitor_row(row, {'city': 'الرياض'}, {})
+        self.assertEqual(seen.get('model'), module.MARKET_STUDY_MODEL)
+        self.assertEqual(row.get('verify_state'), 'search_not_run')
 
     def test_attach_retrieved_citations_adds_match_beside_generic_portal(self):
         """A row already carrying the generic REI link still gains the retrieved
@@ -893,26 +890,17 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             }}],
             'usage': {'server_tool_use': {'web_search_requests': 1}},
         }
-        with patch.object(module, '_call_market_study_model', return_value=(response, '')):
+        with patch.object(module, '_browse_agent_call', return_value=response):
             module._verify_competitor_row(row, {'city': 'الرياض'}, {})
         self.assertEqual(row.get('verify_state'), 'verified')
         self.assertIn('https://developer.example/listing-77', row.get('source_urls') or [])
         self.assertIn('450000', str(row.get('price_value') or ''))
 
-    def test_verify_competitor_keeps_searching_until_price_found(self):
-        """Proving the name is not the finish line — while the price stays
-        empty the next query angle still runs."""
+    def test_verify_competitor_price_comes_from_opened_pages(self):
+        """The agent's own loop keeps digging for the price — the orchestrator
+        runs once and applies only a figure citing a page the browser opened."""
         module = self.application_module
         row = {'name': 'مجمع الفرسان', 'row_source': 'ai', 'id': 'r1'}
-        identity = {
-            'choices': [{'message': {
-                'content': '{"exists": true, "price": {}}',
-                'annotations': [{'url_citation': {
-                    'url': 'https://developer.example/fursan',
-                    'title': 'مجمع الفرسان', 'content': ''}}],
-            }}],
-            'usage': {'server_tool_use': {'web_search_requests': 1}},
-        }
         priced = {
             'choices': [{'message': {
                 'content': '{"exists": true, "price": {"value": "320000", '
@@ -921,19 +909,18 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
                     'url': 'https://developer.example/fursan-prices',
                     'title': 'أسعار مجمع الفرسان', 'content': ''}}],
             }}],
-            'usage': {'server_tool_use': {'web_search_requests': 1}},
         }
         calls = []
 
         def fake_model(*_args, **_kwargs):
             calls.append(1)
-            return (identity, '') if len(calls) == 1 else (priced, '')
+            return priced
 
-        with patch.object(module, '_call_market_study_model', side_effect=fake_model):
+        with patch.object(module, '_browse_agent_call', side_effect=fake_model):
             module._verify_competitor_row(row, {'city': 'الرياض'}, {})
         self.assertEqual(row.get('verify_state'), 'verified')
         self.assertIn('320000', str(row.get('price_value') or ''))
-        self.assertGreaterEqual(len(calls), 2)
+        self.assertEqual(len(calls), 1)
 
     def test_verify_competitor_rows_includes_manual_rows(self):
         """Fill mode completes cells the user left empty — manual rows get the
@@ -946,15 +933,14 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         ]
         searched = {
             'choices': [{'message': {'content': '{"exists": true}', 'annotations': []}}],
-            'usage': {'server_tool_use': {'web_search_requests': 1}},
         }
         prompts = []
 
         def fake_model(*args, **_kwargs):
             prompts.append(args[1] if len(args) > 1 else '')
-            return searched, ''
+            return searched
 
-        with patch.object(module, '_call_market_study_model', side_effect=fake_model):
+        with patch.object(module, '_browse_agent_call', side_effect=fake_model):
             module._verify_competitor_rows(rows, {'city': 'الرياض'}, {})
         self.assertTrue(any('اليدوي' in str(prompt) for prompt in prompts),
                         'manual row never received a verification search')
@@ -982,8 +968,8 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             }}],
             'usage': {'server_tool_use': {'web_search_requests': 3}},
         }
-        with patch.object(self.application_module, '_call_market_study_model',
-                          return_value=(grounded, '')), \
+        with patch.object(self.application_module, '_browse_agent_call',
+                          return_value=grounded), \
                 patch.object(self.application_module, '_verify_market_urls',
                              return_value=set()), \
                 patch.object(self.application_module, '_public_host_addresses',
@@ -1036,10 +1022,10 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         responses = [first, second]
 
         def fake_model(*_args, **_kwargs):
-            return (responses.pop(0), '') if responses else (verify, '')
+            return responses.pop(0) if responses else verify
 
         module = self.application_module
-        with patch.object(module, '_call_market_study_model', side_effect=fake_model), \
+        with patch.object(module, '_browse_agent_call', side_effect=fake_model), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_public_host_addresses', return_value=()):
             res = client.post('/api/market-study/competitors', headers=headers, json={
@@ -1056,9 +1042,8 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
     def test_market_competitors_surfaces_provider_error(self):
         client = self.app.test_client()
         headers = self._headers(self.token_a)
-        failed = ({'error': {'message': 'provider finished with MALFORMED_FUNCTION_CALL'}},
-                  'provider finished with MALFORMED_FUNCTION_CALL')
-        with patch.object(self.application_module, '_call_market_study_model',
+        failed = {'error': {'message': 'provider finished with MALFORMED_FUNCTION_CALL'}}
+        with patch.object(self.application_module, '_browse_agent_call',
                           return_value=failed):
             res = client.post('/api/market-study/competitors', headers=headers, json={
                 'projectType': 'سكني', 'city': 'الرياض', 'mode': 'generate',
@@ -1086,17 +1071,16 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             }}],
             'usage': {'server_tool_use': {'web_search_requests': 1}},
         }
-        gate = ({'error': {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
-                           'error_code': 'NO_TENANT_KEY'}},
-                'لا يوجد مفتاح AI مفعل لهذه الشركة')
+        gate = {'error': {'message': 'لا يوجد مفتاح AI مفعل لهذه الشركة',
+                          'error_code': 'NO_TENANT_KEY'}}
         calls = []
 
         def fake_model(*_args, **_kwargs):
             calls.append(1)
-            return (grounded, '') if not calls[1:] else gate
+            return grounded if not calls[1:] else dict(gate)
 
         module = self.application_module
-        with patch.object(module, '_call_market_study_model', side_effect=fake_model), \
+        with patch.object(module, '_browse_agent_call', side_effect=fake_model), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_public_host_addresses', return_value=()):
             res = client.post('/api/market-study/competitors', headers=headers, json={
@@ -1107,9 +1091,8 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertIn('مفتاح', payload.get('providerError') or '')
         rows = payload.get('competitors') or []
         self.assertTrue(all(row.get('verify_state') == 'search_not_run' for row in rows))
-        # 1 main call + 2 attempts per row (the gate break skips the second
-        # query angle) + the logo-discovery batch — not 4+ per row.
-        self.assertLessEqual(len(calls), 13)
+        # 1 main call + one agent run per row + the logo-discovery batch.
+        self.assertLessEqual(len(calls), 10)
 
     def test_pinned_https_get_follows_only_same_site_redirects(self):
         module = self.application_module

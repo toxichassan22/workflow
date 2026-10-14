@@ -12,8 +12,8 @@ caller plainly that no verified regulations exist. Sources are tried in two
 tiers: a curated registry of known-official document URLs
 (``NATIONAL_REGULATION_URLS`` + ``CITY_REGULATION_URLS``) is fetched first —
 deterministically, with no model involvement — and only when the registry has
-nothing for the city does an OpenRouter ``web`` plugin (Exa) search run, still
-restricted to government hosts. In the failure case the model's own knowledge
+nothing for the city does a self-hosted browse agent (headless Chromium)
+search run, still restricted to government hosts. In the failure case the model's own knowledge
 stays marked as ``model_knowledge`` instead of being laundered through
 another city's document.
 """
@@ -332,26 +332,24 @@ def _parse_json_block(text):
         return {}
 
 
-def discover_city_regulation_urls(slug, city, chat_fn, usage_ctx=None, hosts=None):
+def discover_city_regulation_urls(slug, city, usage_ctx=None, hosts=None):
     """Direct official PDF URLs for a city's building regulations.
 
-    The ``web`` plugin (Exa) executes the search on OpenRouter's side for
-    every request — unlike the provider's native tool, which the model is
-    free to skip. The model only picks which returned links are official
-    PDFs; it never invents a URL. When ``hosts`` carries the city's probed
-    amanah domain(s), results on those domains take priority over any other
-    government host."""
+    A self-hosted browse agent (headless Chromium) runs the searches and
+    opens the pages; the task's own model picks which surfaced links are
+    official PDFs — it never invents a URL. When ``hosts`` carries the city's
+    probed amanah domain(s), results on those domains take priority over any
+    other government host."""
     label = city or slug
     host_hint = ''
     if hosts:
         host_hint = (
             f"الدومين الرسمي لأمانة المدينة هو {' / '.join(hosts)} — "
             "أعطِ أولوية قصوى للروابط المستضافة عليه.")
-    system_prompt = (
+    task = (
         "أنت باحث وثائق حكومية سعودية. أعد JSON فقط بهذا الشكل: "
-        "{\"pdf_urls\":[\"https://...\"]} — بدون أي نص أو شرح إضافي.")
-    user_prompt = (
-        f"ابحث في نتائج البحث المرفقة عن روابط مباشرة لملفات PDF رسمية تحتوي "
+        "{\"pdf_urls\":[\"https://...\"]} — بدون أي نص أو شرح إضافي.\n\n"
+        f"ابحث في الويب عن روابط مباشرة لملفات PDF رسمية تحتوي "
         f"أنظمة وضوابط البناء / الاشتراطات البلدية / المخطط المحلي الصادرة عن "
         f"أمانة {label} أو الجهة المختصة في مدينة {label} بالسعودية. "
         "اقبل الروابط من المواقع الحكومية الرسمية فقط (gov.sa أو موقع الأمانة). "
@@ -360,15 +358,16 @@ def discover_city_regulation_urls(slug, city, chat_fn, usage_ctx=None, hosts=Non
         "أعِد حتى 4 روابط — وثيقة الأنظمة والضوابط واللائحة التنفيذية أولوية — "
         "وإن لم تجد ملف PDF رسميًا أعد {\"pdf_urls\":[]}.")
     try:
-        res = chat_fn(
-            system_prompt, user_prompt,
-            temperature=None, max_tokens=1200,
-            response_format={'type': 'json_object'},
-            plugins=[{'id': 'web', 'engine': 'exa',
-                      'max_results': CITY_REGULATION_MAX_RESULTS}],
-            timeout=180, usage_ctx=usage_ctx)
+        import agent as _agent_module
+        res = _agent_module.run_browse_agent(
+            task, usage_ctx=usage_ctx,
+            search_budget=3, max_steps=8, max_tokens=2000)
     except Exception as error:
         return [], [f'تعذر البحث عن اشتراطات «{label}»: {error}']
+    agent_error = res.get('error') if isinstance(res, dict) else res
+    if agent_error:
+        message = agent_error.get('message') if isinstance(agent_error, dict) else str(agent_error)
+        return [], [f'تعذر البحث عن اشتراطات «{label}»: {message}']
     parsed = _parse_json_block(_response_text(res))
     urls = []
     for value in parsed.get('pdf_urls') or parsed.get('urls') or []:
@@ -475,11 +474,14 @@ def download_city_regulation_pdfs(urls, slug, tier='search', cap=None):
     return saved, warnings
 
 
-def ensure_city_regulation_paths(slug, city, chat_fn=None, usage_ctx=None):
+def ensure_city_regulation_paths(slug, city, usage_ctx=None):
     """(paths, warnings) — cached city PDFs or a fresh official-source fetch.
 
-    Never returns another city's documents: an empty list means no verified
-    regulations exist for this city and the caller must say so."""
+    The fallback search rides the self-hosted browse agent (headless
+    Chromium), so a deployment without a paid search plugin still reaches the
+    official documents. Never returns another city's documents: an empty list
+    means no verified regulations exist for this city and the caller must say
+    so."""
     cached = cached_city_pdf_paths(slug)
     if cached:
         return cached, []
@@ -507,12 +509,9 @@ def ensure_city_regulation_paths(slug, city, chat_fn=None, usage_ctx=None):
         warnings.append(
             f'تعذر تنزيل مستندات الاشتراطات الرسمية المسجلة لمدينة «{label}»؛ '
             'سيتم تجربة البحث عن بديل رسمي.')
-    if chat_fn is None:
-        warnings.append('جلب اشتراطات المدينة غير متاح في هذا السياق.')
-        return [], warnings
     hosts = resolve_city_amana_hosts(slug)
     urls, search_warnings = discover_city_regulation_urls(
-        slug, label, chat_fn, usage_ctx=usage_ctx, hosts=hosts)
+        slug, label, usage_ctx=usage_ctx, hosts=hosts)
     warnings.extend(search_warnings)
     official = [url for url in urls if is_official_regulation_url(url)]
     if hosts:

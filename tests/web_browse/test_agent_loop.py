@@ -1,12 +1,15 @@
-"""Browse-agent loop contract tests (task A6).
+"""Browse-agent loop contract tests.
 
-``modules/web_browse/agent.py`` runs a Vertex ``generateContent`` loop with two
-function declarations — ``web_search`` and ``open_url`` — executed through the
-A1 browser session, then repackages the outcome as an OpenRouter-shaped chat
-response plus ``browse_trace`` and ``url_citation`` annotations.
+``modules/web_browse/agent.py`` runs one OpenRouter chat-completions loop per
+research task — the task's own model decides when to call ``web_search`` /
+``open_url``, the module executes those calls locally against the headless
+Chromium session (``browser.py``), feeds each result back as a ``tool``
+message, and repackages the outcome as an OpenRouter-shaped response plus
+``browse_trace`` and ``url_citation`` annotations.
 
 These tests never touch the network or a real browser: the transport
-(``vertex_generate``) and the browser surface (``browser_session`` /
+(``agent.openrouter_chat`` — the indirection over the app's
+``call_openrouter_messages``) and the browser surface (``browser_session`` /
 ``BrowserWorker`` / module-level ``open_url``/``web_search``) are all faked.
 The contract fixes signatures but not import style, so each dependency name is
 patched on the consumer module *and* the source module — ``from x import f``
@@ -33,7 +36,6 @@ for _p in (str(ROOT), str(_WEB_BROWSE)):
 
 import agent  # noqa: E402  modules/web_browse/agent.py
 import browser  # noqa: E402  modules/web_browse/browser.py
-import vertex_client  # noqa: E402  modules/web_browse/vertex_client.py
 
 _FINAL_TEXT = '{"exists": true, "official_url": "https://sa.aqar.fm/x", "price": null}'
 _PAGE_URL = 'https://sa.aqar.fm/projects/alajlan-riviera-16'
@@ -42,33 +44,44 @@ _PAGE_TEXT = 'صفحة المشروع الرسمية تحتوي تفاصيل ا�
 
 
 def _usage(prompt=10, completion=5):
+    return {'prompt_tokens': prompt,
+            'completion_tokens': completion,
+            'total_tokens': prompt + completion}
+
+
+def _tool_call(name, args, index=0):
     return {
-        'promptTokenCount': prompt,
-        'candidatesTokenCount': completion,
-        'totalTokenCount': prompt + completion,
+        'id': f'call_{index}',
+        'type': 'function',
+        'function': {'name': name, 'arguments': json.dumps(args)},
     }
 
 
-def _fn_response(name, args, prompt=10, completion=5):
+def _fn_response(calls, prompt=10, completion=5):
+    """One assistant turn carrying tool calls — OpenAI messages shape."""
+    if isinstance(calls, tuple):
+        calls = [calls]
     return {
-        'candidates': [{
-            'content': {
-                'role': 'model',
-                'parts': [{'functionCall': {'name': name, 'args': args}}],
+        'choices': [{
+            'message': {
+                'role': 'assistant',
+                'content': None,
+                'tool_calls': [_tool_call(name, args, index)
+                               for index, (name, args) in enumerate(calls)],
             },
-            'finishReason': 'STOP',
+            'finish_reason': 'tool_calls',
         }],
-        'usageMetadata': _usage(prompt, completion),
+        'usage': _usage(prompt, completion),
     }
 
 
 def _text_response(text=_FINAL_TEXT, prompt=10, completion=5):
     return {
-        'candidates': [{
-            'content': {'role': 'model', 'parts': [{'text': text}]},
-            'finishReason': 'STOP',
+        'choices': [{
+            'message': {'role': 'assistant', 'content': text},
+            'finish_reason': 'stop',
         }],
-        'usageMetadata': _usage(prompt, completion),
+        'usage': _usage(prompt, completion),
     }
 
 
@@ -92,7 +105,7 @@ def _default_results(_query):
 class _FakeWorker:
     """One object covering every lifecycle the contract allows: usable as a
     plain worker, as ``with browser_session() as w`` and as ``BrowserWorker()``
-    — it exposes the A1 operations either way."""
+    — it exposes the browser operations either way."""
 
     def __init__(self, open_url=None, web_search=None):
         self._open_url = open_url
@@ -129,7 +142,7 @@ def _citation_payload(annotation):
 
 
 @contextlib.contextmanager
-def _patched_pipeline(vertex_impl, worker=None, open_url=None, web_search=None):
+def _patched_pipeline(chat_impl, worker=None, open_url=None, web_search=None):
     """Intercept every documented dependency on both the consumer (``agent``)
     and the source modules so either import style is covered."""
     worker = worker or _FakeWorker(open_url=open_url, web_search=web_search)
@@ -138,8 +151,7 @@ def _patched_pipeline(vertex_impl, worker=None, open_url=None, web_search=None):
     search_fn = web_search or _default_results
     stack = contextlib.ExitStack()
     for mod, name, new in (
-        (vertex_client, 'vertex_generate', vertex_impl),
-        (agent, 'vertex_generate', vertex_impl),
+        (agent, 'openrouter_chat', chat_impl),
         (browser, 'browser_session', session_factory),
         (agent, 'browser_session', session_factory),
         (browser, 'BrowserWorker', lambda *a, **kw: worker),
@@ -154,9 +166,10 @@ def _patched_pipeline(vertex_impl, worker=None, open_url=None, web_search=None):
         yield worker
 
 
-def _scripted_vertex(responses, calls):
-    def fake(*_a, **_kw):
-        calls.append(_a[0] if _a else _kw.get('contents'))
+def _scripted_chat(responses, calls):
+    def fake(messages, **kwargs):
+        calls.append({'messages': [dict(m) for m in (messages or [])],
+                      'kwargs': kwargs})
         if len(calls) < len(responses):
             return responses[len(calls) - 1]
         return responses[-1]
@@ -167,13 +180,13 @@ def _scripted_vertex(responses, calls):
 class RunBrowseAgentLoopTests(unittest.TestCase):
     def test_search_open_then_final_text_builds_citation(self):
         calls = []
-        vertex_impl = _scripted_vertex([
-            _fn_response('web_search', {'query': 'مشروع العجلان ريفيرا 16'}),
-            _fn_response('open_url', {'url': _PAGE_URL}),
+        chat_impl = _scripted_chat([
+            _fn_response(('web_search', {'query': 'مشروع العجلان ريفيرا 16'})),
+            _fn_response(('open_url', {'url': _PAGE_URL})),
             _text_response(prompt=30, completion=12),
         ], calls)
 
-        with _patched_pipeline(vertex_impl):
+        with _patched_pipeline(chat_impl):
             result = agent.run_browse_agent('تحقق من المنافس', max_steps=5)
 
         self.assertNotIn('error', result)
@@ -194,26 +207,55 @@ class RunBrowseAgentLoopTests(unittest.TestCase):
         self.assertEqual(usage.get('prompt_tokens'), 10 + 10 + 30)
         self.assertEqual(usage.get('completion_tokens'), 5 + 5 + 12)
 
-    def test_tool_results_are_fed_back_to_the_model(self):
+    def test_tool_results_are_fed_back_as_tool_messages(self):
         calls = []
-        vertex_impl = _scripted_vertex([
-            _fn_response('web_search', {'query': 'q'}),
+        chat_impl = _scripted_chat([
+            _fn_response(('web_search', {'query': 'q'})),
             _text_response(),
         ], calls)
 
-        with _patched_pipeline(vertex_impl):
+        with _patched_pipeline(chat_impl):
             agent.run_browse_agent('task', max_steps=4)
 
         self.assertGreaterEqual(len(calls), 2)
-        second_round = json.dumps(calls[1], ensure_ascii=False, default=str)
-        self.assertIn('functionResponse', second_round)
-        self.assertIn('نتيجة', second_round)
+        second_round = calls[1]['messages']
+        roles = [m.get('role') for m in second_round]
+        self.assertEqual(roles[:2], ['system', 'user'])
+        # The assistant turn keeps its raw tool_calls and each answer rides as
+        # a tool-role message keyed by the call id.
+        assistant = second_round[2]
+        self.assertEqual(assistant.get('role'), 'assistant')
+        self.assertTrue(assistant.get('tool_calls'))
+        tool_msg = second_round[3]
+        self.assertEqual(tool_msg.get('role'), 'tool')
+        self.assertEqual(tool_msg.get('tool_call_id'), 'call_0')
+        self.assertIn('نتيجة', tool_msg.get('content') or '')
+
+    def test_parallel_tool_calls_each_get_a_result_message(self):
+        calls = []
+        chat_impl = _scripted_chat([
+            _fn_response([
+                ('open_url', {'url': _PAGE_URL}),
+                ('open_url', {'url': 'https://wasalt.sa/x'}),
+            ]),
+            _text_response(),
+        ], calls)
+
+        with _patched_pipeline(chat_impl):
+            result = agent.run_browse_agent('task', max_steps=4)
+
+        self.assertNotIn('error', result)
+        tool_msgs = [m for m in calls[1]['messages'] if m.get('role') == 'tool']
+        self.assertEqual([m.get('tool_call_id') for m in tool_msgs],
+                         ['call_0', 'call_1'])
+        self.assertEqual(
+            len(result['choices'][0]['message'].get('annotations') or []), 2)
 
     def test_failed_open_is_traced_but_not_cited(self):
         calls = []
-        vertex_impl = _scripted_vertex([
-            _fn_response('open_url', {'url': 'https://wasalt.sa/property/deep'}),
-            _fn_response('open_url', {'url': _PAGE_URL}),
+        chat_impl = _scripted_chat([
+            _fn_response(('open_url', {'url': 'https://wasalt.sa/property/deep'})),
+            _fn_response(('open_url', {'url': _PAGE_URL})),
             _text_response(),
         ], calls)
 
@@ -223,7 +265,7 @@ class RunBrowseAgentLoopTests(unittest.TestCase):
                         'error': 'timeout'}
             return _ok_page(url)
 
-        with _patched_pipeline(vertex_impl, worker=_FakeWorker(open_url=flaky_open)):
+        with _patched_pipeline(chat_impl, worker=_FakeWorker(open_url=flaky_open)):
             result = agent.run_browse_agent('task', max_steps=6)
 
         self.assertNotIn('error', result)
@@ -236,10 +278,10 @@ class RunBrowseAgentLoopTests(unittest.TestCase):
 
     def test_step_cap_returns_error_shape(self):
         calls = []
-        vertex_impl = _scripted_vertex(
-            [_fn_response('web_search', {'query': 'q'})], calls)
+        chat_impl = _scripted_chat(
+            [_fn_response(('web_search', {'query': 'q'}))], calls)
 
-        with _patched_pipeline(vertex_impl):
+        with _patched_pipeline(chat_impl):
             result = agent.run_browse_agent('task', max_steps=3)
 
         self.assertIn('error', result)
@@ -247,79 +289,148 @@ class RunBrowseAgentLoopTests(unittest.TestCase):
         self.assertIsInstance(result.get('browse_trace') or [], list)
 
     def test_transport_error_never_raises(self):
-        vertex_impl = lambda *a, **kw: {'error': {'message': 'boom'}}  # noqa: E731
+        chat_impl = lambda *_a, **_kw: {'error': {'message': 'boom'}}  # noqa: E731
 
-        with _patched_pipeline(vertex_impl):
+        with _patched_pipeline(chat_impl):
             result = agent.run_browse_agent('task', max_steps=4)
 
         self.assertIn('error', result)
         self.assertEqual(result['error'].get('message'), 'boom')
 
+    def test_fatal_refusal_dict_survives_for_downstream_detection(self):
+        """A wallet/key refusal must reach the caller with its error_code —
+        _ai_fatal_error_dict reads it straight off the result."""
+        fatal = {'error': {'fatal': True, 'message': 'استُنفد الرصيد',
+                           'error_code': 'INSUFFICIENT_CREDITS',
+                           'http_status': 402}}
+        chat_impl = lambda *_a, **_kw: dict(fatal)  # noqa: E731
+
+        with _patched_pipeline(chat_impl):
+            result = agent.run_browse_agent('task', max_steps=4)
+
+        self.assertEqual(result['error'].get('error_code'), 'INSUFFICIENT_CREDITS')
+        self.assertTrue(result['error'].get('fatal'))
+
     def test_search_budget_param_caps_searches(self):
         calls = []
-        vertex_impl = _scripted_vertex(
-            [_fn_response('web_search', {'query': 'q'})], calls)
+        chat_impl = _scripted_chat(
+            [_fn_response(('web_search', {'query': 'q'}))], calls)
         searches = []
 
         def counting_search(query):
             searches.append(query)
             return _default_results(query)
 
-        with _patched_pipeline(vertex_impl, web_search=counting_search):
+        with _patched_pipeline(chat_impl, web_search=counting_search):
             result = agent.run_browse_agent('task', max_steps=6, search_budget=2)
 
         # The hard cap granted exactly two real searches; every later call
         # comes back as a budget refusal the model can act on instead of
         # burning the step cap.
         self.assertEqual(len(searches), 2)
-        transcript = json.dumps(calls[-1], ensure_ascii=False, default=str)
+        transcript = json.dumps(calls[-1]['messages'], ensure_ascii=False, default=str)
         self.assertIn('search_budget_exceeded', transcript)
         self.assertIn('error', result)
 
     def test_preamble_advertises_one_less_than_the_hard_cap(self):
         calls = []
-        vertex_impl = _scripted_vertex([_text_response()], calls)
+        chat_impl = _scripted_chat([_text_response()], calls)
 
-        with _patched_pipeline(vertex_impl):
+        with _patched_pipeline(chat_impl):
             agent.run_browse_agent('task')
-        self.assertIn('عمليتي بحث', calls[0][0]['parts'][0]['text'])
+        self.assertEqual(calls[0]['messages'][0].get('role'), 'system')
+        self.assertIn('عمليتي بحث', calls[0]['messages'][0].get('content') or '')
 
         calls.clear()
-        with _patched_pipeline(vertex_impl):
+        with _patched_pipeline(chat_impl):
             agent.run_browse_agent('task', search_budget=8)
-        self.assertIn('7 عمليات بحث', calls[0][0]['parts'][0]['text'])
+        self.assertIn('7 عمليات بحث', calls[0]['messages'][0].get('content') or '')
 
-    def test_output_cap_and_thinking_reach_the_transport(self):
+    def test_output_cap_and_reasoning_effort_reach_the_transport(self):
         seen = []
 
-        def fake(*_a, **kw):
+        def fake(messages, **kw):
             seen.append(kw)
             return _text_response()
 
         with _patched_pipeline(fake):
-            agent.run_browse_agent('task', max_tokens=12345, thinking='medium')
+            agent.run_browse_agent('task', max_tokens=12345,
+                                   reasoning_effort='max')
         self.assertEqual(seen[0].get('max_tokens'), 12345)
-        self.assertEqual(seen[0].get('thinking'), 'medium')
+        self.assertEqual(seen[0].get('reasoning_effort'), 'max')
 
         seen.clear()
         with _patched_pipeline(fake):
             agent.run_browse_agent('task')
         self.assertEqual(seen[0].get('max_tokens'), 4000)
-        self.assertEqual(seen[0].get('thinking'), 'low')
+        self.assertIsNone(seen[0].get('reasoning_effort'))
+
+    def test_task_model_is_forwarded_on_every_round(self):
+        """The loop belongs to the caller's model — the same model that would
+        have answered the task without tools drives every round."""
+        seen = []
+
+        def fake(messages, **kw):
+            seen.append(kw)
+            if len(seen) == 1:
+                return _fn_response(('web_search', {'query': 'q'}))
+            return _text_response()
+
+        with _patched_pipeline(fake):
+            agent.run_browse_agent('task', model='anthropic/claude-haiku-5.5')
+
+        self.assertEqual(
+            [kw.get('model') for kw in seen],
+            ['anthropic/claude-haiku-5.5'] * len(seen))
+        # And every round declares the same two local tools.
+        names = {tool['function']['name'] for kw in seen
+                 for tool in kw.get('tools') or []}
+        self.assertEqual(names, {'web_search', 'open_url'})
+
+    def test_reasoning_effort_refusal_retries_without_it(self):
+        """A provider that rejects the effort knob gets the same model again,
+        minus the knob — never a different transport or a silent failure."""
+        seen = []
+
+        def fake(messages, **kw):
+            seen.append(dict(kw))
+            if kw.get('reasoning_effort'):
+                return {'error': {'message': 'reasoning_effort: Invalid value'}}
+            return _text_response()
+
+        with _patched_pipeline(fake):
+            result = agent.run_browse_agent('task', reasoning_effort='max')
+
+        self.assertNotIn('error', result)
+        self.assertEqual(seen[0].get('reasoning_effort'), 'max')
+        self.assertNotIn('reasoning_effort', seen[1])
 
     def test_never_cites_pages_the_agent_did_not_open(self):
         calls = []
-        vertex_impl = _scripted_vertex([
-            _fn_response('web_search', {'query': 'q'}),
+        chat_impl = _scripted_chat([
+            _fn_response(('web_search', {'query': 'q'})),
             _text_response(),
         ], calls)
 
-        with _patched_pipeline(vertex_impl):
+        with _patched_pipeline(chat_impl):
             result = agent.run_browse_agent('task', max_steps=4)
 
         message = result['choices'][0]['message']
         annotations = [_citation_payload(a) for a in message.get('annotations') or []]
         self.assertEqual([a for a in annotations if a.get('url')], [])
+
+    def test_usage_ctx_reaches_every_round(self):
+        seen = []
+
+        def fake(messages, **kw):
+            seen.append(kw)
+            return _text_response()
+
+        with _patched_pipeline(fake):
+            agent.run_browse_agent(
+                'task', usage_ctx={'tenant_id': 't-9', 'flow': 'market'})
+        self.assertEqual(seen[0].get('usage_ctx'),
+                         {'tenant_id': 't-9', 'flow': 'market'})
 
 
 if __name__ == '__main__':

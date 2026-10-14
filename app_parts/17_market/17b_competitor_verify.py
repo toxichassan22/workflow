@@ -1,20 +1,26 @@
-def _browse_agent_verify(task, usage_ctx, **agent_kwargs):
-    """One self-hosted browse-agent run for a competitor verify or the summary.
+def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
+                       **agent_kwargs):
+    """One self-hosted browse-agent run for a market web task.
 
-    Returns the agent's OpenRouter-shaped reply — every page it opened rides in
-    as a url_citation annotation — or an ``{'error': ...}`` dict. Never raises:
-    the verify path reports the failure as search_not_run instead of falling
-    back to the paid provider, and the module can be absent on a deploy that
-    never enabled the flag. ``agent_kwargs`` (search_budget, max_steps,
-    max_tokens, thinking) pass straight through to run_browse_agent.
+    The task model itself drives the loop — it decides the searches and which
+    pages to open, the headless-Chromium workers execute them, and every page
+    actually read rides back as a url_citation annotation. Returns the agent's
+    OpenRouter-shaped reply or an ``{'error': ...}`` dict; never raises — a
+    caller reports the failure as search_not_run instead of falling back to a
+    paid search layer (there is none left). ``agent_kwargs`` (search_budget,
+    max_steps, max_tokens, reasoning_effort) pass straight through to
+    run_browse_agent.
     """
     try:
         # Flat module, attribute call: `web_browse.agent` would bind a second
         # module identity that `patch.object(agent, 'run_browse_agent')` in
         # tests silently misses.
         import agent as _agent_module
+        task = (str(system_prompt or '').strip() + '\n\n'
+                + str(user_content or '')).strip()
         response = _agent_module.run_browse_agent(
-            task, usage_ctx=usage_ctx, **agent_kwargs)
+            task, usage_ctx=usage_ctx, model=model or MARKET_STUDY_MODEL,
+            **agent_kwargs)
     except Exception as exc:
         return {'error': {'message': f'browse_agent: {exc}'}}
     if not isinstance(response, dict):
@@ -61,13 +67,13 @@ def _absorb_verify_response(row, prompt_response, tokens, needed, matched_pages,
 
 
 def _verify_competitor_row(row, payload, data, tenant_id=None):
-    """One targeted web search per competitor.
+    """One targeted browse-agent run per competitor.
 
-    The main call's single Exa query only retrieves market-level index pages,
-    so the model fills names from memory. A per-competitor query retrieves the
-    pages that actually mention THIS name: they become its source links, its
-    official page feeds the logo import, and a name no retrieved page mentions
-    is flagged as unverified instead of being silently trusted.
+    A market-wide listing query only surfaces index pages, so the model fills
+    names from memory. A per-competitor agent retrieves the pages that
+    actually mention THIS name: they become its source links, its official
+    page feeds the logo import, and a name no retrieved page mentions is
+    flagged as unverified instead of being silently trusted.
     """
     name = str(row.get('name') or '').strip()
     if not name:
@@ -84,7 +90,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     price_rule = (
         'السعر يُقبل فقط إذا ظهر في صفحة قرأتها في هذا البحث، ورابطها يوضع في '
         'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. ')
-    prompts = [(
+    prompt = (
         f'ابحث في الويب عن المشروع العقاري «{name}» في مدينة {city} بالسعودية.\n'
         'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع الرسمي '
         'للمشروع أو مطوّره إن وُجدت", "summary": "سطر واحد عن المشروع", '
@@ -92,85 +98,33 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
         'أي صفحة مسترجعة تذكر المشروع بالاسم تُحتسب دليلًا — موقع المطور أو '
         'إعلانًا تفصيليًا أو خبرًا، وليس شرطًا أن تكون رسمية. '
         'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
-    )]
+    )
     tokens = _competitor_name_tokens(name)
     if not tokens:
         return
     needed = 1 if len(tokens) == 1 else 2
-    # Bare-token retry: a quoted «مشروع …» phrasing under-retrieves when the
-    # pages that name this project drop the generic prefix or use only one
-    # script of a bilingual name. It also doubles as the retry when the first
-    # call errors out or returns no citations.
-    prompts.append(
-        f'ابحث في الويب عن {" ".join(sorted(tokens))} — {city} السعودية.\n'
-        'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع '
-        'الرسمي إن وُجدت", "summary": "سطر واحد", ' + price_shape + '}.\n'
-        + price_rule + 'أي صفحة تذكر الاسم تُحتسب دليلًا — إعلانًا أو خبرًا أو '
-        'موقع مطوّر. إن لم تجد صفحة تذكر هذا الاسم أعد exists=false.'
-    )
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
-    response = None
-    search_ran_any = False
     matched = []
     matched_pages = {}
     official = ''
-    last_error = ''
-    if os.environ.get('BROWSER_AGENT') == '1':
-        # One self-hosted browse agent replaces the prompt loop: it runs the
-        # searches and opens the pages itself, so every page it actually read
-        # arrives as a url_citation annotation — the retrieved evidence.
-        prompt_response = _browse_agent_verify(prompts[0], usage_ctx)
-        response = prompt_response
-        last_error = _chat_error_message(prompt_response)
-        if prompt_response.get('error') is None:
-            if _market_citation_pages(prompt_response):
-                search_ran_any = True
-                prompt_matched, official = _absorb_verify_response(
-                    row, prompt_response, tokens, needed, matched_pages,
-                    offer_lang=offer_lang)
-                matched.extend(prompt_matched)
-            else:
-                # A clean reply that opened zero pages means nothing was read —
-                # "no browsed evidence", never proof the name is fabricated.
-                last_error = 'browse_agent: no browsed evidence'
-    else:
-        for prompt in prompts:
-            prompt_response = None
-            # Plugin-only first (Gemini can fumble tool calls), then the
-            # openrouter:web_search tool — on deployments where the Exa plugin
-            # returns no citations the tool is the only path that grounds.
-            for tools_on in (False, True):
-                try:
-                    prompt_response, err = _call_market_study_model(
-                        market_study.build_consultant_system_prompt(), prompt,
-                        max_tokens=1200, usage_ctx=usage_ctx, server_tools=tools_on)
-                except Exception:
-                    prompt_response = None
-                    continue
-                last_error = err or last_error
-                if not _market_search_ran(prompt_response):
-                    continue
-                search_ran_any = True
-                break
-            if prompt_response is None or not _market_search_ran(prompt_response):
-                # A tenant-key gate refusal is deterministic — every remaining
-                # angle fails identically, so stop instead of burning them all.
-                gate_error = (prompt_response or {}).get('error')
-                if isinstance(gate_error, dict) and gate_error.get('error_code') in (
-                        'NO_TENANT_KEY', 'TENANT_KEY_CHECK_FAILED'):
-                    break
-                continue
-            response = prompt_response
+    # The agent runs the searches and opens the pages itself, so every page
+    # it actually read arrives as a url_citation annotation — the retrieved
+    # evidence. A transport failure or a clean reply with zero opened pages
+    # is search_not_run, never proof the name is fabricated.
+    response = _browse_agent_call(
+        market_study.build_consultant_system_prompt(offer_lang), prompt,
+        usage_ctx)
+    last_error = _chat_error_message(response)
+    search_ran_any = False
+    if response.get('error') is None:
+        if _market_citation_pages(response):
+            search_ran_any = True
             prompt_matched, official = _absorb_verify_response(
-                row, prompt_response, tokens, needed, matched_pages,
-                official=official, offer_lang=offer_lang)
+                row, response, tokens, needed, matched_pages,
+                offer_lang=offer_lang)
             matched.extend(prompt_matched)
-            price_filled = any(str(row.get(key) or '').strip()
-                               for key in ('price_value', 'price_from', 'price_to'))
-            # Identity proven is not the job done — keep searching while the price
-            # is still empty; the next query angle may surface a pricing page.
-            if prompt_matched and price_filled:
-                break
+        else:
+            last_error = 'browse_agent: no browsed evidence'
     if not search_ran_any:
         # The provider returned no citations at all — a search-provider miss,
         # not proof the name is fabricated. Say so instead of mislabeling it.

@@ -142,12 +142,16 @@ class BenchmarkExpansionTests(unittest.TestCase):
 
     @staticmethod
     def _response(rows):
-        return (
-            {'choices': [{'message': {'content': json.dumps(
-                {'competitors': rows}, ensure_ascii=False)}}],
-             'usage': {'server_tool_use': {'web_search_requests': 4}}},
-            '',
-        )
+        # Browse-agent shape: the retrieved pages ride as url_citation
+        # annotations — _market_search_ran treats them as executed research.
+        return {
+            'choices': [{'message': {
+                'content': json.dumps({'competitors': rows}, ensure_ascii=False),
+                'annotations': [{'url_citation': {
+                    'url': 'https://rei.rega.gov.sa/ar', 'title': 'المؤشرات'}}],
+            }}],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 5},
+        }
 
     def test_deficient_axis_gets_its_own_search_round(self):
         module = self.application_module
@@ -158,7 +162,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
         hotel = [{'name': 'فندق المدينة', 'project_type': 'فندقي', 'benchmarks': ['فندقي']}]
         calls = []
 
-        def fake_call(system_prompt, user_prompt, **kwargs):
+        def fake_call(system_prompt, user_prompt, *args, **kwargs):
             calls.append(user_prompt)
             if len(calls) == 1:
                 return self._response(residential + hotel)
@@ -177,7 +181,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
             'competitors': [],
         }
         with self.app.app_context(), \
-                patch.object(module, '_call_market_study_model', side_effect=fake_call), \
+                patch.object(module, '_browse_agent_call', side_effect=fake_call), \
                 patch.object(module, '_verify_competitor_rows', return_value=None), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_auto_import_competitor_logos', return_value=None):
@@ -202,7 +206,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
         ]
         calls = []
 
-        def fake_call(system_prompt, user_prompt, **kwargs):
+        def fake_call(system_prompt, user_prompt, *args, **kwargs):
             calls.append(user_prompt)
             return self._response(rows)
 
@@ -217,7 +221,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
             'competitors': [],
         }
         with self.app.app_context(), \
-                patch.object(module, '_call_market_study_model', side_effect=fake_call), \
+                patch.object(module, '_browse_agent_call', side_effect=fake_call), \
                 patch.object(module, '_verify_competitor_rows', return_value=None), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_auto_import_competitor_logos', return_value=None):

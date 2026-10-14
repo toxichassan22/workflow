@@ -83,7 +83,7 @@ class AiUsageTests(unittest.TestCase):
         module = self.application_module
         with self.app.app_context():
             db.record_ai_usage_event(
-                self.tenant_id, 'google/gemini-3.8-flash', flow='slide',
+                self.tenant_id, 'google/google/gemini-4-argon-flash', flow='slide',
                 prompt_tokens=100, completion_tokens=50, total_tokens=150,
                 draft_id='draft-1', presentation_id='pres-1', generation_id='gen-1')
             db.record_ai_usage_event(
@@ -91,7 +91,7 @@ class AiUsageTests(unittest.TestCase):
                 prompt_tokens=200, completion_tokens=100, total_tokens=300,
                 draft_id='draft-1', presentation_id='pres-1', generation_id='gen-2')
             db.record_ai_usage_event(
-                self.tenant_id, 'google/gemini-3.8-flash', flow='slide',
+                self.tenant_id, 'google/google/gemini-4-argon-flash', flow='slide',
                 prompt_tokens=10, completion_tokens=5, total_tokens=15,
                 draft_id='draft-other', generation_id='gen-3')
             summary = db.get_ai_usage_summary(
@@ -104,7 +104,7 @@ class AiUsageTests(unittest.TestCase):
         self.assertEqual(flows['slide']['calls'], 1)
         self.assertEqual(flows['designer_chat']['total_tokens'], 300)
         models = {row['model'] for row in summary['by_model']}
-        self.assertIn('google/gemini-3.8-flash', models)
+        self.assertIn('google/google/gemini-4-argon-flash', models)
         self.assertEqual(len(summary['recent']), 2)
 
     def test_cost_update_fills_pending_event(self):
@@ -710,26 +710,30 @@ class AiUsageTests(unittest.TestCase):
         self.assertGreaterEqual(summary['totals']['calls'], 1)
         self.assertGreaterEqual(summary['totals']['cost_usd'], 0.02)
 
-    def test_market_model_call_forwards_project_scope(self):
+    def test_market_browse_call_forwards_project_scope(self):
+        """The browse-agent seam must carry the job's usage ctx into the
+        per-round OpenRouter call — tenant and draft both bill correctly."""
         module = self.application_module
         seen = []
         fake = {'choices': [{'message': {'content': '{"competitors": []}'}}],
                 'usage': {'prompt_tokens': 5, 'completion_tokens': 5, 'total_tokens': 10},
                 'id': 'gen-mkt-attr'}
 
-        def _fake_chat(*args, **kwargs):
-            seen.append(kwargs.get('usage_ctx'))
+        def _fake_messages(messages, **kwargs):
+            seen.append(kwargs)
             return dict(fake)
 
         with self.app.app_context():
-            with patch.object(module, 'call_openrouter_chat', side_effect=_fake_chat):
-                module._call_market_study_model(
-                    'sys', 'user', max_tokens=2000,
-                    usage_ctx={'tenant_id': self.tenant_id, 'draft_id': 'draft-mkt-attr',
-                               'flow': 'market'})
+            with patch.object(module, 'call_openrouter_messages',
+                              side_effect=_fake_messages):
+                module._browse_agent_call(
+                    'sys', 'user',
+                    {'tenant_id': self.tenant_id, 'draft_id': 'draft-mkt-attr',
+                     'flow': 'market'})
         self.assertTrue(seen)
-        self.assertEqual(seen[0].get('draft_id'), 'draft-mkt-attr')
-        self.assertEqual(seen[0].get('flow'), 'market')
+        self.assertEqual(seen[0].get('usage_ctx').get('draft_id'), 'draft-mkt-attr')
+        self.assertEqual(seen[0].get('usage_ctx').get('flow'), 'market')
+        self.assertEqual(seen[0].get('model'), module.MARKET_STUDY_MODEL)
 
     def test_usage_ctx_reads_outer_and_inner_draft_ids(self):
         module = self.application_module

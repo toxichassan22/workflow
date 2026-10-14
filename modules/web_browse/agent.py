@@ -1,14 +1,16 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Browse agent loop (task A3): one Vertex generateContent conversation per
-# research task. The model decides when to web_search and which pages to
-# open_url; this module executes those calls against the per-run browser
-# session (browser.py, task A1) and shapes the outcome into the
-# OpenRouter-style dict the market verify path already parses — final text in
-# choices[0].message.content and every opened page as a url_citation
-# annotation, so downstream evidence handling treats genuinely-read pages as
-# retrieved citations. Never raises: failures return {"error": …} plus the
-# browse_trace accumulated so far.
+# Browse agent loop: one chat-completions conversation per research task. The
+# task's own model (the big mind — MARKET_STUDY_MODEL for market work) decides
+# when to web_search and which pages to open_url; this module executes those
+# tool calls locally against the per-run headless-Chromium session
+# (browser.py) and feeds each result back as a ``tool`` message, then
+# repackages the outcome into the OpenRouter-shaped dict the market pipeline
+# already parses — final text in choices[0].message.content and every opened
+# page as a url_citation annotation, so downstream evidence handling treats
+# genuinely-read pages as retrieved citations. Never raises: failures return
+# {"error": …} plus the browse_trace accumulated so far.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+import json
 import os
 
 
@@ -17,6 +19,8 @@ _DEFAULT_MAX_STEPS = 10
 # citation the answer carries downstream.
 _PAGE_TEXT_TOOL_CAP = 12000
 _PAGE_TEXT_CITATION_CAP = 8000
+# One tool-result message never outgrows the transcript.
+_TOOL_MESSAGE_CAP = 60000
 
 def _search_count_phrase(count):
     """Arabic count wording for the preamble's search cap — dual for two,
@@ -42,11 +46,11 @@ def _agent_preamble(budget):
     )
 
 
-# The preamble budgets two searches; the tool grants one grace call, then
-# refuses — a weak SERP must never let the model re-phrase itself into the
-# step cap (the round-2 review finding). The refusal is a directive the model
-# can act on: open what you have, or answer. Callers with wider research
-# tasks (the market summary) raise it via run_browse_agent's search_budget.
+# The preamble budgets searches; the tool grants one grace call, then refuses —
+# a weak SERP must never let the model re-phrase itself into the step cap (the
+# round-2 review finding). The refusal is a directive the model can act on:
+# open what you have, or answer. Callers with wider research tasks (the market
+# summary) raise it via run_browse_agent's search_budget.
 _SEARCH_BUDGET = 3
 _SEARCH_BUDGET_REFUSAL = {
     'error': 'search_budget_exceeded',
@@ -54,51 +58,141 @@ _SEARCH_BUDGET_REFUSAL = {
 }
 
 
-def _tool_declarations():
-    """functionDeclarations the model may call — the A1 browser surface."""
-    return [{
-        'functionDeclarations': [
-            {
-                'name': 'web_search',
-                'description': 'Search the web; returns result titles, URLs and snippets.',
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'query': {'type': 'string', 'description': 'Search query text'},
-                        'max_results': {'type': 'integer',
-                                        'description': 'Maximum results to return (default 8)'},
-                    },
-                    'required': ['query'],
+# OpenAI/OpenRouter tool declarations — executed locally by this module, never
+# by the provider: only pages open_url actually read become citations.
+_BROWSER_TOOLS = [
+    {
+        'type': 'function',
+        'function': {
+            'name': 'web_search',
+            'description': 'Search the web; returns result titles, URLs and snippets.',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'query': {'type': 'string', 'description': 'Search query text'},
+                    'max_results': {'type': 'integer',
+                                    'description': 'Maximum results to return (default 8)'},
                 },
+                'required': ['query'],
             },
-            {
-                'name': 'open_url',
-                'description': 'Open a web page; returns its final URL, title and readable text.',
-                'parameters': {
-                    'type': 'object',
-                    'properties': {
-                        'url': {'type': 'string', 'description': 'Absolute page URL'},
-                    },
-                    'required': ['url'],
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'open_url',
+            'description': 'Open a web page; returns its final URL, title and readable text.',
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'url': {'type': 'string', 'description': 'Absolute page URL'},
                 },
+                'required': ['url'],
             },
-        ],
-    }]
+        },
+    },
+]
 
 
-def vertex_generate(contents, tools=None, model=None, max_tokens=4000, thinking='low'):
-    """Indirection over vertex_client so tests patch a name on this module.
+def openrouter_chat(messages, **kwargs):
+    """Indirection over the app's messages transport so tests patch this name.
 
-    The sibling module is imported at call time — agent.py stays importable
-    before A1/A2 land and without Playwright installed.
+    ``call_openrouter_messages`` lives in the app namespace — it carries the
+    tenant-key gate and per-round usage metering, so it is resolved from
+    ``sys.modules`` at call time and this module stays importable standalone.
+    Transport exceptions collapse into the agent's never-raise contract.
     """
-    import vertex_client
-    return vertex_client.vertex_generate(contents, tools=tools, model=model,
-                                         max_tokens=max_tokens, thinking=thinking)
+    import sys
+    _app = sys.modules.get('app')
+    fn = getattr(_app, 'call_openrouter_messages', None) if _app is not None else None
+    if not callable(fn):
+        return {'error': {'message': 'openrouter messages transport unavailable'}}
+    try:
+        return fn(messages, **kwargs)
+    except Exception as exc:
+        return {'error': {'message': str(exc) or exc.__class__.__name__}}
+
+
+class _ReplyError(Exception):
+    """A provider-level failure; ``payload`` keeps the response's error dict —
+    including fatal refusal fields — so callers see the real refusal."""
+
+    def __init__(self, payload):
+        payload = payload if isinstance(payload, dict) else {'message': str(payload)}
+        super().__init__(str(payload.get('message') or 'provider error'))
+        self.payload = payload
+
+
+def _normalize_reply(response):
+    """{content, tool_calls, raw_message} out of one chat-completions reply."""
+    if not isinstance(response, dict):
+        raise _ReplyError({'message': 'provider returned a non-dict response'})
+    err = response.get('error')
+    if err:
+        raise _ReplyError(err)
+    choices = response.get('choices')
+    if not isinstance(choices, list) or not choices:
+        raise _ReplyError({'message': 'provider returned no choices'})
+    choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = choice.get('message') if isinstance(choice.get('message'), dict) else {}
+    content = message.get('content')
+    if isinstance(content, list):
+        content = ''.join(
+            part.get('text', '') if isinstance(part, dict) else str(part)
+            for part in content)
+    if not str(content or '').strip():
+        # Some backends stream the answer only through the reasoning channel.
+        content = message.get('reasoning') or message.get('reasoning_content') or ''
+    tool_calls = []
+    for call in message.get('tool_calls') or []:
+        if not isinstance(call, dict):
+            continue
+        fn = call.get('function') if isinstance(call.get('function'), dict) else {}
+        arguments = fn.get('arguments')
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments)
+            except (TypeError, ValueError):
+                arguments = {}
+        tool_calls.append({
+            'id': str(call.get('id') or f'call_{len(tool_calls)}'),
+            'name': str(fn.get('name') or ''),
+            'arguments': arguments if isinstance(arguments, dict) else {},
+        })
+    return {'content': str(content or ''), 'tool_calls': tool_calls,
+            'raw_message': message}
+
+
+def _assistant_echo(msg):
+    """Rebuild the assistant turn for the wire: original tool_calls verbatim
+    (arguments stay serialized), reasoning_details ride along when present."""
+    out = {'role': 'assistant', 'content': msg.get('content') or None}
+    raw = msg.get('raw_message') or {}
+    if raw.get('tool_calls'):
+        out['tool_calls'] = raw['tool_calls']
+    if raw.get('reasoning_details'):
+        out['reasoning_details'] = raw['reasoning_details']
+    return out
+
+
+def _tool_message(call, result):
+    """The ``tool`` role message answering one tool call."""
+    return {'role': 'tool',
+            'tool_call_id': str(call.get('id') or ''),
+            'content': json.dumps(result, ensure_ascii=False)[:_TOOL_MESSAGE_CAP]}
+
+
+def _effort_refusal(response):
+    """Provider rejected the reasoning effort knob — retry once without it."""
+    err = response.get('error') if isinstance(response, dict) else None
+    if not err:
+        return False
+    text = json.dumps(err, ensure_ascii=False, default=str).lower()
+    return 'reasoning' in text or 'effort' in text or 'thinking' in text
 
 
 def _browser_session():
-    """Return a fresh per-run browser context manager from A1's browser.py.
+    """Return a fresh per-run browser context manager from browser.py.
 
     Accepts either contract shape: a browser_session() context-manager factory
     or a BrowserWorker class used as a context manager.
@@ -202,8 +296,8 @@ def _log_step(step, tool_name, hint):
 
 
 def _execute_tool(session, name, args, trace, pages, search_state):
-    """Dispatch one model functionCall. Returns the compact functionResponse
-    payload — errors are data, never exceptions."""
+    """Dispatch one model tool call. Returns the compact tool-result payload —
+    errors are data, never exceptions."""
     name = str(name or '').strip()
     args = args if isinstance(args, dict) else {}
     if name == 'web_search':
@@ -213,44 +307,29 @@ def _execute_tool(session, name, args, trace, pages, search_state):
     return {'error': 'unknown_tool'}
 
 
-def _record_agent_usage(usage_ctx, model, status, usage):
-    """Meter the whole run once through the app's ai_usage path.
+def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
+                     max_tokens=None, reasoning_effort=None, model=None):
+    """Drive one OpenRouter tool-call loop against a real browser session.
 
-    Best-effort only: meters only when the app is already loaded (the running
-    server and the test suite), so a standalone probe neither boots Flask nor
-    writes billing rows. A Vertex call carries no generation id, so the row
-    stays cost-unresolved — honest, since billing settles on GCP not OpenRouter.
-    """
-    try:
-        import sys
-        _app = sys.modules.get('app')
-        recorder = getattr(_app, '_record_ai_usage', None) if _app is not None else None
-        if callable(recorder):
-            recorder(usage_ctx, model, status=status, usage=usage)
-    except Exception:
-        pass
-
-
-def run_browse_agent(task, max_steps=None, usage_ctx=None,
-                     search_budget=None, max_tokens=None, thinking=None):
-    """Drive one Vertex tool-use loop against a real browser session.
+    ``model`` is the caller's own task model — the same model that would have
+    answered the request without tools (MARKET_STUDY_MODEL for market work);
+    ``None`` leaves the transport's default. ``search_budget`` raises/lowers
+    the hard web_search cap (default 3 — one more than the preamble
+    advertises); ``max_tokens`` is the per-round output cap (default 4000 — a
+    market-summary JSON needs MARKET_STUDY_MAX_TOKENS); ``reasoning_effort``
+    passes straight through and is dropped for the rest of the run if the
+    provider refuses it.
 
     Returns an OpenRouter-shaped dict: choices[0].message.content holds the
     model's final text, every successfully opened page becomes a url_citation
     annotation ({url, title, content} — text capped at 8K) and browse_trace
     lists every open attempt including failures. Transport errors and a step
     cap without final text return {"error": …} instead of raising.
-
-    ``search_budget`` raises/lowers the hard web_search cap (default 3 — one
-    more than the preamble advertises); ``max_tokens`` is the per-call output
-    cap (default 4000 — a market-summary JSON needs MARKET_STUDY_MAX_TOKENS);
-    ``thinking`` passes to generationConfig.thinkingLevel (default 'low').
     """
     trace = []
     pages = {}
     prompt_tokens = 0
     completion_tokens = 0
-    model_seen = None
     final_text = ''
     error = None
     if max_steps is None:
@@ -270,60 +349,64 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None,
         out_cap = max(1, int(max_tokens)) if max_tokens else 4000
     except (TypeError, ValueError):
         out_cap = 4000
-    thinking = str(thinking or 'low').strip() or 'low'
+    effort = str(reasoning_effort or '').strip() or None
+    effort_disabled = False
 
-    contents = [{'role': 'user',
-                 'parts': [{'text': _agent_preamble(budget) + str(task or '')}]}]
+    messages = [
+        {'role': 'system', 'content': _agent_preamble(budget)},
+        {'role': 'user', 'content': str(task or '')},
+    ]
     session_cm = None
     session = None
     search_state = {'count': 0, 'budget': budget}
+
+    def _round():
+        kwargs = {'tools': _BROWSER_TOOLS, 'max_tokens': out_cap,
+                  'usage_ctx': usage_ctx}
+        if model:
+            kwargs['model'] = model
+        if effort and not effort_disabled:
+            kwargs['reasoning_effort'] = effort
+        return openrouter_chat(messages, **kwargs)
+
     try:
         for step in range(max_steps):
-            response = vertex_generate(contents, tools=_tool_declarations(),
-                                       max_tokens=out_cap, thinking=thinking)
-            if not isinstance(response, dict):
-                error = {'message': 'vertex transport returned a non-dict response'}
-                break
-            model_seen = response.get('modelVersion') or model_seen
-            meta = response.get('usageMetadata') or {}
+            response = _round()
+            if effort and not effort_disabled and _effort_refusal(response):
+                # The hint is model-specific — a provider that rejects it gets
+                # the rest of the run without it, same model either way.
+                effort_disabled = True
+                response = _round()
+            usage_meta = (response.get('usage')
+                          if isinstance(response, dict) else None) or {}
             try:
-                prompt_tokens += int(meta.get('promptTokenCount') or 0)
-                completion_tokens += int(meta.get('candidatesTokenCount') or 0)
+                prompt_tokens += int(usage_meta.get('prompt_tokens') or 0)
+                completion_tokens += int(usage_meta.get('completion_tokens') or 0)
             except (TypeError, ValueError):
                 pass
-            transport_error = response.get('error')
-            if transport_error:
-                error = transport_error if isinstance(transport_error, dict) \
-                    else {'message': str(transport_error)}
+            try:
+                msg = _normalize_reply(response)
+            except _ReplyError as exc:
+                error = exc.payload
                 break
-            candidates = response.get('candidates') or []
-            content = ((candidates[0] or {}).get('content') or {}) if candidates else {}
-            parts = [p for p in (content.get('parts') or []) if isinstance(p, dict)]
-            calls = [p.get('functionCall') for p in parts
-                     if isinstance(p.get('functionCall'), dict)]
-            if not calls:
-                final_text = '\n'.join(str(p.get('text')) for p in parts
-                                       if p.get('text')).strip()
+            if not msg['tool_calls']:
+                final_text = str(msg.get('content') or '').strip()
                 if not final_text:
                     error = {'message': 'model returned no text and no tool call'}
                 break
             if session is None:
                 session_cm = _browser_session()
                 session = session_cm.__enter__()
-            # Echo the model's parts verbatim (keeps any signature fields the
-            # API attaches), then the tool results as one user turn.
-            contents.append({'role': 'model', 'parts': parts})
-            replies = []
-            for call in calls:
-                tool_name = str(call.get('name') or '').strip()
-                tool_args = call.get('args') if isinstance(call.get('args'), dict) else {}
-                hint = str(tool_args.get('url') or tool_args.get('query') or '')[:120]
-                _log_step(step + 1, tool_name or '?', hint)
-                replies.append({'functionResponse': {
-                    'name': tool_name or 'unknown',
-                    'response': _execute_tool(session, tool_name, tool_args,
-                                              trace, pages, search_state)}})
-            contents.append({'role': 'user', 'parts': replies})
+            # Echo the model's message (raw tool_calls keep their serialized
+            # arguments), then answer each call with a tool result message.
+            messages.append(_assistant_echo(msg))
+            for call in msg['tool_calls']:
+                args = call['arguments']
+                hint = str(args.get('url') or args.get('query') or '')[:120]
+                _log_step(step + 1, call['name'] or '?', hint)
+                result = _execute_tool(session, call['name'], args,
+                                       trace, pages, search_state)
+                messages.append(_tool_message(call, result))
         else:
             error = {'message': f'max_steps reached ({max_steps}) without a final answer'}
     except Exception as exc:
@@ -338,8 +421,6 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None,
     usage = {'prompt_tokens': prompt_tokens,
              'completion_tokens': completion_tokens,
              'total_tokens': prompt_tokens + completion_tokens}
-    model_name = model_seen or os.environ.get('BROWSER_AGENT_MODEL') or 'browser-agent'
-    _record_agent_usage(usage_ctx, model_name, 'error' if error else 'ok', usage)
     try:
         print(f"[BROWSE AGENT] done: pages={len(pages)} trace={len(trace)} "
               f"{'error=' + str((error or {}).get('message')) if error else 'ok'}")

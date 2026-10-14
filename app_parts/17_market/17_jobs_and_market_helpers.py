@@ -240,16 +240,14 @@ def _read_market_job(tenant_id, job_id):
     return _read_job('.market_jobs', tenant_id, job_id)
 
 
-MARKET_SEARCH_ENGINE = (os.environ.get('MARKET_SEARCH_ENGINE') or 'auto').strip() or 'auto'
-
-
 def _market_search_ran(res):
-    """Whether the response proves a web search actually executed.
+    """Whether the response proves real web research actually executed.
 
-    ``usage.server_tool_use.web_search_requests`` counts executed queries and
-    ``url_citation`` annotations carry the retrieved pages; a parseable JSON
-    with neither is the model answering from memory, which used to be accepted
-    silently as a sourced study.
+    The browse agent returns ``url_citation`` annotations only for pages its
+    headless Chromium actually opened — a parseable JSON with none is the
+    model answering from memory, which must never read as a sourced study.
+    The remaining detectors (server_tool_use, groundingMetadata) stay so a
+    response from an older payload shape still counts truthfully.
     """
     if not isinstance(res, dict):
         return False

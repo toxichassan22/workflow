@@ -45,12 +45,16 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     user_prompt = market_study.build_competitors_user_prompt(
         payload, existing, mode=mode, offer_lang=offer_lang)
     report(18, 'جاري البحث في الويب عن المنافسين وبياناتهم — قد يستغرق دقائق...')
-    # The reasoning budget counts against max_tokens on this model — a tight cap
-    # truncates the competitors array mid-generation and returns a thin table.
-    res, provider_error = _call_market_study_model(
-        system_prompt, user_prompt, max_tokens=14000, max_search_results=14,
-        usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
-        search_context={'city': payload.get('city'), 'country': 'SA'})
+    # A competitor scan is the widest single research task — one search per
+    # plausible rival plus the market-wide ones, with room to open the pages
+    # that surface. The model decides the queries; Chromium does the reads.
+    res = _browse_agent_call(
+        system_prompt, user_prompt,
+        _usage_ctx('market', data, tenant_id=tenant_id),
+        search_budget=_COMPETITORS_SEARCH_BUDGET,
+        max_steps=_COMPETITORS_MAX_STEPS,
+        max_tokens=14000)
+    provider_error = _chat_error_message(res) if res.get('error') else ''
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
         fatal = _ai_fatal_error_dict(res)
@@ -188,10 +192,11 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
                  'values (status: Operating/Under Construction/Off-Plan; classification: '
                  'Direct/Indirect/Benchmark; operation_type: Sale/Rent/Hotel Operation/Other).'
                  if offer_lang == 'en' else ''))
-        res2, _err2 = _call_market_study_model(
-            system_prompt, expansion_prompt, max_tokens=14000, max_search_results=20,
-            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id),
-            search_context={'city': payload.get('city'), 'country': 'SA'})
+        res2 = _browse_agent_call(
+            system_prompt, expansion_prompt,
+            _usage_ctx('market', data, tenant_id=tenant_id),
+            search_budget=4, max_steps=10, max_tokens=14000)
+        _err2 = _chat_error_message(res2) if res2.get('error') else ''
         provider_error = provider_error or _err2
         _collect_citations(res2)
         parsed2, _parse_err2 = _parse_market_model_json(res2)
@@ -310,6 +315,11 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
 _SUMMARY_SEARCH_BUDGET = 8
 _SUMMARY_MAX_STEPS = 16
 
+# The competitors sweep is wider still: roughly one search per plausible rival
+# plus the market-level listings, each paired with page opens.
+_COMPETITORS_SEARCH_BUDGET = 10
+_COMPETITORS_MAX_STEPS = 20
+
 
 def _execute_market_summary(data, tenant_id=None, progress=None):
     report = progress if callable(progress) else (lambda *_args: None)
@@ -339,39 +349,27 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
         user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     report(18, 'جاري تحليل السوق والمنافسين بالبحث في الويب — قد يستغرق دقائق...')
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
-    if os.environ.get('BROWSER_AGENT') == '1':
-        # One self-hosted browse agent replaces the OpenRouter/Exa layer here
-        # too: it runs the searches and opens the pages itself, so the sources
-        # table and the figures rest only on pages it actually read. A
-        # transport failure — or a clean reply that opened zero pages — is an
-        # explicit search_not_run, never a silent paid fallback.
-        res = _browse_agent_verify(
-            system_prompt + '\n\n' + user_prompt, usage_ctx,
-            search_budget=_SUMMARY_SEARCH_BUDGET, max_steps=_SUMMARY_MAX_STEPS,
-            max_tokens=MARKET_STUDY_MAX_TOKENS, thinking='max')
-        failed = res.get('error') is not None
-        provider_error = _chat_error_message(res)
-        if not failed and not _market_citation_pages(res):
-            # A clean reply that opened zero pages means nothing was read —
-            # "no browsed evidence", never a market study from memory.
-            provider_error = 'browse_agent: no browsed evidence'
-            failed = True
-        if failed:
-            return {
-                'success': False,
-                'error': 'تعذر تنفيذ بحث الويب لملخص السوق. لم يُستبدل النص الحالي.',
-                'failureReason': 'search_not_run',
-                'providerError': provider_error,
-            }
-    else:
-        res, provider_error = _call_market_study_model(
-            system_prompt, user_prompt, max_tokens=MARKET_STUDY_MAX_TOKENS,
-            usage_ctx=usage_ctx,
-            search_context={'city': payload.get('city'), 'country': 'SA'},
-            # SOL is a reasoning model: every search round-trip and the final long
-            # JSON both pay the thinking tax. 'medium' keeps the depth of the web
-            # research while shaving minutes off a single-pass summary.
-            reasoning_effort='medium')
+    # The browse agent is the only search layer: it runs the searches and
+    # opens the pages itself through headless Chromium, so the sources table
+    # and the figures rest only on pages it actually read. A transport
+    # failure — or a clean reply that opened zero pages — is an explicit
+    # search_not_run, never a silent memory answer.
+    res = _browse_agent_call(
+        system_prompt, user_prompt, usage_ctx,
+        search_budget=_SUMMARY_SEARCH_BUDGET, max_steps=_SUMMARY_MAX_STEPS,
+        max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='max')
+    failed = res.get('error') is not None
+    provider_error = _chat_error_message(res) if failed else ''
+    if not failed and not _market_citation_pages(res):
+        provider_error = 'browse_agent: no browsed evidence'
+        failed = True
+    if failed and _ai_fatal_error_dict(res) is None:
+        return {
+            'success': False,
+            'error': 'تعذر تنفيذ بحث الويب لملخص السوق. لم يُستبدل النص الحالي.',
+            'failureReason': 'search_not_run',
+            'providerError': provider_error,
+        }
     report(72, 'التحقق من مصادر الملخص وفترة بياناتها...')
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
@@ -575,9 +573,11 @@ def api_market_study_competitor_logo():
             'logo_url رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP من الموقع الرسمي أو نطاق الصور التابع له، '
             'وlogo_source_url الصفحة الرسمية التي تثبت الشعار. إذا لم تجد دليلًا رسميًا أعد القيم فارغة.'
         )
-        response, provider_error = _call_market_study_model(
-            market_study.build_consultant_system_prompt(), discovery_prompt, max_tokens=1600,
-            usage_ctx=_usage_ctx('market', data))
+        response = _browse_agent_call(
+            market_study.build_consultant_system_prompt(), discovery_prompt,
+            _usage_ctx('market', data),
+            search_budget=3, max_steps=8, max_tokens=1600)
+        provider_error = _chat_error_message(response) if response.get('error') else ''
         parsed, parse_error = _parse_market_model_json(response)
         discovered_official = str(parsed.get('official_url') or parsed.get('logo_source_url') or '').strip()
         citations = _market_citation_urls(response)
@@ -598,9 +598,11 @@ def api_market_study_competitor_logo():
             'logo_url رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP على النطاق الرسمي أو نطاق الصور التابع له، '
             'وlogo_source_url صفحة الموقع الرسمي. إذا لم تجده أعد القيمتين فارغتين.'
         )
-        response, provider_error = _call_market_study_model(
-            market_study.build_consultant_system_prompt(), prompt, max_tokens=1200,
-            usage_ctx=_usage_ctx('market', data))
+        response = _browse_agent_call(
+            market_study.build_consultant_system_prompt(), prompt,
+            _usage_ctx('market', data),
+            search_budget=2, max_steps=6, max_tokens=1200)
+        provider_error = _chat_error_message(response) if response.get('error') else ''
         parsed, parse_error = _parse_market_model_json(response)
         if parse_error:
             return jsonify({'success': False, 'error': provider_error or 'لم يُعثر على شعار رسمي'}), 404

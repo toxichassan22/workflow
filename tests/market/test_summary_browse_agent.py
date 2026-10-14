@@ -1,12 +1,12 @@
-"""BROWSER_AGENT=1 routes the market executive summary to the browse agent.
+"""The market executive summary rides the self-hosted browse agent.
 
-The summary used to reach the web only through the OpenRouter/Exa layer
-(``_call_market_study_model``). With the flag on, one self-hosted browse
-agent runs the searches and opens the pages itself; the pages it actually
-read arrive as url_citation annotations — the retrieved evidence that makes
-``searchVerified`` true. An agent error, or a clean reply that opened zero
-pages, is an explicit ``search_not_run`` failure, never a silent paid
-fallback and never a memory study.
+The summary's web research runs through one headless-Chromium agent loop
+driven by the task's own model (MARKET_STUDY_MODEL): the model decides the
+searches and which pages to open, the workers execute them, and every page
+actually read arrives as a url_citation annotation — the retrieved evidence
+that makes ``searchVerified`` true. An agent error, or a clean reply that
+opened zero pages, is an explicit ``search_not_run`` failure — there is no
+paid search layer left to fall back to and never a memory study.
 
 Run like every other suite::
 
@@ -68,7 +68,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 {'url': url, 'title': 'صفحة', 'chars': 2} for url in urls],
         }
 
-    def test_summary_rides_the_browse_agent_when_flagged(self):
+    def test_summary_rides_the_browse_agent(self):
         module = self.application_module
         captured = {}
 
@@ -78,11 +78,8 @@ class SummaryBrowseAgentTests(unittest.TestCase):
             captured['usage_ctx'] = usage_ctx
             return self._agent_reply()
 
-        with patch.dict(os.environ, {'BROWSER_AGENT': '1'}), \
-                self.app.app_context(), \
+        with self.app.app_context(), \
                 patch.object(agent, 'run_browse_agent', side_effect=fake_agent), \
-                patch.object(module, '_call_market_study_model',
-                             side_effect=AssertionError('paid layer must not run')), \
                 patch.object(module, '_verify_market_urls', return_value=set()):
             result = module._execute_market_summary({'city': 'جدة'}, tenant_id='t1')
 
@@ -96,18 +93,18 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                          module._SUMMARY_MAX_STEPS)
         self.assertEqual(captured['kwargs'].get('max_tokens'),
                          module.MARKET_STUDY_MAX_TOKENS)
-        self.assertEqual(captured['kwargs'].get('thinking'), 'max')
+        self.assertEqual(captured['kwargs'].get('reasoning_effort'), 'max')
+        # The task's own model drives the loop — not a separate agent model.
+        self.assertEqual(captured['kwargs'].get('model'),
+                         module.MARKET_STUDY_MODEL)
         self.assertEqual(captured['usage_ctx'].get('tenant_id'), 't1')
         self.assertTrue(result['sources'])
 
     def test_agent_error_is_explicit_search_not_run(self):
         module = self.application_module
-        with patch.dict(os.environ, {'BROWSER_AGENT': '1'}), \
-                self.app.app_context(), \
+        with self.app.app_context(), \
                 patch.object(agent, 'run_browse_agent',
-                             return_value={'error': {'message': 'browse_agent: launch_failed'}}), \
-                patch.object(module, '_call_market_study_model',
-                             side_effect=AssertionError('paid layer must not run')):
+                             return_value={'error': {'message': 'browse_agent: launch_failed'}}):
             result = module._execute_market_summary({'city': 'جدة'}, tenant_id=None)
         self.assertFalse(result['success'])
         self.assertEqual(result['failureReason'], 'search_not_run')
@@ -117,36 +114,33 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         # An agent that answered from memory — its annotations carry no opened
         # page — must not ship as a market study.
         module = self.application_module
-        with patch.dict(os.environ, {'BROWSER_AGENT': '1'}), \
-                self.app.app_context(), \
+        with self.app.app_context(), \
                 patch.object(agent, 'run_browse_agent',
-                             return_value=self._agent_reply(urls=())), \
-                patch.object(module, '_call_market_study_model',
-                             side_effect=AssertionError('paid layer must not run')):
+                             return_value=self._agent_reply(urls=())):
             result = module._execute_market_summary({'city': 'جدة'}, tenant_id=None)
         self.assertFalse(result['success'])
         self.assertEqual(result['failureReason'], 'search_not_run')
         self.assertEqual(result['providerError'], 'browse_agent: no browsed evidence')
 
-    def test_flag_off_keeps_the_openrouter_layer(self):
+    def test_fatal_refusal_reports_credit_not_search_not_run(self):
+        """A wallet/key refusal stays a credit failure — the job must surface
+        the deterministic refusal, not a generic search miss."""
         module = self.application_module
-        response = {
-            'choices': [{'message': {'content': json.dumps({
-                'summary': {'market_definition': 'تحليل'},
-                'sources': [{'name': 's', 'url': 'https://sakani.sa/x'}],
-            }, ensure_ascii=False)}}],
-            'usage': {'server_tool_use': {'web_search_requests': 1}},
-        }
-        with patch.dict(os.environ, {'BROWSER_AGENT': '0'}), \
-                self.app.app_context(), \
-                patch.object(agent, 'run_browse_agent',
-                             side_effect=AssertionError('agent must not run')), \
-                patch.object(module, '_call_market_study_model',
-                             return_value=(response, '')), \
-                patch.object(module, '_verify_market_urls', return_value=set()):
+        fatal = {'error': {'fatal': True, 'message': 'استُنفد الرصيد',
+                           'error_code': 'INSUFFICIENT_CREDITS',
+                           'http_status': 402}}
+        with self.app.app_context(), \
+                patch.object(agent, 'run_browse_agent', return_value=dict(fatal)):
             result = module._execute_market_summary({'city': 'جدة'}, tenant_id=None)
-        self.assertTrue(result['success'], result)
-        self.assertTrue(result['searchVerified'])
+        self.assertFalse(result['success'])
+        self.assertEqual(result['failureReason'], 'insufficient_credit')
+
+    def test_legacy_search_layer_is_gone(self):
+        """Regression guard: the paid OpenRouter/Exa layer was deleted — the
+        browse agent is the only web-research path a market call can take."""
+        module = self.application_module
+        self.assertFalse(hasattr(module, '_call_market_study_model'))
+        self.assertFalse(hasattr(module, 'MARKET_SEARCH_ENGINE'))
 
 
 if __name__ == '__main__':

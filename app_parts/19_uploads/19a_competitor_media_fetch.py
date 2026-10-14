@@ -549,21 +549,13 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
         '"logo_source_url" الصفحة الرسمية التي ظهر فيها الشعار. '
         'إن لم تجد دليلًا رسميًا لمشروع أعد حقوله فارغة، ولا تخمّن أي رابط.'
     )
-    response = None
-    for tools_on in (False, True):
-        # Plugin-only first: the multi-lookup prompt makes Gemini answer the
-        # tool call with MALFORMED_FUNCTION_CALL, so the Exa plugin is the
-        # reliable ground — until a deployment where it returns nothing, in
-        # which case the server tool is the only remaining path to citations.
-        try:
-            response, _provider_error = _call_market_study_model(
-                market_study.build_consultant_system_prompt(), prompt, max_tokens=4000,
-                usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id), server_tools=tools_on)
-        except Exception:
-            response = None
-            continue
-        if _market_search_ran(response):
-            break
+    # One browse-agent run searches and opens per project — the retrieved
+    # pages arrive as url_citation annotations, which is the only evidence
+    # the logo matcher trusts.
+    response = _browse_agent_call(
+        market_study.build_consultant_system_prompt(), prompt,
+        _usage_ctx('market', data, tenant_id=tenant_id),
+        search_budget=max(3, len(batch)), max_steps=16, max_tokens=4000)
     if not _market_search_ran(response):
         for row in batch:
             row.setdefault('logo_import_warning', 'تعذر التحقق من الموقع الرسمي للشعار')
@@ -618,9 +610,8 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
         row['logo_url'] = str(item.get('logo_url') or '').strip()
         row['logo_source_url'] = official
         row['logo_official_verified'] = True
-    # The model's JSON is only a formatter — the Exa citations carry the actual
-    # retrieved pages. When the reply is malformed (Gemini emits
-    # MALFORMED_FUNCTION_CALL on multi-lookup prompts) or misses a row, match
+    # The model's JSON is only a formatter — the citations carry the actual
+    # retrieved pages. When the reply is malformed or misses a row, match
     # those pages to each competitor's name directly.
     for row in batch:
         if row.get('logo_official_verified'):

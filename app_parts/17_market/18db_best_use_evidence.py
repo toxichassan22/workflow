@@ -51,26 +51,8 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
         prompt = json.dumps({'city': city, 'district': district, 'use': use,
                             'maximumSearches': 2, 'maximumObservations': 6}, ensure_ascii=False)
         with _worker_app_context():
-            try:
-                # Google-native grounding first: the provider's own search answers
-                # fast and reads Arabic listing queries well.
-                rows, response = _best_use_price_scan_use(
-                    use, prompt, city, draft, data,
-                    {'engine': 'native', 'max_uses': 2, 'max_tool_calls': 3, 'timeout': 120,
-                     'reasoning_effort': 'low'},
-                    6, usage_ctx)
-            except best_use_contract.ProposalError as error:
-                # A native grounding pass that leaves no detectable search trace
-                # falls through to the deeper Exa pass instead of failing the scan.
-                if not str(error).startswith('price_search_not_run'):
-                    raise
-                rows, response = [], None
-            if not rows:
-                rows, response = _best_use_price_scan_use(
-                    use, prompt, city, draft, data,
-                    {'engine': 'exa', 'mode': 'auto', 'max_uses': 3, 'max_total_results': 16,
-                     'max_tool_calls': 5, 'timeout': 120, 'max_results': 8,
-                     'reasoning_effort': 'low'}, 8, usage_ctx)
+            rows, response = _best_use_price_scan_use(
+                use, prompt, city, draft, data, usage_ctx)
         return use, rows, response
 
     candidates, retrieved = [], []
@@ -108,8 +90,8 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
                                       preliminary=True)
 
 
-def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap, usage_ctx):
-    response, error = _call_market_study_model(
+def _best_use_price_scan_use(use, prompt, city, draft, data, usage_ctx):
+    response = _browse_agent_call(
         'مسح أسعار حي من الويب للاستخدام والمنطقة المحددين فقط. '
         'بحث بيع وبحث إيجار، لا دراسة سوق ولا بيانات مشروع أساسية. '
         'لا تؤلف أسعارًا ولا تستخدم ذاكرة الموديل. '
@@ -122,12 +104,12 @@ def _best_use_price_scan_use(use, prompt, city, draft, data, budget, results_cap
         '"value":100,"currency":"SAR","unit":"sqm|unit|room","period":"oneOff|year|month|night",'
         '"city":"","district":"","url":"","excerpt":"","publishedAt":null,"propertyId":"","entityName":""}]}. '
         'إذا لم يوجد سعر موثق observations=[]؛ لا تعوض النقص بأرقام مفترضة.',
-        prompt, max_tokens=12000, usage_ctx=usage_ctx,
-        search_context={'city': city, 'country': 'SA'},
-        max_search_results=results_cap, search_budget=budget)
+        prompt, usage_ctx,
+        search_budget=3, max_steps=8, max_tokens=12000)
+    error = _chat_error_message(response) if response.get('error') else ''
     if error or not _market_search_ran(response):
-        # Surface the provider's real reason — quota, timeout, malformed
-        # tool call — instead of a bare code that reads as "no results".
+        # Surface the run's real reason — quota, timeout, zero pages read —
+        # instead of a bare code that reads as "no results".
         detail = (error or '').strip() or 'no_search_executed'
         raise best_use_contract.ProposalError('price_search_not_run: ' + detail[:240])
     parsed = _best_use_explore_provider(response)

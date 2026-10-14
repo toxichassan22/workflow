@@ -680,15 +680,19 @@ class AdminAgentTests(unittest.TestCase):
             db.create_training_entry(self.tenant, 'سوق', 'ركز على منطقة الرياض', category='content')
         captured = {}
 
-        def fake_market(system_prompt, user_prompt, **kwargs):
+        def fake_market(system_prompt, user_prompt, *args, **kwargs):
             captured['system'] = system_prompt
-            captured['usage_ctx'] = kwargs.get('usage_ctx')
-            return {'choices': [{'message': {'content': '{"competitors": [], "notes": ""}'}}]}, None
+            captured['usage_ctx'] = args[0] if args else kwargs.get('usage_ctx')
+            return {'choices': [{'message': {
+                'content': '{"competitors": [], "notes": ""}',
+                'annotations': [{'url_citation': {
+                    'url': 'https://rei.rega.gov.sa/ar', 'title': 'صفحة'}}],
+            }}]}
 
         # App context only — no request, so g.tenant_id is absent, exactly like
         # the background worker thread.
         with self.app.app_context():
-            with patch.object(self.application_module, '_call_market_study_model',
+            with patch.object(self.application_module, '_browse_agent_call',
                               side_effect=fake_market):
                 result = self.application_module._execute_market_competitors(
                     {'projectData': {'project_name': 'مشروع'}}, tenant_id=self.tenant)
@@ -698,13 +702,17 @@ class AdminAgentTests(unittest.TestCase):
 
         captured.clear()
 
-        def fake_summary(system_prompt, user_prompt, **kwargs):
+        def fake_summary(system_prompt, user_prompt, *args, **kwargs):
             captured['system'] = system_prompt
-            captured['usage_ctx'] = kwargs.get('usage_ctx')
-            return {'choices': [{'message': {'content': '{"summary": "ملخص", "sources": []}'}}]}, None
+            captured['usage_ctx'] = args[0] if args else kwargs.get('usage_ctx')
+            return {'choices': [{'message': {
+                'content': '{"summary": "ملخص", "sources": []}',
+                'annotations': [{'url_citation': {
+                    'url': 'https://rei.rega.gov.sa/ar', 'title': 'صفحة'}}],
+            }}]}
 
         with self.app.app_context():
-            with patch.object(self.application_module, '_call_market_study_model',
+            with patch.object(self.application_module, '_browse_agent_call',
                               side_effect=fake_summary):
                 result = self.application_module._execute_market_summary(
                     {'projectData': {'project_name': 'مشروع'}}, tenant_id=self.tenant)

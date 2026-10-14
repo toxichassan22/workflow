@@ -447,7 +447,7 @@ def _execute_extract_croquis():
             if foreign_city:
                 try:
                     city_pdf_paths, city_warnings = city_regulations.ensure_city_regulation_paths(
-                        site_city_slug, site_city_label, call_openrouter_chat,
+                        site_city_slug, site_city_label,
                         usage_ctx=_usage_ctx('land', data))
                     vision_warnings.extend(city_warnings)
                 except Exception as fetch_error:

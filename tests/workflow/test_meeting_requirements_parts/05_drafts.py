@@ -410,7 +410,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
             result['logo_path'] = '/uploads/creative/imported-logo.png'
             return result
 
-        with patch.object(module, '_call_market_study_model', return_value=(response, '')) as model_call, \
+        with patch.object(module, '_browse_agent_call', return_value=response) as model_call, \
                 patch.object(module, '_store_imported_competitor_logo', side_effect=store_logo):
             imported = client.post('/api/market-study/competitors/logo', headers=self._headers(self.token_a), json={
                 'draftId': 'logo-discovery-draft',
@@ -425,7 +425,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertTrue(competitor['logo_official_verified'])
         self.assertEqual(model_call.call_count, 1)
 
-        with patch.object(module, '_call_market_study_model') as model_call:
+        with patch.object(module, '_browse_agent_call') as model_call:
             preserved = client.post('/api/market-study/competitors/logo', headers=self._headers(self.token_a), json={
                 'competitor': {
                     'id': 'manual-logo-project', 'name': 'مشروع يدوي',
