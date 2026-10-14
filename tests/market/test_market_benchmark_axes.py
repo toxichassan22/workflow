@@ -181,6 +181,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
             'competitors': [],
         }
         with self.app.app_context(), \
+                patch.object(module, '_run_market_source_plan', return_value=None), \
                 patch.object(module, '_browse_agent_call', side_effect=fake_call), \
                 patch.object(module, '_verify_competitor_rows', return_value=None), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
@@ -221,6 +222,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
             'competitors': [],
         }
         with self.app.app_context(), \
+                patch.object(module, '_run_market_source_plan', return_value=None), \
                 patch.object(module, '_browse_agent_call', side_effect=fake_call), \
                 patch.object(module, '_verify_competitor_rows', return_value=None), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
