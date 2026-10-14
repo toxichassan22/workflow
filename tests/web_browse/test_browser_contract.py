@@ -426,5 +426,68 @@ class WebSearchContractTests(unittest.TestCase):
         self.assertEqual(results, [])
 
 
+class ProviderOrderTests(unittest.TestCase):
+    """ddg is out of the default rotation — its 418 walls cost the goto
+    timeout ahead of every real search — but it stays a valid
+    BROWSER_SEARCH_PROVIDER pin so the contracted chain remains reachable."""
+
+    def test_ddg_is_not_in_the_default_order(self):
+        self.assertNotIn('ddg', browser._DEFAULT_ORDER)
+        self.assertEqual(browser._DEFAULT_ORDER[0], 'brave')
+        self.assertEqual(browser._providers(), list(browser._DEFAULT_ORDER))
+
+    def test_ddg_stays_pinnable(self):
+        import os
+        with mock.patch.dict(os.environ, {'BROWSER_SEARCH_PROVIDER': 'ddg'}):
+            providers = browser._providers()
+        self.assertEqual(providers[0], 'ddg')
+        # The pin comes first; the real chain still follows as fallbacks.
+        self.assertEqual(providers[1:], browser._DEFAULT_ORDER)
+
+    def test_unknown_pin_falls_back_to_default(self):
+        import os
+        with mock.patch.dict(os.environ, {'BROWSER_SEARCH_PROVIDER': 'nope'}):
+            self.assertEqual(browser._providers(), browser._DEFAULT_ORDER)
+
+
+class ThreadLocalBrowserTests(unittest.TestCase):
+    """``thread_local_browser`` binds one live worker to the calling thread —
+    the ×4 verify/scan pools share it instead of launching per call."""
+
+    def setUp(self):
+        _NET['visited'] = []
+        _NET['goto_error'] = None
+        _NET['launch_error'] = None
+        self._pw_patch = mock.patch.object(
+            browser, 'sync_playwright', _MANAGER, create=True)
+        self._pw_patch.start()
+        self.addCleanup(self._pw_patch.stop)
+        browser.close_thread_browser()
+        self.addCleanup(browser.close_thread_browser)
+
+    def test_returns_a_live_worker_bound_to_the_thread(self):
+        worker = browser.thread_local_browser()
+        self.assertTrue(worker.is_open)
+        self.assertIs(getattr(browser._tls, 'worker', None), worker)
+
+    def test_second_call_reuses_the_same_worker(self):
+        first = browser.thread_local_browser()
+        self.assertIs(browser.thread_local_browser(), first)
+
+    def test_close_thread_browser_releases_the_worker(self):
+        worker = browser.thread_local_browser()
+        browser.close_thread_browser()
+        self.assertIsNone(getattr(browser._tls, 'worker', None))
+        self.assertFalse(worker.is_open)
+        self.assertIsNot(browser.thread_local_browser(), worker)
+
+    def test_browser_session_restores_the_thread_worker(self):
+        worker = browser.thread_local_browser()
+        with browser.browser_session() as session_worker:
+            self.assertIs(browser._tls.worker, session_worker)
+        self.assertIs(browser._tls.worker, worker)
+        self.assertTrue(worker.is_open)
+
+
 if __name__ == '__main__':
     unittest.main()

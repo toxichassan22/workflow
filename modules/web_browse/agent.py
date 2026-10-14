@@ -9,9 +9,16 @@
 # page as a url_citation annotation, so downstream evidence handling treats
 # genuinely-read pages as retrieved citations. Never raises: failures return
 # {"error": …} plus the browse_trace accumulated so far.
+#
+# Optional run controls: a shared ``evidence_pool`` answers repeated queries
+# and page opens from the job's stored evidence instead of re-driving the
+# browser; ``deadline`` stops the loop cleanly when the job's time budget is
+# spent; ``session`` lets the caller hand in a browser worker it owns (the
+# agent never closes a session it did not open itself).
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 import json
 import os
+import time
 
 
 _DEFAULT_MAX_STEPS = 10
@@ -221,13 +228,22 @@ def _tool_callable(session, name):
         return None
 
 
-def _run_web_search(session, args, search_state):
-    if search_state['count'] >= search_state.get('budget', _SEARCH_BUDGET):
-        return dict(_SEARCH_BUDGET_REFUSAL)
-    search_state['count'] += 1
+def _run_web_search(session, args, search_state, evidence_pool=None):
     query = str(args.get('query') or '').strip()
     if not query:
         return {'error': 'empty_query'}
+    cached = _pool_query(evidence_pool, query)
+    if cached is not None:
+        # A pooled answer costs no search — it does not consume the budget.
+        _log_line(f'[BROWSE AGENT] pool hit query={query[:120]}')
+        return {'results': [
+            {'title': str(item.get('title') or ''),
+             'url': str(item.get('url') or ''),
+             'snippet': str(item.get('snippet') or '')}
+            for item in cached if isinstance(item, dict)]}
+    if search_state['count'] >= search_state.get('budget', _SEARCH_BUDGET):
+        return dict(_SEARCH_BUDGET_REFUSAL)
+    search_state['count'] += 1
     fn = _tool_callable(session, 'web_search')
     if fn is None:
         return {'error': 'web_search_unavailable'}
@@ -249,13 +265,36 @@ def _run_web_search(session, args, search_state):
         compact.append({'title': str(item.get('title') or ''),
                         'url': str(item.get('url') or ''),
                         'snippet': str(item.get('snippet') or '')})
+    # A real execution is recorded — an errored search is not, so a later
+    # stage may retry a transiently failed lookup.
+    _pool_store_query(evidence_pool, query, compact)
     return {'results': compact}
 
 
-def _run_open_url(session, args, trace, pages):
+def _run_open_url(session, args, trace, pages, evidence_pool=None):
     url = str(args.get('url') or '').strip()
     if not url:
         return {'error': 'empty_url'}
+    failed_reason = _pool_page_failed(evidence_pool, url)
+    if failed_reason is not None:
+        # The job already tried this URL and failed — same answer, no refetch.
+        trace.append({'url': url, 'title': '', 'chars': 0,
+                      'error': str(failed_reason), 'pool': True})
+        return {'url': url, 'error': str(failed_reason)}
+    pooled = _pool_page(evidence_pool, url)
+    if pooled is not None:
+        _log_line(f'[BROWSE AGENT] pool hit url={url[:120]}')
+        title = str(pooled.get('title') or '')
+        content = str(pooled.get('content') or '')
+        final_url = (str(pooled.get('final_url') or pooled.get('url')
+                         or url).strip() or url)
+        trace.append({'url': final_url, 'title': title,
+                      'chars': len(content), 'pool': True})
+        if final_url not in pages:
+            pages[final_url] = {'title': title,
+                                'content': content[:_PAGE_TEXT_CITATION_CAP]}
+        return {'url': final_url, 'title': title,
+                'text': content[:_PAGE_TEXT_TOOL_CAP]}
     fn = _tool_callable(session, 'open_url')
     if fn is None:
         trace.append({'url': url, 'title': '', 'chars': 0, 'error': 'open_url_unavailable'})
@@ -263,8 +302,9 @@ def _run_open_url(session, args, trace, pages):
     try:
         result = fn(url)
     except Exception as exc:
-        trace.append({'url': url, 'title': '', 'chars': 0,
-                      'error': str(exc) or exc.__class__.__name__})
+        reason = str(exc) or exc.__class__.__name__
+        trace.append({'url': url, 'title': '', 'chars': 0, 'error': reason})
+        _pool_mark_failed(evidence_pool, url, reason)
         return {'url': url, 'error': 'open_failed'}
     result = result if isinstance(result, dict) else {}
     title = str(result.get('title') or '')
@@ -272,18 +312,19 @@ def _run_open_url(session, args, trace, pages):
     error = result.get('error')
     if error:
         trace.append({'url': url, 'title': title, 'chars': 0, 'error': str(error)})
+        _pool_mark_failed(evidence_pool, url, str(error))
         return {'url': url, 'error': str(error)}
     final_url = str(result.get('final_url') or result.get('url') or url).strip() or url
     trace.append({'url': final_url, 'title': title, 'chars': len(text)})
     if final_url not in pages:
         pages[final_url] = {'title': title, 'content': text[:_PAGE_TEXT_CITATION_CAP]}
+    _pool_add_page(evidence_pool, url, title, text, final_url)
     return {'url': final_url, 'title': title, 'text': text[:_PAGE_TEXT_TOOL_CAP]}
 
 
-def _log_step(step, tool_name, hint):
+def _log_line(line):
     """Terse progress line. Logging must never kill a run — cp1252 consoles
     cannot encode the Arabic hints, so fall back to an escaped form."""
-    line = f"[BROWSE AGENT] step {step}: tool={tool_name} url/query={hint}"
     try:
         print(line)
     except UnicodeEncodeError:
@@ -295,20 +336,90 @@ def _log_step(step, tool_name, hint):
         pass
 
 
-def _execute_tool(session, name, args, trace, pages, search_state):
+def _log_step(step, tool_name, hint):
+    _log_line(f"[BROWSE AGENT] step {step}: tool={tool_name} url/query={hint}")
+
+
+# Evidence-pool glue. The pool (modules/web_browse/evidence.py) is optional
+# and duck-typed — this module must stay importable standalone, so every call
+# goes through a guard that treats a missing/broken pool as "nothing cached"
+# and never lets pool bookkeeping kill a run.
+def _pool_query(evidence_pool, query):
+    """Stored results for this query — None means the pool never ran it."""
+    getter = getattr(evidence_pool, 'query_results', None)
+    if not callable(getter):
+        return None
+    try:
+        return getter(query)
+    except Exception:
+        return None
+
+
+def _pool_store_query(evidence_pool, query, results):
+    add = getattr(evidence_pool, 'add_query', None)
+    if callable(add):
+        try:
+            add(query, results)
+        except Exception:
+            pass
+
+
+def _pool_page(evidence_pool, url):
+    getter = getattr(evidence_pool, 'get_page', None)
+    if not callable(getter):
+        return None
+    try:
+        page = getter(url)
+    except Exception:
+        return None
+    return page if isinstance(page, dict) else None
+
+
+def _pool_page_failed(evidence_pool, url):
+    getter = getattr(evidence_pool, 'page_failed', None)
+    if not callable(getter):
+        return None
+    try:
+        return getter(url)
+    except Exception:
+        return None
+
+
+def _pool_add_page(evidence_pool, url, title, content, final_url):
+    add = getattr(evidence_pool, 'add_page', None)
+    if callable(add):
+        try:
+            add(url, title=title, content=content,
+                final_url=final_url, via='browser')
+        except Exception:
+            pass
+
+
+def _pool_mark_failed(evidence_pool, url, reason):
+    mark = getattr(evidence_pool, 'mark_failed', None)
+    if callable(mark):
+        try:
+            mark(url, reason)
+        except Exception:
+            pass
+
+
+def _execute_tool(session, name, args, trace, pages, search_state,
+                  evidence_pool=None):
     """Dispatch one model tool call. Returns the compact tool-result payload —
     errors are data, never exceptions."""
     name = str(name or '').strip()
     args = args if isinstance(args, dict) else {}
     if name == 'web_search':
-        return _run_web_search(session, args, search_state)
+        return _run_web_search(session, args, search_state, evidence_pool)
     if name == 'open_url':
-        return _run_open_url(session, args, trace, pages)
+        return _run_open_url(session, args, trace, pages, evidence_pool)
     return {'error': 'unknown_tool'}
 
 
 def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
-                     max_tokens=None, reasoning_effort=None, model=None):
+                     max_tokens=None, reasoning_effort=None, model=None,
+                     evidence_pool=None, deadline=None, session=None):
     """Drive one OpenRouter tool-call loop against a real browser session.
 
     ``model`` is the caller's own task model — the same model that would have
@@ -319,6 +430,18 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     market-summary JSON needs MARKET_STUDY_MAX_TOKENS); ``reasoning_effort``
     passes straight through and is dropped for the rest of the run if the
     provider refuses it.
+
+    ``evidence_pool`` (an ``EvidencePool`` from evidence.py) is the job's
+    shared evidence store: a query the pool already ran is answered from its
+    stored results and an already-fetched page answers open_url without
+    touching the browser, while every real search/fetch/failure lands back in
+    the pool. ``deadline`` is a unix timestamp shared by the whole job — it is
+    checked before each model round and before each tool execution, and on
+    expiry the loop stops and returns
+    ``{'error': {'message': 'deadline_exceeded'}, ...}`` with the pages it had
+    collected. ``session`` is a caller-owned browser worker (a BrowserWorker
+    or the ``browser_session()`` yield) used for all tool execution; only a
+    session this function opened itself is closed on exit.
 
     Returns an OpenRouter-shaped dict: choices[0].message.content holds the
     model's final text, every successfully opened page becomes a url_citation
@@ -351,13 +474,19 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
         out_cap = 4000
     effort = str(reasoning_effort or '').strip() or None
     effort_disabled = False
+    try:
+        deadline = float(deadline) if deadline is not None else None
+    except (TypeError, ValueError):
+        deadline = None
+
+    def _deadline_hit():
+        return deadline is not None and time.time() >= deadline
 
     messages = [
         {'role': 'system', 'content': _agent_preamble(budget)},
         {'role': 'user', 'content': str(task or '')},
     ]
     session_cm = None
-    session = None
     search_state = {'count': 0, 'budget': budget}
 
     def _round():
@@ -371,10 +500,16 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
 
     try:
         for step in range(max_steps):
+            if _deadline_hit():
+                error = {'message': 'deadline_exceeded'}
+                break
             response = _round()
             if effort and not effort_disabled and _effort_refusal(response):
                 # The hint is model-specific — a provider that rejects it gets
                 # the rest of the run without it, same model either way.
+                if _deadline_hit():
+                    error = {'message': 'deadline_exceeded'}
+                    break
                 effort_disabled = True
                 response = _round()
             usage_meta = (response.get('usage')
@@ -395,23 +530,36 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                     error = {'message': 'model returned no text and no tool call'}
                 break
             if session is None:
+                # No point launching the caller's browser once the budget is
+                # spent — the deadline wins over a pending tool call.
+                if _deadline_hit():
+                    error = {'message': 'deadline_exceeded'}
+                    break
                 session_cm = _browser_session()
                 session = session_cm.__enter__()
             # Echo the model's message (raw tool_calls keep their serialized
             # arguments), then answer each call with a tool result message.
             messages.append(_assistant_echo(msg))
             for call in msg['tool_calls']:
+                if _deadline_hit():
+                    error = {'message': 'deadline_exceeded'}
+                    break
                 args = call['arguments']
                 hint = str(args.get('url') or args.get('query') or '')[:120]
                 _log_step(step + 1, call['name'] or '?', hint)
                 result = _execute_tool(session, call['name'], args,
-                                       trace, pages, search_state)
+                                       trace, pages, search_state,
+                                       evidence_pool)
                 messages.append(_tool_message(call, result))
+            if error is not None:
+                break
         else:
             error = {'message': f'max_steps reached ({max_steps}) without a final answer'}
     except Exception as exc:
         error = {'message': str(exc) or exc.__class__.__name__}
     finally:
+        # Only a session this run opened is closed — a caller-provided
+        # ``session`` stays the caller's problem to release.
         if session_cm is not None:
             try:
                 session_cm.__exit__(None, None, None)
@@ -421,16 +569,18 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     usage = {'prompt_tokens': prompt_tokens,
              'completion_tokens': completion_tokens,
              'total_tokens': prompt_tokens + completion_tokens}
-    try:
-        print(f"[BROWSE AGENT] done: pages={len(pages)} trace={len(trace)} "
+    _log_line(f"[BROWSE AGENT] done: pages={len(pages)} trace={len(trace)} "
               f"{'error=' + str((error or {}).get('message')) if error else 'ok'}")
-    except Exception:
-        pass
-    if error:
-        return {'error': error, 'usage': usage, 'browse_trace': trace}
     annotations = [{'url_citation': {'url': url, 'title': page['title'],
                                      'content': page['content']}}
                    for url, page in pages.items()]
+    if error:
+        result = {'error': error, 'usage': usage, 'browse_trace': trace}
+        if annotations:
+            # Pages gathered before the failure stay visible to the caller —
+            # a deadline stops the loop, it does not throw away evidence.
+            result['annotations'] = annotations
+        return result
     return {'choices': [{'message': {'role': 'assistant',
                                     'content': final_text,
                                     'annotations': annotations}}],

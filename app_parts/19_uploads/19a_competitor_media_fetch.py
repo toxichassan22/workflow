@@ -478,17 +478,31 @@ def _official_citation_pages(pages, name):
 
 
 def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=None,
-                                  citation_pages=None):
+                                  citation_pages=None, evidence_pool=None,
+                                  deadline=None, session=None):
     """Import official logos during competitor generation — no per-row button needed.
 
     Pass 1 is free: rows whose source_url already verifies as the official site go
-    straight to HTML extraction. Pass 1.5 is free too: citation pages the main
-    search already retrieved are matched to each competitor's name and treated as
-    its official page. Pass 2 runs ONE extra search call to discover the official
-    site + logo for whatever remains, then extracts/downloads per row.
+    straight to HTML extraction. Pass 1.5 is free too: pages the job already
+    retrieved (browse citations plus everything the shared evidence pool holds —
+    a superset once the agent layer records into it) are matched to each
+    competitor's name and treated as its official page. Pass 2 runs ONE extra
+    search call to discover the official site + logo for whatever remains, then
+    extracts/downloads per row — and carries the job's pool/deadline/session.
     """
     report = progress if callable(progress) else (lambda *_args: None)
     draft_id = payload.get('draftId') or payload.get('draft_id')
+    evidence_pages = list(citation_pages or [])
+    if evidence_pool is not None:
+        _seen_page_urls = {str(page.get('url') or '') for page in evidence_pages}
+        try:
+            for _pool_page in evidence_pool.pages():
+                _pool_url = str((_pool_page or {}).get('url') or '')
+                if _pool_url and _pool_url not in _seen_page_urls:
+                    _seen_page_urls.add(_pool_url)
+                    evidence_pages.append(_pool_page)
+        except Exception:
+            pass
     missing = []
     total = max(1, len(rows))
     for index, row in enumerate(rows):
@@ -503,7 +517,7 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
             or market_study.official_source_reliability(
                 row.get('name'), row.get('source'), official_url)))
         if not verified:
-            for page_url in _official_citation_pages(citation_pages, row.get('name')):
+            for page_url in _official_citation_pages(evidence_pages, row.get('name')):
                 if page_url.casefold() in dead_keys:
                     continue
                 official_url = page_url
@@ -535,6 +549,13 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
     if not missing:
         return
     batch = missing[:8]
+    if _market_deadline_hit(deadline):
+        # The job is out of time — an honest warning instead of one more
+        # discovery call that would only land after the budget.
+        for row in batch:
+            row.setdefault('logo_import_warning',
+                           'انتهت ميزانية وقت المهمة قبل البحث عن الشعار')
+        return
     report(82, 'البحث عن المواقع الرسمية وشعارات المنافسين المتبقية...')
     listing = json.dumps(
         [{'id': str(row.get('id') or ''), 'name': str(row.get('name') or '')} for row in batch],
@@ -555,6 +576,7 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
     response = _browse_agent_call(
         market_study.build_consultant_system_prompt(), prompt,
         _usage_ctx('market', data, tenant_id=tenant_id),
+        evidence_pool=evidence_pool, deadline=deadline, session=session,
         search_budget=max(3, len(batch)), max_steps=16, max_tokens=4000)
     if not _market_search_ran(response):
         for row in batch:
@@ -562,6 +584,18 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
         return
     parsed, _parse_error = _parse_market_model_json(response)
     discovery_pages = _market_citation_pages(response)
+    if evidence_pool is not None:
+        # The discovery call's own pages land in the pool too — match against
+        # the union so an official page fetched at any earlier stage counts.
+        _seen_discovery = {str(page.get('url') or '') for page in discovery_pages}
+        try:
+            for _pool_page in evidence_pool.pages():
+                _pool_url = str((_pool_page or {}).get('url') or '')
+                if _pool_url and _pool_url not in _seen_discovery:
+                    _seen_discovery.add(_pool_url)
+                    discovery_pages.append(_pool_page)
+        except Exception:
+            pass
     results = parsed.get('results') if isinstance(parsed, dict) else None
     if not isinstance(results, list):
         results = [parsed] if isinstance(parsed, dict) else []

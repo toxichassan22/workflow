@@ -16,6 +16,14 @@ def _best_use_verify_regulations(draft):
     return stored
 
 
+# One wall-clock budget for the whole price scan — every per-use browse call
+# and evidence fetch spends the same minutes; env-overridable.
+try:
+    _BEST_USE_SCAN_TIME_BUDGET = max(60, int(os.environ.get('BEST_USE_SCAN_TIME_BUDGET') or 300))
+except (TypeError, ValueError):
+    _BEST_USE_SCAN_TIME_BUDGET = 300
+
+
 def _best_use_price_page(url):
     pool, response, final_url = _pinned_https_get(url)
     if response is None:
@@ -46,31 +54,46 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
     if not city:
         raise best_use_contract.ProposalError('price_city_missing')
     usage_ctx = _usage_ctx('best_use_price_scan', data, draft_id=draft['id'])
+    # One job pool and one deadline across all uses; each pool thread runs
+    # its share on a single thread-bound browser instead of launching a
+    # Chromium per call.
+    evidence_pool = _new_evidence_pool()
+    deadline = time.time() + _BEST_USE_SCAN_TIME_BUDGET
 
-    def _scan_use(use):
-        prompt = json.dumps({'city': city, 'district': district, 'use': use,
-                            'maximumSearches': 2, 'maximumObservations': 6}, ensure_ascii=False)
-        with _worker_app_context():
-            rows, response = _best_use_price_scan_use(
-                use, prompt, city, draft, data, usage_ctx)
-        return use, rows, response
+    def _scan_uses(chunk):
+        session = _verify_thread_browser()
+        results = []
+        try:
+            for use in chunk:
+                prompt = json.dumps({'city': city, 'district': district, 'use': use,
+                                    'maximumSearches': 2, 'maximumObservations': 6}, ensure_ascii=False)
+                with _worker_app_context():
+                    rows, response = _best_use_price_scan_use(
+                        use, prompt, city, draft, data, usage_ctx,
+                        evidence_pool=evidence_pool, deadline=deadline, session=session)
+                results.append((use, rows, response))
+        finally:
+            _close_verify_thread_browser()
+        return results
 
     candidates, retrieved = [], []
     done = [0]
     from concurrent.futures import ThreadPoolExecutor, as_completed
     if progress:
         progress(15, 'prices', {'index': 0, 'total': len(uses)})
-    with ThreadPoolExecutor(max_workers=max(1, min(4, len(uses)))) as pool:
-        futures = {pool.submit(_scan_use, use): use for use in uses}
+    workers = max(1, min(4, len(uses)))
+    chunks = [uses[index::workers] for index in range(workers)]
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_scan_uses, chunk) for chunk in chunks if chunk]
         for future in as_completed(futures):
-            use, rows, response = future.result()
-            done[0] += 1
-            if progress:
-                progress(20 + int(35 * done[0] / max(1, len(uses))), 'prices',
-                         {'use': use, 'index': done[0], 'total': len(uses)})
-            if response:
-                retrieved.extend(_market_citation_pages(response))
-            candidates.extend(row for row in rows[:6] if isinstance(row, dict) and row.get('use') == use)
+            for use, rows, response in future.result():
+                done[0] += 1
+                if progress:
+                    progress(20 + int(35 * done[0] / max(1, len(uses))), 'prices',
+                             {'use': use, 'index': done[0], 'total': len(uses)})
+                if response:
+                    retrieved.extend(_market_citation_pages(response))
+                candidates.extend(row for row in rows[:6] if isinstance(row, dict) and row.get('use') == use)
     # verify_observation needs the excerpt inside a retrieved page — grounding
     # pages already carry the cited text, so only fetch URLs the search did not.
     covered = {best_use_prices.clean_url(page.get('url')) for page in retrieved if page.get('content')}
@@ -90,7 +113,8 @@ def _best_use_scan_prices(draft, regulation_data, data, progress=None):
                                       preliminary=True)
 
 
-def _best_use_price_scan_use(use, prompt, city, draft, data, usage_ctx):
+def _best_use_price_scan_use(use, prompt, city, draft, data, usage_ctx,
+                             evidence_pool=None, deadline=None, session=None):
     response = _browse_agent_call(
         'مسح أسعار حي من الويب للاستخدام والمنطقة المحددين فقط. '
         'بحث بيع وبحث إيجار، لا دراسة سوق ولا بيانات مشروع أساسية. '
@@ -105,7 +129,8 @@ def _best_use_price_scan_use(use, prompt, city, draft, data, usage_ctx):
         '"city":"","district":"","url":"","excerpt":"","publishedAt":null,"propertyId":"","entityName":""}]}. '
         'إذا لم يوجد سعر موثق observations=[]؛ لا تعوض النقص بأرقام مفترضة.',
         prompt, usage_ctx,
-        search_budget=3, max_steps=8, max_tokens=12000)
+        search_budget=3, max_steps=8, max_tokens=12000,
+        evidence_pool=evidence_pool, deadline=deadline, session=session)
     error = _chat_error_message(response) if response.get('error') else ''
     if error or not _market_search_ran(response):
         # Surface the run's real reason — quota, timeout, zero pages read —

@@ -8,7 +8,46 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
-def _prepare_market_payload(data):
+# The market flows are the only AI surface that sees the whole project file —
+# every other chat gets a hand-picked slice, but a market study cannot evaluate
+# a project it cannot see, so chat and research prompts share the same bounded
+# build_project_facts brief (grouped by section, per-field and total caps).
+_MARKET_PROJECT_FACTS_LIMIT = 60000
+
+
+def _market_project_facts(data, tenant_id=None):
+    """All-sections project context for market prompts: the live client payload
+    when it arrives, else the stored draft — rendered as the labeled facts
+    brief, never a raw JSON dump."""
+    source = data.get('projectData') or data.get('project_data')
+    if not isinstance(source, dict) or not source:
+        source = None
+        draft_id = str(data.get('draftId') or data.get('draft_id') or '').strip()
+        if draft_id:
+            if tenant_id is None:
+                try:
+                    tenant_id = getattr(g, 'tenant_id', None)
+                except Exception:
+                    tenant_id = None
+            if tenant_id:
+                try:
+                    draft = db.get_project_draft_by_id(tenant_id, draft_id) or {}
+                    source = draft.get('draft_data')
+                except Exception as exc:
+                    print(f'[MARKET] project facts draft lookup failed: {exc}')
+        if not isinstance(source, dict) or not source:
+            return ''
+    try:
+        facts = str(slide_engine.build_project_facts(source, tenant_id) or '').strip()
+    except Exception as exc:
+        print(f'[MARKET] project facts build failed: {exc}')
+        return ''
+    if len(facts) > _MARKET_PROJECT_FACTS_LIMIT:
+        facts = facts[:_MARKET_PROJECT_FACTS_LIMIT] + '\n... [تم اختصار ملف المشروع]'
+    return facts
+
+
+def _prepare_market_payload(data, tenant_id=None):
     payload = dict(data or {})
     radius_value = payload.get('competitorRadius') or payload.get('competitor_radius') or '10'
     custom_km = payload.get('competitorRadiusCustomKm') or payload.get('competitor_radius_custom_km')
@@ -23,10 +62,127 @@ def _prepare_market_payload(data):
     )
     mixed = payload.get('projectComponents') or payload.get('project_mixed_components') or payload.get('project_components')
     payload['projectComponents'] = mixed
+    payload['projectFacts'] = _market_project_facts(data, tenant_id)
     return payload
 
 
+# One wall-clock budget for a whole competitors job. The same deadline rides
+# into every browse call and fetch, so a stage stops handing the next stage
+# work the job no longer has time for instead of draining its own step cap.
+try:
+    _MARKET_JOB_TIME_BUDGET = max(60, int(os.environ.get('MARKET_JOB_TIME_BUDGET') or 540))
+except (TypeError, ValueError):
+    _MARKET_JOB_TIME_BUDGET = 540
+
+# Expansion rounds stop this far short of the deadline so row verification
+# and the logo pass still get their share of the budget.
+_MARKET_EXPANSION_DEADLINE_MARGIN = 30
+
+
+def _new_evidence_pool():
+    """One EvidencePool per market job — shared by the source plan, every
+    browse call, the verify pool and the logo pass, so no query or page is
+    fetched twice. None while the web_browse evidence module isn't deployed;
+    every consumer treats None as 'pool layer off' and behaves as before."""
+    try:
+        import evidence
+        pool_cls = getattr(evidence, 'EvidencePool', None)
+        return pool_cls() if pool_cls is not None else None
+    except Exception:
+        return None
+
+
+def _market_browser_session():
+    """The job's shared browser for the sequential stages (source plan, main
+    and expansion calls, logo discovery). A BrowserWorker is lazy: building it
+    is free and Chromium launches on the first real tool call — nothing
+    launches for a run that never browses. None when the browser module can't
+    provide one; calls then open their own per-run sessions as before."""
+    try:
+        import browser as _browser_module
+        worker_cls = getattr(_browser_module, 'BrowserWorker', None)
+        return worker_cls() if worker_cls is not None else None
+    except Exception:
+        return None
+
+
+def _market_source_fetch_http(url):
+    """``fetch_http`` injected into ``run_source_plan`` — the pinned-HTTPS
+    reader the pipeline already trusts for retrieved source pages. Returns the
+    page markup ('' when unreadable); thin shells are the browser path's job.
+    """
+    html, _err = _read_market_source_page(url)
+    return html or ''
+
+
+def _run_market_source_plan(payload, offer_lang='ar', evidence_pool=None,
+                            session=None, deadline=None, report=None):
+    """Known-sources-first retrieval: the catalog's deep links (REGA datasets,
+    sakani/ejar/stats, portal listing pages) feed the evidence pool before any
+    model search runs. No-op until the retrieval-plan part lands in
+    market_study — the plan functions resolve from its shared namespace."""
+    if evidence_pool is None:
+        return
+    build = getattr(market_study, 'build_source_plan', None)
+    run = getattr(market_study, 'run_source_plan', None)
+    if not callable(build) or not callable(run):
+        return
+    try:
+        plan = build(payload, offer_lang=offer_lang)
+    except Exception as exc:
+        print(f'[MARKET STUDY] source plan build failed: {exc}')
+        return
+    if not plan:
+        return
+    try:
+        outcome = run(plan, evidence_pool, _market_source_fetch_http,
+                      session=session, deadline=deadline, report=report)
+        print(f'[MARKET STUDY] source plan done: {outcome}')
+    except Exception as exc:
+        print(f'[MARKET STUDY] source plan fetch failed: {exc}')
+
+
+def _pool_covers_angle(evidence_pool, angle):
+    """True when an expansion round for ``angle`` would only refetch stored
+    evidence: the same query already ran (folded dedupe) or pool pages already
+    carry the angle's distinctive tokens."""
+    if evidence_pool is None:
+        return False
+    try:
+        if evidence_pool.query_results(angle) is not None:
+            return True
+        tokens = _competitor_name_tokens(angle)
+        if not tokens:
+            return False
+        needed = 1 if len(tokens) == 1 else 2
+        return bool(evidence_pool.pages_for_name(tokens, needed))
+    except Exception:
+        return False
+
+
 def _execute_market_competitors(data, tenant_id=None, progress=None):
+    """Job entry — one evidence pool, one deadline, one shared browser session
+    for everything the run searches or fetches; the pieces pass through to
+    every stage that browses (source plan → main call → expansion rounds →
+    row verify → logo pass)."""
+    report = progress if callable(progress) else (lambda *_args: None)
+    evidence_pool = _new_evidence_pool()
+    deadline = time.time() + _MARKET_JOB_TIME_BUDGET
+    session = _market_browser_session()
+    try:
+        return _run_market_competitors(
+            data, tenant_id=tenant_id, progress=report,
+            evidence_pool=evidence_pool, deadline=deadline, session=session)
+    finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+
+def _run_market_competitors(data, tenant_id=None, progress=None,
+                            evidence_pool=None, deadline=None, session=None):
     report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data)
     offer_lang = slide_engine.resolve_offer_lang(data)
@@ -45,12 +201,18 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     user_prompt = market_study.build_competitors_user_prompt(
         payload, existing, mode=mode, offer_lang=offer_lang)
     report(18, 'جاري البحث في الويب عن المنافسين وبياناتهم — قد يستغرق دقائق...')
+    # Known sources first: the catalog's deep links land in the evidence pool
+    # before the model searches, so rows built on them verify without refetch.
+    _run_market_source_plan(payload, offer_lang=offer_lang,
+                            evidence_pool=evidence_pool, session=session,
+                            deadline=deadline, report=report)
     # A competitor scan is the widest single research task — one search per
     # plausible rival plus the market-wide ones, with room to open the pages
     # that surface. The model decides the queries; Chromium does the reads.
     res = _browse_agent_call(
         system_prompt, user_prompt,
         _usage_ctx('market', data, tenant_id=tenant_id),
+        evidence_pool=evidence_pool, deadline=deadline, session=session,
         search_budget=_COMPETITORS_SEARCH_BUDGET,
         max_steps=_COMPETITORS_MAX_STEPS,
         max_tokens=14000)
@@ -66,10 +228,13 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
             'error': wallet_msg if credit and wallet_msg else 'تعذر توليد المنافسين.',
             'failureReason': 'insufficient_credit' if credit else parse_error,
             'providerError': provider_error,
+            'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         }
     # Every grounded call's retrieved pages are evidence — collect them across
     # the main call and all expansion rounds instead of keeping only the
     # richest single answer, so later rounds keep feeding verification/logos.
+    # Each page also lands in the shared pool, which is what phases 1-2 of
+    # verification and the logo pass match against.
     citation_pages = []
     citation_urls = []
     _seen_citation_urls = set()
@@ -80,6 +245,13 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
                 _seen_citation_urls.add(page['url'])
                 citation_pages.append(page)
                 citation_urls.append(page['url'])
+                if evidence_pool is not None:
+                    try:
+                        evidence_pool.add_page(
+                            page['url'], title=page.get('title') or '',
+                            content=page.get('content') or '', via='agent')
+                    except Exception:
+                        pass
 
     _collect_citations(res)
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
@@ -147,6 +319,11 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     round_no = 0
     max_rounds = len(axis_queries) + len(generic_angles)
     while mode != 'fill' and _market_search_ran(res) and round_no < max_rounds:
+        # Near the job's deadline the loop stops so verify and logos keep
+        # their share of the budget — an expansion answer that arrives after
+        # the deadline lands nowhere.
+        if deadline is not None and time.time() >= deadline - _MARKET_EXPANSION_DEADLINE_MARGIN:
+            break
         deficits = _axis_deficits()
         if not deficits:
             break
@@ -169,6 +346,11 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
                 'منافس بقيمة محوره في benchmarks.' if multi_axis else '')
         else:
             break
+        if _pool_covers_angle(evidence_pool, angle):
+            # The corpus already holds this angle — the same query ran before
+            # or stored pages carry its tokens, so a fresh browse call would
+            # mostly read pool hits instead of surfacing new names.
+            continue
         report(24 + round_no,
                f'عدد منافسي محور {deficit_labels} أقل من الحد الأدنى — بحث إضافي ({round_no + 1})...'
                if multi_axis else
@@ -195,6 +377,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         res2 = _browse_agent_call(
             system_prompt, expansion_prompt,
             _usage_ctx('market', data, tenant_id=tenant_id),
+            evidence_pool=evidence_pool, deadline=deadline, session=session,
             search_budget=4, max_steps=10, max_tokens=14000)
         _err2 = _chat_error_message(res2) if res2.get('error') else ''
         provider_error = provider_error or _err2
@@ -224,10 +407,27 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
             break
     merged, added, updated = market_study.merge_generated_competitors(
         existing, generated, mode=mode, offer_lang=offer_lang)
-    market_study.apply_search_citations(merged, citation_urls)
-    _attach_retrieved_citations(merged, citation_pages)
+    # The pool's pages are a superset of the citation list once the agent
+    # layer records into it — union rather than assume, so matching works on
+    # either side of that landing.
+    evidence_pages = list(citation_pages)
+    evidence_urls = list(citation_urls)
+    if evidence_pool is not None:
+        try:
+            for _pool_page in evidence_pool.pages():
+                _pool_url = str((_pool_page or {}).get('url') or '')
+                if _pool_url and _pool_url not in _seen_citation_urls:
+                    _seen_citation_urls.add(_pool_url)
+                    evidence_pages.append(_pool_page)
+                    evidence_urls.append(_pool_url)
+        except Exception:
+            pass
+    market_study.apply_search_citations(merged, evidence_urls)
+    _attach_retrieved_citations(merged, evidence_pages)
     report(30, 'التحقق من كل منافس ببحث مستقل في الويب...')
-    _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id, progress=report)
+    _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id,
+                            progress=report, evidence_pool=evidence_pool,
+                            deadline=deadline)
     for row in merged:
         market_study.canonicalize_competitor_source_urls(row)
         _drop_foreign_competitor_urls(row)
@@ -254,7 +454,8 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     report(74, 'استيراد شعارات المنافسين من مواقعها الرسمية...')
     _auto_import_competitor_logos(
         merged, payload, data, tenant_id=tenant_id, progress=report,
-        citation_pages=citation_pages)
+        citation_pages=evidence_pages, evidence_pool=evidence_pool,
+        deadline=deadline, session=session)
     report(93, 'إعداد جدول المصادر والتحذيرات...')
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
@@ -295,6 +496,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
         'added': added,
         'updated': updated,
         'searchVerified': search_ran,
+        'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         'partial': partial,
         'providerError': provider_error or None,
         'outOfRadiusCount': out_of_radius,
@@ -315,6 +517,13 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
 _SUMMARY_SEARCH_BUDGET = 8
 _SUMMARY_MAX_STEPS = 16
 
+# The whole summary job — source plan plus the one wide browse call — spends
+# the same wall-clock minutes; env-overridable like _MARKET_JOB_TIME_BUDGET.
+try:
+    _SUMMARY_JOB_TIME_BUDGET = max(60, int(os.environ.get('SUMMARY_JOB_TIME_BUDGET') or 420))
+except (TypeError, ValueError):
+    _SUMMARY_JOB_TIME_BUDGET = 420
+
 # The competitors sweep is wider still: roughly one search per plausible rival
 # plus the market-level listings, each paired with page opens.
 _COMPETITORS_SEARCH_BUDGET = 10
@@ -322,6 +531,27 @@ _COMPETITORS_MAX_STEPS = 20
 
 
 def _execute_market_summary(data, tenant_id=None, progress=None):
+    """Job entry — one evidence pool, one deadline, one shared browser
+    session for the source plan and the main browse call, mirroring the
+    competitors job's wiring."""
+    report = progress if callable(progress) else (lambda *_args: None)
+    evidence_pool = _new_evidence_pool()
+    deadline = time.time() + _SUMMARY_JOB_TIME_BUDGET
+    session = _market_browser_session()
+    try:
+        return _run_market_summary(
+            data, tenant_id=tenant_id, progress=report,
+            evidence_pool=evidence_pool, deadline=deadline, session=session)
+    finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+
+def _run_market_summary(data, tenant_id=None, progress=None,
+                        evidence_pool=None, deadline=None, session=None):
     report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data)
     competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
@@ -354,8 +584,14 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
     # and the figures rest only on pages it actually read. A transport
     # failure — or a clean reply that opened zero pages — is an explicit
     # search_not_run, never a silent memory answer.
+    # Known sources first: the catalog's deep links land in the shared pool
+    # before the model searches, so its queries and page opens reuse them.
+    _run_market_source_plan(payload, offer_lang=offer_lang,
+                            evidence_pool=evidence_pool, session=session,
+                            deadline=deadline, report=report)
     res = _browse_agent_call(
         system_prompt, user_prompt, usage_ctx,
+        evidence_pool=evidence_pool, deadline=deadline, session=session,
         search_budget=_SUMMARY_SEARCH_BUDGET, max_steps=_SUMMARY_MAX_STEPS,
         max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='max')
     failed = res.get('error') is not None
@@ -369,6 +605,7 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
             'error': 'تعذر تنفيذ بحث الويب لملخص السوق. لم يُستبدل النص الحالي.',
             'failureReason': 'search_not_run',
             'providerError': provider_error,
+            'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         }
     report(72, 'التحقق من مصادر الملخص وفترة بياناتها...')
     parsed, parse_error = _parse_market_model_json(res)
@@ -383,6 +620,7 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
                      else 'تعذر توليد ملخص السوق. لم يُستبدل النص الحالي.',
             'failureReason': 'insufficient_credit' if credit else parse_error,
             'providerError': provider_error,
+            'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         }
     normalized = market_study.normalize_summary(parsed)
     if not market_study.summary_has_content(normalized.get('summary')):
@@ -391,9 +629,19 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
             'error': 'عاد النموذج ملخصًا فارغًا. لم يُستبدل النص الحالي.',
             'failureReason': 'empty_response',
             'providerError': provider_error,
+            'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         }
     search_verified = _market_search_ran(res)
-    market_study.apply_search_citations(normalized.get('sources'), _market_citation_urls(res), url_key='url')
+    # Citation collection unions the pool's fetched pages — a source-plan or
+    # tool-read page is retrieved evidence even when the agent never cited it.
+    citation_urls = list(_market_citation_urls(res))
+    if evidence_pool is not None:
+        for _pool_page in evidence_pool.pages():
+            _pool_url = str((_pool_page or {}).get('url') or '').strip()
+            if _pool_url:
+                citation_urls.append(_pool_url)
+    citation_urls = list(dict.fromkeys(citation_urls))
+    market_study.apply_search_citations(normalized.get('sources'), citation_urls, url_key='url')
     sources = normalized.get('sources') or []
     if search_verified:
         dead_urls = _verify_market_urls(
@@ -417,6 +665,7 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
     return {
         'success': True,
         'searchVerified': search_verified,
+        'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         **normalized,
     }
 

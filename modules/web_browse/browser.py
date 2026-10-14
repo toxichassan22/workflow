@@ -6,6 +6,8 @@ no module-level browser. Two entry points share the same worker:
 
 - `BrowserWorker` / `browser_session()` — explicit lifecycle for the agent
   loop (lazily launched on first tool call, closed in `finally`).
+- `thread_local_browser()` / `close_thread_browser()` — a long-lived worker
+  bound to the calling thread, for pools that run many fetches per thread.
 - module-level `open_url()` / `web_search()` — contract helpers that reuse the
   calling thread's active session, or spin up a one-shot browser when none is.
 
@@ -35,10 +37,11 @@ _BLOCKED_TYPES = {'image', 'media', 'font'}
 _STRIP_SELECTOR = 'script,style,nav,footer,header,form,noscript,iframe'
 # SERP endpoints. Verified on this repo's dev box (2026-10): DDG's html/lite
 # endpoints return an anomaly page (HTTP 418 body) from datacenter and dev IPs
-# alike; bing.com works but its Arabic real-estate index returns SEO spam;
-# search.brave.com and search.yahoo.com returned on-topic Saudi results for the
-# probe query. The fallback chain keeps the contracted ddg→bing order usable
-# via BROWSER_SEARCH_PROVIDER while brave/yahoo carry real traffic.
+# alike — a dead first provider that burned the goto timeout ahead of every
+# real search, so it is out of the default rotation but stays a valid
+# BROWSER_SEARCH_PROVIDER pin. bing.com works but its Arabic real-estate index
+# returns SEO spam; search.brave.com and search.yahoo.com returned on-topic
+# Saudi results for the probe query, so they carry real traffic.
 _DDG_URL = 'https://html.duckduckgo.com/html/?q='
 _BING_URL = 'https://www.bing.com/search?q='
 _BRAVE_URL = 'https://search.brave.com/search?q='
@@ -188,17 +191,20 @@ _PROVIDER_JS = {'ddg': _DDG_JS, 'bing': _BING_JS,
 _PROVIDER_UNWRAP = {'ddg': _unwrap_ddg, 'bing': _unwrap_bing,
                     'yahoo': _unwrap_yahoo}
 
-# ddg first per contract; brave/yahoo next (verified relevant on Arabic
-# real-estate queries); bing last — non-empty but spam-grade results.
-_DEFAULT_ORDER = ['ddg', 'brave', 'yahoo', 'bing']
+# brave/yahoo first — verified relevant on Arabic real-estate queries; bing
+# last (non-empty but spam-grade). ddg is out of the default rotation: its
+# 418 anomaly pages cost the goto timeout before every real search. It stays
+# a valid BROWSER_SEARCH_PROVIDER pin so tests can force the old chain.
+_DEFAULT_ORDER = ['brave', 'yahoo', 'bing']
 
 
 def _providers():
     pinned = (os.environ.get('BROWSER_SEARCH_PROVIDER') or '').strip().lower()
     order = list(_DEFAULT_ORDER)
-    if pinned in order:
-        order.remove(pinned)
-        order.insert(0, pinned)
+    if pinned in _PROVIDER_JS:
+        # A known provider pins first — including ddg, which is no longer in
+        # the default order but must stay reachable for tests/contracts.
+        order = [pinned] + [p for p in order if p != pinned]
     return order
 
 
@@ -365,17 +371,55 @@ class BrowserWorker:
         return hits
 
 
+def thread_local_browser(headless=True):
+    """The calling thread's shared worker — a live BrowserWorker bound via
+    ``_tls.worker``.
+
+    Pool threads (the ×4 verify/scan pools) take one worker per thread and
+    reuse it for every fetch instead of paying a Chromium launch per call.
+    Reuses the already-active worker when the thread has one (an open
+    ``browser_session()`` included); ``close_thread_browser()`` releases it
+    when the pool shuts down.
+    """
+    worker = _active_worker()
+    if worker is None:
+        stale = getattr(_tls, 'worker', None)
+        if stale is not None:
+            try:
+                stale.close()
+            except Exception:
+                pass
+        worker = BrowserWorker(headless=headless)
+        worker.start()
+        _tls.worker = worker
+    return worker
+
+
+def close_thread_browser():
+    """Release the calling thread's shared worker, if one was bound."""
+    worker = getattr(_tls, 'worker', None)
+    _tls.worker = None
+    if worker is not None:
+        try:
+            worker.close()
+        except Exception:
+            pass
+
+
 @contextmanager
 def browser_session(headless=True):
     """The per-agent-run session: one browser for the calling thread."""
     worker = BrowserWorker(headless=headless)
+    previous = getattr(_tls, 'worker', None)
     try:
         worker.start()
         _tls.worker = worker
         yield worker
     finally:
         if getattr(_tls, 'worker', None) is worker:
-            _tls.worker = None
+            # Hand the slot back to a thread worker that was bound earlier —
+            # the session only borrows it for its own lifetime.
+            _tls.worker = previous
         worker.close()
 
 

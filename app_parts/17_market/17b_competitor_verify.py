@@ -1,4 +1,26 @@
+def _agent_run_accepts(agent_module, param):
+    """True when ``run_browse_agent`` declares ``param`` (or ``**kwargs``).
+
+    evidence_pool/deadline/session arrive with the web_browse agent task —
+    probing keeps this caller correct on either side of that landing instead
+    of hard-failing an older agent build on an unexpected keyword argument.
+    """
+    try:
+        import inspect
+        params = inspect.signature(agent_module.run_browse_agent).parameters.values()
+        return any(p.name == param or p.kind == inspect.Parameter.VAR_KEYWORD
+                   for p in params)
+    except Exception:
+        return False
+
+
+def _market_deadline_hit(deadline):
+    """The job's shared wall-clock limit: None means no budget was set."""
+    return deadline is not None and time.time() >= deadline
+
+
 def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
+                       evidence_pool=None, deadline=None, session=None,
                        **agent_kwargs):
     """One self-hosted browse-agent run for a market web task.
 
@@ -9,7 +31,8 @@ def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
     caller reports the failure as search_not_run instead of falling back to a
     paid search layer (there is none left). ``agent_kwargs`` (search_budget,
     max_steps, max_tokens, reasoning_effort) pass straight through to
-    run_browse_agent.
+    run_browse_agent, and so do the job-scoped ``evidence_pool``/``deadline``/
+    ``session`` — once the agent signature carries them.
     """
     try:
         # Flat module, attribute call: `web_browse.agent` would bind a second
@@ -18,9 +41,14 @@ def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
         import agent as _agent_module
         task = (str(system_prompt or '').strip() + '\n\n'
                 + str(user_content or '')).strip()
+        forwarded = dict(agent_kwargs)
+        for _key, _value in (('evidence_pool', evidence_pool),
+                             ('deadline', deadline), ('session', session)):
+            if _value is not None and _agent_run_accepts(_agent_module, _key):
+                forwarded[_key] = _value
         response = _agent_module.run_browse_agent(
             task, usage_ctx=usage_ctx, model=model or MARKET_STUDY_MODEL,
-            **agent_kwargs)
+            **forwarded)
     except Exception as exc:
         return {'error': {'message': f'browse_agent: {exc}'}}
     if not isinstance(response, dict):
@@ -66,17 +94,25 @@ def _absorb_verify_response(row, prompt_response, tokens, needed, matched_pages,
     return prompt_matched, official
 
 
-def _verify_competitor_row(row, payload, data, tenant_id=None):
-    """One targeted browse-agent run per competitor.
+def _verify_competitor_row(row, payload, data, tenant_id=None,
+                           evidence_pool=None, deadline=None, session=None):
+    """One targeted browse-agent run per competitor — the last-resort path.
 
     A market-wide listing query only surfaces index pages, so the model fills
     names from memory. A per-competitor agent retrieves the pages that
     actually mention THIS name: they become its source links, its official
     page feeds the logo import, and a name no retrieved page mentions is
-    flagged as unverified instead of being silently trusted.
+    flagged as unverified instead of being silently trusted. Rows reach this
+    only when the evidence pool already failed to match them (phases 1-2);
+    pool/deadline/the thread's browser ride along so the run never refetches
+    stored pages and stops when the job's time budget is gone.
     """
     name = str(row.get('name') or '').strip()
     if not name:
+        return
+    if _market_deadline_hit(deadline):
+        row['verify_state'] = 'search_not_run'
+        row['verify_provider_error'] = 'deadline_exceeded'
         return
     offer_lang = slide_engine.resolve_offer_lang(data)
     en = offer_lang == 'en'
@@ -113,7 +149,8 @@ def _verify_competitor_row(row, payload, data, tenant_id=None):
     # is search_not_run, never proof the name is fabricated.
     response = _browse_agent_call(
         market_study.build_consultant_system_prompt(offer_lang), prompt,
-        usage_ctx)
+        usage_ctx, evidence_pool=evidence_pool, deadline=deadline,
+        session=session)
     last_error = _chat_error_message(response)
     search_ran_any = False
     if response.get('error') is None:
@@ -387,7 +424,227 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     return True
 
 
-def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None):
+def _pages_as_agent_response(pages):
+    """Pool pages in the OpenRouter reply shape ``_market_citation_pages``
+    reads — url_citation annotations — so stored evidence absorbs through the
+    exact same code path as a live browse run (``_absorb_verify_response``).
+    """
+    annotations = []
+    for page in pages or []:
+        url = str((page or {}).get('url') or '').strip()
+        if not url:
+            continue
+        annotations.append({'url_citation': {
+            'url': url,
+            'title': str(page.get('title') or ''),
+            'content': str(page.get('content') or ''),
+        }})
+    return {'choices': [{'message': {'role': 'assistant', 'content': '',
+                                    'annotations': annotations}}]}
+
+
+def _verify_row_from_pool(row, payload, data, evidence_pool):
+    """Match a competitor row against pages the job already retrieved.
+
+    The source plan and the earlier browse calls leave every fetched page in
+    the shared pool; a row whose distinctive name tokens appear in stored
+    pages absorbs them as evidence and verifies with zero new searches.
+    Returns True only when the row was actually marked verified — a pool hit
+    that absorbs to nothing (e.g. all matches on foreign-market hosts) leaves
+    the row for the next phase.
+    """
+    if evidence_pool is None or not isinstance(row, dict):
+        return False
+    tokens = _competitor_name_tokens(row.get('name'))
+    if not tokens:
+        return False
+    needed = 1 if len(tokens) == 1 else 2
+    try:
+        pages = evidence_pool.pages_for_name(tokens, needed)
+    except Exception:
+        pages = []
+    if not pages:
+        return False
+    offer_lang = slide_engine.resolve_offer_lang(data)
+    matched_pages = {}
+    matched, official = _absorb_verify_response(
+        row, _pages_as_agent_response(pages), tokens, needed, matched_pages,
+        offer_lang=offer_lang)
+    matched = list(dict.fromkeys(matched))
+    if not matched:
+        return False
+    row.pop('no_search_evidence', None)
+    if not any(str(row.get(key) or '').strip()
+               for key in ('price_value', 'price_from', 'price_to')):
+        _fill_competitor_price_from_listings(
+            row, matched + market_study.competitor_source_urls(row),
+            pages=list(matched_pages.values()))
+    row['verify_state'] = 'verified'
+    row['source_urls'] = list(dict.fromkeys(
+        market_study.competitor_source_urls(row) + matched))[:6]
+    if not str(row.get('source_url') or '').strip():
+        row['source_url'] = market_study.prefer_specific_source_url(*row['source_urls'])
+    if official and not str(row.get('logo_source_url') or '').strip():
+        row['logo_source_url'] = official
+        row['logo_official_verified'] = True
+    return True
+
+
+def _verify_bind_browser(browser_module):
+    """Bind this pool thread's BrowserWorker once — the module-level helpers
+    then reuse it for every fetch instead of paying a Chromium launch per
+    call. No-op where the thread-local helper hasn't landed; the helpers
+    one-shot a browser per call in that shape."""
+    getter = getattr(browser_module, 'thread_local_browser', None)
+    if callable(getter):
+        try:
+            getter()
+        except Exception:
+            pass
+
+
+def _verify_thread_browser():
+    """The calling thread's own BrowserWorker — Playwright's sync API is
+    one-worker-per-thread, so verify-pool threads never share the job
+    session. None until the thread-local helper exists."""
+    try:
+        import browser as _browser_module
+        getter = getattr(_browser_module, 'thread_local_browser', None)
+        if callable(getter):
+            worker = getter()
+            if worker is not None:
+                return worker
+    except Exception:
+        pass
+    return None
+
+
+def _verify_agent_session():
+    """The verify thread's browser for the agent's ``session=`` — resolved
+    only when ``run_browse_agent`` accepts the parameter, so an agent build
+    without it never pays a Chromium launch it cannot use. None means the
+    agent opens its own per-run session, as before."""
+    try:
+        import agent as _agent_module
+        if not _agent_run_accepts(_agent_module, 'session'):
+            return None
+    except Exception:
+        return None
+    return _verify_thread_browser()
+
+
+def _close_verify_thread_browser():
+    """Release a verify thread's browser — no-op while the module-level
+    helpers (one-shot, self-closing) carry the fallback."""
+    try:
+        import browser as _browser_module
+        close = getattr(_browser_module, 'close_thread_browser', None)
+        if callable(close):
+            close()
+    except Exception:
+        pass
+
+
+def _verify_row_deterministic(row, payload, data, evidence_pool, deadline):
+    """Phase 2: one deterministic «name city» search on the thread's browser,
+    top hits opened into the pool, then a re-match — the decision stays in
+    Python, no model round involved. Returns True when the row verified.
+
+    Fetches go through browser.py's contract helpers (``web_search`` /
+    ``open_url``): they reuse the thread's bound worker — or the job session
+    on the main thread — and one-shot a browser only when nothing is bound.
+    """
+    if evidence_pool is None:
+        return False
+    name = str(row.get('name') or '').strip()
+    tokens = _competitor_name_tokens(name)
+    if not name or not tokens:
+        return False
+    if _market_deadline_hit(deadline):
+        return False
+    try:
+        import browser as _browser_module
+    except Exception:
+        return False
+    search_fn = getattr(_browser_module, 'web_search', None)
+    open_fn = getattr(_browser_module, 'open_url', None)
+    if not callable(search_fn):
+        return False
+    bound = [False]
+
+    def _bind():
+        if not bound[0]:
+            bound[0] = True
+            _verify_bind_browser(_browser_module)
+
+    city = str(payload.get('city') or '').strip() or 'السعودية'
+    query = f'«{name}» {city}'
+    try:
+        cached = evidence_pool.query_results(query)
+    except Exception:
+        cached = None
+    if cached is not None:
+        results = cached
+    else:
+        _bind()
+        try:
+            results = search_fn(query)
+        except Exception:
+            results = []
+        results = [item for item in (results or []) if isinstance(item, dict)]
+        try:
+            evidence_pool.add_query(query, results)
+        except Exception:
+            pass
+    for item in results[:3]:
+        url = str(item.get('url') or '').strip()
+        if not url or not callable(open_fn):
+            continue
+        if _market_deadline_hit(deadline):
+            break
+        try:
+            if evidence_pool.get_page(url) is not None or evidence_pool.page_failed(url):
+                continue
+        except Exception:
+            pass
+        _bind()
+        try:
+            opened = open_fn(url)
+        except Exception as exc:
+            opened = {'error': str(exc) or exc.__class__.__name__}
+        opened = opened if isinstance(opened, dict) else {}
+        try:
+            if opened.get('error'):
+                evidence_pool.mark_failed(url, str(opened.get('error')))
+            else:
+                evidence_pool.add_page(
+                    url, title=str(opened.get('title') or ''),
+                    content=str(opened.get('text') or opened.get('content') or ''),
+                    final_url=str(opened.get('final_url') or url), via='browser')
+        except Exception:
+            pass
+    return _verify_row_from_pool(row, payload, data, evidence_pool)
+
+
+def _verify_competitor_row_pooled(row, payload, data, tenant_id=None,
+                                  evidence_pool=None, deadline=None):
+    """Pool-thread phases: deterministic search first, the browse agent only
+    for rows still without any evidence. An expired job deadline is an honest
+    search_not_run — the row never silently skipped its verdict."""
+    if _market_deadline_hit(deadline):
+        row['verify_state'] = 'search_not_run'
+        row['verify_provider_error'] = 'deadline_exceeded'
+        return
+    if evidence_pool is not None and _verify_row_deterministic(
+            row, payload, data, evidence_pool, deadline):
+        return
+    _verify_competitor_row(row, payload, data, tenant_id=tenant_id,
+                           evidence_pool=evidence_pool, deadline=deadline,
+                           session=_verify_agent_session())
+
+
+def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
+                            evidence_pool=None, deadline=None):
     report = progress if callable(progress) else (lambda *_args: None)
     # Manual rows verify too: fill mode exists to complete the cells the user
     # left empty, and the per-name search is the only priced lookup they get.
@@ -399,17 +656,40 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None):
     done = [0]
     total = len(targets)
 
+    def _tick(row):
+        done[0] += 1
+        report(30 + int(28 * done[0] / total),
+               f'التحقق من «{row.get("name") or "منافس"}» ({done[0]} من {total})...')
+
+    # Phase 1 — pure matching, sequential: pages the source plan and earlier
+    # browse calls already fetched carry most names; those rows absorb the
+    # stored evidence and verify without a single new search.
+    pending = []
+    for row in targets:
+        if evidence_pool is not None and not _market_deadline_hit(deadline):
+            try:
+                if _verify_row_from_pool(row, payload, data, evidence_pool):
+                    _tick(row)
+                    continue
+            except Exception as exc:
+                print(f"[MARKET STUDY] pool verify failed for "
+                      f"«{row.get('name') or 'منافس'}»: {exc}")
+        pending.append(row)
+
+    # Phases 2+3 on the pool — each thread drives its own browser.
     def verify(row):
         try:
             # Pool threads share no Flask context — without one the key gate
             # misreads every company as unkeyed and db-backed helpers die.
             with _worker_app_context():
-                _verify_competitor_row(row, payload, data, tenant_id=tenant_id)
+                _verify_competitor_row_pooled(row, payload, data, tenant_id=tenant_id,
+                                              evidence_pool=evidence_pool,
+                                              deadline=deadline)
         finally:
-            done[0] += 1
-            report(30 + int(28 * done[0] / total),
-                   f'التحقق من «{row.get("name") or "منافس"}» ({done[0]} من {total})...')
+            _close_verify_thread_browser()
+            _tick(row)
 
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=min(4, total)) as pool:
-        list(pool.map(verify, targets))
+    if pending:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(4, len(pending))) as workers:
+            list(workers.map(verify, pending))

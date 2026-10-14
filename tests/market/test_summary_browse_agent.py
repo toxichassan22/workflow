@@ -48,6 +48,15 @@ class SummaryBrowseAgentTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp_dir.cleanup()
 
+    def setUp(self):
+        # The summary executor now runs the retrieval planner into the job's
+        # evidence pool before the browse call — stub the seam so this suite
+        # never fetches real pages whether or not that layer has landed.
+        stub = patch.object(
+            self.application_module, '_run_market_source_plan', return_value=None)
+        stub.start()
+        self.addCleanup(stub.stop)
+
     @staticmethod
     def _agent_reply(urls=('https://sakani.sa/reports-and-data/rent-index-q3',)):
         text = json.dumps({

@@ -19,22 +19,20 @@ _SUMMARY_CHAT_SOURCES_MAX = 8
 _SUMMARY_CHAT_SEARCH_BUDGET = 3
 _SUMMARY_CHAT_MAX_STEPS = 8
 
+# The research phase gets its own short wall-clock budget — a chat reply
+# cannot sit on a multi-minute sweep the way the full summary job can.
+try:
+    _SUMMARY_CHAT_JOB_TIME_BUDGET = max(30, int(os.environ.get('SUMMARY_CHAT_JOB_TIME_BUDGET') or 120))
+except (TypeError, ValueError):
+    _SUMMARY_CHAT_JOB_TIME_BUDGET = 120
+
 _SUMMARY_CHAT_STALE_KEYS = ('one_block', 'decision', 'swot')
 
 
 def _summary_chat_model():
-    """The chat model is the owner's pick — read fresh every call, never a
-    literal slug and never a fallback model."""
-    return str(os.environ.get('MARKET_CHAT_MODEL') or '').strip()
-
-
-def _summary_chat_config_error():
-    return {
-        'success': False,
-        'error': 'MARKET_CHAT_MODEL غير مضبوط في بيئة الخادم — اضبط المتغير ثم أعد المحاولة.',
-        'error_code': 'MARKET_CHAT_MODEL_MISSING',
-        'failureReason': 'config_error',
-    }
+    """MARKET_CHAT_MODEL stays an owner override; unset it falls back to the
+    tenant-chat model every other chat surface uses."""
+    return str(os.environ.get('MARKET_CHAT_MODEL') or '').strip() or GEMINI_TEXT_MODEL
 
 
 def _summary_chat_axis(value):
@@ -177,9 +175,7 @@ def _summary_chat_fatal_or_credit(res, provider_error, parse_error, fallback_err
 def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     report = progress if callable(progress) else (lambda *_args: None)
     chat_model = _summary_chat_model()
-    if not chat_model:
-        return _summary_chat_config_error()
-    payload = _prepare_market_payload(data)
+    payload = _prepare_market_payload(data, tenant_id)
     message = str(data.get('message') or '').strip()[:_SUMMARY_CHAT_MESSAGE_MAX]
     if not message:
         return {'success': False, 'error': 'الرسالة مطلوبة.',
@@ -188,6 +184,10 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     if axis is None:
         return {'success': False, 'error': 'محور الملخص غير معروف.',
                 'error_code': 'AXIS_UNKNOWN', 'failureReason': 'axis_unknown'}
+    # No pinned axis (the general/auto thread) → the model names the axis its
+    # reply actually handles; the detected key steers phase-B context and is
+    # echoed back so the client can show what the message was routed to.
+    auto_axis = axis == market_study.SUMMARY_CHAT_AXIS_GENERAL
     research_allowed = str(data.get('research') or 'auto').strip().lower() != 'off'
     history = _summary_chat_history(data.get('history'))
     state = _summary_chat_state(data)
@@ -230,21 +230,41 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     sources_add = []
     citations = []
     search_performed = False
+    detected_axis = str(turn.get('axis') or '').strip() if auto_axis else axis
+    if detected_axis not in {item['key'] for item in market_study.SUMMARY_SECTIONS} \
+            and detected_axis != market_study.SUMMARY_CHAT_AXIS_GENERAL:
+        detected_axis = market_study.SUMMARY_CHAT_AXIS_GENERAL
+    # A clarification turn is a question back to the user — never an edit
+    # proposal and never a browse run.
+    clarification = bool(turn.get('needs_clarification'))
+    if clarification:
+        ops = []
 
     # Phase B — live research inside the same binding scope/period, only when
     # the model asked for it and the caller did not forbid it. The researched
     # answer replaces phase A's reply/ops: it saw the retrieved pages.
-    if turn.get('needs_research') and research_allowed:
+    if turn.get('needs_research') and research_allowed and not clarification:
         report(46, 'جاري البحث في الويب داخل نطاق المشروع...')
         research_prompt = market_study.build_summary_chat_research_prompt(
-            payload, axis, message, history, state, turn.get('queries') or [])
+            payload, detected_axis, message, history, state, turn.get('queries') or [])
+        # The turn shares the job contract: one evidence pool and one
+        # deadline bound the browse run like every other market search.
+        chat_pool = _new_evidence_pool()
         research_res = _browse_agent_call(
             system_prompt, research_prompt, usage_ctx, model=chat_model,
+            evidence_pool=chat_pool,
+            deadline=time.time() + _SUMMARY_CHAT_JOB_TIME_BUDGET,
             search_budget=_SUMMARY_CHAT_SEARCH_BUDGET,
             max_steps=_SUMMARY_CHAT_MAX_STEPS, max_tokens=8000)
         research_error = (_chat_error_message(research_res)
                           if research_res.get('error') else '')
-        citations = _market_citation_urls(research_res)
+        citations = list(_market_citation_urls(research_res))
+        if chat_pool is not None:
+            for _pool_page in chat_pool.pages():
+                _pool_url = str((_pool_page or {}).get('url') or '').strip()
+                if _pool_url:
+                    citations.append(_pool_url)
+        citations = list(dict.fromkeys(citations))
         search_performed = _market_search_ran(research_res)
         research_parsed, research_parse_error = _parse_market_model_json(research_res)
         if research_parse_error:
@@ -289,10 +309,13 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     result = {
         'success': True,
         'reply': reply,
+        'axis': detected_axis,
         'proposal': proposal,
         'searchPerformed': search_performed,
         'citations': citations,
     }
+    if clarification:
+        result['clarification'] = True
     if rejected_ops:
         result['rejectedOps'] = rejected_ops
     if provider_error:
@@ -305,9 +328,7 @@ def _execute_market_summary_consolidate(data, tenant_id=None, progress=None):
     sources are final already, so this is a rewrite pass with no browsing."""
     report = progress if callable(progress) else (lambda *_args: None)
     chat_model = _summary_chat_model()
-    if not chat_model:
-        return _summary_chat_config_error()
-    payload = _prepare_market_payload(data)
+    payload = _prepare_market_payload(data, tenant_id)
     raw_stale = data.get('stale')
     if isinstance(raw_stale, dict):
         stale_keys = [key for key in _SUMMARY_CHAT_STALE_KEYS if raw_stale.get(key)]
