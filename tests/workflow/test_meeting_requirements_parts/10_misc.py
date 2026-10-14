@@ -773,7 +773,9 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
                 '<span>Executive Suite $340 nightly</span>' + ('x' * 220) +
                 '<script type="application/ld+json">'
                 '{"offers":{"price":850,"priceCurrency":"USD"}}</script>')
-        prices = module._extract_listing_prices(html)
+        with patch.object(module.market_study, '_live_fx_rates',
+                          return_value={}):
+            prices = module._extract_listing_prices(html)
         found = {(item['value'], item['currency']) for item in prices}
         self.assertIn((120.0, 'EUR'), found)
         self.assertIn((340.0, 'USD'), found)
@@ -795,7 +797,9 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         row = {'name': 'فندق تجريبي', 'operation_type': 'تشغيل فندقي',
                'source_urls': list(pages)}
         with patch.object(module, '_read_market_source_page',
-                          side_effect=lambda url, **kw: (pages.get(url, ''), '')):
+                          side_effect=lambda url, **kw: (pages.get(url, ''), '')), \
+                patch.object(module.market_study, '_live_fx_rates',
+                             return_value={}):
             filled = module._fill_competitor_price_from_listings(row, list(pages))
         self.assertTrue(filled)
         self.assertEqual(row['price_currency'], 'SAR')
@@ -815,7 +819,9 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         row = {'name': 'فندق', 'operation_type': 'تشغيل فندقي',
                'source_urls': list(pages)}
         with patch.object(module, '_read_market_source_page',
-                          side_effect=lambda url, **kw: (pages.get(url, ''), '')):
+                          side_effect=lambda url, **kw: (pages.get(url, ''), '')), \
+                patch.object(module.market_study, '_live_fx_rates',
+                             return_value={}):
             filled = module._fill_competitor_price_from_listings(row, list(pages))
         self.assertTrue(filled)
         self.assertEqual(row['price_currency'], 'SAR')

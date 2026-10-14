@@ -216,11 +216,13 @@ class PoolVerifyPhaseTests(_MarketTestBase):
         silently relabeled."""
         module = self.module
         row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
-        module._apply_verified_competitor_price(
-            row,
-            {'price': {'type': 'سعر الليلة', 'value': '140', 'currency': 'يورو',
-                       'url': 'https://trivago.example/hotel'}},
-            {'https://trivago.example/hotel'})
+        with patch.object(market_study, '_live_fx_rates', return_value={}):
+            module._apply_verified_competitor_price(
+                row,
+                {'price': {'type': 'سعر الليلة', 'value': '140',
+                           'currency': 'يورو',
+                           'url': 'https://trivago.example/hotel'}},
+                {'https://trivago.example/hotel'})
         self.assertEqual(row['price_value'], '567')   # 140 EUR × 4.05
         self.assertEqual(row['price_type'], 'سعر الليلة')
         self.assertEqual(row['price_currency'], 'SAR')
@@ -243,18 +245,39 @@ class PoolVerifyPhaseTests(_MarketTestBase):
         self.assertEqual(row['price_value'], '700')
         self.assertEqual(row['price_currency'], 'SAR')
 
-    def test_verify_price_keeps_currency_without_known_rate(self):
-        """A currency with no configured rate keeps its own unit — inventing
-        an exchange rate is worse than an honest foreign figure."""
+    def test_verify_price_converts_unlisted_currency_at_live_rate(self):
+        """A currency outside the built-in table still converts — the live
+        ER table is what keeps «any currency to SAR» true."""
         module = self.module
         row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
-        module._apply_verified_competitor_price(
-            row,
-            {'price': {'type': 'سعر الليلة', 'value': '400', 'currency': 'CHF',
-                       'url': 'https://trivago.example/hotel'}},
-            {'https://trivago.example/hotel'})
-        self.assertEqual(row['price_value'], '400')
-        self.assertEqual(row['price_currency'], 'CHF')
+        with patch.object(market_study, '_live_fx_rates',
+                          return_value={'CHF': 4.5}):
+            module._apply_verified_competitor_price(
+                row,
+                {'price': {'type': 'سعر الليلة', 'value': '400',
+                           'currency': 'CHF',
+                           'url': 'https://trivago.example/hotel'}},
+                {'https://trivago.example/hotel'})
+        self.assertEqual(row['price_value'], '1800')   # 400 CHF × 4.5
+        self.assertEqual(row['price_currency'], 'SAR')
+        self.assertEqual(row['price_cache']['original_price_value'], '400')
+        self.assertEqual(row['price_cache']['original_currency'], 'CHF')
+
+    def test_verify_price_drops_unconvertible_currency(self):
+        """The (ر.س) cell can only hold riyals — a foreign figure whose rate
+        is unknowable everywhere is dropped, not relabeled."""
+        module = self.module
+        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
+        with patch.object(market_study, '_live_fx_rates', return_value={}):
+            module._apply_verified_competitor_price(
+                row,
+                {'price': {'type': 'سعر الليلة', 'value': '400',
+                           'currency': 'XYZ',
+                           'url': 'https://trivago.example/hotel'}},
+                {'https://trivago.example/hotel'})
+        self.assertFalse(row.get('price_value'))
+        self.assertFalse(row.get('price_type'))
+        self.assertFalse(row.get('price_cache'))
 
     def test_deterministic_search_fills_pool_then_verifies(self):
         module = self.module
@@ -756,6 +779,18 @@ class BannedListingPortalTests(_MarketTestBase):
             ('https://trivago.sa/hotel', 'تشغيل فندقي', False),
             ('https://trivago.sa/x', 'إيجار', True),
             ('https://trivago.sa/x', 'بيع', True),
+            ('https://instagram.com/p/abc', 'بيع', True),
+            ('https://www.instagram.com/hotel.page/', 'تشغيل فندقي', True),
+            ('https://m.facebook.com/page', 'إيجار', True),
+            ('https://tiktok.com/@x/video/1', 'بيع', True),
+            ('https://x.com/status/1', 'بيع', True),
+            ('https://t.co/abc', 'إيجار', True),
+            ('https://youtube.com/watch?v=1', 'بيع', True),
+            ('https://wa.me/966500000000', 'بيع', True),
+            ('https://linkedin.com/company/x', 'بيع', True),
+            # Domain-boundary tokens must not swallow lookalike hosts.
+            ('https://www.fox.com/show', 'بيع', False),
+            ('https://alt.co/page', 'إيجار', False),
         )
         for url, operation, expected in cases:
             self.assertEqual(
@@ -934,7 +969,8 @@ class BannedListingPortalTests(_MarketTestBase):
                'source_urls': [page['url']]}
         with self.app.app_context(), \
                 patch.object(module, '_read_market_source_page',
-                             side_effect=AssertionError('content is inlined')):
+                             side_effect=AssertionError('content is inlined')), \
+                patch.object(market_study, '_live_fx_rates', return_value={}):
             filled = module._fill_competitor_price_from_listings(
                 row, [page['url']], pages=[page])
         self.assertTrue(filled)
@@ -943,6 +979,62 @@ class BannedListingPortalTests(_MarketTestBase):
         self.assertEqual(row['price_cache']['original_price_value'], '1000')
         self.assertEqual(row['price_cache']['original_currency'], 'USD')
         self.assertIn('USD', row.get('note') or '')
+
+    def test_listing_prices_detect_jod_and_egp_mentions(self):
+        """The currency-word pattern is not a USD/EUR club — Jordanian dinar
+        and Egyptian-pound mentions resolve through the alias table."""
+        module = self.module
+        html = ('شاليه مفروش 500 دينار أردني لليلة' + ('x' * 200) +
+                'غرفة فندقية 1,200 ج.م في الليلة')
+        with patch.object(market_study, '_live_fx_rates', return_value={}):
+            found = {(item['value'], item['currency'])
+                     for item in module._extract_listing_prices(html)}
+        self.assertIn((500.0, 'JOD'), found)
+        self.assertIn((1200.0, 'EGP'), found)
+
+    def test_fill_competitor_price_converts_jod_to_sar(self):
+        module = self.module
+        page = {'url': 'https://chalets.example/omar',
+                'title': 'شاليه عمر — الحجز',
+                'content': 'شاليه عمر للحجز اليومي 200 دينار أردني'}
+        row = {'name': 'شاليه عمر', 'operation_type': 'تشغيل فندقي',
+               'source_urls': [page['url']]}
+        with self.app.app_context(), \
+                patch.object(module, '_read_market_source_page',
+                             side_effect=AssertionError('content is inlined')), \
+                patch.object(market_study, '_live_fx_rates', return_value={}):
+            filled = module._fill_competitor_price_from_listings(
+                row, [page['url']], pages=[page])
+        self.assertTrue(filled)
+        self.assertEqual(row['price_value'], '1058')   # 200 JOD × 5.29
+        self.assertEqual(row['price_currency'], 'SAR')
+        self.assertEqual(row['price_cache']['original_price_value'], '200')
+        self.assertEqual(row['price_cache']['original_currency'], 'JOD')
+
+    def test_listing_prices_drop_currency_without_any_rate(self):
+        """An ISO-looking token with no rate anywhere is not a currency the
+        cell can express — the mention dies at extraction."""
+        module = self.module
+        html = 'مساحة المشروع 1,500 SQM إجمالية'
+        with patch.object(market_study, '_live_fx_rates', return_value={}):
+            self.assertEqual(module._extract_listing_prices(html), [])
+
+    def test_instagram_source_yields_no_price_and_no_source(self):
+        """The cited instagram URL is refused before a price lands — a reel
+        caption is not evidence."""
+        module = self.module
+        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي',
+               'source_urls': ['https://instagram.com/hotel.test']}
+        module._apply_verified_competitor_price(
+            row,
+            {'price': {'type': 'سعر الليلة', 'value': '900', 'currency': 'SAR',
+                       'url': 'https://instagram.com/hotel.test'}},
+            {'https://instagram.com/hotel.test'})
+        self.assertFalse(row.get('price_value'))
+        self.assertFalse(row.get('price_currency'))
+        self.assertFalse(row.get('field_sources'))
+        module._drop_banned_competitor_listing_urls(row)
+        self.assertFalse(row.get('source_urls'))
 
     def test_drop_banned_listing_urls_strips_row_and_clears_price(self):
         module = self.module

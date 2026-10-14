@@ -377,12 +377,27 @@ _PRICE_CURRENCY_ALIASES = {
     'دولار امريكي': 'USD',
     'aed': 'AED', 'درهم': 'AED', 'درهم اماراتي': 'AED',
     'gbp': 'GBP', '£': 'GBP', 'جنيه استرليني': 'GBP',
-    'kwd': 'KWD', 'دينار': 'KWD', 'دينار كويتي': 'KWD',
-    'qar': 'QAR', 'ريال قطري': 'QAR',
-    'bhd': 'BHD', 'دينار بحريني': 'BHD',
-    'omr': 'OMR', 'ريال عماني': 'OMR',
-    'egp': 'EGP', 'جنيه': 'EGP', 'جنيه مصري': 'EGP',
-    'jod': 'JOD', 'دينار اردني': 'JOD',
+    'kwd': 'KWD', 'دينار': 'KWD', 'دينار كويتي': 'KWD', 'د.ك': 'KWD',
+    'qar': 'QAR', 'ريال قطري': 'QAR', 'ر.ق': 'QAR', 'رق': 'QAR',
+    'bhd': 'BHD', 'دينار بحريني': 'BHD', 'د.ب': 'BHD',
+    'omr': 'OMR', 'ريال عماني': 'OMR', 'ر.ع': 'OMR',
+    'egp': 'EGP', 'جنيه': 'EGP', 'جنيه مصري': 'EGP', 'ج.م': 'EGP',
+    'jod': 'JOD', 'دينار اردني': 'JOD', 'jd': 'JOD',
+    'try': 'TRY', '₺': 'TRY', 'ليره تركيه': 'TRY', 'ل.ت': 'TRY',
+    'chf': 'CHF', 'فرنك سويسري': 'CHF',
+    'lbp': 'LBP', 'ليره لبنانيه': 'LBP', 'ل.ل': 'LBP',
+    'syp': 'SYP', 'ليره سوريه': 'SYP', 'ل.س': 'SYP',
+    'iqd': 'IQD', 'دينار عراقي': 'IQD', 'د.ع': 'IQD',
+    'lyd': 'LYD', 'دينار ليبي': 'LYD', 'د.ل': 'LYD',
+    'tnd': 'TND', 'دينار تونسي': 'TND', 'د.ت': 'TND',
+    'mad': 'MAD', 'درهم مغربي': 'MAD', 'د.م': 'MAD',
+    'dzd': 'DZD', 'دينار جزائري': 'DZD', 'د.ج': 'DZD',
+    'jpy': 'JPY', 'ين ياباني': 'JPY',
+    'cny': 'CNY', 'يوان': 'CNY',
+    'inr': 'INR', 'روبيه': 'INR',
+    # د.إ / د.أ / د.ا stay unmapped on purpose — the fold below turns both the
+    # Emirati dirham and the Jordanian dinar abbreviations into the same
+    # «د.ا», and converting dirhams at the dinar rate is worse than no match.
 }
 
 
@@ -403,19 +418,54 @@ def _canonical_price_currency(value):
 
 # A source price printed in another currency is converted to SAR for the
 # (ر.س) column — the (ر.س) figure is what the table displays, the original
-# stays in price_cache as original_*. Dollar-pegged GCC currencies are
-# exact; floating rates take an FX_SAR_<CCY> env override when a fresher
-# number is wanted. An unlisted currency never invents a rate — the row
-# keeps the source currency instead of fabricating an exchange.
+# stays in price_cache as original_*. Rate precedence: an FX_SAR_<CCY> env
+# override, then the live ER table, then this built-in fallback. Dollar-
+# pegged GCC entries are exact; floating rows drift until the next edit —
+# the live table is what keeps «any currency at the current rate» true.
 _PRICE_FX_TO_SAR = {
     'USD': 3.75, 'AED': 1.0207, 'QAR': 1.0302, 'BHD': 9.9474, 'OMR': 9.7403,
     'EUR': 4.05, 'GBP': 4.85, 'KWD': 12.25, 'JOD': 5.29, 'EGP': 0.0765,
+    'CHF': 4.70, 'TRY': 0.089, 'JPY': 0.025, 'CNY': 0.52, 'INR': 0.045,
+    'LBP': 0.000042, 'SYP': 0.0003, 'IQD': 0.0029, 'LYD': 0.77,
+    'TND': 1.27, 'MAD': 0.41, 'DZD': 0.028,
 }
+
+# One request per process covers every ISO currency — a live fetch per
+# mention would be madness, so the whole SAR-based table caches for 12h
+# (10min on failure, so a transient outage doesn't disable the run).
+_PRICE_FX_LIVE = {'at': 0.0, 'rates': {}, 'ok': False}
+_PRICE_FX_LIVE_OK_TTL = 12 * 3600
+_PRICE_FX_LIVE_FAIL_TTL = 10 * 60
+
+
+def _live_fx_rates():
+    """{ISO: SAR-per-unit} from the open ER API; {} when unreachable."""
+    import time
+    import urllib.request
+    cache = _PRICE_FX_LIVE
+    now = time.time()
+    ttl = _PRICE_FX_LIVE_OK_TTL if cache['ok'] else _PRICE_FX_LIVE_FAIL_TTL
+    if cache['at'] and now - cache['at'] < ttl:
+        return cache['rates']
+    try:
+        req = urllib.request.Request(
+            'https://open.er-api.com/v6/latest/SAR',
+            headers={'User-Agent': 'landloom-market/1.0'})
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            payload = json.loads(resp.read() or b'{}')
+        rates = payload.get('rates') if isinstance(payload, dict) else {}
+        cache['rates'] = {str(k).upper(): 1.0 / float(v)
+                          for k, v in (rates or {}).items() if float(v) > 0}
+        cache['ok'] = True
+    except Exception:
+        cache['rates'], cache['ok'] = {}, False
+    cache['at'] = now
+    return cache['rates']
 
 
 def price_fx_to_sar(currency):
     """SAR multiplier for a source currency — 1.0 for SAR, None when the
-    rate is unknowable."""
+    rate is unknowable. env override > live rate > static fallback."""
     code = _canonical_price_currency(currency)
     if code == 'SAR':
         return 1.0
@@ -425,7 +475,9 @@ def price_fx_to_sar(currency):
         env_rate = float(os.environ.get(f'FX_SAR_{code}') or 0)
     except (TypeError, ValueError):
         env_rate = 0.0
-    return env_rate if env_rate > 0 else _PRICE_FX_TO_SAR.get(code)
+    if env_rate > 0:
+        return env_rate
+    return _live_fx_rates().get(code) or _PRICE_FX_TO_SAR.get(code)
 
 
 _COMPETITOR_SOURCE_FIELD_ALIASES = {
@@ -894,8 +946,24 @@ _BANNED_LISTING_HOST_TOKENS = (
     'opensooq', 'haraj', 'lamudi', 'exxl', 'estater', 'muqawil', 'eqqar',
     'aqaar.', 'aqarmap', 'booking.', 'airbnb.', 'hotels.', 'expedia.',
     'agoda.', 'vrbo', 'tripadvisor.',
+    # Social networks are never competitor evidence — a bio or a reel caption
+    # carries an unverifiable figure, and an Instagram profile's title IS the
+    # competitor's name so it slips past the name-in-title gate. The '='
+    # prefix pins the match to the domain itself or a subdomain, so «x.com»
+    # can never swallow a real host like fox.com.
+    '=instagram.com', '=facebook.com', '=fb.com', '=fb.me', '=messenger.com',
+    '=tiktok.com', '=twitter.com', '=x.com', '=t.co', '=youtube.com',
+    '=youtu.be', '=snapchat.com', '=pinterest.com', '=threads.net',
+    '=t.me', '=telegram.me', '=wa.me', '=whatsapp.com', '=linkedin.com',
 )
 _HOTEL_LISTING_HOST_TOKENS = ('trivago.',)
+
+
+def _banned_listing_host_token(host, token):
+    if token.startswith('='):
+        dom = token[1:]
+        return host == dom or host.endswith('.' + dom)
+    return token in host
 
 
 def banned_competitor_listing_host(url, operation=''):
@@ -911,7 +979,8 @@ def banned_competitor_listing_host(url, operation=''):
     if any(token in host for token in _HOTEL_LISTING_HOST_TOKENS):
         op = _fold_choice(operation)
         return 'فندقي' not in op and 'hotel' not in op
-    return any(token in host for token in _BANNED_LISTING_HOST_TOKENS)
+    return any(_banned_listing_host_token(host, token)
+               for token in _BANNED_LISTING_HOST_TOKENS)
 
 
 def resolve_source_url_from_citations(url, citations, operation=''):

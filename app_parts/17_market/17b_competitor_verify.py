@@ -141,7 +141,9 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         'أي صفحة مسترجعة تذكر المشروع بالاسم تُحتسب دليلًا — موقع المطور أو '
         'إعلانًا على منصة عقار (sa.aqar.fm) أو تريفاجو لمنافس فندقي أو خبرًا، '
         'وليس شرطًا أن تكون رسمية — وروابط منصات الإعلانات الأخرى '
-        '(bayut، wasalt، dealapp…) ممنوعة ولا تُعتمد. '
+        '(bayut، wasalt، dealapp…) ممنوعة ولا تُعتمد، وكذلك كل روابط '
+        'التواصل الاجتماعي (إنستغرام، فيسبوك، تيك توك، إكس، يوتيوب…) — '
+        'ليست دليلًا ولا مصدرًا للأسعار فلا تفتحها. '
         'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
     )
     tokens = _competitor_name_tokens(name)
@@ -253,6 +255,13 @@ def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'
         price.get('currency') or price.get('price_currency') or price.get('priceCurrency'))
     fx_rate = (market_study.price_fx_to_sar(currency)
                if currency and currency != 'SAR' else None)
+    if currency and currency != 'SAR' and not fx_rate:
+        # The (ر.س) cell can only hold riyals — a foreign figure with no
+        # resolvable rate is dropped, not relabeled. Blank stays honest.
+        for key in ('price_value', 'price_from', 'price_to',
+                    'price_type', 'price_cache'):
+            row.pop(key, None)
+        return
     if fx_rate:
         # Same rule as the listing fill — the (ر.س) cell carries riyals; the
         # figure the page printed rides along as price_cache.original_*.
@@ -310,9 +319,20 @@ def _read_market_source_page(url, max_bytes=2 * 1024 * 1024):
 
 
 _ARABIC_DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
+# Currency-word alternation built from the alias table — the keys are stored
+# folded (همزات swiped, ة→ه) but page text isn't, so each foldable letter
+# widens back to a class. Longest first keeps «دينار اردني» ahead of «دينار».
+_LISTING_CURRENCY_WORD_RE = '|'.join(
+    re.escape(key)
+      .replace('ا', '[اأإآ]').replace('ه', '[هة]').replace('ي', '[يى]')
+    for key in sorted(market_study._PRICE_CURRENCY_ALIASES,
+                      key=len, reverse=True))
 # Each pattern pairs with the currency it proves: a figure the page priced in
 # euros or dollars stays in that currency on the row — never re-read as SAR.
-# None means the markup itself must declare the unit (JSON-LD priceCurrency).
+# TOK1/TOK2 resolve the captured currency word through the alias table; ISO1/
+# ISO2 accept any 3-letter code and the FX gate drops the non-currencies
+# (SQM, THE, …). None means the markup itself must declare the unit
+# (JSON-LD priceCurrency).
 _LISTING_PRICE_PATTERNS = (
     (re.compile(r'(?:ريال|ر\.?\s?س|SAR|SR)\s*[:=]?\s*([0-9][0-9,.\u0660-\u0669]{2,})', re.IGNORECASE), 'SAR'),
     (re.compile(r'([0-9][0-9,.\u0660-\u0669]{2,})\s*(?:ريال|ر\.?\s?س|SAR|SR)\b', re.IGNORECASE), 'SAR'),
@@ -320,6 +340,10 @@ _LISTING_PRICE_PATTERNS = (
     (re.compile(r'([0-9][0-9,.]{2,})\s*(?:يورو|EUR|€)\b', re.IGNORECASE), 'EUR'),
     (re.compile(r'(?:دولار|USD|US\$|\$)\s*[:=]?\s*([0-9][0-9,.]{2,})', re.IGNORECASE), 'USD'),
     (re.compile(r'([0-9][0-9,.]{2,})\s*(?:دولار|USD|US\$|\$)\b', re.IGNORECASE), 'USD'),
+    (re.compile(r'([0-9][0-9,.\u0660-\u0669]{2,})\s*(' + _LISTING_CURRENCY_WORD_RE + r')\b', re.IGNORECASE), 'TOK2'),
+    (re.compile(r'\b(' + _LISTING_CURRENCY_WORD_RE + r')\s*[:=]?\s*([0-9][0-9,.\u0660-\u0669]{2,})', re.IGNORECASE), 'TOK1'),
+    (re.compile(r'([0-9][0-9,.\u0660-\u0669]{2,})\s*\b([A-Za-z]{3})\b'), 'ISO2'),
+    (re.compile(r'\b([A-Za-z]{3})\s*[:=]?\s*([0-9][0-9,.\u0660-\u0669]{2,})'), 'ISO1'),
     (re.compile(r'"price"\s*:\s*"?([0-9][0-9,.]{2,})"?'), None),
 )
 _LISTING_PRICE_MIN = 300.0
@@ -343,7 +367,11 @@ def _extract_listing_prices(html):
             except (TypeError, ValueError):
                 continue
             window = html[max(0, match.start() - 100):match.end() + 100]
-            if pattern_currency is not None:
+            if pattern_currency in ('TOK1', 'ISO1'):
+                currency = market_study._canonical_price_currency(match.group(1))
+            elif pattern_currency in ('TOK2', 'ISO2'):
+                currency = market_study._canonical_price_currency(match.group(2))
+            elif pattern_currency:
                 currency = pattern_currency
             else:
                 declared = re.search(
@@ -355,8 +383,12 @@ def _extract_listing_prices(html):
                 if not declared:
                     continue
                 currency = market_study._canonical_price_currency(declared.group(1))
-                if not currency:
-                    continue
+            if not currency:
+                continue
+            if currency != 'SAR' and not market_study.price_fx_to_sar(currency):
+                # A foreign mention we cannot convert cannot sit in the (ر.س)
+                # cell — this also drops the ISO pattern's false positives.
+                continue
             floor = _LISTING_PRICE_MIN if currency == 'SAR' else _LISTING_PRICE_MIN_FOREIGN
             if not (floor <= value <= _LISTING_PRICE_MAX):
                 continue
