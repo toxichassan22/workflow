@@ -180,8 +180,25 @@ def _visual_plan_input_signature(data, context=None):
                                      separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
 
 
+def _visual_plan_token_numbers(value):
+    """Canonical number form for the sealed-body hash. The client stores the
+    scene as JS numbers and re-posts it through JSON.stringify, which has no
+    float/int distinction — every integral float (0.0, 25.0) arrives back as
+    an int. Scenes always carry a literal 0.0 at the parcel origin, so a
+    byte-exact HMAC over the un-normalized body rejected every reposted scene
+    with PLANS_SCENE_INVALID. Canonicalizing floats to ints binds the
+    geometry, not the serializer."""
+    if isinstance(value, dict):
+        return {key: _visual_plan_token_numbers(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_visual_plan_token_numbers(item) for item in value]
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
 def _visual_plan_token(kind, data, signature, payload, legacy=False):
-    normalized = db.normalize_generation_input(payload)
+    normalized = _visual_plan_token_numbers(db.normalize_generation_input(payload))
     body = hashlib.sha256(json.dumps(normalized, sort_keys=True, ensure_ascii=False,
                                     separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
     tenant = str(getattr(g, 'tenant_id', '') or '')

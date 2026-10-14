@@ -248,6 +248,55 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(refused.status_code, 400, refused.get_json())
         self.assertEqual(refused.get_json()['error_code'], 'PLANS_SCENE_INVALID')
 
+    def test_sealed_scene_survives_the_browser_number_roundtrip(self):
+        """The client stores the scene as JS numbers and posts it back through
+        JSON.stringify — JS owns no float/int distinction, so every integral
+        float arrives as an int (0.0 -> 0). Every sealed scene carries a
+        literal 0.0 at the parcel origin, so the byte-exact body HMAC used to
+        fail every repost with PLANS_SCENE_INVALID. The token now
+        canonicalizes integral floats, so a browser-round-tripped scene
+        verifies while a genuinely tampered one still refuses."""
+        module = self.application_module
+        project = self.project()
+        layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[5, 3], [15, 3], [15, 15], [5, 15]]}],
+            'entries': [], 'openAreas': []})
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': layout}}]
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'), \
+                module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            data = {'projectData': project, 'plansWorkflow': self.workflow(project)}
+            scene, _context, _reference = module._visual_plan_create_scene(data)
+
+            def browser_roundtrip(value):
+                if isinstance(value, dict):
+                    return {key: browser_roundtrip(item) for key, item in value.items()}
+                if isinstance(value, list):
+                    return [browser_roundtrip(item) for item in value]
+                if isinstance(value, float) and value.is_integer():
+                    return int(value)
+                return value
+
+            # The origin subtraction guarantees the regression path — the
+            # parcel polygon always holds the exact 0.0 the browser drops.
+            self.assertIn(0.0, [coord for parcel in scene['geometry']['parcels']
+                                for point in parcel['polygon'] for coord in point])
+            posted_scene = browser_roundtrip(scene)
+            self.assertNotEqual(json.dumps(scene), json.dumps(posted_scene))
+
+            workflow = {**self.workflow(project), 'scene': posted_scene}
+            verified, _contract, _ctx, _program = module._visual_plan_scene_from_request(
+                {'projectData': project, 'plansWorkflow': workflow})
+            self.assertEqual(verified['token'], scene['token'])
+
+            workflow['scene'] = browser_roundtrip(scene)
+            workflow['scene']['buildings'][0]['footprint'][0] = [0, 0]
+            with self.assertRaises(module.visual_plan_geometry.PlanGeometryError) as raised:
+                module._visual_plan_scene_from_request({'projectData': project, 'plansWorkflow': workflow})
+            self.assertEqual(raised.exception.code, 'PLANS_SCENE_INVALID')
+
     def test_fixed_geometry_plans_do_not_chain_image_approvals(self):
         module = self.application_module
         project = self.project()
