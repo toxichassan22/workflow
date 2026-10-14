@@ -506,12 +506,14 @@ def _run_open_url(session, args, trace, pages, evidence_pool=None):
 
 def _log_line(line):
     """Terse progress line. Logging must never kill a run — cp1252 consoles
-    cannot encode the Arabic hints, so fall back to an escaped form."""
+    cannot encode the Arabic hints, so fall back to an escaped form. flush=True
+    forces the line through gunicorn's block-buffered stdout so tail -f sees
+    it as it happens instead of a burst when the 8KB buffer fills."""
     try:
-        print(line)
+        print(line, flush=True)
     except UnicodeEncodeError:
         try:
-            print(line.encode('ascii', 'backslashreplace').decode('ascii'))
+            print(line.encode('ascii', 'backslashreplace').decode('ascii'), flush=True)
         except Exception:
             pass
     except Exception:

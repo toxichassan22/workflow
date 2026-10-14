@@ -378,6 +378,16 @@ class ProgressEventTests(unittest.TestCase):
         self.assertEqual(len(tool_dones), 1)
         self.assertFalse(tool_dones[0]['ok'])
 
+    def test_log_line_flushes_so_tail_sees_steps_live(self):
+        """gunicorn block-buffers worker stdout — without flush=True a
+        [BROWSE AGENT] line waits for ~8KB of output, so tail -f shows
+        nothing while the run is alive."""
+        printed = []
+        with mock.patch('builtins.print') as mocked:
+            agent._log_line('step line')
+        self.assertTrue(mocked.called)
+        self.assertEqual(mocked.call_args.kwargs.get('flush'), True)
+
 
 class DeadlineTests(unittest.TestCase):
     def test_expired_deadline_stops_before_the_first_round(self):
