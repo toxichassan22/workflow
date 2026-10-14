@@ -474,6 +474,33 @@ class ProviderOrderTests(unittest.TestCase):
         self.assertIn('yahoo', providers)
         self.assertIn('bing', providers)
 
+    def test_blocked_serp_provider_is_skipped_after_two_walls(self):
+        """A captcha/anomaly SERP is not a real empty result — after two walls
+        the provider stops costing goto+settle time for the rest of the run."""
+        worker = browser.BrowserWorker.__new__(browser.BrowserWorker)
+        calls = []
+        with mock.patch.object(browser.BrowserWorker, '_search_once',
+                               lambda self, p, q, c: calls.append(p) or []), \
+                mock.patch.object(browser.BrowserWorker, '_serp_blocked',
+                                  lambda self, p: p == 'brave'):
+            worker.web_search('query one')
+            worker.web_search('query two')
+            worker.web_search('query three')
+        self.assertEqual(calls.count('brave'), 2)
+        self.assertEqual(calls.count('yahoo'), 3)
+        self.assertEqual(calls.count('bing'), 3)
+
+    def test_empty_serp_without_a_wall_is_not_marked_blocked(self):
+        worker = browser.BrowserWorker.__new__(browser.BrowserWorker)
+        calls = []
+        with mock.patch.object(browser.BrowserWorker, '_search_once',
+                               lambda self, p, q, c: calls.append(p) or []), \
+                mock.patch.object(browser.BrowserWorker, '_serp_blocked',
+                                  lambda self, p: False):
+            worker.web_search('q1')
+            worker.web_search('q2')
+        self.assertEqual(calls.count('brave'), 2)
+
 
 class ThreadLocalBrowserTests(unittest.TestCase):
     def test_thread_local_browser_reuses_the_threads_worker(self):

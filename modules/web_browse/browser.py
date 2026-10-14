@@ -378,18 +378,47 @@ class BrowserWorker:
         return result
 
     def web_search(self, query, max_results=MAX_RESULTS):
-        """SERP scrape: tries each provider in order until hits; never raises."""
+        """SERP scrape: tries each provider in order until hits; never raises.
+        A provider that serves a bot wall twice in a row is skipped for the
+        rest of the session — its goto+settle seconds are pure cost."""
         cap = max(1, int(max_results or MAX_RESULTS))
         for provider in _providers():
+            if provider in getattr(self, '_blocked_serps', ()):
+                continue
             try:
                 hits = self._search_once(provider, query, cap)
             except Exception as exc:
                 print(f'[BROWSER] search provider={provider} failed: {exc}')
                 hits = []
+            if not hits and self._serp_blocked(provider):
+                streaks = getattr(self, '_serp_block_streak', None)
+                if streaks is None:
+                    streaks = self._serp_block_streak = {}
+                streaks[provider] = streaks.get(provider, 0) + 1
+                print(f'[BROWSER] search provider={provider} blocked (bot wall)')
+                if streaks[provider] >= 2:
+                    blocked = getattr(self, '_blocked_serps', None)
+                    if blocked is None:
+                        blocked = self._blocked_serps = set()
+                    blocked.add(provider)
+                    print(f'[BROWSER] search provider={provider} skipped for this session')
+                continue
             print(f'[BROWSER] search provider={provider} hits={len(hits)}')
             if hits:
                 return hits
         return []
+
+    def _serp_blocked(self, provider):
+        """Cheap wall check on the already-loaded SERP — only runs when the
+        extractor found no rows, so a real empty result page stays 'hits=0'
+        while a captcha/anomaly page reports 'blocked'."""
+        try:
+            title = self._page.title() if self._page is not None else ''
+            text = self._page.evaluate(
+                "() => document.body ? document.body.innerText.slice(0, 900) : ''")
+        except Exception:
+            return False
+        return _looks_blocked(title or '', text or '')
 
     def _search_once(self, provider, query, cap):
         page = self._ensure_page()
