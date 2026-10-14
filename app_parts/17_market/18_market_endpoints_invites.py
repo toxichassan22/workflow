@@ -138,7 +138,7 @@ def _market_agent_progress(report, lo, hi, label):
         if not isinstance(event, dict):
             return
         phase = event.get('phase')
-        if phase not in ('round', 'tool', 'tool_done'):
+        if phase not in ('round', 'tool', 'tool_done', 'retry'):
             return
         try:
             step = max(1, int(event.get('step') or 1))
@@ -148,7 +148,10 @@ def _market_agent_progress(report, lo, hi, label):
         pct = int(lo) + int(span * min(step, max_steps) / max_steps)
         hint = str(event.get('hint') or '').strip()[:80]
         tool = str(event.get('tool') or '')
-        if phase == 'tool':
+        if phase == 'retry':
+            report(pct, f'{label} — تعثر المزود، إعادة المحاولة '
+                        f'{int(event.get("attempt") or 1)}')
+        elif phase == 'tool':
             verb = ('يبحث في الويب عن' if tool == 'web_search'
                     else 'يفتح صفحة' if tool == 'open_url' else 'ينفذ أداة')
             report(pct, f'{label} — {verb} «{hint}»' if hint

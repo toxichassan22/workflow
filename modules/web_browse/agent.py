@@ -53,6 +53,20 @@ _OPEN_BEFORE_ANSWER_PROMPT = (
     'افتح الآن بـ open_url أقرب رابط أو اثنين من النتائج للمطلوب، '
     'ثم أعد إجابتك معتمدًا على الصفحة المقروءة.')
 
+# One provider hiccup must not kill a multi-minute job: an overloaded upstream,
+# a rate limit, a 5xx or a dropped/timed-out transport re-issues the round in
+# place a couple of times with backoff. Fatal refusals (tenant key, wallet,
+# trial) and unrecognized errors never retry — a 400 or an auth rejection
+# retried is just the job's deadline burning.
+_TRANSIENT_MAX_RETRIES = 2
+_TRANSIENT_BACKOFF_S = (4.0, 12.0)
+_TRANSIENT_RETRY_CODES = {408, 409, 425, 429, 500, 502, 503, 504, 529}
+_TRANSIENT_RETRY_TOKENS = (
+    'overload', 'rate limit', 'rate_limit', 'too many request', 'temporar',
+    'unavailable', 'capacity', 'timeout', 'timed out', 'connection',
+    'مهلة', 'انقطع',
+)
+
 def _search_count_phrase(count):
     """Arabic count wording for the preamble's search cap — dual for two,
     an explicit number otherwise."""
@@ -381,6 +395,31 @@ def _effort_refusal(response):
         return False
     text = json.dumps(err, ensure_ascii=False, default=str).lower()
     return 'reasoning' in text or 'effort' in text or 'thinking' in text
+
+
+def _transient_provider_error(payload):
+    """True only for the retryable provider failures.
+
+    The status may arrive as ``http_status``/``code`` on the error dict or as
+    the ``[429]`` prefix the app transport stamps onto the message; wording
+    covers the rest (OpenRouter's upstream 'Overloaded', Arabic transport
+    messages). Anything fatal or unrecognized stays fatal.
+    """
+    if not isinstance(payload, dict) \
+            or payload.get('fatal') or payload.get('error_code'):
+        return False
+    for key in ('http_status', 'code', 'status'):
+        try:
+            if int(payload.get(key) or 0) in _TRANSIENT_RETRY_CODES:
+                return True
+        except (TypeError, ValueError):
+            pass
+    text = str(payload.get('message') or '')
+    prefixed = re.match(r'\[\s*(\d{3})\s*\]', text)
+    if prefixed and int(prefixed.group(1)) in _TRANSIENT_RETRY_CODES:
+        return True
+    lowered = text.casefold()
+    return any(token in lowered for token in _TRANSIENT_RETRY_TOKENS)
 
 
 def _browser_session():
@@ -828,6 +867,42 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                     break
                 effort_disabled = True
                 response = _round()
+            # A transient provider failure re-issues the same round after a
+            # short backoff — the retry lives inside this step so it never
+            # burns the step cap or the remaining tool-call budget.
+            msg = None
+            reply_error = None
+            for _attempt in range(_TRANSIENT_MAX_RETRIES + 1):
+                try:
+                    msg = _normalize_reply(response)
+                    reply_error = None
+                    break
+                except _ReplyError as exc:
+                    reply_error = exc.payload
+                    if (_attempt >= _TRANSIENT_MAX_RETRIES
+                            or not _transient_provider_error(reply_error)):
+                        break
+                    wait = _TRANSIENT_BACKOFF_S[
+                        min(_attempt, len(_TRANSIENT_BACKOFF_S) - 1)]
+                    if deadline is not None:
+                        wait = min(wait, deadline - time.time() - 1.0)
+                    if wait <= 0:
+                        break
+                    _log_line(f"[BROWSE AGENT] transient provider error "
+                              f"{reply_error.get('message')!r}; retry "
+                              f"{_attempt + 1} in {wait:.0f}s")
+                    _emit({'phase': 'retry', 'step': step + 1,
+                           'max_steps': max_steps, 'attempt': _attempt + 1,
+                           'wait': wait, 'searches': search_state['count'],
+                           'pages': len(pages)})
+                    time.sleep(wait)
+                    if _deadline_hit():
+                        reply_error = {'message': 'deadline_exceeded'}
+                        break
+                    response = _round()
+            if reply_error is not None or msg is None:
+                error = reply_error or {'message': 'provider returned no usable reply'}
+                break
             usage_meta = (response.get('usage')
                           if isinstance(response, dict) else None) or {}
             try:
@@ -835,11 +910,6 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                 completion_tokens += int(usage_meta.get('completion_tokens') or 0)
             except (TypeError, ValueError):
                 pass
-            try:
-                msg = _normalize_reply(response)
-            except _ReplyError as exc:
-                error = exc.payload
-                break
             if not msg['tool_calls']:
                 final_text = str(msg.get('content') or '').strip()
                 if (not compact_retried and _truncated_reply(response)

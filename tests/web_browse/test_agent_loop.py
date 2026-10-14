@@ -24,6 +24,7 @@ import contextlib
 import json
 import os
 import sys
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -373,6 +374,77 @@ class RunBrowseAgentLoopTests(unittest.TestCase):
 
         self.assertEqual(result['error'].get('error_code'), 'INSUFFICIENT_CREDITS')
         self.assertTrue(result['error'].get('fatal'))
+
+    def _fake_time(self):
+        fake = mock.Mock()
+        fake.time = time.time
+        return fake
+
+    def test_transient_provider_error_retries_the_same_round(self):
+        """An 'Overloaded' upstream is a hiccup, not a verdict — the round is
+        re-issued after backoff inside the same step instead of killing the
+        whole job."""
+        calls = []
+        chat_impl = _scripted_chat([
+            {'error': {'message': 'Overloaded'}},
+            _text_response(),
+        ], calls)
+        fake_time = self._fake_time()
+
+        with _patched_pipeline(chat_impl), \
+                mock.patch.object(agent, 'time', fake_time):
+            result = agent.run_browse_agent('task', max_steps=4)
+
+        self.assertNotIn('error', result)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(result['choices'][0]['message']['content'],
+                         _FINAL_TEXT)
+        self.assertEqual(fake_time.sleep.call_count, 1)
+
+    def test_transient_retries_exhaust_then_surface_the_error(self):
+        calls = []
+        chat_impl = _scripted_chat(
+            [{'error': {'message': '[503] provider unavailable'}}], calls)
+        fake_time = self._fake_time()
+
+        with _patched_pipeline(chat_impl), \
+                mock.patch.object(agent, 'time', fake_time):
+            result = agent.run_browse_agent('task', max_steps=4)
+
+        self.assertEqual(result['error'].get('message'),
+                         '[503] provider unavailable')
+        self.assertEqual(len(calls), 1 + agent._TRANSIENT_MAX_RETRIES)
+        self.assertEqual(fake_time.sleep.call_count,
+                         agent._TRANSIENT_MAX_RETRIES)
+
+    def test_fatal_refusal_never_retries(self):
+        """Wallet/key refusals stay single-shot — retrying a 402 just burns
+        the job deadline."""
+        calls = []
+        fatal = {'error': {'fatal': True, 'message': 'استُنفد الرصيد',
+                           'error_code': 'INSUFFICIENT_CREDITS',
+                           'http_status': 402}}
+        chat_impl = _scripted_chat([fatal], calls)
+        fake_time = self._fake_time()
+
+        with _patched_pipeline(chat_impl), \
+                mock.patch.object(agent, 'time', fake_time):
+            result = agent.run_browse_agent('task', max_steps=4)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result['error'].get('error_code'),
+                         'INSUFFICIENT_CREDITS')
+
+    def test_unrecognized_error_never_retries(self):
+        """A plain non-transient failure keeps the old one-shot behavior."""
+        calls = []
+        chat_impl = _scripted_chat([{'error': {'message': 'boom'}}], calls)
+
+        with _patched_pipeline(chat_impl):
+            result = agent.run_browse_agent('task', max_steps=4)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(result['error'].get('message'), 'boom')
 
     def test_search_budget_param_caps_searches(self):
         calls = []
