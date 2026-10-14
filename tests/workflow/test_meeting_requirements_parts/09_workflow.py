@@ -1152,8 +1152,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             4: ['منصة عقار aqar.fm', 'منصات المسوقين العقاريين المرخصين'],
             5: ['Google Maps للمواقع والمسافات والخدمات maps.google.com',
                 'Google Places للتقييمات والحركة المحيطة',
-                'المواقع الإخبارية الموثوقة',
-                'وكالة الأنباء السعودية spa.gov.sa', 'البيانات الصحفية الرسمية'],
+                'المواقع الإخبارية الموثوقة', 'البيانات الصحفية الرسمية'],
         }
         self.assertEqual(market_study.SOURCE_PRIORITY, expected)
         expected_type_sources = {

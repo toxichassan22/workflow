@@ -20,6 +20,7 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 import json
 import os
+import re
 import time
 
 
@@ -197,6 +198,25 @@ _BROWSER_TOOLS = [
 # Hard failures (timeout, http_*, blocked) still short-circuit.
 _RETRYABLE_PAGE_FAILURES = {'needs_interaction', 'thin_content'}
 _ACTION_TOOLS = ('click_element', 'type_text', 'scroll_page')
+
+# URL shapes measured to cost a browser wait for zero evidence — path-level,
+# not host bans: REGA's advanced-search grids sit behind Nafath (268-char
+# login shell) and spa.gov.sa's non-/ar/ paths hang past the navigation
+# timeout (22s -> 0 chars) while its /ar/ articles load normally. A match is
+# refused before the browser launches, so a free-search pick cannot burn the
+# job's deadline on a page that can never be read.
+_DEAD_URL_SHAPES = (
+    re.compile(r'rega\.gov\.sa/ar/advanced-search', re.I),
+    re.compile(r'spa\.gov\.sa(?:/(?!ar/)|/?$)', re.I),
+)
+
+
+def _dead_url_shape(url):
+    """The skip reason for a URL proven unreadable, or None."""
+    for shape in _DEAD_URL_SHAPES:
+        if shape.search(str(url or '')):
+            return 'dead_source'
+    return None
 
 
 def _compact_tool_history(messages):
@@ -432,6 +452,11 @@ def _run_open_url(session, args, trace, pages, evidence_pool=None):
     url = str(args.get('url') or '').strip()
     if not url:
         return {'error': 'empty_url'}
+    dead = _dead_url_shape(url)
+    if dead:
+        trace.append({'url': url, 'title': '', 'chars': 0, 'error': dead})
+        _pool_mark_failed(evidence_pool, url, dead)
+        return {'url': url, 'error': dead}
     failed_reason = _pool_page_failed(evidence_pool, url)
     if failed_reason is not None:
         # The job already tried this URL and failed — same answer, no refetch.
@@ -601,6 +626,12 @@ def _run_inspect_page(session, args, trace, pages, evidence_pool=None):
     those soft failures are bypassed; hard failures still short-circuit."""
     url = str(args.get('url') or '').strip()
     if url:
+        dead = _dead_url_shape(url)
+        if dead:
+            trace.append({'url': url, 'title': '', 'chars': 0,
+                          'error': dead})
+            _pool_mark_failed(evidence_pool, url, dead)
+            return {'url': url, 'error': dead}
         failed_reason = _pool_page_failed(evidence_pool, url)
         if failed_reason is not None \
                 and str(failed_reason) not in _RETRYABLE_PAGE_FAILURES:

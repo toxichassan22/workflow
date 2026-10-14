@@ -861,6 +861,41 @@ class RunBrowseAgentCompactionTests(unittest.TestCase):
         self.assertEqual(
             result['choices'][0]['message']['content'], _FINAL_TEXT)
 
+    def test_known_dead_urls_are_skipped_without_a_fetch(self):
+        """Measured-dead shapes (Nafath-gated grids, hanging non-ar news
+        paths) fail fast — no 20s browser wait, no wasted deadline, and the
+        pool marks them so a repeat pick never retries."""
+        calls = []
+        chat_impl = _scripted_chat([
+            _fn_response([
+                ('open_url', {'url': 'https://www.spa.gov.sa/N2465775'}),
+                ('open_url', {'url': 'https://rei.rega.gov.sa/ar/advanced-search/deals'}),
+                ('open_url', {'url': 'https://www.spa.gov.sa/ar/N2465775'}),
+            ]),
+            _text_response(),
+        ], calls)
+        opens = []
+
+        def counting_open(url):
+            opens.append(url)
+            return _ok_page(url)
+
+        pool = _FakePool()
+        with _patched_pipeline(chat_impl, open_url=counting_open):
+            result = agent.run_browse_agent(
+                'task', max_steps=4, evidence_pool=pool)
+
+        self.assertNotIn('error', result)
+        # Only the readable /ar/ article was fetched — the dead shapes never
+        # reached the browser.
+        self.assertEqual(opens, ['https://www.spa.gov.sa/ar/N2465775'])
+        self.assertEqual(
+            pool.page_failed('https://www.spa.gov.sa/N2465775'), 'dead_source')
+        self.assertEqual(
+            pool.page_failed(
+                'https://rei.rega.gov.sa/ar/advanced-search/deals'),
+            'dead_source')
+
     def test_the_compressed_retry_runs_only_once(self):
         calls = []
         chat_impl = _scripted_chat([

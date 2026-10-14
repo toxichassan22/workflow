@@ -144,6 +144,15 @@ class BuildSourcePlanTests(unittest.TestCase):
         self.assertFalse(any(host in url for url in urls
                              for host in ('bayut.sa', 'wasalt.sa', 'dealapp.sa')))
 
+    def test_spa_gov_sa_is_never_planned(self):
+        # spa.gov.sa's homepage reads as a shell and its non-/ar/ article
+        # paths hang past the navigation timeout — measured, not guessed — so
+        # the plan must not schedule a fetch on it.
+        plan = market_study.build_source_plan(
+            {'projectType': 'سكني', 'city': 'جدة'})
+        urls = [entry['url'] for entry in plan]
+        self.assertFalse(any('spa.gov.sa' in url for url in urls))
+
     def test_mixed_use_pulls_every_component_kind_sources(self):
         plan = market_study.build_source_plan(
             {'projectType': 'متعدد الاستخدامات',
