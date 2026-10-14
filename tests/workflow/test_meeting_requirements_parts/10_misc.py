@@ -711,7 +711,8 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             '<html><body>إيجار سنوي 18,000 ريال سنوياً للمحل '
             + ('x' * 220) +
             '<span>SAR 45,000</span> شهريا '
-            '<script type="application/ld+json">{"offers":{"price":95000}}</script>'
+            '<script type="application/ld+json">'
+            '{"offers":{"price":95000,"priceCurrency":"SAR"}}</script>'
             '</body></html>')
         prices = module._extract_listing_prices(html)
         values = {item['value'] for item in prices}
@@ -780,10 +781,10 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         nightly = [item for item in prices if item['value'] == 120.0]
         self.assertEqual(nightly[0]['period'], 'ليلة')
 
-    def test_fill_competitor_price_keeps_foreign_currency_separate(self):
-        """The median lives inside one currency and the row carries it —
-        mixing € and SAR figures into a single SAR-labeled number is a
-        fabrication, so EUR mentions form their own pool."""
+    def test_fill_competitor_price_converts_foreign_currency_to_sar(self):
+        """The median lives inside one currency, then converts to the (ر.س)
+        cell — mixing € and SAR into one figure is a fabrication, so the EUR
+        pool converts at the fixed rate and the source figure stays cached."""
         module = self.application_module
         pages = {
             'https://trivago.example/hotel-a':
@@ -797,9 +798,12 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
                           side_effect=lambda url, **kw: (pages.get(url, ''), '')):
             filled = module._fill_competitor_price_from_listings(row, list(pages))
         self.assertTrue(filled)
-        self.assertEqual(row['price_currency'], 'EUR')
-        self.assertEqual(row['price_value'], '150')
+        self.assertEqual(row['price_currency'], 'SAR')
+        # Median €150 × 4.05 → 608 ر.س — the printed €150 is not lost.
+        self.assertEqual(row['price_value'], '608')
         self.assertEqual(row['price_type'], 'متوسط سعر الغرفة ADR')
+        self.assertEqual(row['price_cache']['original_price_value'], '150')
+        self.assertEqual(row['price_cache']['original_currency'], 'EUR')
         self.assertIn('EUR', row['note'])
 
     def test_fill_competitor_price_prefers_sar_over_foreign_mentions(self):

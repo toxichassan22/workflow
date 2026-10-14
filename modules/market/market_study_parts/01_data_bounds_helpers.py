@@ -401,6 +401,33 @@ def _canonical_price_currency(value):
     return ''
 
 
+# A source price printed in another currency is converted to SAR for the
+# (ر.س) column — the (ر.س) figure is what the table displays, the original
+# stays in price_cache as original_*. Dollar-pegged GCC currencies are
+# exact; floating rates take an FX_SAR_<CCY> env override when a fresher
+# number is wanted. An unlisted currency never invents a rate — the row
+# keeps the source currency instead of fabricating an exchange.
+_PRICE_FX_TO_SAR = {
+    'USD': 3.75, 'AED': 1.0207, 'QAR': 1.0302, 'BHD': 9.9474, 'OMR': 9.7403,
+    'EUR': 4.05, 'GBP': 4.85, 'KWD': 12.25, 'JOD': 5.29, 'EGP': 0.0765,
+}
+
+
+def price_fx_to_sar(currency):
+    """SAR multiplier for a source currency — 1.0 for SAR, None when the
+    rate is unknowable."""
+    code = _canonical_price_currency(currency)
+    if code == 'SAR':
+        return 1.0
+    if not code:
+        return None
+    try:
+        env_rate = float(os.environ.get(f'FX_SAR_{code}') or 0)
+    except (TypeError, ValueError):
+        env_rate = 0.0
+    return env_rate if env_rate > 0 else _PRICE_FX_TO_SAR.get(code)
+
+
 _COMPETITOR_SOURCE_FIELD_ALIASES = {
     'name': 'name',
     'project_name': 'name',

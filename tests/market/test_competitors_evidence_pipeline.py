@@ -210,9 +210,10 @@ class PoolVerifyPhaseTests(_MarketTestBase):
         # The price rides the retrieved page content, not the model's memory.
         self.assertEqual(str(row.get('price_value') or ''), '850000')
 
-    def test_verify_price_keeps_its_source_currency(self):
-        """A verify reply's EUR price lands with its currency — a Booking page
-        priced in euros must not be dropped as «no price» nor relabeled SAR."""
+    def test_verify_price_converts_source_currency_to_sar(self):
+        """A verify reply's EUR price converts to the (ر.س) cell — the figure
+        the page printed is preserved in price_cache.original_*, never
+        silently relabeled."""
         module = self.module
         row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
         module._apply_verified_competitor_price(
@@ -220,11 +221,40 @@ class PoolVerifyPhaseTests(_MarketTestBase):
             {'price': {'type': 'سعر الليلة', 'value': '140', 'currency': 'يورو',
                        'url': 'https://trivago.example/hotel'}},
             {'https://trivago.example/hotel'})
-        self.assertEqual(row['price_value'], '140')
+        self.assertEqual(row['price_value'], '567')   # 140 EUR × 4.05
         self.assertEqual(row['price_type'], 'سعر الليلة')
-        self.assertEqual(row['price_currency'], 'EUR')
+        self.assertEqual(row['price_currency'], 'SAR')
+        self.assertEqual(row['price_cache']['original_price_value'], '140')
+        self.assertEqual(row['price_cache']['original_currency'], 'EUR')
         self.assertIn('https://trivago.example/hotel',
                       row['field_sources']['price_value'])
+
+    def test_verify_price_fx_env_override(self):
+        """FX_SAR_<CCY> overrides the built-in rate for floating currencies."""
+        module = self.module
+        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
+        with patch.dict(os.environ, {'FX_SAR_EUR': '5.0'}):
+            module._apply_verified_competitor_price(
+                row,
+                {'price': {'type': 'سعر الليلة', 'value': '140',
+                           'currency': 'يورو',
+                           'url': 'https://trivago.example/hotel'}},
+                {'https://trivago.example/hotel'})
+        self.assertEqual(row['price_value'], '700')
+        self.assertEqual(row['price_currency'], 'SAR')
+
+    def test_verify_price_keeps_currency_without_known_rate(self):
+        """A currency with no configured rate keeps its own unit — inventing
+        an exchange rate is worse than an honest foreign figure."""
+        module = self.module
+        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
+        module._apply_verified_competitor_price(
+            row,
+            {'price': {'type': 'سعر الليلة', 'value': '400', 'currency': 'CHF',
+                       'url': 'https://trivago.example/hotel'}},
+            {'https://trivago.example/hotel'})
+        self.assertEqual(row['price_value'], '400')
+        self.assertEqual(row['price_currency'], 'CHF')
 
     def test_deterministic_search_fills_pool_then_verifies(self):
         module = self.module
@@ -871,6 +901,48 @@ class BannedListingPortalTests(_MarketTestBase):
                 row, [page['url'] for page in pages], pages=pages)
         self.assertFalse(filled)
         self.assertFalse(row.get('price_value'))
+
+    def test_undeclared_jsonld_price_is_not_a_sar_price(self):
+        """A bare "price": N with no declared unit is a number, not a price —
+        offer internals, ids and points serialize the same way, and the old
+        default-SAR read stamped them onto the row."""
+        module = self.module
+        page = {'url': 'https://marriott.example/hotel/assila',
+                'title': 'فندق أصيلة جدة — الغرف والأجنحة',
+                'content': ('فندق أصيلة جدة — أجنحة فاخرة '
+                            '{"@type":"Offer","price":999,"stars":5}')}
+        row = {'name': 'فندق أصيلة', 'operation_type': 'تشغيل فندقي',
+               'source_urls': [page['url']]}
+        with self.app.app_context(), \
+                patch.object(module, '_read_market_source_page',
+                             side_effect=AssertionError('content is inlined')):
+            filled = module._fill_competitor_price_from_listings(
+                row, [page['url']], pages=[page])
+        self.assertFalse(filled)
+        self.assertFalse(row.get('price_value'))
+
+    def test_listing_price_converts_declared_usd_to_sar(self):
+        """A project-named page quoting USD converts at the fixed peg — the
+        ر.س cell holds riyals, the printed dollar figure stays in the cache."""
+        module = self.module
+        page = {'url': 'https://marriott.example/hotel/assila',
+                'title': 'فندق أصيلة جدة — الغرف والأجنحة',
+                'content': ('فندق أصيلة جدة — سعر الليلة '
+                            '{"@type":"Offer","price":"1000",'
+                            '"priceCurrency":"USD"}')}
+        row = {'name': 'فندق أصيلة', 'operation_type': 'تشغيل فندقي',
+               'source_urls': [page['url']]}
+        with self.app.app_context(), \
+                patch.object(module, '_read_market_source_page',
+                             side_effect=AssertionError('content is inlined')):
+            filled = module._fill_competitor_price_from_listings(
+                row, [page['url']], pages=[page])
+        self.assertTrue(filled)
+        self.assertEqual(row['price_value'], '3750')   # 1,000 USD × 3.75
+        self.assertEqual(row['price_currency'], 'SAR')
+        self.assertEqual(row['price_cache']['original_price_value'], '1000')
+        self.assertEqual(row['price_cache']['original_currency'], 'USD')
+        self.assertIn('USD', row.get('note') or '')
 
     def test_drop_banned_listing_urls_strips_row_and_clears_price(self):
         module = self.module

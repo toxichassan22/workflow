@@ -251,6 +251,25 @@ def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'
         row['price_type'] = price_type
     currency = market_study._canonical_price_currency(
         price.get('currency') or price.get('price_currency') or price.get('priceCurrency'))
+    fx_rate = (market_study.price_fx_to_sar(currency)
+               if currency and currency != 'SAR' else None)
+    if fx_rate:
+        # Same rule as the listing fill — the (ر.س) cell carries riyals; the
+        # figure the page printed rides along as price_cache.original_*.
+        cache = row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {}
+        cache['original_currency'] = currency
+        for key, orig in (('price_value', value), ('price_from', from_v),
+                          ('price_to', to_v)):
+            if not orig or not str(row.get(key) or '').strip():
+                continue
+            try:
+                row[key] = str(int(round(float(orig) * fx_rate)))
+            except (TypeError, ValueError):
+                continue
+            cache[key] = row[key]
+            cache[f'original_{key}'] = str(orig)
+        row['price_cache'] = cache
+        currency = 'SAR'
     if currency:
         row['price_currency'] = currency
     field_sources = market_study.competitor_field_sources(row)
@@ -330,8 +349,14 @@ def _extract_listing_prices(html):
                 declared = re.search(
                     r'"priceCurrency"\s*:\s*"?([A-Za-z]{3})"?',
                     html[max(0, match.start() - 300):match.end() + 300])
-                currency = (market_study._canonical_price_currency(declared.group(1))
-                            if declared else 'SAR') or 'SAR'
+                # A bare "price": N with no declared unit is a number, not a
+                # price — points, ids and unrelated offers serialize the same
+                # way. Reading one as SAR fabricates the row's figure.
+                if not declared:
+                    continue
+                currency = market_study._canonical_price_currency(declared.group(1))
+                if not currency:
+                    continue
             floor = _LISTING_PRICE_MIN if currency == 'SAR' else _LISTING_PRICE_MIN_FOREIGN
             if not (floor <= value <= _LISTING_PRICE_MAX):
                 continue
@@ -435,9 +460,18 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     else:
         currency = next((m.get('currency') for m in pool if m.get('currency')), 'SAR')
         pool = [m for m in pool if (m.get('currency') or 'SAR') == currency] or pool
-    values = sorted({m['value'] for m in pool})
+    orig_values = sorted({m['value'] for m in pool})
     per_sqm = any(m['per_sqm'] for m in pool)
     used_urls = list(dict.fromkeys(m['url'] for m in pool))
+    source_currency = currency
+    fx_rate = (market_study.price_fx_to_sar(source_currency)
+               if source_currency != 'SAR' else None)
+    # The (ر.س) column stores riyals — convert at a fixed rate and keep the
+    # source figure in price_cache.original_* rather than relabeling it.
+    values = (sorted(int(round(v * fx_rate)) for v in orig_values)
+              if fx_rate else orig_values)
+    if fx_rate:
+        currency = 'SAR'
     median = int(round(values[len(values) // 2] if len(values) % 2
                        else (values[len(values) // 2 - 1] + values[len(values) // 2]) / 2))
     if len(values) > 1:
@@ -473,6 +507,19 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     row['price_type'] = price_type
     row['price_listed'] = True
     row['price_currency'] = currency
+    if fx_rate:
+        orig_median = int(round(
+            orig_values[len(orig_values) // 2] if len(orig_values) % 2
+            else (orig_values[len(orig_values) // 2 - 1]
+                  + orig_values[len(orig_values) // 2]) / 2))
+        cache = row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {}
+        cache['original_currency'] = source_currency
+        if field_key == 'price_value':
+            cache['original_price_value'] = str(orig_median)
+        else:
+            cache['original_price_from'] = str(int(orig_values[0]))
+            cache['original_price_to'] = str(int(orig_values[-1]))
+        row['price_cache'] = cache
     field_sources = market_study.competitor_field_sources(row)
     bucket = field_sources.setdefault(field_key, [])
     for url in used_urls:
@@ -481,8 +528,13 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     row['field_sources'] = field_sources
     row['source_urls'] = list(dict.fromkeys(
         market_study.competitor_source_urls(row) + used_urls))[:6]
-    marker = ('السعر متوسط إعلانات مسترجعة — غير موثق رسميًا' if currency == 'SAR'
-              else f'السعر متوسط إعلانات مسترجعة بعملة {currency} — غير موثق رسميًا')
+    if fx_rate:
+        marker = (f'السعر متوسط إعلانات مسترجعة محوّل من {source_currency} '
+                  f'(≈{fx_rate:g} ر.س) — غير موثق رسميًا')
+    elif currency == 'SAR':
+        marker = 'السعر متوسط إعلانات مسترجعة — غير موثق رسميًا'
+    else:
+        marker = f'السعر متوسط إعلانات مسترجعة بعملة {currency} — غير موثق رسميًا'
     note = str(row.get('note') or '').strip()
     if marker not in note:
         row['note'] = f'{note} — {marker}' if note else marker
