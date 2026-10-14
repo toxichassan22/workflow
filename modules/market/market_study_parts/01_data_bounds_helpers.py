@@ -365,6 +365,42 @@ def _unique_values(values):
     return result
 
 
+# A competitor price is stored exactly as the source page printed it — the
+# row's price_currency keeps that figure honest instead of silently reading
+# as SAR. Common spellings fold to ISO codes; an unknown token is dropped
+# rather than invented (the cell then shows the SAR default).
+_PRICE_CURRENCY_ALIASES = {
+    'sar': 'SAR', 'ر.س': 'SAR', 'رس': 'SAR', 'ريال': 'SAR', 'ريال سعودي': 'SAR',
+    'sr': 'SAR', 'sar.': 'SAR',
+    'eur': 'EUR', '€': 'EUR', 'يورو': 'EUR',
+    'usd': 'USD', '$': 'USD', 'us$': 'USD', 'دولار': 'USD',
+    'دولار امريكي': 'USD',
+    'aed': 'AED', 'درهم': 'AED', 'درهم اماراتي': 'AED',
+    'gbp': 'GBP', '£': 'GBP', 'جنيه استرليني': 'GBP',
+    'kwd': 'KWD', 'دينار': 'KWD', 'دينار كويتي': 'KWD',
+    'qar': 'QAR', 'ريال قطري': 'QAR',
+    'bhd': 'BHD', 'دينار بحريني': 'BHD',
+    'omr': 'OMR', 'ريال عماني': 'OMR',
+    'egp': 'EGP', 'جنيه': 'EGP', 'جنيه مصري': 'EGP',
+    'jod': 'JOD', 'دينار اردني': 'JOD',
+}
+
+
+def _canonical_price_currency(value):
+    """ISO code for a competitor row's price_currency, '' when unknowable."""
+    text = _norm(value)
+    if not text:
+        return ''
+    folded = (text.casefold()
+              .replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا')
+              .replace('ة', 'ه').rstrip('.'))
+    if folded in _PRICE_CURRENCY_ALIASES:
+        return _PRICE_CURRENCY_ALIASES[folded]
+    if re.fullmatch(r'[A-Za-z]{3}', text):
+        return text.upper()
+    return ''
+
+
 _COMPETITOR_SOURCE_FIELD_ALIASES = {
     'name': 'name',
     'project_name': 'name',

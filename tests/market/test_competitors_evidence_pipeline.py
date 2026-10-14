@@ -210,6 +210,22 @@ class PoolVerifyPhaseTests(_MarketTestBase):
         # The price rides the retrieved page content, not the model's memory.
         self.assertEqual(str(row.get('price_value') or ''), '850000')
 
+    def test_verify_price_keeps_its_source_currency(self):
+        """A verify reply's EUR price lands with its currency — a Booking page
+        priced in euros must not be dropped as «no price» nor relabeled SAR."""
+        module = self.module
+        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
+        module._apply_verified_competitor_price(
+            row,
+            {'price': {'type': 'سعر الليلة', 'value': '140', 'currency': 'يورو',
+                       'url': 'https://booking.example/hotel'}},
+            {'https://booking.example/hotel'})
+        self.assertEqual(row['price_value'], '140')
+        self.assertEqual(row['price_type'], 'سعر الليلة')
+        self.assertEqual(row['price_currency'], 'EUR')
+        self.assertIn('https://booking.example/hotel',
+                      row['field_sources']['price_value'])
+
     def test_deterministic_search_fills_pool_then_verifies(self):
         module = self.module
         pool = evidence.EvidencePool()

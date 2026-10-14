@@ -760,6 +760,59 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         self.assertEqual(row['price_type'], 'إيجار الوحدة الشهري')
         self.assertEqual(row['price_value'], '30000')
 
+    def test_extract_listing_prices_reads_foreign_currencies(self):
+        """Booking-style pages price in EUR/USD from the datacenter IP — the
+        figure keeps its own currency instead of being dropped as «no price»
+        or silently re-read as SAR."""
+        module = self.application_module
+        html = ('<div>Double Room — €120 per night</div>' + ('x' * 220) +
+                '<span>Executive Suite $340 nightly</span>' + ('x' * 220) +
+                '<script type="application/ld+json">'
+                '{"offers":{"price":850,"priceCurrency":"USD"}}</script>')
+        prices = module._extract_listing_prices(html)
+        found = {(item['value'], item['currency']) for item in prices}
+        self.assertIn((120.0, 'EUR'), found)
+        self.assertIn((340.0, 'USD'), found)
+        self.assertIn((850.0, 'USD'), found)
+        nightly = [item for item in prices if item['value'] == 120.0]
+        self.assertEqual(nightly[0]['period'], 'ليلة')
+
+    def test_fill_competitor_price_keeps_foreign_currency_separate(self):
+        """The median lives inside one currency and the row carries it —
+        mixing € and SAR figures into a single SAR-labeled number is a
+        fabrication, so EUR mentions form their own pool."""
+        module = self.application_module
+        pages = {
+            'https://booking.example/hotel-a': 'غرفة مزدوجة 120 يورو لليلة',
+            'https://booking.example/hotel-b': 'جناح تنفيذي 180 يورو per night',
+        }
+        row = {'name': 'فندق تجريبي', 'operation_type': 'تشغيل فندقي',
+               'source_urls': list(pages)}
+        with patch.object(module, '_read_market_source_page',
+                          side_effect=lambda url, **kw: (pages.get(url, ''), '')):
+            filled = module._fill_competitor_price_from_listings(row, list(pages))
+        self.assertTrue(filled)
+        self.assertEqual(row['price_currency'], 'EUR')
+        self.assertEqual(row['price_value'], '150')
+        self.assertEqual(row['price_type'], 'متوسط سعر الغرفة ADR')
+        self.assertIn('EUR', row['note'])
+
+    def test_fill_competitor_price_prefers_sar_over_foreign_mentions(self):
+        module = self.application_module
+        pages = {
+            'https://booking.example/hotel-c':
+                'غرفة 95 يورو لليلة — يعادل 400 ريال سعودي تقريبًا',
+        }
+        row = {'name': 'فندق', 'operation_type': 'تشغيل فندقي',
+               'source_urls': list(pages)}
+        with patch.object(module, '_read_market_source_page',
+                          side_effect=lambda url, **kw: (pages.get(url, ''), '')):
+            filled = module._fill_competitor_price_from_listings(row, list(pages))
+        self.assertTrue(filled)
+        self.assertEqual(row['price_currency'], 'SAR')
+        self.assertEqual(row['price_value'], '400')
+        self.assertEqual(row['price_type'], 'سعر الليلة')
+
     def test_fill_competitor_price_uses_citation_content_before_fetching(self):
         """The search provider's excerpt already carries the figure for pages
         the direct fetch cannot reach (bayut answers 401 to the pinned GET) —

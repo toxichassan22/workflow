@@ -428,11 +428,16 @@
       const priceFrom = competitorPriceField(row, 'price_from') || cached.price_from || '';
       const priceTo = competitorPriceField(row, 'price_to') || cached.price_to || '';
       const priceValue = competitorPriceField(row, 'price_value') || cached.price_value || '';
+      const rowCurrency = marketTranslateCompetitorValue(String(tr.dataset.priceCurrency || 'SAR'));
+      const currencyLabel = rowCurrency === 'SAR' ? 'ر.س' : rowCurrency;
+      const priceFromPlaceholder = 'من (' + currencyLabel + ')';
+      const priceToPlaceholder = 'إلى (' + currencyLabel + ')';
+      const priceValuePlaceholder = 'القيمة (' + currencyLabel + ')';
       if (competitorPriceIsRange(priceType)) {
-        cell.innerHTML = '<input data-field="price_from" data-currency="SAR" value="' + escapeHtml(priceFrom) + '" placeholder="من (ر.س)" inputmode="decimal">' +
-          '<input data-field="price_to" data-currency="SAR" value="' + escapeHtml(priceTo) + '" placeholder="إلى (ر.س)" style="margin-top:6px" inputmode="decimal">';
+        cell.innerHTML = '<input data-field="price_from" data-currency="' + escapeHtml(rowCurrency) + '" value="' + escapeHtml(priceFrom) + '" placeholder="' + escapeHtml(priceFromPlaceholder) + '" inputmode="decimal">' +
+          '<input data-field="price_to" data-currency="' + escapeHtml(rowCurrency) + '" value="' + escapeHtml(priceTo) + '" placeholder="' + escapeHtml(priceToPlaceholder) + '" style="margin-top:6px" inputmode="decimal">';
       } else {
-        cell.innerHTML = '<input data-field="price_value" data-currency="SAR" value="' + escapeHtml(priceValue) + '" placeholder="القيمة (ر.س)" inputmode="decimal">';
+        cell.innerHTML = '<input data-field="price_value" data-currency="' + escapeHtml(rowCurrency) + '" value="' + escapeHtml(priceValue) + '" placeholder="' + escapeHtml(priceValuePlaceholder) + '" inputmode="decimal">';
       }
       cell.querySelectorAll('input').forEach(input => {
         formatMarketNumericInput(input);

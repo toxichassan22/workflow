@@ -123,6 +123,43 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertEqual(filled[0]['price_type'], 'أخرى')
         self.assertEqual(filled[0]['price_value'], '1200000')
 
+    def test_market_study_price_currency_survives_and_travels_with_the_price(self):
+        """A Booking page priced in euros used to lose its figure entirely —
+        the row had no currency slot, so «120 EUR» could only be written as a
+        fake SAR number or dropped. normalize keeps the code, fill-mode merge
+        moves the tag only alongside a price it labels, and the prompt schema
+        declares the field."""
+        import market_study
+        row = market_study.normalize_competitor_row({
+            'name': 'فندق بوكينج',
+            'operation_type': 'تشغيل فندقي',
+            'price_type': 'سعر الليلة',
+            'price_value': '120',
+            'price_currency': 'يورو',
+        })
+        self.assertEqual(row['price_value'], '120')
+        self.assertEqual(row['price_currency'], 'EUR')
+        aliased = market_study.normalize_competitor_row({
+            'name': 'فندق الدولار',
+            'price': {'type': 'سعر الليلة', 'value': '95', 'currency': 'US$'},
+        })
+        self.assertEqual(aliased['price_currency'], 'USD')
+        merged, _added, _updated = market_study.merge_generated_competitors(
+            [{'id': 'm1', 'name': 'فندق بوكينج', 'price_value': '900'}],
+            [{'id': 'm1', 'name': 'فندق بوكينج', 'price_currency': 'EUR'}],
+            mode='fill')
+        self.assertEqual(merged[0]['price_value'], '900')
+        self.assertNotEqual(merged[0].get('price_currency'), 'EUR')
+        merged2, _added2, _updated2 = market_study.merge_generated_competitors(
+            [{'id': 'm2', 'name': 'فندق آخر'}],
+            [{'id': 'm2', 'name': 'فندق آخر', 'price_value': '480',
+              'price_currency': 'USD'}],
+            mode='fill')
+        self.assertEqual(merged2[0]['price_value'], '480')
+        self.assertEqual(merged2[0]['price_currency'], 'USD')
+        prompt = market_study.build_competitors_user_prompt({}, [], mode='generate')
+        self.assertIn('price_currency', prompt)
+
     def test_market_study_prefers_exact_page_urls_over_homepages(self):
         import market_study
         row = market_study.normalize_competitor_row({
@@ -1369,6 +1406,36 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertNotIn('تحليل السوق', index_titles)
         self.assertNotIn('الجدول الزمني', index_titles)
         self.assertIn('الخاتمة', index_titles)
+
+    def test_project_facts_drop_stored_chat_run_state_and_frozen_snapshots(self):
+        """Working state stored on the draft is bookkeeping, and frozen drift-check
+        copies inside a blob are not facts — both used to reach the prompt as if
+        they were current data («الأدوار 10» next to the live «12»)."""
+        import slide_engine
+
+        draft = {
+            'project_name': 'مشروع تجريبي',
+            'floorCount': 12,
+            'designerChat': {'messages': [{'content': 'STALE_SENTINEL'}]},
+            'designerChatSessions': {'s1': {'memory': 'STALE_SENTINEL'}},
+            'chatHistory': [{'content': 'STALE_SENTINEL'}],
+            'best_use_chat': {'messages': ['STALE_SENTINEL']},
+            'draftHistory': [{'change': 'STALE_SENTINEL'}],
+            'tenantArchiveCache': {'html': 'STALE_SENTINEL'},
+            'slide_generation_checkpoint': {'note': 'STALE_SENTINEL'},
+            'slidesData': [{'html': 'STALE_SENTINEL'}],
+            'best_use_data': {'title': 'التوزيع',
+                              'components': [{'name': 'شقق'}],
+                              'sourceSnapshot': {'approved_floor_count': 'STALE_SENTINEL'},
+                              'sourceHash': 'STALE_SENTINEL'},
+        }
+        facts = slide_engine.build_project_facts(draft)
+        self.assertIn('مشروع تجريبي', facts)
+        self.assertIn('التوزيع', facts)
+        self.assertIn('شقق', facts)
+        self.assertNotIn('STALE_SENTINEL', facts)
+        self.assertNotIn('sourceSnapshot', facts)
+        self.assertNotIn('sourceHash', facts)
 
     def test_heatmap_polarity_and_three_tier_colors(self):
         engine = self.application_module.slide_engine

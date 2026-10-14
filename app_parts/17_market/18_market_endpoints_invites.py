@@ -389,7 +389,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             + (f'قيم benchmarks المسموحة حصرًا: {axis_label_list}.\n'
                if needs_benchmarks else '')
             + 'أعد JSON فقط: {"competitors":[{"name":"","district":"","distance_km":"",'
-              '"benchmarks":[],"operation_type":"","price_type":"","price":"","source_urls":[]}]} '
+              '"benchmarks":[],"operation_type":"","price_type":"","price_currency":"",'
+              '"price":"","source_urls":[]}]} '
               'مع بقية الحقول المعتادة عند توفرها.'
               + (' Write every field value in English using the allowed English enum '
                  'values (status: Operating/Under Construction/Off-Plan; classification: '

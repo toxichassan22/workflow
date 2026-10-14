@@ -498,6 +498,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'مع بيان ما بحثت عنه في notes. الصف الناقص السعر مقبول؛ الرقم المختلق مرفوض.\n'
         '6. املأ price_type من القائمة المسموحة لنوع التشغيل، واستخدم price_from و price_to لأنواع النطاق '
         f'({", ".join(sorted(RANGE_PRICE_TYPES_EN) if en else sorted(RANGE_PRICE_TYPES))}) و price_value لغيرها.\n'
+        'اكتب في price_currency عملة السعر كما ظهرت في الصفحة (SAR للريال): إذا سعّرت '
+        'الصفحة بعملة أخرى — كأسعار منصات الحجز باليورو أو الدولار — اكتب رمزها في '
+        'price_currency ولا تحوّلها ولا تسقط السعر لأجل عملته؛ وسعر ليلة معروض على '
+        'منصة حجز مسمّاة يُقبل لنوع تشغيل فندقي مع ذكر المصدر والتاريخ في notes.\n'
         '7. النطاق الجغرافي ملزم: ابحث عن منافسين داخل النطاق المكتوب في بيانات المشروع فقط. '
         'لكل منافس اكتب حيه في district ومسافته التقريبية من موقع المشروع بالكيلومتر في distance_km '
         'وإحداثياته في lat وlng إن ظهرت في المصدر. '
@@ -557,6 +561,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         f'      "benchmarks": ["{axis_labels[0]}"]' + (f' — قيم حصرية من: {axis_list}' if needs_benchmarks else '') + ',\n'
         f'      "operation_type": "{enum["operation_type"]}",\n'
         '      "price_type": "",\n'
+        '      "price_currency": "SAR",\n'
         '      "price_value": "",\n'
         '      "price_from": "",\n'
         '      "price_to": "",\n'
@@ -580,7 +585,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '  "notes": ""\n'
         '}\n'
         'أعد كل المفاتيح المذكورة لكل منافس ولا تحذف operation_type أو price_type أو price_value أو price_from أو price_to. '
-        'إذا وجدت سعرًا في البحث فأعد operation_type وprice_type والقيمة أو النطاق معًا، ولا تترك أيًا منها فارغًا. '
+        'إذا وجدت سعرًا في البحث فأعد operation_type وprice_type والقيمة أو النطاق وprice_currency معًا، ولا تترك أيًا منها فارغًا. '
         'إذا لم تجد سعرًا اترك حقول السعر فارغة واذكر المصدر إن وُجد.\n'
         'في source_urls ضع كل روابط الصفحات التي قرأتها واستخدمت منها أي معلومة لهذا المنافس، رابطًا لكل صفحة، '
         'ولا تكتف برابط واحد إذا استخدمت أكثر من صفحة. اجعل source_url هو الرابط الأهم للتوافق مع البيانات القديمة. '
@@ -776,6 +781,12 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
     price_value = _clean_numeric(price_value)
     price_from = _clean_numeric(price_from)
     price_to = _clean_numeric(price_to)
+    price_currency = _canonical_price_currency(_first_nonempty(
+        row.get('price_currency'), row.get('priceCurrency'), row.get('currency'),
+        row.get('العملة'), row.get('عملة السعر'),
+        price_payload.get('currency'), price_payload.get('price_currency'),
+        price_payload.get('priceCurrency'), price_payload.get('العملة'),
+    ))
     area_cache = row.get('area_cache') if isinstance(row.get('area_cache'), dict) else {}
     area_sqm = _clean_numeric(_first_nonempty(
         row.get('area_sqm'), row.get('areaSqm'), row.get('area'), row.get('المساحة'), area_cache.get('area_sqm')))
@@ -853,6 +864,7 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'price_value': price_value,
         'price_from': price_from,
         'price_to': price_to,
+        'price_currency': price_currency,
         'price_cache': row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {},
         'source': _norm(row.get('source') or row.get('source_name') or row.get('sourceName')),
         'source_url': source_url,
@@ -1033,6 +1045,10 @@ def merge_generated_competitors(existing, generated, mode='generate', offer_lang
         incoming_sources = competitor_field_sources(incoming)
         warnings = list(target.get('conflict_warnings') or [])
         has_manual_logo = bool(target.get('logo_file_id') or target.get('logo_path'))
+        target_has_price = any(_competitor_value_filled(target.get(key))
+                               for key in ('price_value', 'price_from', 'price_to'))
+        incoming_has_price = any(_competitor_value_filled(incoming.get(key))
+                                 for key in ('price_value', 'price_from', 'price_to'))
         target_has_area = any(_competitor_value_filled(target.get(key))
                               for key in ('area_sqm', 'area_from', 'area_to'))
         incoming_has_area = any(_competitor_value_filled(incoming.get(key))
@@ -1061,6 +1077,10 @@ def merge_generated_competitors(existing, generated, mode='generate', offer_lang
                 })
         for key, value in incoming.items():
             if key in protected or (has_manual_logo and key in {'logo_url', 'logo_source_url'}):
+                continue
+            if key == 'price_currency':
+                # A currency tag only travels with the price it labels — merged
+                # alone it would brand the row's existing SAR figure as foreign.
                 continue
             current_value = target.get(key)
             if _competitor_value_filled(value) and not _competitor_value_filled(current_value):
@@ -1093,6 +1113,9 @@ def merge_generated_competitors(existing, generated, mode='generate', offer_lang
                 }
                 if signature not in existing_signatures:
                     warnings.append(warning)
+        if (not target_has_price and incoming_has_price
+                and _competitor_value_filled(incoming.get('price_currency'))):
+            target['price_currency'] = incoming['price_currency']
         target['field_sources'] = target_sources
         target['source_urls'] = _unique_values(competitor_source_urls(target) + competitor_source_urls(incoming))
         target['source_url'] = prefer_specific_source_url(target.get('source_url'), *target['source_urls'])

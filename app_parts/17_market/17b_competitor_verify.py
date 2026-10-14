@@ -122,10 +122,13 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     price_shape = (
         '"price": {"type": "أحد: ' + price_options + '", "value": "الرقم فقط", '
         '"from": "الحد الأدنى للنطاق", "to": "الحد الأقصى للنطاق", '
+        '"currency": "عملة السعر كما وردت في الصفحة — SAR أو EUR أو USD…", '
         '"url": "رابط الصفحة التي ورد فيها السعر حرفيًا"}')
     price_rule = (
         'السعر يُقبل فقط إذا ظهر في صفحة قرأتها في هذا البحث، ورابطها يوضع في '
-        'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. ')
+        'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. '
+        'السعر بعملة غير الريال (كيورو منصات الحجز) مقبول — اكتب العملة في '
+        'price.currency ولا تحوّلها ولا تسقط السعر لأجلها. ')
     prompt = (
         f'ابحث في الويب عن المشروع العقاري «{name}» في مدينة {city} بالسعودية.\n'
         'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع الرسمي '
@@ -238,6 +241,10 @@ def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'
         field_key = 'price_value'
     if price_type:
         row['price_type'] = price_type
+    currency = market_study._canonical_price_currency(
+        price.get('currency') or price.get('price_currency') or price.get('priceCurrency'))
+    if currency:
+        row['price_currency'] = currency
     field_sources = market_study.competitor_field_sources(row)
     urls = field_sources.setdefault(field_key, [])
     if url not in urls:
@@ -276,21 +283,31 @@ def _read_market_source_page(url, max_bytes=2 * 1024 * 1024):
 
 
 _ARABIC_DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
+# Each pattern pairs with the currency it proves: a figure the page priced in
+# euros or dollars stays in that currency on the row — never re-read as SAR.
+# None means the markup itself must declare the unit (JSON-LD priceCurrency).
 _LISTING_PRICE_PATTERNS = (
-    re.compile(r'(?:ريال|ر\.?\s?س|SAR|SR)\s*[:=]?\s*([0-9][0-9,.\u0660-\u0669]{2,})', re.IGNORECASE),
-    re.compile(r'([0-9][0-9,.\u0660-\u0669]{2,})\s*(?:ريال|ر\.?\s?س|SAR|SR)\b', re.IGNORECASE),
-    re.compile(r'"price"\s*:\s*"?([0-9][0-9,.]{2,})"?'),
+    (re.compile(r'(?:ريال|ر\.?\s?س|SAR|SR)\s*[:=]?\s*([0-9][0-9,.\u0660-\u0669]{2,})', re.IGNORECASE), 'SAR'),
+    (re.compile(r'([0-9][0-9,.\u0660-\u0669]{2,})\s*(?:ريال|ر\.?\s?س|SAR|SR)\b', re.IGNORECASE), 'SAR'),
+    (re.compile(r'(?:يورو|EUR|€)\s*[:=]?\s*([0-9][0-9,.]{2,})', re.IGNORECASE), 'EUR'),
+    (re.compile(r'([0-9][0-9,.]{2,})\s*(?:يورو|EUR|€)\b', re.IGNORECASE), 'EUR'),
+    (re.compile(r'(?:دولار|USD|US\$|\$)\s*[:=]?\s*([0-9][0-9,.]{2,})', re.IGNORECASE), 'USD'),
+    (re.compile(r'([0-9][0-9,.]{2,})\s*(?:دولار|USD|US\$|\$)\b', re.IGNORECASE), 'USD'),
+    (re.compile(r'"price"\s*:\s*"?([0-9][0-9,.]{2,})"?'), None),
 )
 _LISTING_PRICE_MIN = 300.0
+# A sub-300 SAR figure is a date or a percentage, but a €25 night rate is real —
+# foreign-currency mentions pass on a much lower floor.
+_LISTING_PRICE_MIN_FOREIGN = 20.0
 _LISTING_PRICE_MAX = 2_000_000_000.0
 
 
 def _extract_listing_prices(html):
-    """[{value, period, per_sqm}] — price mentions inside a fetched listing page."""
+    """[{value, period, per_sqm, currency}] — price mentions inside a fetched listing page."""
     if not html:
         return []
     found = {}
-    for pattern in _LISTING_PRICE_PATTERNS:
+    for pattern, pattern_currency in _LISTING_PRICE_PATTERNS:
         for match in pattern.finditer(html):
             raw = (match.group(1) or '').translate(_ARABIC_DIGITS)
             raw = raw.replace(',', '').replace(' ', '')
@@ -298,9 +315,18 @@ def _extract_listing_prices(html):
                 value = float(raw)
             except (TypeError, ValueError):
                 continue
-            if not (_LISTING_PRICE_MIN <= value <= _LISTING_PRICE_MAX):
-                continue
             window = html[max(0, match.start() - 100):match.end() + 100]
+            if pattern_currency is not None:
+                currency = pattern_currency
+            else:
+                declared = re.search(
+                    r'"priceCurrency"\s*:\s*"?([A-Za-z]{3})"?',
+                    html[max(0, match.start() - 300):match.end() + 300])
+                currency = (market_study._canonical_price_currency(declared.group(1))
+                            if declared else 'SAR') or 'SAR'
+            floor = _LISTING_PRICE_MIN if currency == 'SAR' else _LISTING_PRICE_MIN_FOREIGN
+            if not (floor <= value <= _LISTING_PRICE_MAX):
+                continue
             if re.search(r'سنوي|سنة|annual|yearly|per\s*year|/yr', window, re.IGNORECASE):
                 period = 'سنوي'
             elif re.search(r'شهري|شهر|monthly|per\s*month|/mo', window, re.IGNORECASE):
@@ -310,7 +336,8 @@ def _extract_listing_prices(html):
             else:
                 period = ''
             per_sqm = bool(re.search(r'متر|sqm|م²|per\s*sq', window, re.IGNORECASE))
-            found[(value, period, per_sqm)] = {'value': value, 'period': period, 'per_sqm': per_sqm}
+            found[(value, period, per_sqm, currency)] = {
+                'value': value, 'period': period, 'per_sqm': per_sqm, 'currency': currency}
     return list(found.values())
 
 
@@ -372,6 +399,16 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         pool = [m for m in mentions if m['period'] == 'ليلة'] or mentions
     else:
         pool = [m for m in mentions if not m['period']] or mentions
+    # A median can only live inside one currency — mixing € and SAR figures
+    # into one number is a fabrication. SAR mentions win; otherwise the first
+    # foreign currency carries its own pool.
+    sar_mentions = [m for m in pool if (m.get('currency') or 'SAR') == 'SAR']
+    if sar_mentions:
+        currency = 'SAR'
+        pool = sar_mentions
+    else:
+        currency = next((m.get('currency') for m in pool if m.get('currency')), 'SAR')
+        pool = [m for m in pool if (m.get('currency') or 'SAR') == currency] or pool
     values = sorted({m['value'] for m in pool})
     per_sqm = any(m['per_sqm'] for m in pool)
     used_urls = list(dict.fromkeys(m['url'] for m in pool))
@@ -409,6 +446,7 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         field_key = 'price_value'
     row['price_type'] = price_type
     row['price_listed'] = True
+    row['price_currency'] = currency
     field_sources = market_study.competitor_field_sources(row)
     bucket = field_sources.setdefault(field_key, [])
     for url in used_urls:
@@ -417,7 +455,8 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     row['field_sources'] = field_sources
     row['source_urls'] = list(dict.fromkeys(
         market_study.competitor_source_urls(row) + used_urls))[:6]
-    marker = 'السعر متوسط إعلانات مسترجعة — غير موثق رسميًا'
+    marker = ('السعر متوسط إعلانات مسترجعة — غير موثق رسميًا' if currency == 'SAR'
+              else f'السعر متوسط إعلانات مسترجعة بعملة {currency} — غير موثق رسميًا')
     note = str(row.get('note') or '').strip()
     if marker not in note:
         row['note'] = f'{note} — {marker}' if note else marker
