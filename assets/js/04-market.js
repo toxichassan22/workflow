@@ -129,7 +129,6 @@
           <div style="margin-top:12px"><label>إخلاء المسؤولية</label>
             <textarea id="marketDisclaimer" rows="2"></textarea>
           </div>
-          <div id="marketSummaryChat"></div>
         </div>
         <div class="market-block">
           <h4>ملخص دراسة سوق العمل</h4>
@@ -177,6 +176,7 @@
         document.getElementById('marketSwot_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });
       refreshDynamicI18n(div);
+      if (typeof mountMarketSummaryChat === 'function') mountMarketSummaryChat(div);
     }
 
     function updateMarketStudyFieldVisibility() {

@@ -395,7 +395,7 @@ DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000
 # /api/designer-chat keeps the legacy all-at-once planner.
 DESIGNER_AGENT = (os.environ.get('DESIGNER_AGENT') or '').strip() == '1'
 DESIGNER_AGENT_PLANNER_MODEL = os.environ.get('DESIGNER_AGENT_PLANNER_MODEL') or GEMINI_TEXT_MODEL
-DESIGNER_AGENT_WORKER_MODEL = os.environ.get('DESIGNER_AGENT_WORKER_MODEL') or SLIDE_TEXT_MODEL
+DESIGNER_AGENT_WORKER_MODEL = os.environ.get('DESIGNER_AGENT_WORKER_MODEL') or GEMINI_TEXT_MODEL
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
 # All image generation runs on OpenRouter's dedicated /images endpoint — the

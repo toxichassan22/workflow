@@ -931,5 +931,13 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "summary_chat.locked": "الملخص معتمد — التعديلات مقفلة.",
   "summary_chat.failed": "تعذر إرسال الرسالة.",
   "summary_chat.sending": "جاري معالجة الرسالة...",
-  "summary_chat.applied_toast": "طُبّقت التعديلات على الملخص"
+  "summary_chat.applied_toast": "طُبّقت التعديلات على الملخص",
+  "summary_chat.fab_label": "شات دراسة السوق",
+  "summary_chat.axis_detected": "المحور: {axis}",
+  "summary_chat.minimize": "إخفاء",
+  "summary_chat.end": "إنهاء",
+  "summary_chat.end_confirm_title": "هل تريد إنهاء هذه المحادثة؟",
+  "summary_chat.end_confirm_body": "سيبدأ الشات محادثة جديدة عند فتحه مرة أخرى.",
+  "summary_chat.end_confirm": "إنهاء المحادثة",
+  "summary_chat.end_return": "العودة إلى المحادثة"
 }/*I18N_AR_END*/;

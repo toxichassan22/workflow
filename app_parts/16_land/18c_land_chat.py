@@ -471,7 +471,7 @@ def api_land_chat():
     try:
         response = call_text_chat(
             LAND_CHAT_SYSTEM_PROMPT, user_content, max_tokens=2500,
-            model=SLIDE_TEXT_MODEL,
+            model=GEMINI_TEXT_MODEL,
             usage_ctx=_usage_ctx_optional('ai_text', data))
         reply = _land_chat_clean_reply(extract_chat_content(response, 'LAND-CHAT'))
     except Exception as exc:

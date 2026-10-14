@@ -17,7 +17,10 @@ Written against the contracts in ``docs/plans/market stude/plan.md``: module
 helpers live in ``market_study`` (part ``04_summary_chat.py``) and the
 executors in the app namespace (part ``18f_summary_chat.py``). Zero network —
 the text model, the browse agent and the URL probe are mocked; the chat model
-arrives only through the owner-managed ``MARKET_CHAT_MODEL`` env var.
+defaults to ``GEMINI_TEXT_MODEL`` (Gemini 4 Argon) with ``MARKET_CHAT_MODEL``
+as the owner override. The client never picks an axis: the model detects it
+and echoes it back, and an ambiguous message returns a clarification question
+instead of an edit.
 
 Run like every other suite — one suite per process, PYTHONPATH=repo root::
 
@@ -515,25 +518,88 @@ class SummaryChatApiTests(unittest.TestCase):
         self.assertEqual(result['reply'], 'لا أستطيع تنفيذ ذلك')
         self.assertIsNone(result['proposal'])
 
-    def test_missing_chat_model_env_is_a_config_error(self):
+    def test_missing_chat_model_env_defaults_to_argon(self):
         module = self.application_module
-        result = None
+        captured = {}
+
+        def fake_chat(system, prompt, **kwargs):
+            captured['kwargs'] = kwargs
+            return _chat_result({'reply': 'رد', 'ops': []})
+
         with self.app.app_context(), \
                 patch.dict(os.environ) as env, \
-                patch.object(module, 'call_text_chat',
-                             side_effect=AssertionError('model call must not run')) as chat_mock:
+                patch.object(module, 'call_text_chat', side_effect=fake_chat) as chat_mock:
             env.pop('MARKET_CHAT_MODEL', None)
-            try:
-                result = module._execute_market_summary_chat(
-                    self._chat_data(), tenant_id=self.tenant)
-            except AssertionError:
-                raise
-            except Exception as exc:
-                self.assertIn('MARKET_CHAT_MODEL', str(exc))
-        self.assertFalse(chat_mock.called)
-        if result is not None:
-            self.assertFalse(result.get('success'), result)
-            self.assertIn('MARKET_CHAT_MODEL', json.dumps(result, ensure_ascii=False))
+            result = module._execute_market_summary_chat(
+                self._chat_data(), tenant_id=self.tenant)
+        self.assertTrue(chat_mock.called)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(captured['kwargs'].get('model'), module.GEMINI_TEXT_MODEL)
+
+    def test_auto_axis_echoes_the_model_detected_axis(self):
+        module = self.application_module
+        with self.app.app_context(), \
+                patch.dict(os.environ, {'MARKET_CHAT_MODEL': 'm/chat'}), \
+                patch.object(module, 'call_text_chat', return_value=_chat_result({
+                    'reply': 'رد عن الطلب', 'axis': 'demand', 'ops': []})):
+            result = module._execute_market_summary_chat(
+                self._chat_data(axis=''), tenant_id=self.tenant)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['axis'], 'demand')
+
+    def test_auto_axis_rejects_a_hallucinated_axis_key(self):
+        module = self.application_module
+        with self.app.app_context(), \
+                patch.dict(os.environ, {'MARKET_CHAT_MODEL': 'm/chat'}), \
+                patch.object(module, 'call_text_chat', return_value=_chat_result({
+                    'reply': 'رد', 'axis': 'not_an_axis', 'ops': []})):
+            result = module._execute_market_summary_chat(
+                self._chat_data(axis=''), tenant_id=self.tenant)
+        self.assertTrue(result['success'], result)
+        self.assertEqual(result['axis'], market_study.SUMMARY_CHAT_AXIS_GENERAL)
+
+    def test_clarification_turn_never_edits_and_never_browses(self):
+        module = self.application_module
+        with self.app.app_context(), \
+                patch.dict(os.environ, {'MARKET_CHAT_MODEL': 'm/chat'}), \
+                patch.object(module, 'call_text_chat', return_value=_chat_result({
+                    'reply': 'هل تقصد العرض أم الطلب؟',
+                    'needs_clarification': True,
+                    'needs_research': True,
+                    'queries': ['q'],
+                    'ops': [{'op': 'set_axis', 'key': 'supply', 'value': 'v'}],
+                })), \
+                patch.object(module, '_browse_agent_call',
+                             side_effect=AssertionError('clarification never browses')) as browse:
+            result = module._execute_market_summary_chat(
+                self._chat_data(axis='', message='عدّل القسم'), tenant_id=self.tenant)
+        browse.assert_not_called()
+        self.assertTrue(result['success'], result)
+        self.assertTrue(result.get('clarification'))
+        self.assertEqual(result['reply'], 'هل تقصد العرض أم الطلب؟')
+        self.assertIsNone(result['proposal'])
+        self.assertFalse(result.get('searchPerformed'))
+
+    def test_full_project_facts_reach_the_turn_prompt(self):
+        module = self.application_module
+        captured = {}
+
+        def fake_chat(system, prompt, **kwargs):
+            captured['prompt'] = prompt
+            return _chat_result({'reply': 'رد', 'ops': []})
+
+        project_data = {
+            'project_name': 'برج الاختبار',
+            'custom_boardroom_note': 'قاعة احتفالات مائية معلّقة',
+        }
+        with self.app.app_context(), \
+                patch.dict(os.environ, {'MARKET_CHAT_MODEL': 'm/chat'}), \
+                patch.object(module, 'call_text_chat', side_effect=fake_chat):
+            result = module._execute_market_summary_chat(
+                self._chat_data(axis='', projectData=project_data),
+                tenant_id=self.tenant)
+        self.assertTrue(result['success'], result)
+        self.assertIn('قاعة احتفالات مائية معلّقة', captured['prompt'])
 
     def test_research_off_forbids_phase_b(self):
         module = self.application_module

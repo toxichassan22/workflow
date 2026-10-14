@@ -91,6 +91,8 @@ class SummaryChatPromptTests(unittest.TestCase):
         self.assertIn('حدّث محور العرض', prompt)       # the message
         self.assertIn('"needs_research"', prompt)      # JSON output shape
         self.assertIn('"ops"', prompt)
+        self.assertIn('"axis"', prompt)                # model-detected axis
+        self.assertIn('"needs_clarification"', prompt) # ambiguity contract
         for option in market_study.DECISION_OPTIONS:   # decision enum listed
             self.assertIn(option, prompt)
 
@@ -119,6 +121,17 @@ class SummaryChatPromptTests(unittest.TestCase):
         self.assertNotIn('"swot":', prompt)            # unflagged stays out
         self.assertIn('بلا بحث', prompt)               # no-browse declared
         self.assertIn('نص محور supply', prompt)        # final axes carried
+
+    def test_project_input_block_includes_the_full_project_facts(self):
+        block = market_study._project_input_block({
+            'projectName': 'مشروع', 'city': 'جدة',
+            'projectFacts': '### الموقع\n- الحي: النرجس\n\n### بيانات إضافية\n- ملاحظة: قاعة مائية',
+        })
+        self.assertIn('جدة', block)                    # compact inputs stay
+        self.assertIn('سياق ملف المشروع الكامل', block)
+        self.assertIn('قاعة مائية', block)             # all-sections facts
+        self.assertNotIn('سياق ملف المشروع الكامل',
+                         market_study._project_input_block({'city': 'جدة'}))
 
 
 class NormalizeChatReplyTests(unittest.TestCase):
@@ -158,6 +171,17 @@ class NormalizeChatReplyTests(unittest.TestCase):
         result = market_study.normalize_summary_chat_reply(
             {'reply': 'ر', 'needs_research': 'false'})
         self.assertFalse(result['needs_research'])
+
+    def test_reply_axis_and_clarification_normalize(self):
+        result = market_study.normalize_summary_chat_reply(
+            {'reply': 'سؤال', 'axis': 'demand', 'needs_clarification': 'true'})
+        self.assertEqual(result['axis'], 'demand')
+        self.assertTrue(result['needs_clarification'])
+        # A key outside the axis whitelist folds back to the general thread.
+        result = market_study.normalize_summary_chat_reply(
+            {'reply': 'سؤال', 'axis': 'invented_axis'})
+        self.assertEqual(result['axis'], market_study.SUMMARY_CHAT_AXIS_GENERAL)
+        self.assertFalse(result['needs_clarification'])
 
     def test_research_normalizes_sources_add(self):
         result = market_study.normalize_summary_chat_research({

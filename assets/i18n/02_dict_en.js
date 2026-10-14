@@ -931,5 +931,13 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "summary_chat.locked": "Summary approved — edits are locked.",
   "summary_chat.failed": "Could not send the message.",
   "summary_chat.sending": "Processing the message...",
-  "summary_chat.applied_toast": "Changes applied to the summary"
+  "summary_chat.applied_toast": "Changes applied to the summary",
+  "summary_chat.fab_label": "Market study chat",
+  "summary_chat.axis_detected": "Axis: {axis}",
+  "summary_chat.minimize": "Minimize",
+  "summary_chat.end": "End",
+  "summary_chat.end_confirm_title": "End this conversation?",
+  "summary_chat.end_confirm_body": "The chat will start a new conversation next time it opens.",
+  "summary_chat.end_confirm": "End conversation",
+  "summary_chat.end_return": "Back to the conversation"
 }/*I18N_EN_END*/;

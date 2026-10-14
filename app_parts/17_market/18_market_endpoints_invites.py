@@ -184,7 +184,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
 def _run_market_competitors(data, tenant_id=None, progress=None,
                             evidence_pool=None, deadline=None, session=None):
     report = progress if callable(progress) else (lambda *_args: None)
-    payload = _prepare_market_payload(data)
+    payload = _prepare_market_payload(data, tenant_id)
     offer_lang = slide_engine.resolve_offer_lang(data)
     existing = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
@@ -553,7 +553,7 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
 def _run_market_summary(data, tenant_id=None, progress=None,
                         evidence_pool=None, deadline=None, session=None):
     report = progress if callable(progress) else (lambda *_args: None)
-    payload = _prepare_market_payload(data)
+    payload = _prepare_market_payload(data, tenant_id)
     competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     raw_current = data.get('currentSummary')
     current_summary = raw_current if isinstance(raw_current, (dict, str)) else None

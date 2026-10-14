@@ -1,11 +1,37 @@
-/* 05a_market_summary_chat.css - market summary discussion panel chrome */
+/* 05a_market_summary_chat.css - market summary chat: the floating ball +
+   resizable panel reuse the shared .land-chat-* chrome; the rules below only
+   lay out the market content inside that panel. */
 
-.market-summary-chat {
-  margin-top: 18px;
+.market-summary-chat-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.market-summary-chat-axes {
-  flex-wrap: wrap;
+.market-summary-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--navy, #07182C);
+}
+
+.market-summary-chat .market-summary-chat-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+}
+
+.market-summary-chat-axistag {
+  margin-top: 6px;
+  font-weight: 700;
+  color: var(--teal-dark, #0A829B);
 }
 
 .market-summary-chat-composer {

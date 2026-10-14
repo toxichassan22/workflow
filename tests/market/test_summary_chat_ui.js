@@ -40,7 +40,7 @@ function fakeSourceRow(row) {
 function fixture() {
   const storedSources = [{ name: 'مصدر موجود', url: 'https://a.sa' }];
   const host = { innerHTML: '' };
-  const chatInput = { value: '', disabled: false, addEventListener() {} };
+  const chatInput = { value: '', disabled: false, addEventListener() {}, focus() {} };
   const decisionLabel = { children: [], querySelector: sel => (sel === '.market-summary-stale-tag' ? decisionLabel.children[0] || null : null), appendChild(c) { decisionLabel.children[0] = c; return c; } };
   const inputs = {
     marketSummaryChat: host,
@@ -64,6 +64,36 @@ function fixture() {
       parentElement: { querySelector: sel => (sel === 'label' ? decisionLabel : null) }
     }
   };
+  // Element registry: innerHTML is never parsed in the stub DOM, so elements
+  // reached through querySelector('#id') are minted lazily and shared with
+  // getElementById — enough for mount/toggle paths to run for real.
+  const registry = {};
+  const fakeEl = () => ({
+    tagName: 'DIV', className: '', hidden: false, disabled: false,
+    textContent: '', innerHTML: '', value: '', style: {}, dataset: {},
+    children: [], offsetWidth: 400, offsetHeight: 500,
+    classList: {
+      _set: new Set(),
+      add(c) { this._set.add(c); }, remove(c) { this._set.delete(c); },
+      contains(c) { return this._set.has(c); },
+      toggle(c, force) {
+        const want = force === undefined ? !this._set.has(c) : !!force;
+        if (want) this._set.add(c); else this._set.delete(c);
+      }
+    },
+    appendChild(child) { this.children.push(child); return child; },
+    remove() {},
+    addEventListener() {}, setPointerCapture() {}, focus() {},
+    closest() { return null; },
+    getBoundingClientRect() { return { left: 18, top: 700, right: 74, bottom: 756, width: 56, height: 56 }; },
+    querySelector(sel) {
+      const id = sel.startsWith('#') ? sel.slice(1) : null;
+      if (id) return registry[id] || (registry[id] = fakeEl());
+      return null;
+    },
+    querySelectorAll() { return []; }
+  });
+  inputs['section-market-study'] = fakeEl();
   const initialSummary = { market_definition: 'تعريف السوق الحالي', supply: 'نص العرض الحالي' };
   const initialSwot = { strengths: 'قوة قائمة' };
   const summaryKeys = ['market_definition', 'city_position', 'sector_performance', 'supply',
@@ -73,7 +103,13 @@ function fixture() {
   swotKeys.forEach(key => { inputs['marketSwot_' + key] = { value: initialSwot[key] || '', addEventListener() {} }; });
   const context = vm.createContext({
     console, Intl, URL, JSON, setTimeout, clearTimeout,
-    window: { location: { origin: 'http://localhost:5515' } },
+    window: {
+      location: { origin: 'http://localhost:5515' },
+      innerWidth: 1280, innerHeight: 800,
+      addEventListener() {}
+    },
+    localStorage: { _m: {}, getItem(k) { return this._m[k] ?? null; }, setItem(k, v) { this._m[k] = String(v); } },
+    getComputedStyle: () => ({ direction: 'rtl' }),
     tenantProjectData: {
       draftId: 'draft-1', project_name: 'مشروع سكني', city: 'الرياض',
       project_language: '', market_study_data: {
@@ -90,8 +126,8 @@ function fixture() {
     toasts: [], requests: [],
     document: {
       addEventListener() {},
-      createElement: tag => ({ tagName: tag, className: '', hidden: false, textContent: '' }),
-      getElementById: id => inputs[id] || null,
+      createElement: fakeEl,
+      getElementById: id => inputs[id] || registry[id] || null,
       querySelector: () => null,
       querySelectorAll: selector =>
         (selector === '#marketSourcesPanels .market-sources-table tbody tr'
@@ -197,20 +233,75 @@ test('sendMarketSummaryChat posts the axis state and stores both turns', async (
   assert.equal(thread[1].searchPerformed, true);
 });
 
-test('sendMarketSummaryChat routes a named axis and sends capped history', async () => {
+test('sendMarketSummaryChat always auto-routes: axis stays empty and history is capped', async () => {
   const { context, chatInput } = fixture();
-  context.selectMarketSummaryChatAxis('supply');
   const state = context.getMarketStudyState();
   state.summaryChat = {
-    supply: Array.from({ length: 20 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: 'م' + i }))
+    general: Array.from({ length: 20 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: 'م' + i }))
   };
   context.setMarketStudyState(state);
   chatInput.value = 'رسالة جديدة';
   await context.sendMarketSummaryChat();
   const request = context.requests[0];
-  assert.equal(request.payload.axis, 'supply');
+  assert.equal(request.payload.axis, '');
   assert.equal(request.payload.history.length, 12);
   assert.deepEqual(Object.keys(request.payload.history[0]).sort(), ['content', 'role']);
+});
+
+test('the detected axis echoes back on the assistant turn as a tag', async () => {
+  const { context, host, chatInput } = fixture();
+  chatInput.value = 'حدّث محور العرض';
+  context.nextResponse = { success: true, reply: 'تم', axis: 'supply' };
+  await context.sendMarketSummaryChat();
+  const thread = context.getMarketStudyState().summaryChat.general;
+  assert.equal(thread[1].axis, 'supply');
+  assert.match(host.innerHTML, /market-summary-chat-axistag/);
+  assert.match(host.innerHTML, /المحور:/);
+});
+
+test('a clarification answer renders like a normal reply without proposals', async () => {
+  const { context, host, chatInput } = fixture();
+  chatInput.value = 'عدّل القسم';
+  context.nextResponse = { success: true, reply: 'هل تقصد العرض أم الطلب؟', clarification: true };
+  await context.sendMarketSummaryChat();
+  const thread = context.getMarketStudyState().summaryChat.general;
+  assert.equal(thread[1].clarification, true);
+  assert.equal(thread[1].proposal, undefined);
+  assert.match(host.innerHTML, /هل تقصد العرض أم الطلب؟/);
+  assert.doesNotMatch(host.innerHTML, /تعديلات مقترحة/);
+});
+
+test('mountMarketSummaryChat mounts the floating ball and a hidden panel once', () => {
+  const { context, inputs } = fixture();
+  const section = inputs['section-market-study'];
+  context.mountMarketSummaryChat(section);
+  context.mountMarketSummaryChat(section);
+  assert.equal(section.children.length, 1);
+  const wrap = section.children[0];
+  assert.equal(wrap.className, 'land-chat-wrap');
+  assert.match(wrap.innerHTML, /class="land-chat-fab" id="marketSummaryChatFab"/);
+  assert.match(wrap.innerHTML, /class="land-chat-panel" id="marketSummaryChatPanel" hidden/);
+  assert.match(wrap.innerHTML, /id="marketSummaryChatResize"/);
+  assert.doesNotMatch(wrap.innerHTML, /selectMarketSummaryChatAxis/);
+  const panel = context.document.getElementById('marketSummaryChatPanel');
+  panel.hidden = true;   // the stub DOM does not parse the hidden attribute
+  context.toggleMarketSummaryChat(true);
+  assert.equal(panel.hidden, false);
+  context.toggleMarketSummaryChat();
+  assert.equal(panel.hidden, true);
+});
+
+test('legacy per-axis threads fold into the single auto thread', () => {
+  const { context } = fixture();
+  const state = context.getMarketStudyState();
+  state.summaryChat = {
+    supply: [{ role: 'user', content: 'س1' }, { role: 'assistant', content: 'ج1' }],
+    demand: [{ role: 'user', content: 'س2' }]
+  };
+  context.setMarketStudyState(state);
+  const merged = context.marketSummaryChatState();
+  assert.deepEqual(Object.keys(merged.summaryChat), ['general']);
+  assert.equal(merged.summaryChat.general.length, 3);
 });
 
 test('a proposal renders a pending card and apply writes the state', async () => {

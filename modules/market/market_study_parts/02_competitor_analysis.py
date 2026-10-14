@@ -390,6 +390,14 @@ def _project_input_block(payload):
             '- مفتاح investmentModel في المكونات: ' +
             '، '.join(f'{key} = {label}' for key, label in INVESTMENT_MODEL_LABELS.items())
         )
+    # Market-side calls are the only ones that see the whole project file —
+    # every other flow gets a hand-picked slice, but a market study cannot
+    # evaluate a project it cannot see. The server fills projectFacts with a
+    # bounded, section-grouped brief; the chat and both research tasks share it.
+    project_facts = _norm(payload.get('projectFacts'))
+    if project_facts:
+        lines.append('### سياق ملف المشروع الكامل — كل الأقسام المعبأة (سياق موثوق للفهم والربط)')
+        lines.append(project_facts)
     return '\n'.join(lines)
 
 

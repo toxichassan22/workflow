@@ -201,8 +201,18 @@ def _summary_chat_source_row(row):
     }
 
 
+def _summary_chat_reply_axis(value):
+    """The axis the model says the message is about — folded onto the known
+    keyset so a hallucinated key can never steer the context block."""
+    axis = _norm(value)
+    if axis in _SUMMARY_CHAT_AXIS_KEYSET or axis == SUMMARY_CHAT_AXIS_GENERAL:
+        return axis
+    return SUMMARY_CHAT_AXIS_GENERAL
+
+
 def normalize_summary_chat_reply(raw):
-    """Phase-A (discuss) output → {reply, needs_research, queries, ops}.
+    """Phase-A (discuss) output → {reply, axis, needs_clarification,
+    needs_research, queries, ops}.
 
     Accepts the parsed dict or the model's raw text (fenced blocks and
     surrounding prose tolerated). Malformed input raises ValueError with a
@@ -223,6 +233,8 @@ def normalize_summary_chat_reply(raw):
     ][:_SUMMARY_CHAT_QUERIES_MAX]
     return {
         'reply': reply,
+        'axis': _summary_chat_reply_axis(data.get('axis')),
+        'needs_clarification': _chat_flag(data.get('needs_clarification')),
         'needs_research': _chat_flag(data.get('needs_research')),
         'queries': queries,
         'ops': _summary_chat_ops_list(data),
@@ -494,9 +506,9 @@ def _summary_chat_flags_block(state):
 
 
 def _summary_chat_context_block(payload, axis, message, history, state):
-    """The shared context both phases carry: project inputs, the axis under
-    discussion with its current text, the other axes as a first-line index,
-    dependent-output flags, the compact sources table, history, message."""
+    """The shared context both phases carry: project inputs plus the full
+    project file, the reference axis with its current text, the other axes as
+    a first-line index, dependent-output flags, sources, history, message."""
     summary = state.get('summary') if isinstance(state, dict) else {}
     if axis == SUMMARY_CHAT_AXIS_GENERAL:
         current_label = 'الملخص كاملًا — النقاش العام'
@@ -517,7 +529,7 @@ def _summary_chat_context_block(payload, axis, message, history, state):
         f'تاريخ اليوم / تاريخ الوصول للمصادر: {date.today().isoformat()}\n'
         'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
-        f'المحور قيد النقاش: {current_label} — key: {axis}\n'
+        f'محور السياق المعروض: {current_label} — key: {axis}\n'
         'النص الحالي للمحور:\n'
         f'{current_text}\n\n'
         'فهرس المحاور الأخرى (أول سطر من كل محور — للسياق فقط):\n'
@@ -546,14 +558,26 @@ _SUMMARY_CHAT_OPS_SPEC = (
 
 def build_summary_chat_system(offer_lang=None):
     """System prompt for the discuss phase: a market analyst in a scoped
-    conversation about this project's summary — proposes ops, never applies,
-    never names sources inside reply, plain text only."""
+    conversation about this project's summary — detects the addressed axis
+    itself, asks a clarifying question when the message is ambiguous,
+    proposes ops, never applies, never names sources inside reply."""
     en = offer_lang == 'en'
     prompt = (
         'أنت مستشار متخصص في دراسات السوق العقاري في المملكة العربية السعودية، '
         f'وتدير الآن نقاشًا تفاعليًا حول «{SUMMARY_TITLE}» المولّد مسبقًا لمشروع واحد.\n'
         'قواعد الجلسة:\n'
         '- أجب بلغة رسالة المستخدم — العربية للعربية والإنجليزية للإنجليزية.\n'
+        '- أنت الوحيد المطّلع على ملف المشروع كاملًا — كل قسم معبّأ يصلك في السياق '
+        '(الأرض والكروكي، الموقع، المكونات، المؤشرات المالية، أفضل استخدام، الفريق، '
+        'المحتوى التنفيذي). استخدمه لتفهم قصد المستخدم وتحكم على سوق هذا المشروع '
+        'تحديدًا، فدراسة السوق الصحيحة تقيّم المشروع الفعلي ولا تكتفي بمعلومات عامة.\n'
+        '- حدّد بنفسك محور الملخص الذي تعالجه رسالة المستخدم واكتب مفتاحه في axis — '
+        'المستخدم لا يختار المحور؛ استنتجه من صياغة الرسالة ومن ملف المشروع، '
+        'واختر general فقط للنقاش الذي لا يخص محورًا بعينه.\n'
+        '- إن كانت رسالة المستخدم غامضة أو مضللة أو يحتمل أنها تقصد أكثر من محور '
+        'أو قسم معًا، فلا تخمّن: اضبط needs_clarification=true واجعل reply سؤال '
+        'توضيح واحد قصير يحدد المقصود، واترك ops فارغة وneeds_research=false. '
+        'وإن كانت الرسالة واضحة فلا تسأل سؤالًا توضيحيًا أصلًا.\n'
         '- النقاش محصور في ملخص سوق هذا المشروع: محاوره العشرة، تحليل SWOT، القرار، '
         'الملخص التنفيذي، وجدول المصادر. ما خرج عن هذا النطاق أجب عنه بإيجاز وبيّن أنه خارج الدراسة.\n'
         '- عند طلب تعديل فعلي في النص اقترحه عبر ops — الاقتراح يُعرض على المستخدم '
@@ -591,10 +615,16 @@ def build_summary_chat_turn_prompt(payload, axis, message, history, state):
         + '\nأرجع JSON فقط بهذا الشكل — بلا أي نص خارج JSON:\n'
         '{\n'
         '  "reply": "ردك على المستخدم — نص عادي",\n'
+        '  "axis": "مفتاح محور الملخص الذي تعالجه الرسالة — من المحاور المذكورة أعلاه أو general للعموم",\n'
+        '  "needs_clarification": false,\n'
         '  "needs_research": false,\n'
         '  "queries": ["استعلام بحث دقيق عند ضبط needs_research=true"],\n'
         '  "ops": []\n'
         '}\n'
+        'استنتج axis من موضوع الرسالة — من مفاتيح محاور الملخص المذكورة في الفهرس '
+        'أو general. وعندما تكون الرسالة ملتبسة أو تحتمل أكثر من معنى اضبط '
+        'needs_clarification=true واكتب في reply سؤال توضيح واحد قصير بدل '
+        'التخمين — عندها يجب أن تبقى ops فارغة وneeds_research=false.\n'
         'اضبط needs_research=true فقط عندما يتطلب الرد بيانات حية من الويب '
         '(رقم جديد أو مصدر أو تحقق)، واكتب عندها queries دقيقة محصورة في نطاق '
         'المشروع وفترة بياناته.\n'

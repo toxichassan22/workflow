@@ -503,7 +503,7 @@ def api_training_chat():
         # This agent changes the company's settings, so it runs on the strong model with real
         # reasoning instead of the fast text model, and with room to plan several tool calls.
         response = call_text_chat(system_prompt, user_prompt, max_tokens=6000,
-                                 model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+                                 model=GEMINI_TEXT_MODEL, reasoning_effort='medium',
                                  image_references=attachment_images or None,
                                  usage_ctx=_usage_ctx('training_chat', data))
         reply = extract_chat_content(response, 'SUPER-AGENT')
@@ -1452,7 +1452,7 @@ html يجب أن يكون div class=\"slide\" واحداً كاملاً، بلا
 الطلب: {instruction}
 HTML الحالي:
 {current_html}"""
-                    response = call_text_chat(edit_prompt, instruction, max_tokens=6000, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('training_chat', workspace, tenant_id=tenant_id))
+                    response = call_text_chat(edit_prompt, instruction, max_tokens=6000, model=GEMINI_TEXT_MODEL, usage_ctx=_usage_ctx('training_chat', workspace, tenant_id=tenant_id))
                     raw = extract_chat_content(response, 'SUPER-AGENT-SLIDE-EDIT').strip()
                     raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw).strip()
                     parsed = None

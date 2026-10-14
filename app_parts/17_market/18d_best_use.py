@@ -344,7 +344,8 @@ def _best_use_execute(draft, data, kind, job=None):
             response = call_text_chat(system, prompt + feedback,
                                       max_tokens=8000 if kind == 'generate' or revise else 3000,
                                       timeout=120, reasoning_effort='low', response_format={'type': 'json_object'},
-                                      image_references=map_references, model=SLIDE_TEXT_MODEL,
+                                      image_references=map_references,
+                                      model=GEMINI_TEXT_MODEL if kind == 'chat' else SLIDE_TEXT_MODEL,
                                       usage_ctx=_usage_ctx('best_use', data, draft_id=draft['id']))
             parsed = _best_use_provider_result(response)
             raw = parsed.get('proposal') if revise else parsed

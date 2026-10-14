@@ -949,6 +949,21 @@
         competitors: state.competitors,
         currentSummary: state.summary,
         currentSources: state.sources,
-        currentSwot: state.swot
+        currentSwot: state.swot,
+        // The market study is the one AI surface that sees the whole project:
+        // a live data-key snapshot over tenantProjectData (files skipped —
+        // build_project_facts renders it into the bounded facts brief).
+        projectData: collectMarketProjectData()
       };
+    }
+
+    function collectMarketProjectData() {
+      const data = { ...(tenantProjectData || {}) };
+      document.querySelectorAll('#tenantProjectForm [data-key]').forEach(input => {
+        const key = input.dataset && input.dataset.key;
+        const type = input.dataset && input.dataset.type;
+        if (!key || type === 'image' || type === 'pdf' || type === 'file') return;
+        if (input.value !== undefined && input.value !== '') data[key] = input.value;
+      });
+      return data;
     }

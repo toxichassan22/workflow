@@ -451,7 +451,7 @@ def api_visual_concept_prompt():
             'prompt': prompt,
             'reply': reply,
             'referenceCount': len(references),
-            'model': SLIDE_TEXT_MODEL,
+            'model': GEMINI_TEXT_MODEL,
         })
     except Exception as exc:
         app.logger.exception('Visual concept prompt failed')

@@ -104,7 +104,7 @@ def api_visual_concept_plans_conflict_chat():
         for attempt in range(2):
             response = call_text_chat(
                 PLANS_CONFLICT_CHAT_SYSTEM_PROMPT, user_content, max_tokens=cap,
-                model=SLIDE_TEXT_MODEL,
+                model=GEMINI_TEXT_MODEL,
                 usage_ctx=_usage_ctx_optional('ai_text', data))
             choices = response.get('choices') if isinstance(response, dict) else None
             first = choices[0] if choices and isinstance(choices[0], dict) else {}

@@ -849,7 +849,7 @@ def _visual_concept_generate_prompt_text(facts, slot_id, current_prompt='', inst
             user_prompt,
             temperature=None,
             max_tokens=8000,
-            model=SLIDE_TEXT_MODEL,
+            model=GEMINI_TEXT_MODEL,
             reasoning_effort='medium',
             response_format={'type': 'json_object'},
             image_references=references or None,

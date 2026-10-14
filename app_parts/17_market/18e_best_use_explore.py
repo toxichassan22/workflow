@@ -90,7 +90,8 @@ def _best_use_explore_execute(draft, data, kind, job=None):
             progress(65 + attempt * 8, stage, {'index': attempt + 1, 'total': 3})
             response = call_text_chat(system, prompt + feedback, max_tokens=10000 if targets else 2500,
                                       timeout=100, reasoning_effort='low', response_format={'type': 'json_object'},
-                                      image_references=_best_use_map_references(draft), model=SLIDE_TEXT_MODEL,
+                                      image_references=_best_use_map_references(draft),
+                                      model=GEMINI_TEXT_MODEL if kind == 'chat' else SLIDE_TEXT_MODEL,
                                       usage_ctx=_usage_ctx('best_use_explore_' + stage, data, draft_id=draft['id']))
             try:
                 parsed = _best_use_explore_provider(response)
