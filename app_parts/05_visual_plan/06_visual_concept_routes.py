@@ -161,6 +161,7 @@ def _visual_concept_plans_context_from_request(data):
     context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
     context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
     context['boundary_points'] = points or context.get('boundary_points') or []
+    context['buildable_area'] = _visual_concept_plan_buildable_area(context, project_data, points)
     _financial_parking_refresh_context(context, project_data)
     _visual_concept_plan_context_ensure_idea(context, project_data)
     return project_data, workflow, boundary, points, context

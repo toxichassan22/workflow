@@ -247,6 +247,20 @@ def _visual_concept_plan_regulation_floor_cap(regulations):
     return max(candidates) if candidates else None
 
 
+def _visual_concept_plan_required_footprints(by_building):
+    """Sum over buildings of the largest simultaneous floor area — the minimum
+    footprint each above-ground mass must occupy on the parcel."""
+    required = 0.0
+    for entries in by_building.values():
+        probes = {parsed['lo'] for parsed, _row in entries} | {parsed['hi'] for parsed, _row in entries}
+        areas = [sum(row['floor_area_sqm'] for parsed, row in entries
+                     if isinstance(row.get('floor_area_sqm'), (int, float))
+                     and parsed['lo'] <= probe <= parsed['hi'])
+                 for probe in probes]
+        required += max(areas, default=0)
+    return required
+
+
 def _visual_concept_plan_distribution_checks(rows, totals, context, regulations):
     """Deterministic re-check of an (edited) distribution table — instant, no model:
     floor-range overlaps per building, height caps, coverage footprint, and the
@@ -314,6 +328,7 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                     'detail': f'«{row.get("component") or "مكون"}» ({row.get("floor_range")}) يتجاوز الحد الموثق {cap:g} دورًا',
                     'result': 'متعارض', 'severity': 'high', 'fixedFact': True,
                     'row_ids': [row.get('id')]})
+    required = _visual_concept_plan_required_footprints(by_building)
     land = _visual_concept_number(context.get('land_area') or regulations.get('croquis_land_area'))
     coverage = _visual_concept_number(context.get('coverage_ratio') or regulations.get('coverage_ratio')
                                       or regulations.get('building_ratio_coverage'))
@@ -329,14 +344,6 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                     'item': 'مساحة الدور تتجاوز حد التغطية',
                     'detail': f'«{row.get("component") or "مكون"}» {area:g} م² والحد التقريبي {footprint_cap:g} م²',
                     'result': 'يحتاج تأكيد', 'severity': 'medium', 'row_ids': [row.get('id')]})
-        required = 0.0
-        for entries in by_building.values():
-            probes = {parsed['lo'] for parsed, _row in entries} | {parsed['hi'] for parsed, _row in entries}
-            areas = [sum(row['floor_area_sqm'] for parsed, row in entries
-                         if isinstance(row.get('floor_area_sqm'), (int, float))
-                         and parsed['lo'] <= probe <= parsed['hi'])
-                     for probe in probes]
-            required += max(areas, default=0)
         if required > footprint_cap + 0.5:
             checks.append({
                 'item': 'إجمالي بصمات المباني يتجاوز حد التغطية',
@@ -345,6 +352,15 @@ def _visual_concept_plan_distribution_checks(rows, totals, context, regulations)
                            'قلّل أكبر مساحة دور بكل مبنى أو راجع نسبة التغطية'),
                 'result': 'متعارض', 'severity': 'high', 'fixedFact': True, 'fixable': False,
                 'row_ids': [row.get('id') for entries in by_building.values() for _parsed, row in entries]})
+    buildable = _visual_concept_number(context.get('buildable_area'))
+    if buildable and required > buildable + 0.5:
+        checks.append({
+            'item': 'بصمات المباني المطلوبة لا تتسع داخل الارتدادات',
+            'detail': (f'مجموع البصمات المطلوبة للمباني فوق الأرض {required:g} م² يتجاوز '
+                       f'منطقة البناء بعد الارتدادات المسجلة ~{buildable:g} م² — '
+                       'قلّل أكبر مساحة دور بكل مبنى أو راجع الارتدادات'),
+            'result': 'متعارض', 'severity': 'high', 'fixedFact': True, 'fixable': False,
+            'row_ids': [row.get('id') for entries in by_building.values() for _parsed, row in entries]})
     far = _visual_concept_number(context.get('floor_area_ratio')) or _visual_concept_number(regulations.get('floor_area_ratio'))
     if not far:
         far_match = re.search(r'معامل[^\d]{0,15}(\d+(?:[.,]\d+)?)',

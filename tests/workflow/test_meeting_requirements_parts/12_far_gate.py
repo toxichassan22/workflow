@@ -154,6 +154,58 @@ class MeetingRequirementsTestsPart12(MeetingRequirementsTests):
         self.assertTrue(any(c['item'] == 'إجمالي المسطحات يتجاوز معامل البناء'
                             for c in checks))
 
+    def test_distribution_flags_a_program_that_cannot_fit_the_setbacks(self):
+        """The recorded setbacks shrink the parcel into a buildable envelope —
+        a distribution whose required footprints exceed it used to clear stage
+        2 on numbers alone and only explode at scene seal. The check now
+        compares the required footprints with the envelope the same geometry
+        module computes, so the conflict surfaces while the client is still
+        editing rows."""
+        module = self.application_module
+        points = [
+            {'point': '1', 'eastings': 500000, 'northings': 2000000},
+            {'point': '2', 'eastings': 500040, 'northings': 2000000},
+            {'point': '3', 'eastings': 500040, 'northings': 2000030},
+            {'point': '4', 'eastings': 500000, 'northings': 2000030},
+        ]
+        project = {
+            'project_name': 'Tight Parcel',
+            'survey_coordinates': points,
+            'setbacks': '8 m west; 8 m east; 8 m north; 8 m south',
+            'land_and_building_summary': 'The main facade faces west.',
+            'directions_table': [
+                {'direction': 'west', 'regulation_text': 'Public street 20 m wide', 'setback': 8},
+                {'direction': 'east', 'regulation_text': 'Neighboring plot', 'setback': 8},
+                {'direction': 'north', 'regulation_text': 'Neighboring plot', 'setback': 8},
+                {'direction': 'south', 'regulation_text': 'Neighboring plot', 'setback': 8},
+            ],
+        }
+        _project, _workflow, _boundary, _points, context = \
+            module._visual_concept_plans_context_from_request({
+                'projectData': project,
+                'plansWorkflow': {'boundary': {'approved': True, 'points': points}}})
+        # 40x30 parcel minus 8 m on every side leaves a 24x14 envelope.
+        self.assertAlmostEqual(context['buildable_area'], 24 * 14)
+        item = 'بصمات المباني المطلوبة لا تتسع داخل الارتدادات'
+        rows = [{'id': 'r1', 'building': 'A', 'floor_range': '1-3',
+                 'component': 'شقق', 'floor_area_sqm': 400}]
+        checks = module._visual_concept_plan_distribution_checks(
+            rows, [], context, context.get('regulations') or {})
+        self.assertTrue(any(check['item'] == item and check['result'] == 'متعارض'
+                            for check in checks))
+        rows[0]['floor_area_sqm'] = 300
+        checks = module._visual_concept_plan_distribution_checks(
+            rows, [], context, context.get('regulations') or {})
+        self.assertFalse(any(check['item'] == item for check in checks))
+        # Unusable croquis geometry keeps the check silent — numbers-only rows
+        # judge exactly as they did before the envelope existed.
+        _project, _workflow, _boundary, _points, bare = \
+            module._visual_concept_plans_context_from_request({
+                'projectData': {'project_name': 'x'}, 'plansWorkflow': {}})
+        self.assertIsNone(bare['buildable_area'])
+        checks = module._visual_concept_plan_distribution_checks(rows, [], bare, {})
+        self.assertFalse(any(check['item'] == item for check in checks))
+
     def test_proposal_backfills_units_and_areas_from_the_recorded_program(self):
         """A model proposal that ships blank units/area cells gets them filled
         from the recorded program — the component's required units and area

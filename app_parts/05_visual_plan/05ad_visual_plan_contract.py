@@ -1,6 +1,7 @@
 import hmac as _visual_plan_hmac
 import visual_plan_context as visual_plan_context
 import visual_plan_geometry as visual_plan_geometry
+import visual_plan_scene as visual_plan_scene
 
 
 VISUAL_PLAN_SCENE_VERSION = 1
@@ -157,6 +158,19 @@ def _visual_plan_contract(data, context=None):
     contract['distribution'] = {'rows': normalized['rows'], 'totals': normalized['totals']}
     contract['clientNotes'] = _visual_plan_notes(data)
     return contract, context
+
+
+def _visual_concept_plan_buildable_area(context, project_data, points):
+    """Total buildable envelope area — what remains for above-ground footprints
+    once the recorded setbacks are carved out of the parcels. Recomputed from
+    the live payload every request so a cached planContext never judges by a
+    stale boundary. None when the croquis geometry itself is unusable."""
+    try:
+        contract = visual_plan_context.croquis_contract(project_data, context, points)
+    except visual_plan_geometry.PlanGeometryError:
+        return None
+    return sum(abs(visual_plan_geometry.signed_area(item['polygon']))
+               for item in visual_plan_scene.buildable_envelopes(contract))
 
 
 def _visual_plan_input_signature(data, context=None):
