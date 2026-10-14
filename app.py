@@ -389,6 +389,9 @@ REQUIRE_TENANT_OPENROUTER_KEY = (
 GEMINI_TEXT_MODEL = "google/gemini-4-argon"
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
+# The plans workflow (verify, boundary, distribution, notes, scene) runs its own
+# text model — default argon, overridable without touching the slide model.
+VISUAL_PLAN_TEXT_MODEL = os.environ.get('VISUAL_PLAN_TEXT_MODEL') or GEMINI_TEXT_MODEL
 DESIGNER_PLANNER_MAX_TOKENS = int(os.environ.get('DESIGNER_PLANNER_MAX_TOKENS', '3000'))
 DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000'))
 # Designer agent (chatplan): per-task planner/runner path behind a flag. When 0,
@@ -398,6 +401,7 @@ DESIGNER_AGENT_PLANNER_MODEL = os.environ.get('DESIGNER_AGENT_PLANNER_MODEL') or
 DESIGNER_AGENT_WORKER_MODEL = os.environ.get('DESIGNER_AGENT_WORKER_MODEL') or GEMINI_TEXT_MODEL
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
+print(f"[CONFIG] Visual plan text model: {VISUAL_PLAN_TEXT_MODEL}")
 # All image generation runs on OpenRouter's dedicated /images endpoint — the
 # adopted model is image-only and rejects /chat/completions.
 IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'openai/gpt-image-2.5-sunburst')

@@ -247,7 +247,7 @@ def _visual_plan_create_scene(data, context=None):
     for attempt in range(2):
         response = call_openrouter_chat(
             system_prompt, user_prompt + feedback, temperature=None, max_tokens=cap,
-            model=SLIDE_TEXT_MODEL, reasoning_effort='medium', response_format={'type': 'json_object'},
+            model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium', response_format={'type': 'json_object'},
             image_references=references or None, usage_ctx=_usage_ctx('image', data))
         fatal = _ai_fatal_error_dict(response)
         if fatal is not None:
@@ -369,7 +369,7 @@ def _visual_plan_edit_scene(data, slot_id):
                    + '\nCURRENT REQUEST:\n' + instruction)
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=4000,
-        model=SLIDE_TEXT_MODEL, reasoning_effort='medium', response_format={'type': 'json_object'},
+        model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium', response_format={'type': 'json_object'},
         image_references=references or None, usage_ctx=_usage_ctx('image', data))
     fatal = _ai_fatal_error_dict(response)
     if fatal is not None:

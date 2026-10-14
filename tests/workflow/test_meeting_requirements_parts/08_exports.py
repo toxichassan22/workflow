@@ -1335,11 +1335,12 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         }
         with patch.object(module, 'call_openrouter_chat', return_value={
             'choices': [{'message': {'content': json.dumps(verification_payload, ensure_ascii=False)}}]
-        }):
+        }) as verify_call:
             verified = client.post('/api/visual-concept/plans-verify', headers=self._headers(self.token_a), json={
                 'projectData': project_data
             })
         self.assertEqual(verified.status_code, 200, verified.get_json())
+        self.assertEqual(verify_call.call_args.kwargs['model'], module.VISUAL_PLAN_TEXT_MODEL)
         verification = verified.get_json()['verification']
         serialized = json.dumps(verification, ensure_ascii=False)
         self.assertNotIn('اشتراطات1', serialized)
@@ -1388,6 +1389,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             })
         self.assertEqual(prompts.status_code, 200, prompts.get_json())
         self.assertTrue(layout_call.called)
+        self.assertEqual(layout_call.call_args.kwargs['model'], module.VISUAL_PLAN_TEXT_MODEL)
         scene = prompts.get_json()['scene']
         self.assertTrue(scene['token'])
         self.assertEqual(scene['buildings'][0]['footprint'], layout['buildings'][0]['footprint'])
@@ -1428,6 +1430,15 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(generated.get_json()['image'], '/uploads/creative/site.png')
         self.assertEqual(generated.get_json()['engine'], 'surveyed_geometry')
         self.assertEqual(generated.get_json()['scene']['token'], scene['token'])
+
+    def test_plans_text_calls_run_on_visual_plan_model(self):
+        module = self.application_module
+        self.assertEqual(module.VISUAL_PLAN_TEXT_MODEL, module.GEMINI_TEXT_MODEL)
+        for part in ('05a_visual_concept_plan.py', '05ad_visual_plan_contract.py',
+                     '05ae_visual_plan_scene.py', '06_visual_concept_routes.py'):
+            text = (ROOT / 'app_parts' / '05_visual_plan' / part).read_text(encoding='utf-8')
+            self.assertNotIn('SLIDE_TEXT_MODEL', text, part)
+            self.assertIn('VISUAL_PLAN_TEXT_MODEL', text, part)
 
     def test_plans_distribution_is_proposed_checked_and_gates_prompts(self):
         module = self.application_module
@@ -1474,6 +1485,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'plansWorkflow': {**workflow, 'distributionNotes': 'المواقف السطحية في خلف الأرض'}})
         self.assertEqual(proposal.status_code, 200, proposal.get_json())
         self.assertIn('المواقف السطحية في خلف الأرض', propose_call.call_args[0][1])
+        self.assertEqual(propose_call.call_args.kwargs['model'], module.VISUAL_PLAN_TEXT_MODEL)
         distribution = proposal.get_json()['distribution']
         self.assertEqual(len(distribution['rows']), 3)
         totals = {row['component']: row for row in distribution['totals']}
@@ -1503,6 +1515,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('انقل المكاتب من الأدوار 1-10 إلى 1-5', revise_prompt)
         self.assertIn('مواقف سيارات', revise_prompt)
         self.assertIn('أبقِ باقي الصفوف', revise_prompt)
+        self.assertEqual(revise_call.call_args.kwargs['model'], module.VISUAL_PLAN_TEXT_MODEL)
         self.assertEqual(len(revision.get_json()['distribution']['rows']), 2)
 
         # A failed revision never falls back to a fresh distribution — that
@@ -1550,6 +1563,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'projectData': project_data, 'plansWorkflow': workflow, 'distribution': overlapping, 'mode': 'ai'})
         self.assertEqual(ai_checked.status_code, 200, ai_checked.get_json())
         self.assertTrue(review_call.called)
+        self.assertEqual(review_call.call_args.kwargs['model'], module.VISUAL_PLAN_TEXT_MODEL)
         self.assertEqual(ai_checked.get_json()['issues'][0]['title'], 'المواقف')
 
         # sol may also dismiss a finding as a false alarm: the deterministic

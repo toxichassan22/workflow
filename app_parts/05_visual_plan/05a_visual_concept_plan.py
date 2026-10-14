@@ -844,7 +844,7 @@ def _visual_concept_plan_adapt_bodies(distribution, bodies, data):
     try:
         response = call_openrouter_chat(
             system_prompt, user_prompt, temperature=None, max_tokens=9000,
-            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium',
             response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
         parsed = parse_json_object(_get_chat_response_text(response))
     except Exception:

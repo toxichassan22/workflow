@@ -90,7 +90,7 @@ def _visual_plan_resolve_primary_frontage(summary, constraints, rows, data):
     try:
         response = call_openrouter_chat(
             system_prompt, user_prompt, temperature=None, max_tokens=3000,
-            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium',
             response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
     except Exception:
         return None
@@ -227,7 +227,7 @@ def _visual_plan_review_notes(data, context=None):
         )
         response = call_openrouter_chat(
             system_prompt, user_prompt, temperature=None, max_tokens=5000,
-            model=SLIDE_TEXT_MODEL, reasoning_effort='medium',
+            model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium',
             response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
         fatal = _ai_fatal_error_dict(response)
         if fatal is not None:
