@@ -70,7 +70,9 @@ def _absorb_verify_response(row, prompt_response, tokens, needed, matched_pages,
     prompt_matched = []
     for page in _market_citation_pages(prompt_response):
         url = str(page.get('url') or '').strip()
-        if url and _foreign_market_host(url):
+        if url and (_foreign_market_host(url)
+                    or market_study.banned_competitor_listing_host(
+                        url, row.get('operation_type'))):
             continue
         title_url = market_study._fold_choice(f"{page.get('title') or ''} {url}")
         haystack = market_study._fold_choice(
@@ -137,7 +139,9 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         'للمشروع أو مطوّره إن وُجدت", "summary": "سطر واحد عن المشروع", '
         + price_shape + '}.\n' + price_rule +
         'أي صفحة مسترجعة تذكر المشروع بالاسم تُحتسب دليلًا — موقع المطور أو '
-        'إعلانًا تفصيليًا أو خبرًا، وليس شرطًا أن تكون رسمية. '
+        'إعلانًا على منصة عقار (sa.aqar.fm) أو تريفاجو لمنافس فندقي أو خبرًا، '
+        'وليس شرطًا أن تكون رسمية — وروابط منصات الإعلانات الأخرى '
+        '(bayut، wasalt، dealapp…) ممنوعة ولا تُعتمد. '
         'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
     )
     tokens = _competitor_name_tokens(name)
@@ -215,6 +219,8 @@ def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'
         price = parsed if isinstance(parsed, dict) else {}
     url = str(price.get('url') or price.get('source_url') or price.get('sourceUrl') or '').strip()
     if not url or url not in (citation_urls or set()):
+        return
+    if market_study.banned_competitor_listing_host(url, row.get('operation_type')):
         return
     value = market_study._clean_numeric(price.get('value') or price.get('price_value'))
     from_v = market_study._clean_numeric(price.get('from') or price.get('price_from'))
@@ -349,21 +355,36 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     The verify searches leave the price fields empty when the model's reply
     omits the figure — but the retrieved evidence carries it in two places:
     the citation content the search provider already returned (free, works
-    even on bot-walled portals like bayut) and the fetched page markup for
-    pages that are readable directly. The median of the mentions becomes a
-    «متوسط» price; a single mention keeps its own type. price_listed flags
-    it as listing evidence, not an officially documented tariff.
+    even on bot-walled portals) and the fetched page markup for pages that
+    are readable directly. Only a page that names THIS competitor in its
+    title or URL may yield a price — an index page that drops the name once
+    among a hundred listings would otherwise stamp the portal's whole-stock
+    median on every competitor it mentions. Banned classifieds hosts (all
+    but aqar.fm, and trivago for hotel rows) never feed a row at all.
+    The median of the mentions becomes a «متوسط» price; a single mention
+    keeps its own type. price_listed flags it as listing evidence, not an
+    officially documented tariff. A row with no project-specific page keeps
+    its price fields empty — an empty cell is honest, a borrowed median is
+    not.
     """
     dead = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
     page_content = {}
+    page_titles = {}
     for page in pages or []:
         if isinstance(page, dict):
-            page_content[str(page.get('url') or '').strip()] = str(page.get('content') or '')
+            page_url = str(page.get('url') or '').strip()
+            page_content[page_url] = str(page.get('content') or '')
+            page_titles[page_url] = str(page.get('title') or '')
+    operation = str(row.get('operation_type') or '').strip() or 'أخرى'
+    tokens = _competitor_name_tokens(row.get('name'))
     mentions = []
     searched = 0
     unreadable = 0
     for url in list(dict.fromkeys(urls or []))[:4]:
-        if str(url).strip().casefold() in dead:
+        url_key = str(url).strip().casefold()
+        if url_key in dead:
+            continue
+        if market_study.banned_competitor_listing_host(url, operation):
             continue
         # The citation excerpt is searched first — fetching is the fallback
         # for pages the provider did not quote (or quoted too thinly).
@@ -372,6 +393,10 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
             html, _err = _read_market_source_page(url)
         if not html:
             unreadable += 1
+            continue
+        title = page_titles.get(url) or market_study._html_title(html)
+        if tokens and not all(token in market_study._fold_choice(f'{title} {url}')
+                              for token in tokens):
             continue
         searched += 1
         for item in _extract_listing_prices(html):
@@ -385,7 +410,6 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         return False
     print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» listing prices: "
           f"{len(mentions)} mentions from {len({m['url'] for m in mentions})} pages")
-    operation = str(row.get('operation_type') or '').strip() or 'أخرى'
     options = market_study.PRICE_TYPE_BY_OPERATION.get(
         operation, market_study.PRICE_TYPE_BY_OPERATION['أخرى'])
 
@@ -640,6 +664,8 @@ def _verify_row_deterministic(row, payload, data, evidence_pool, deadline):
     for item in results[:3]:
         url = str(item.get('url') or '').strip()
         if not url or not callable(open_fn):
+            continue
+        if market_study.banned_competitor_listing_host(url, row.get('operation_type')):
             continue
         if _market_deadline_hit(deadline):
             break

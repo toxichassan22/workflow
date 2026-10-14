@@ -452,6 +452,57 @@ def _drop_foreign_competitor_urls(row):
     return row
 
 
+def _drop_banned_competitor_listing_urls(row):
+    """Remove banned classifieds/booking links from a competitor row.
+
+    The owner rule: aqar.fm is the only classifieds portal, trivago only on
+    hotel-operation rows. Banned links leave source_urls/field_sources/
+    source_url/logo_source_url — and a price whose evidence was all banned
+    goes back to empty rather than standing on a link the rules reject.
+    """
+    if not isinstance(row, dict):
+        return row
+    operation = row.get('operation_type')
+
+    def _keep(url):
+        return not market_study.banned_competitor_listing_host(url, operation)
+
+    field_sources = market_study.competitor_field_sources(row)
+    price_urls_before = [
+        url for key in ('price_value', 'price_from', 'price_to')
+        for url in (field_sources.get(key) or [])]
+    urls = market_study.competitor_source_urls(row)
+    kept = [url for url in urls if _keep(url)]
+    if len(kept) != len(urls):
+        row['source_urls'] = kept
+        if not kept:
+            row.pop('source_urls', None)
+    if field_sources:
+        cleaned = {
+            field: [url for url in urls if _keep(url)]
+            for field, urls in field_sources.items()
+        }
+        row['field_sources'] = {field: urls for field, urls in cleaned.items() if urls}
+        if not row['field_sources']:
+            row.pop('field_sources', None)
+    if row.get('source_url') and not _keep(row['source_url']):
+        row.pop('source_url', None)
+    if row.get('logo_source_url') and not _keep(row['logo_source_url']):
+        row.pop('logo_source_url', None)
+        row.pop('logo_official_verified', None)
+    if not str(row.get('source_url') or '').strip() and kept:
+        row['source_url'] = market_study.prefer_specific_source_url(*kept)
+    price_urls_after = [
+        url for key in ('price_value', 'price_from', 'price_to')
+        for url in ((row.get('field_sources') or {}).get(key) or [])]
+    if price_urls_before and not price_urls_after:
+        # The figure stood on banned links alone — empty is honest.
+        for key in ('price_value', 'price_from', 'price_to',
+                    'price_cache', 'price_listed'):
+            row.pop(key, None)
+    return row
+
+
 def _official_citation_pages(pages, name):
     """Citation pages that look like the competitor's own site.
 

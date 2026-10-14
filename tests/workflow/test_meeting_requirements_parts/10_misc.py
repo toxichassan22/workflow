@@ -728,9 +728,12 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         «متوسط» type, source attribution and the estimated marker."""
         module = self.application_module
         pages = {
-            'https://bayut.sa/listing-a': 'مكاتب إدارية 18,000 ريال سنوياً',
-            'https://bayut.sa/listing-b': 'محل تجاري بإيجار 24,000 ريال سنوياً',
-            'https://bayut.sa/listing-c': 'مساحات 36,000 ريال سنوياً',
+            'https://sa.aqar.fm/listing-a':
+                '<title>مجمع تجريبي — مكاتب</title> مكاتب إدارية 18,000 ريال سنوياً',
+            'https://sa.aqar.fm/listing-b':
+                '<title>مجمع تجريبي — محل</title> محل تجاري بإيجار 24,000 ريال سنوياً',
+            'https://sa.aqar.fm/listing-c':
+                '<title>مجمع تجريبي — مساحات</title> مساحات 36,000 ريال سنوياً',
         }
         row = {'name': 'مجمع تجريبي', 'operation_type': 'إيجار',
                'source_urls': list(pages)}
@@ -749,14 +752,14 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         module = self.application_module
         row = {'name': 'مشروع', 'operation_type': 'إيجار',
                'dead_source_urls': ['https://dead.example/x'],
-               'source_urls': ['https://dead.example/x', 'https://bayut.sa/only']}
-        pages = {'https://bayut.sa/only': 'إيجار 30,000 ريال شهرياً'}
+               'source_urls': ['https://dead.example/x', 'https://sa.aqar.fm/only']}
+        pages = {'https://sa.aqar.fm/only': 'إيجار 30,000 ريال شهرياً'}
         fetched = []
         with patch.object(module, '_read_market_source_page',
                           side_effect=lambda url, **kw: (fetched.append(url), (pages.get(url, ''), ''))[1]):
             filled = module._fill_competitor_price_from_listings(row, row['source_urls'])
         self.assertTrue(filled)
-        self.assertEqual(fetched, ['https://bayut.sa/only'])
+        self.assertEqual(fetched, ['https://sa.aqar.fm/only'])
         self.assertEqual(row['price_type'], 'إيجار الوحدة الشهري')
         self.assertEqual(row['price_value'], '30000')
 
@@ -783,8 +786,10 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         fabrication, so EUR mentions form their own pool."""
         module = self.application_module
         pages = {
-            'https://booking.example/hotel-a': 'غرفة مزدوجة 120 يورو لليلة',
-            'https://booking.example/hotel-b': 'جناح تنفيذي 180 يورو per night',
+            'https://trivago.example/hotel-a':
+                '<title>فندق تجريبي — غرفة</title> غرفة مزدوجة 120 يورو لليلة',
+            'https://trivago.example/hotel-b':
+                '<title>فندق تجريبي — جناح</title> جناح تنفيذي 180 يورو per night',
         }
         row = {'name': 'فندق تجريبي', 'operation_type': 'تشغيل فندقي',
                'source_urls': list(pages)}
@@ -800,8 +805,8 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
     def test_fill_competitor_price_prefers_sar_over_foreign_mentions(self):
         module = self.application_module
         pages = {
-            'https://booking.example/hotel-c':
-                'غرفة 95 يورو لليلة — يعادل 400 ريال سعودي تقريبًا',
+            'https://trivago.example/hotel-c':
+                '<title>فندق — غرفة</title> غرفة 95 يورو لليلة — يعادل 400 ريال سعودي تقريبًا',
         }
         row = {'name': 'فندق', 'operation_type': 'تشغيل فندقي',
                'source_urls': list(pages)}
@@ -818,15 +823,15 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         the direct fetch cannot reach (bayut answers 401 to the pinned GET) —
         the citation content is searched first and the page is never fetched."""
         module = self.application_module
-        pages = [{'url': 'https://bayut.sa/listing-401',
-                  'title': 'محل للإيجار',
+        pages = [{'url': 'https://sa.aqar.fm/listing-401',
+                  'title': 'محل للإيجار — مجمع الرحاب',
                   'content': 'محل تجاري للإيجار 18,000 ريال سنوياً في حي الرحاب'}]
         row = {'name': 'مجمع الرحاب', 'operation_type': 'إيجار',
-               'source_urls': ['https://bayut.sa/listing-401']}
+               'source_urls': ['https://sa.aqar.fm/listing-401']}
         with patch.object(module, '_read_market_source_page',
                           side_effect=AssertionError('must not fetch — the excerpt has the price')):
             filled = module._fill_competitor_price_from_listings(
-                row, ['https://bayut.sa/listing-401'], pages=pages)
+                row, ['https://sa.aqar.fm/listing-401'], pages=pages)
         self.assertTrue(filled)
         self.assertEqual(row['price_value'], '18000')
         self.assertEqual(row['price_type'], 'إيجار الوحدة السنوي')

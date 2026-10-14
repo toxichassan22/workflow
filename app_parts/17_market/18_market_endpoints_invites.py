@@ -501,6 +501,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     for row in merged:
         market_study.canonicalize_competitor_source_urls(row)
         _drop_foreign_competitor_urls(row)
+        _drop_banned_competitor_listing_urls(row)
     report(70, 'التحقق من روابط المصادر واحدًا واحدًا...')
     search_ran = _market_search_ran(res) or bool(citation_urls)
     if search_ran:
