@@ -546,6 +546,48 @@ class ProviderOrderTests(unittest.TestCase):
             worker.web_search('q2')
         self.assertEqual(calls.count('brave'), 2)
 
+    def test_searxng_leads_the_order_when_configured(self):
+        with mock.patch.dict(os.environ,
+                             {'SEARXNG_URL': 'http://127.0.0.1:8888'},
+                             clear=False):
+            os.environ.pop('BROWSER_SEARCH_PROVIDER', None)
+            providers = browser._providers()
+        self.assertEqual(providers[0], 'searxng')
+        self.assertEqual(providers[1:], ['brave', 'yahoo', 'bing'])
+
+    def test_searxng_absent_without_url(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('SEARXNG_URL', None)
+            os.environ.pop('BROWSER_SEARCH_PROVIDER', None)
+            self.assertNotIn('searxng', browser._providers())
+
+    def test_searxng_stays_a_pinnable_provider(self):
+        with mock.patch.dict(os.environ,
+                             {'SEARXNG_URL': 'http://127.0.0.1:8888',
+                              'BROWSER_SEARCH_PROVIDER': 'searxng'}):
+            providers = browser._providers()
+        self.assertEqual(providers[0], 'searxng')
+
+    def test_searxng_search_parses_json_results(self):
+        payload = {'results': [
+            {'url': 'https://a.sa/x', 'title': 'نتيجة أولى', 'content': 'مقتطف'},
+            {'url': 'https://b.sa/y', 'title': '', 'content': ''},
+            {'url': '', 'title': 'بلا رابط'},
+        ]}
+
+        class _Resp:
+            def read(self):
+                return json.dumps(payload).encode('utf-8')
+
+        with mock.patch.dict(os.environ,
+                             {'SEARXNG_URL': 'http://127.0.0.1:8888'}), \
+                mock.patch.object(browser.urllib.request, 'urlopen',
+                                  return_value=_Resp()):
+            hits = browser._searxng_search('q', 8)
+        self.assertEqual(hits, [{'title': 'نتيجة أولى',
+                                 'url': 'https://a.sa/x',
+                                 'snippet': 'مقتطف'}])
+
 
 class ThreadLocalBrowserTests(unittest.TestCase):
     def test_thread_local_browser_reuses_the_threads_worker(self):

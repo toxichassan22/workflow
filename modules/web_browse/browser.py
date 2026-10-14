@@ -19,11 +19,13 @@ fallback for hosts where Chromium cannot run (the A7 viability probe decides).
 """
 
 import base64
+import json
 import os
 import re
 import threading
+import urllib.request
 from contextlib import contextmanager
-from urllib.parse import parse_qs, quote_plus, unquote, urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlencode, urlparse
 
 DEFAULT_TIMEOUT = 20        # seconds, page goto
 SETTLE_MS = 1500            # post-domcontentloaded settle
@@ -244,11 +246,54 @@ _PROVIDER_UNWRAP = {'ddg': _unwrap_ddg, 'bing': _unwrap_bing,
 # a valid BROWSER_SEARCH_PROVIDER pin so tests can force the old chain.
 _DEFAULT_ORDER = ['brave', 'yahoo', 'bing']
 
+# Self-hosted metasearch: SEARXNG_URL points at a SearXNG instance (its JSON
+# format must be enabled in settings.yml). When configured it leads the
+# order — one local HTTP call beats three walled SERP scrapes — and
+# BROWSER_SEARCH_PROVIDER=searxng pins it explicitly.
+_SEARXNG_TIMEOUT = 8
+
+
+def _searxng_base():
+    return (os.environ.get('SEARXNG_URL') or '').strip().rstrip('/')
+
+
+def _searxng_search(query, cap):
+    """Plain-HTTP call into the self-hosted metasearch — no page needed."""
+    base = _searxng_base()
+    if not base:
+        return []
+    url = (base + '/search?' + urlencode({
+        'q': str(query), 'format': 'json',
+        'language': 'auto', 'safesearch': '0'}))
+    try:
+        req = urllib.request.Request(
+            url, headers={'Accept': 'application/json', 'User-Agent': USER_AGENT})
+        payload = json.loads(
+            urllib.request.urlopen(req, timeout=_SEARXNG_TIMEOUT).read() or b'{}')
+    except Exception as exc:
+        print(f'[BROWSER] searxng failed: {exc}')
+        return []
+    hits = []
+    for row in payload.get('results') or []:
+        if not isinstance(row, dict):
+            continue
+        link = str(row.get('url') or '').strip()
+        title = str(row.get('title') or '').strip()
+        if not link or not title:
+            continue
+        hits.append({'title': title, 'url': link,
+                     'snippet': str(row.get('content') or '').strip()})
+        if len(hits) >= cap:
+            break
+    return hits
+
 
 def _providers():
     pinned = (os.environ.get('BROWSER_SEARCH_PROVIDER') or '').strip().lower()
     order = list(_DEFAULT_ORDER)
-    if pinned in _PROVIDER_JS:
+    if _searxng_base():
+        order.insert(0, 'searxng')
+    if pinned in _PROVIDER_JS or (pinned == 'searxng' and _searxng_base()):
         # A known provider pins first — including ddg, which is no longer in
         # the default order but must stay reachable for tests/contracts.
         order = [pinned] + [p for p in order if p != pinned]
@@ -395,7 +440,8 @@ class BrowserWorker:
             if hits:
                 print(f'[BROWSER] search provider={provider} hits={len(hits)}')
                 return hits
-            title, walled = self._serp_state()
+            title, walled = (('', False) if provider == 'searxng'
+                             else self._serp_state())
             if walled:
                 streaks = getattr(self, '_serp_block_streak', None)
                 if streaks is None:
@@ -428,6 +474,8 @@ class BrowserWorker:
         return title, _looks_blocked(title, str(text or ''))
 
     def _search_once(self, provider, query, cap):
+        if provider == 'searxng':
+            return _searxng_search(query, cap)
         page = self._ensure_page()
         # SERPs get en-US headers — see _SEARCH_LANG. Page reads keep ar-SA.
         try:
