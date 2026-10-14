@@ -346,15 +346,63 @@ def _visual_plan_create_scene(data, context=None):
     raise error
 
 
+def _visual_plan_slot_prompt(workflow, kind, context):
+    """The drawing prompt stored for this slot, rebuilt from the contract
+    context when an older draft never carried it."""
+    prompt = ((workflow.get('prompts') or {}).get(kind) or '')
+    if prompt:
+        return prompt
+    distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
+    regulations = context.get('regulations') or {}
+    model = (_visual_concept_plan_model_from_distribution(distribution, context, regulations)
+             or _visual_concept_plan_model(context, regulations))
+    return _visual_concept_plan_drawing_prompt(kind, context, model)
+
+
+def _visual_plan_illustrate(scene, kind, prompt, contract, data, base_image='', extra_refs=None):
+    """The image model draws the shipped illustration — never the geometry.
+    The deterministic layout render still runs, but as a reference pinning the
+    sealed scene's exact footprints, labels, entries and open areas; the
+    surveyed parcel outline rides beside it so the drawn boundary is the real
+    one. The sealed scene stays the only geometry authority."""
+    references = [base_image] if base_image else []
+    references.append(visual_plan_renderer.render_plan(scene, kind))
+    boundary_url = _visual_concept_render_plan_boundary_reference(
+        contract['geometry']['surveyPoints'], g.tenant_id)
+    if boundary_url:
+        references += _visual_concept_reference_uris(urls=[boundary_url], tenant_id=g.tenant_id)
+    references += list(extra_refs or [])
+    image_prompt = (prompt
+        + ('\nThe first attached image is the current approved illustration of this plan — '
+           'keep its look and every unrequested detail identical. ' if base_image else '\n')
+        + 'The attached layout render is the validated engineering scene — match it exactly: '
+        'same parcel, footprint placements, labels, entries and open areas, only illustrated '
+        'in the requested drawing style. The surveyed parcel outline attachment is the true '
+        'boundary — trace it exactly.')
+    image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
+                            usage_ctx=_usage_ctx('image', data))
+    if image:
+        return image, len(references)
+    err = last_images_api_error() or {}
+    if err.get('fatal') or err.get('error_code') in _FATAL_AI_ERROR_CODES:
+        raise FatalAICallError(err.get('message'), error_code=err.get('error_code'),
+                               http_status=err.get('http_status'),
+                               provider_message=err.get('provider_message'))
+    raise visual_plan_geometry.PlanGeometryError(
+        _client_safe_llm_error(err.get('message') or 'تعذر توليد صورة المخطط.'),
+        'PLANS_PROVIDER_FAILED')
+
+
 def _visual_plan_render_response(data, slot_id):
-    scene, _contract, _context, _program = _visual_plan_scene_from_request(data)
+    scene, contract, context, _program = _visual_plan_scene_from_request(data)
     kind = _visual_concept_plan_kind(slot_id)
-    image = visual_plan_renderer.render_plan(scene, kind)
     workflow = data.get('plansWorkflow') or {}
+    prompt = _visual_plan_slot_prompt(workflow, kind, context)
+    image, reference_count = _visual_plan_illustrate(scene, kind, prompt, contract, data)
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
-            'prompt': (workflow.get('prompts') or {}).get(kind) or '', 'scene': scene,
-            'engine': 'surveyed_geometry', 'geometryMode': 'surveyed_xy_schematic_z',
-            'referenceCount': len(scene['geometry']['surveyPoints'])}
+            'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry',
+            'model': VISUAL_CONCEPT_IMAGE_MODEL, 'geometryMode': 'surveyed_xy_schematic_z',
+            'referenceCount': reference_count}
 
 
 def _visual_plan_edit_scene(data, slot_id):
@@ -415,7 +463,11 @@ def _visual_plan_edit_scene(data, slot_id):
         raise visual_plan_geometry.PlanGeometryError('لم يصل تعديل منظم صالح للمخطط.', 'PLANS_EDIT_INVALID')
     edited = visual_plan_scene.apply_edits(scene, result.get('edits'), contract, program, facade_only)
     edited = _visual_plan_seal_scene(data, edited, context)
-    image = visual_plan_renderer.render_plan(edited, _visual_concept_plan_kind(slot_id))
+    kind = _visual_concept_plan_kind(slot_id)
+    prompt = _visual_plan_slot_prompt(data.get('plansWorkflow') or {}, kind, context)
+    image, _count = _visual_plan_illustrate(
+        edited, kind, prompt, contract, data, base_image=base_image,
+        extra_refs=_visual_concept_edit_reference_uris(data))
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
             'scene': edited, 'engine': 'surveyed_geometry',
             'reply': _visual_concept_plan_sanitize_text(_visual_concept_text(result.get('reply'), 1200)) or 'تم تعديل العنصر المحدد في المخطط.'}

@@ -211,7 +211,8 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         # The signature covers every input the scene depends on — a relabeled
         # draftId changes nothing it should care about.
         relabeled = dict(project, draftId='reloaded-draft-id')
-        with patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
+        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
             render = client.post('/api/visual-concept/generate',
                 headers=self._headers(self.token_a),
                 json={'slotId': 'plan_site', 'prompt': 'PROMPT',
@@ -229,7 +230,8 @@ class VisualPlanContractTests(MeetingRequirementsTests):
             posted = {key: value for key, value in scene.items() if key != 'token'}
             legacy_scene = dict(scene, token=module._visual_plan_token(
                 'scene', data, signature, posted, legacy=True))
-        with patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
+        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
             render = client.post('/api/visual-concept/generate',
                 headers=self._headers(self.token_a),
                 json={'slotId': 'plan_site', 'prompt': 'PROMPT',
@@ -296,6 +298,59 @@ class VisualPlanContractTests(MeetingRequirementsTests):
             with self.assertRaises(module.visual_plan_geometry.PlanGeometryError) as raised:
                 module._visual_plan_scene_from_request({'projectData': project, 'plansWorkflow': workflow})
             self.assertEqual(raised.exception.code, 'PLANS_SCENE_INVALID')
+
+    def test_plan_render_illustrates_the_sealed_scene_with_the_image_model(self):
+        """The shipped plan artwork comes from the image model — the
+        deterministic renderer still runs, but as a layout reference pinning
+        the sealed scene's geometry, never as the returned image."""
+        module = self.application_module
+        project = self.project()
+        client = self.app.test_client()
+        layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[5, 3], [15, 3], [15, 15], [5, 15]]}],
+            'entries': [], 'openAreas': []})
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': layout}}]
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            prepared = client.post('/api/visual-concept/plans-prompts',
+                headers=self._headers(self.token_a),
+                json={'projectData': project, 'plansWorkflow': self.workflow(project)})
+        self.assertEqual(prepared.status_code, 200, prepared.get_json())
+        scene = prepared.get_json()['scene']
+        workflow = {**self.workflow(project), 'scene': scene,
+                    'prompts': prepared.get_json()['prompts']}
+
+        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT') as image_call, \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/plan.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            render = client.post('/api/visual-concept/generate',
+                headers=self._headers(self.token_a),
+                json={'slotId': 'plan_site', 'projectData': project, 'plansWorkflow': workflow})
+        self.assertEqual(render.status_code, 200, render.get_json())
+        body = render.get_json()
+        self.assertEqual(body['image'], '/uploads/creative/plan.png')
+        self.assertEqual(body['model'], module.VISUAL_CONCEPT_IMAGE_MODEL)
+        image_call.assert_called_once()
+        sent_prompt = image_call.call_args.args[0]
+        self.assertIn('DRAWING REQUESTED', sent_prompt)
+        self.assertIn('layout render is the validated engineering scene', sent_prompt)
+        self.assertEqual(image_call.call_args.kwargs.get('model'), module.VISUAL_CONCEPT_IMAGE_MODEL)
+        references = image_call.call_args.args[1]
+        # The sealed scene's own deterministic layout render leads the
+        # reference set — the illustration redraws it, it cannot redraw
+        # geometry the scene never approved.
+        self.assertTrue(references[0].startswith('data:image/png;base64,'))
+        self.assertIn('ref:parcel', references)
+
+        with patch.object(module, 'call_images_api', return_value=None), \
+                patch.object(module, 'last_images_api_error', return_value=None), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            failed = client.post('/api/visual-concept/generate',
+                headers=self._headers(self.token_a),
+                json={'slotId': 'plan_site', 'projectData': project, 'plansWorkflow': workflow})
+        self.assertEqual(failed.status_code, 503, failed.get_json())
+        self.assertEqual(failed.get_json()['error_code'], 'PLANS_PROVIDER_FAILED')
 
     def test_fixed_geometry_plans_do_not_chain_image_approvals(self):
         module = self.application_module

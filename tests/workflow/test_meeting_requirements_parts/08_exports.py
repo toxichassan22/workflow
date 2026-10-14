@@ -1033,7 +1033,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         plan_workflow['scene'] = prepared.get_json()['scene']
         plan_workflow['prompts'] = prepared.get_json()['prompts']
 
-        with patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/plan.png'):
+        with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
+                patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/plan.png'):
             plan = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site',
                 'prompt': 'Conceptual site plan',
@@ -1423,7 +1424,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(offline.status_code, 503, offline.get_json())
         self.assertEqual(offline.get_json()['error_code'], 'PLANS_PROVIDER_FAILED')
 
-        with patch.object(module, 'persist_generated_image', return_value='/uploads/creative/site.png'):
+        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/site.png'):
             generated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_site', 'planKind': 'site', 'prompt': 'SITE PROMPT',
                 'planBoundaryReferenceUrl': '/uploads/creative/parcel-ref.png',
@@ -1870,7 +1872,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         scene = prepared.get_json()['scene']
         self.assertEqual(scene['buildings'][0]['footprint'], layout['buildings'][0]['footprint'])
 
-        with patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
+        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
             for slot in ('plan_massing', 'plan_uses', 'plan_site'):
                 response = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                     'slotId': slot, 'prompt': 'PROMPT', 'projectData': project_data,
