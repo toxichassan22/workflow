@@ -311,12 +311,13 @@ FRONTEND_CSS_ORDER = (
     'project-form/01a_location_maps.css',
     'project-form/02_fields_tables_rail.css',
     'project-form/03_timeline_board.css', 'project-form/04_financial_parking.css',
-    'project-form/05_best_use.css',
+    'project-form/05_best_use.css', 'project-form/05a_market_summary_chat.css',
 )
 FRONTEND_JS_ORDER = (
     '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
     '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
+    '05a-market-summary-chat.js',
     '06-team.js', '07-project-form/01_form_sections.js',
     '07-project-form/02_section_versions.js', '07-project-form/03_best_use.js',
     '07-project-form/03a_best_use_calculator.js', '07-project-form/03b_best_use_explore.js',
@@ -672,6 +673,7 @@ BUILD_FINGERPRINT_FILES = ('app.py', 'index.html', 'modules/slides/slide_engine.
                            'assets/js/02-settings-branding',
                            'assets/js/03-executive-classification.js',
                            'assets/js/04-market.js', 'assets/js/05-market-competitors.js',
+                           'assets/js/05a-market-summary-chat.js',
                            'assets/js/06-team.js', 'assets/js/07-project-form',
                            'assets/js/08-location-maps', 'assets/js/09-financial',
                            'assets/js/10-financial-report-timeline',

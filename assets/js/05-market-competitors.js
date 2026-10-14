@@ -861,6 +861,7 @@
       tenantProjectData.market_study_data = next;
       updateMarketStudyFieldVisibility();
       syncMarketLocationMirrors();
+      if (typeof renderMarketSummaryChat === 'function') renderMarketSummaryChat();
       refreshDynamicI18n(document.getElementById('section-market-study'));
     }
 
