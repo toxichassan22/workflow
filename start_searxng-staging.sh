@@ -19,8 +19,11 @@ export PATH="$HOME/bin:$PATH"
 BASE="${SEARXNG_HOME:-$HOME/searxng}"
 VENV="${SEARXNG_VENV:-$HOME/searxng-venv}"
 SETTINGS="${SEARXNG_SETTINGS_PATH:-$BASE/settings.yml}"
-ADDR="${SEARXNG_BIND_ADDRESS:-127.0.0.1:8888}"
-PORT="${ADDR##*:}"
+# searxng-run reads host and port separately — SEARXNG_BIND_ADDRESS is a bare
+# host ("127.0.0.1"), never host:port (a "host:port" value reaches getaddrinfo
+# as the hostname and the process dies with "Name or service not known").
+HOST="${SEARXNG_BIND_ADDRESS:-127.0.0.1}"
+PORT="${SEARXNG_PORT:-8888}"
 PIDFILE="$BASE/searxng-$PORT.pid"
 LOG="$BASE/searxng.log"
 
@@ -28,7 +31,7 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     exit 0
 fi
 # Something healthy already answers the port — leave it alone.
-if curl -fsS -m 3 "http://$ADDR/search?q=healthcheck&format=json" -o /dev/null 2>/dev/null; then
+if curl -fsS -m 3 "http://$HOST:$PORT/search?q=healthcheck&format=json" -o /dev/null 2>/dev/null; then
     exit 0
 fi
 
@@ -38,8 +41,9 @@ if [ ! -x "$VENV/bin/searxng-run" ]; then
 fi
 
 export SEARXNG_SETTINGS_PATH="$SETTINGS"
-export SEARXNG_BIND_ADDRESS="$ADDR"
+export SEARXNG_BIND_ADDRESS="$HOST"
+export SEARXNG_PORT="$PORT"
 cd "$BASE"
 nohup "$VENV/bin/searxng-run" >>"$LOG" 2>&1 &
 echo $! > "$PIDFILE"
-echo "searxng started pid $(cat "$PIDFILE") on $ADDR"
+echo "searxng started pid $(cat "$PIDFILE") on $HOST:$PORT"
