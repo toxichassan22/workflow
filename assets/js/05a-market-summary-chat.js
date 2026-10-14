@@ -410,10 +410,10 @@
           marketSummaryChatPush(state, axis, turn);
           const liveInput = document.getElementById('marketSummaryChatInput');
           if (liveInput) liveInput.value = '';
-        } else if (res && res.status === 'running' && res.success !== false) {
+        } else if (marketJobInFlight(res)) {
           marketSummaryChatPush(state, axis, {
             role: 'assistant',
-            content: WFT('gen.took_longer', 'استغرق التوليد وقتًا أطول من المتوقع — أعد المحاولة بعد قليل.')
+            content: marketJobStillRunningText()
           });
         } else {
           const detail = String(res && (res.error || res.message) || '').trim();
@@ -499,7 +499,9 @@
             if (pending) pending.textContent = marketSummaryChatProgress;
           });
         }
-        if (res && res.success) {
+        if (marketJobInFlight(res)) {
+          toast(marketJobStillRunningText());
+        } else if (res && res.success) {
           const next = marketSummaryChatState();
           if (res.one_block_summary) {
             next.one_block_summary = String(res.one_block_summary).trim();

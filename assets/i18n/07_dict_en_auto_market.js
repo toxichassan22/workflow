@@ -395,5 +395,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "— مصادر الملخص غير موثقة: لم يعمل البحث في الويب أثناء التوليد": "— summary sources are undocumented: web search did not run during generation",
   ": تم الإبقاء على القيمة الحالية.": ": the current value was kept.",
   "تفاصيل المزود": "Provider details",
+  "توجد مهمة قيد التنفيذ — جاري متابعة نتيجتها.": "A task is already running — following its progress.",
+  "المهمة ما زالت تعمل في الخلفية.": "The task is still running in the background.",
   "يُقاس على": "Benchmarks"
 }/*I18N_EN_AUTO_END*/);
