@@ -99,8 +99,8 @@ class BuildSourcePlanTests(unittest.TestCase):
             {'projectType': 'سكني', 'city': 'الرياض'})
         urls = [entry['url'] for entry in plan]
         for expected in (
-                'https://rei.rega.gov.sa/ar/advanced-search/deals',
-                'https://rei.rega.gov.sa/ar/advanced-search/live',
+                'https://rei.rega.gov.sa',
+                'https://rei.rega.gov.sa/ar/cities/%D8%A7%D9%84%D8%B1%D9%8A%D8%A7%D8%B6',
                 'https://sakani.sa/reports-and-data',
                 'https://stats.gov.sa', 'https://sama.gov.sa',
                 'https://ejar.sa', 'https://nhc.sa',
@@ -110,11 +110,22 @@ class BuildSourcePlanTests(unittest.TestCase):
     def test_dataset_expansion_entries_are_browser_bound(self):
         plan = market_study.build_source_plan(
             {'projectType': 'سكني', 'city': 'الرياض'})
-        deals = next(entry for entry in plan
-                     if entry['url'].endswith('/advanced-search/deals'))
-        self.assertEqual(deals['purpose'], 'dataset')
-        self.assertEqual(deals['tier'], 1)
-        self.assertTrue(deals['needs_browser'])
+        city_page = next(entry for entry in plan if '/ar/cities/' in entry['url'])
+        self.assertEqual(city_page['purpose'], 'dataset')
+        self.assertEqual(city_page['tier'], 1)
+        self.assertTrue(city_page['needs_browser'])
+
+    def test_gated_advanced_search_pages_are_never_planned(self):
+        # rei.rega.gov.sa/ar/advanced-search/* sits behind Nafath login — the
+        # browser only ever reads a login shell there. The plan must carry the
+        # public city page instead and never waste a fetch on the gated grids.
+        plan = market_study.build_source_plan(
+            {'projectType': 'سكني', 'city': 'جدة'})
+        urls = [entry['url'] for entry in plan]
+        self.assertFalse(any('/advanced-search' in url for url in urls))
+        decoded = [unquote(url) for url in urls]
+        self.assertTrue(any(
+            u == 'https://rei.rega.gov.sa/ar/cities/جدة' for u in decoded))
 
     def test_listing_urls_scoped_to_the_city_and_browser_bound(self):
         plan = market_study.build_source_plan(

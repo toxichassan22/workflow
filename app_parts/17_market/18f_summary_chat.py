@@ -184,7 +184,7 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     if axis is None:
         return {'success': False, 'error': 'محور الملخص غير معروف.',
                 'error_code': 'AXIS_UNKNOWN', 'failureReason': 'axis_unknown'}
-    # No pinned axis (the general/auto thread) → the model names the axis its
+    # No pinned axis (the general/auto thread) — the model names the axis its
     # reply actually handles; the detected key steers phase-B context and is
     # echoed back so the client can show what the message was routed to.
     auto_axis = axis == market_study.SUMMARY_CHAT_AXIS_GENERAL

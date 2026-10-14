@@ -300,10 +300,14 @@ def build_source_plan(payload, offer_lang='ar'):
                 continue   # listing pages below carry this host's evidence
             _add(url, 'catalog', label=line)
 
-    # 3) City-scoped classifieds listings — current asking prices.
+    # 3) City-scoped pages: the indicators portal's public city page carries
+    #    deal counts and values (its advanced-search grids are Nafath-gated),
+    #    then classifieds listings for current asking prices.
     ops = _payload_operations(payload) or {'بيع', 'إيجار'}
     city = _norm(payload.get('city'))
     if city:
+        _add(f'https://rei.rega.gov.sa/ar/cities/{quote(city)}', 'dataset',
+             label='المؤشرات العقارية — صفحة المدينة', needs_browser=True)
         for url, label in _listing_urls(kinds, ops, city):
             _add(url, 'listing', label=label, needs_browser=True)
 

@@ -163,8 +163,8 @@ def _pool_covers_angle(evidence_pool, angle):
 def _execute_market_competitors(data, tenant_id=None, progress=None):
     """Job entry — one evidence pool, one deadline, one shared browser session
     for everything the run searches or fetches; the pieces pass through to
-    every stage that browses (source plan → main call → expansion rounds →
-    row verify → logo pass)."""
+    every stage that browses (source plan, main call, expansion rounds,
+    row verify, logo pass)."""
     report = progress if callable(progress) else (lambda *_args: None)
     evidence_pool = _new_evidence_pool()
     deadline = time.time() + _MARKET_JOB_TIME_BUDGET

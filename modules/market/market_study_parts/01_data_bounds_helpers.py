@@ -65,10 +65,7 @@ SUMMARY_SECTION_HINTS = {
 SOURCE_PRIORITY = {
     1: [
         'الهيئة العامة للعقار rega.gov.sa',
-        'منصة المؤشرات العقارية rei.rega.gov.sa — صفقات البيع المنفذة rei.rega.gov.sa/ar/advanced-search/deals ومتوسط سعر المتر حسب الحي ونوع العقار',
-        'المؤشرات اللحظية rei.rega.gov.sa/ar/advanced-search/live — أسعار السوق الحالية',
-        'مؤشر سوق الإيجار التفصيلي rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator — ومقارنة الأحياء rei.rega.gov.sa/ar/advanced-search/rental-market/comparison',
-        'معروض الإعلانات rei.rega.gov.sa/ar/advanced-search/ads-supply-market — أسعار الطلب المعروضة',
+        'منصة المؤشرات العقارية rei.rega.gov.sa — صفحة كل مدينة تحت مسار /ar/cities تعرض عدد صفقاتها وقيمتها والحي الأكثر نشاطًا؛ صفحات البحث المتقدم في المنصة تتطلب دخول نفاذ',
         'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data — جداول إيجار الوحدات السكنية والتجارية حسب المدينة والحي',
         'السجل العقاري rer.sa وبيانات وزارة العدل moj.gov.sa المتاحة',
         'شبكة إيجار ejar.sa',
@@ -202,7 +199,7 @@ TYPE_ANALYSIS_POINTS = {
 
 TYPE_SOURCE_PRIORITY = {
     'سكني': [
-        'منصة المؤشرات العقارية rei.rega.gov.sa/ar/advanced-search — صفقات البيع المنفذة deals ومؤشر سوق الإيجار rental-market',
+        'منصة المؤشرات العقارية rei.rega.gov.sa — صفحة المدينة تحت /ar/cities: عدد الصفقات وقيمتها والحي الأكثر نشاطًا',
         'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data',
         'الهيئة العامة للإحصاء stats.gov.sa',
         'البنك المركزي السعودي sama.gov.sa',
@@ -215,7 +212,7 @@ TYPE_SOURCE_PRIORITY = {
         'Google Maps للموقع والخدمات فقط',
     ],
     'تجاري': [
-        'منصة المؤشرات العقارية rei.rega.gov.sa/ar/advanced-search — صفقات البيع المنفذة deals ومؤشر سوق الإيجار rental-market — وشبكة إيجار ejar.sa',
+        'منصة المؤشرات العقارية rei.rega.gov.sa — صفحة المدينة تحت /ar/cities — وشبكة إيجار ejar.sa',
         'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data — جداول الوحدات التجارية',
         'الهيئة العامة للإحصاء stats.gov.sa',
         'وزارة التجارة mc.gov.sa',
@@ -860,11 +857,6 @@ def prefer_specific_source_url(*candidates):
 # fixed dataset page, so a bare-domain citation is normalized to the page that
 # actually exposes the row's numbers instead of a shell that shows nothing.
 _PORTAL_DATASET_PAGES = {
-    'rei.rega.gov.sa': {
-        'بيع': 'https://rei.rega.gov.sa/ar/advanced-search/deals',
-        'إيجار': 'https://rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator',
-        'default': 'https://rei.rega.gov.sa/ar/advanced-search/live',
-    },
     'sakani.sa': {
         'default': 'https://sakani.sa/reports-and-data',
     },

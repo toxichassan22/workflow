@@ -413,44 +413,30 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
 
     def test_portal_homepage_links_resolve_to_the_dataset_page(self):
         import market_study
-        # rei.rega.gov.sa/ar is a navigation shell — sale figures live behind the
-        # deals view and rental figures behind the detailed indicator. A row that
-        # cites only the portal homepage must end up pointing at the dataset page.
-        sale = {
-            'name': 'برج بيعي',
-            'operation_type': 'بيع',
-            'source_url': 'https://rei.rega.gov.sa/ar',
-            'source_urls': ['https://rei.rega.gov.sa/ar'],
-            'field_sources': {'price_value': ['https://rei.rega.gov.sa/ar']},
-            'row_source': 'ai',
-        }
+        # sakani.sa is the mapped portal: a homepage citation resolves to the
+        # fixed dataset view. rei.rega.gov.sa is deliberately unmapped — its
+        # advanced-search grids are Nafath-gated, so a homepage stays a
+        # homepage instead of resolving into a login shell.
         rental = {
             'name': 'مجمع إيجاري',
             'operation_type': 'إيجار',
-            'source_url': 'https://rei.rega.gov.sa/ar',
-            'source_urls': ['https://rei.rega.gov.sa/ar', 'https://sakani.sa'],
+            'source_url': 'https://sakani.sa',
+            'source_urls': ['https://sakani.sa'],
             'field_sources': {'price_value': ['https://sakani.sa']},
             'row_source': 'ai',
         }
-        market_study.apply_search_citations([sale, rental], [])
-        self.assertEqual(sale['source_url'], 'https://rei.rega.gov.sa/ar/advanced-search/deals')
-        self.assertEqual(sale['source_urls'], ['https://rei.rega.gov.sa/ar/advanced-search/deals'])
-        self.assertEqual(
-            sale['field_sources']['price_value'],
-            ['https://rei.rega.gov.sa/ar/advanced-search/deals'])
+        market_study.apply_search_citations([rental], [])
+        self.assertEqual(rental['source_url'], 'https://sakani.sa/reports-and-data')
+        self.assertEqual(rental['source_urls'], ['https://sakani.sa/reports-and-data'])
         self.assertEqual(
             rental['field_sources']['price_value'], ['https://sakani.sa/reports-and-data'])
-        self.assertIn(
-            'https://rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator',
-            rental['source_urls'])
-        self.assertIn('https://sakani.sa/reports-and-data', rental['source_urls'])
         self.assertTrue(all(
             not market_study.is_generic_source_homepage(url) for url in rental['source_urls']))
         # A retrieved page on the same host still wins over the canonical map.
-        retrieved = ['https://rei.rega.gov.sa/ar/advanced-search/deals?deal=1']
+        retrieved = ['https://sakani.sa/reports-and-data?city=jeddah']
         cited = {
-            'name': 'برج', 'operation_type': 'بيع',
-            'source_url': 'https://rei.rega.gov.sa/ar', 'row_source': 'ai',
+            'name': 'برج', 'operation_type': 'إيجار',
+            'source_url': 'https://sakani.sa', 'row_source': 'ai',
         }
         market_study.apply_search_citations([cited], retrieved)
         self.assertEqual(cited['source_url'], retrieved[0])
@@ -463,15 +449,22 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertEqual(other['source_url'], 'https://developer.sa/')
         # Links merged in by the per-competitor verification get normalized too.
         merged = {
-            'name': 'برج', 'operation_type': 'بيع',
-            'source_url': 'https://rei.rega.gov.sa',
-            'source_urls': ['https://rei.rega.gov.sa', 'https://dev.sa/proj/1'],
+            'name': 'برج', 'operation_type': 'إيجار',
+            'source_url': 'https://sakani.sa',
+            'source_urls': ['https://sakani.sa', 'https://dev.sa/proj/1'],
         }
         market_study.canonicalize_competitor_source_urls(merged)
         self.assertEqual(
-            merged['source_urls'][0], 'https://rei.rega.gov.sa/ar/advanced-search/deals')
+            merged['source_urls'][0], 'https://sakani.sa/reports-and-data')
         self.assertEqual(
-            merged['source_url'], 'https://rei.rega.gov.sa/ar/advanced-search/deals')
+            merged['source_url'], 'https://sakani.sa/reports-and-data')
+        # And the gated REGA grids never come back through normalization.
+        gated = {
+            'name': 'برج', 'operation_type': 'بيع',
+            'source_url': 'https://rei.rega.gov.sa/ar', 'row_source': 'ai',
+        }
+        market_study.apply_search_citations([gated], [])
+        self.assertEqual(gated['source_url'], 'https://rei.rega.gov.sa/ar')
 
     def test_competitor_verification_captures_retrieved_price(self):
         module = self.application_module
@@ -1131,10 +1124,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         expected = {
             1: [
                 'الهيئة العامة للعقار rega.gov.sa',
-                'منصة المؤشرات العقارية rei.rega.gov.sa — صفقات البيع المنفذة rei.rega.gov.sa/ar/advanced-search/deals ومتوسط سعر المتر حسب الحي ونوع العقار',
-                'المؤشرات اللحظية rei.rega.gov.sa/ar/advanced-search/live — أسعار السوق الحالية',
-                'مؤشر سوق الإيجار التفصيلي rei.rega.gov.sa/ar/advanced-search/rental-market/detailed-indicator — ومقارنة الأحياء rei.rega.gov.sa/ar/advanced-search/rental-market/comparison',
-                'معروض الإعلانات rei.rega.gov.sa/ar/advanced-search/ads-supply-market — أسعار الطلب المعروضة',
+                'منصة المؤشرات العقارية rei.rega.gov.sa — صفحة كل مدينة تحت مسار /ar/cities تعرض عدد صفقاتها وقيمتها والحي الأكثر نشاطًا؛ صفحات البحث المتقدم في المنصة تتطلب دخول نفاذ',
                 'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data — جداول إيجار الوحدات السكنية والتجارية حسب المدينة والحي',
                 'السجل العقاري rer.sa وبيانات وزارة العدل moj.gov.sa المتاحة',
                 'شبكة إيجار ejar.sa',
@@ -1169,7 +1159,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertEqual(market_study.SOURCE_PRIORITY, expected)
         expected_type_sources = {
             'سكني': [
-                'منصة المؤشرات العقارية rei.rega.gov.sa/ar/advanced-search — صفقات البيع المنفذة deals ومؤشر سوق الإيجار rental-market',
+                'منصة المؤشرات العقارية rei.rega.gov.sa — صفحة المدينة تحت /ar/cities: عدد الصفقات وقيمتها والحي الأكثر نشاطًا',
                 'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data',
                 'الهيئة العامة للإحصاء stats.gov.sa',
                 'البنك المركزي السعودي sama.gov.sa', 'وافي red.rega.gov.sa',
@@ -1180,7 +1170,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
                 'Google Maps للموقع والخدمات فقط',
             ],
             'تجاري': [
-                'منصة المؤشرات العقارية rei.rega.gov.sa/ar/advanced-search — صفقات البيع المنفذة deals ومؤشر سوق الإيجار rental-market — وشبكة إيجار ejar.sa',
+                'منصة المؤشرات العقارية rei.rega.gov.sa — صفحة المدينة تحت /ar/cities — وشبكة إيجار ejar.sa',
                 'المؤشر التفصيلي لسوق الإيجار sakani.sa/reports-and-data — جداول الوحدات التجارية',
                 'الهيئة العامة للإحصاء stats.gov.sa', 'وزارة التجارة mc.gov.sa',
                 'الأمانة وبلدي balady.gov.sa', 'البنك المركزي السعودي sama.gov.sa',
