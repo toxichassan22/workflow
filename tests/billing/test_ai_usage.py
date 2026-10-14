@@ -83,7 +83,7 @@ class AiUsageTests(unittest.TestCase):
         module = self.application_module
         with self.app.app_context():
             db.record_ai_usage_event(
-                self.tenant_id, 'google/google/gemini-4-argon-flash', flow='slide',
+                self.tenant_id, 'google/gemini-4-argon', flow='slide',
                 prompt_tokens=100, completion_tokens=50, total_tokens=150,
                 draft_id='draft-1', presentation_id='pres-1', generation_id='gen-1')
             db.record_ai_usage_event(
@@ -91,7 +91,7 @@ class AiUsageTests(unittest.TestCase):
                 prompt_tokens=200, completion_tokens=100, total_tokens=300,
                 draft_id='draft-1', presentation_id='pres-1', generation_id='gen-2')
             db.record_ai_usage_event(
-                self.tenant_id, 'google/google/gemini-4-argon-flash', flow='slide',
+                self.tenant_id, 'google/gemini-4-argon', flow='slide',
                 prompt_tokens=10, completion_tokens=5, total_tokens=15,
                 draft_id='draft-other', generation_id='gen-3')
             summary = db.get_ai_usage_summary(
@@ -104,7 +104,7 @@ class AiUsageTests(unittest.TestCase):
         self.assertEqual(flows['slide']['calls'], 1)
         self.assertEqual(flows['designer_chat']['total_tokens'], 300)
         models = {row['model'] for row in summary['by_model']}
-        self.assertIn('google/google/gemini-4-argon-flash', models)
+        self.assertIn('google/gemini-4-argon', models)
         self.assertEqual(len(summary['recent']), 2)
 
     def test_cost_update_fills_pending_event(self):
