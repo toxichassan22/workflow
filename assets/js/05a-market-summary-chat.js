@@ -274,22 +274,27 @@
       const staleKeys = Object.keys(state.summaryStale || {}).filter(key => state.summaryStale[key]);
       let log = '<div class="best-use-chat-messages market-summary-chat-messages" id="marketSummaryChatLog" role="log" aria-live="polite">';
       if (!marketSummaryHasContent(state.summary)) {
-        log += '<div class="tenant-hint">' + escapeHtml(WFT('summary_chat.empty', 'لم يُولَّد ملخص السوق بعد.')) + '</div>';
+        log += '<div class="land-chat-empty">' + escapeHtml(WFT('summary_chat.empty', 'لم يُولَّد ملخص السوق بعد.')) + '</div>';
       } else {
         log += thread.map((turn, index) => marketSummaryChatTurnHtml(turn, axis, index, state, locked)).join('');
         if (marketSummaryChatBusy) {
           log += '<div class="best-use-chat-message assistant"><div class="best-use-chat-text market-summary-chat-pending">' +
             escapeHtml(marketSummaryChatProgress || WFT('summary_chat.sending', 'جاري معالجة الرسالة...')) + '</div></div>';
+        } else if (!thread.length) {
+          log += '<div class="land-chat-empty">' + escapeHtml(WFT('summary_chat.thread_empty', 'لا توجد رسائل في هذه المحادثة.')) + '</div>';
         }
       }
       log += '</div>';
       const staleNames = staleKeys.map(key =>
         WFT(MARKET_SUMMARY_CHAT_STALE_LABEL_KEYS[key] || '', MARKET_SUMMARY_CHAT_STALE_FALLBACKS[key] || key));
       const staleBar = '<div class="market-summary-chat-stale"' + (staleKeys.length ? '' : ' hidden') + '>' +
-        '<span class="tenant-hint">' + escapeHtml(WFT('summary_chat.stale_for', 'يحتاج تحديثًا: {items}', { items: staleNames.join('، ') })) + '</span>' +
+        '<div class="market-summary-chat-stale-text">' +
+        '<span class="market-summary-chat-stale-title">' + escapeHtml(WFT('summary_chat.stale_title', 'مخرجات تحتاج تحديثًا')) + '</span>' +
+        '<span class="market-summary-chat-stale-items">' + escapeHtml(staleNames.join('، ')) + '</span>' +
+        '</div>' +
         '<button type="button" class="btn primary small" onclick="runMarketSummaryConsolidate()"' +
         (locked || marketSummaryChatBusy ? ' disabled' : '') + '>' +
-        escapeHtml(WFT('summary_chat.consolidate', 'تحديث الملخص التنفيذي')) + '</button></div>';
+        escapeHtml(WFT('summary_chat.consolidate', 'تحديث المخرجات')) + '</button></div>';
       const lockNote = locked
         ? '<div><span class="best-use-status market-summary-chat-lock">' + escapeHtml(WFT('summary_chat.locked', 'الملخص معتمد — التعديلات مقفلة.')) + '</span></div>'
         : '';
@@ -298,7 +303,7 @@
         '<textarea id="marketSummaryChatInput" rows="2" maxlength="4000" dir="auto"' +
         ' placeholder="' + escapeHtml(WFT('summary_chat.message', 'الرسالة')) + '"' +
         (composerDisabled ? ' disabled' : '') + ' data-section-lock-ignore="1"></textarea>' +
-        '<div class="best-use-actions">' +
+        '<div class="market-summary-chat-composer-foot">' +
         '<label class="market-summary-chat-research"><input type="checkbox" id="marketSummaryChatResearch"' +
         (marketSummaryChatResearchOn ? ' checked' : '') + (composerDisabled ? ' disabled' : '') +
         ' data-section-lock-ignore="1"> ' + escapeHtml(WFT('summary_chat.research', 'بحث الويب')) + '</label>' +
@@ -421,8 +426,8 @@
       const fab = document.getElementById('marketSummaryChatFab');
       if (!panel || panel.hidden || !fab) return;
       const rect = fab.getBoundingClientRect();
-      const width = panel.offsetWidth || Math.min(440, window.innerWidth - 24);
-      const height = panel.offsetHeight || Math.min(560, window.innerHeight - 24);
+      const width = panel.offsetWidth || Math.min(400, window.innerWidth - 24);
+      const height = panel.offsetHeight || Math.min(480, window.innerHeight - 96);
       const gap = 10;
       let top = rect.top - gap - height;
       if (top < 12) top = rect.bottom + gap;
@@ -550,13 +555,9 @@
         '<div><div class="land-chat-title" id="marketSummaryChatTitle"></div></div>' +
         '<div class="land-chat-actions">' +
         '<button type="button" class="land-chat-action" id="marketSummaryChatMinimize"' +
-        ' title="' + escapeHtml(WFT('summary_chat.minimize', 'إخفاء')) + '"' +
-        ' aria-label="' + escapeHtml(WFT('summary_chat.minimize', 'إخفاء')) + '"' +
-        ' onclick="toggleMarketSummaryChat(false)">&gt;&lt;</button>' +
+        ' onclick="toggleMarketSummaryChat(false)">' + escapeHtml(WFT('summary_chat.minimize', 'إخفاء')) + '</button>' +
         '<button type="button" class="land-chat-action" id="marketSummaryChatEnd"' +
-        ' title="' + escapeHtml(WFT('summary_chat.end', 'إنهاء')) + '"' +
-        ' aria-label="' + escapeHtml(WFT('summary_chat.end', 'إنهاء')) + '"' +
-        ' onclick="showMarketSummaryChatEndConfirm()">×</button>' +
+        ' onclick="showMarketSummaryChatEndConfirm()">' + escapeHtml(WFT('summary_chat.end', 'إنهاء')) + '</button>' +
         '</div></div>' +
         '<div class="market-summary-chat-body" id="marketSummaryChat"></div>' +
         '<div class="land-chat-confirm" id="marketSummaryChatConfirm" hidden>' +
@@ -590,7 +591,7 @@
           const size = JSON.parse(localStorage.getItem(MARKET_SUMMARY_CHAT_SIZE_KEY) || 'null');
           if (size && Number.isFinite(size.width) && Number.isFinite(size.height)) {
             panel.style.width = Math.min(size.width, window.innerWidth - 24) + 'px';
-            panel.style.height = Math.min(size.height, window.innerHeight - 24) + 'px';
+            panel.style.height = Math.min(size.height, Math.max(260, window.innerHeight - 96)) + 'px';
           }
         } catch (error) {}
       }
@@ -763,7 +764,7 @@
       const stale = Object.keys(state.summaryStale || {}).filter(key => state.summaryStale[key]);
       if (!stale.length) return;
       marketSummaryChatBusy = true;
-      marketSummaryChatProgress = WFT('summary_chat.consolidating', 'جاري تحديث المخرجات المعلّمة...');
+      marketSummaryChatProgress = WFT('summary_chat.consolidating', 'جاري تحديث المخرجات...');
       renderMarketSummaryChat();
       try {
         const payload = collectMarketStudyRequestPayload();
@@ -800,12 +801,12 @@
           setMarketStudyState(next);
           applyMarketStudyState(next);
           persistMarketStudyFromDom();
-          toast(WFT('summary_chat.consolidated', 'تم تحديث المخرجات المعلّمة'));
+          toast(WFT('summary_chat.consolidated', 'تم تحديث المخرجات'));
         } else {
-          toast(String(res && (res.error || res.message) || WFT('summary_chat.consolidate_failed', 'تعذر تحديث المخرجات المعلّمة.')));
+          toast(String(res && (res.error || res.message) || WFT('summary_chat.consolidate_failed', 'تعذر تحديث المخرجات.')));
         }
       } catch (error) {
-        toast(String(error && error.message || WFT('summary_chat.consolidate_failed', 'تعذر تحديث المخرجات المعلّمة.')));
+        toast(String(error && error.message || WFT('summary_chat.consolidate_failed', 'تعذر تحديث المخرجات.')));
       } finally {
         marketSummaryChatBusy = false;
         marketSummaryChatProgress = '';

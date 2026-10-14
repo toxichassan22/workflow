@@ -328,7 +328,7 @@ test('a proposal renders a pending card and apply writes the state', async () =>
   const thread = stored.summaryChat.general;
   assert.equal(thread[1].proposalStatus, 'applied');
   assert.match(host.innerHTML, /طُبّق/);
-  assert.match(host.innerHTML, /يحتاج تحديثًا/);
+  assert.match(host.innerHTML, /مخرجات تحتاج تحديثًا/);
 });
 
 test('dismissing a proposal keeps the state untouched', async () => {
@@ -398,4 +398,60 @@ test('model replies are escaped inside the rendered thread', async () => {
   assert.doesNotMatch(host.innerHTML, /<script>/);
   assert.doesNotMatch(host.innerHTML, /<img/);
   assert.match(host.innerHTML, /&lt;img/);
+});
+
+test('an empty thread renders an empty state, not a blank log', () => {
+  const { context, host } = fixture();
+  context.renderMarketSummaryChat();
+  assert.match(host.innerHTML, /land-chat-empty/);
+  assert.match(host.innerHTML, /لا توجد رسائل في هذه المحادثة/);
+});
+
+test('the stale bar names the flagged outputs next to its update action', () => {
+  const { context, host } = fixture();
+  const state = context.getMarketStudyState();
+  state.summaryStale = { one_block: true, decision: true };
+  context.setMarketStudyState(state);
+  context.renderMarketSummaryChat();
+  assert.match(host.innerHTML, /market-summary-chat-stale-title[^<]*مخرجات تحتاج تحديثًا/);
+  assert.match(host.innerHTML, /ملخص دراسة سوق العمل/);
+  assert.match(host.innerHTML, /تصنيف القرار/);
+  assert.match(host.innerHTML, /runMarketSummaryConsolidate\(\)"[^>]*>\s*تحديث المخرجات/);
+});
+
+test('the stale bar stays hidden while nothing is flagged', () => {
+  const { context, host } = fixture();
+  const state = context.getMarketStudyState();
+  state.summaryStale = {};
+  context.setMarketStudyState(state);
+  context.renderMarketSummaryChat();
+  assert.match(host.innerHTML, /class="market-summary-chat-stale" hidden>/);
+  // The CSS must re-hide it too: display:flex on the class beats the UA
+  // [hidden] rule, which is what left a ghost bar on screen before.
+  const css = fs.readFileSync(
+    path.join(root, 'assets/css/project-form/05a_market_summary_chat.css'), 'utf8');
+  assert.match(css, /\.market-summary-chat-stale\[hidden\]\s*\{\s*display:\s*none/);
+});
+
+test('the composer keeps a foot row with a real checkbox and the send action', () => {
+  const { context, host } = fixture();
+  context.renderMarketSummaryChat();
+  const foot = host.innerHTML.slice(
+    host.innerHTML.indexOf('market-summary-chat-composer-foot'));
+  assert.match(foot, /id="marketSummaryChatResearch"/);
+  assert.match(foot, /sendMarketSummaryChat\(\)/);
+  // The global input rule (width:100%, min-height:42px) tiles checkboxes —
+  // the chat pins its research toggle back to checkbox size.
+  const css = fs.readFileSync(
+    path.join(root, 'assets/css/project-form/05a_market_summary_chat.css'), 'utf8');
+  assert.match(css, /\.market-summary-chat-research input\[type="checkbox"\][^}]*min-height:\s*0/);
+});
+
+test('the panel header uses word buttons, not icon glyphs', () => {
+  const { context, inputs } = fixture();
+  context.mountMarketSummaryChat(inputs['section-market-study']);
+  const wrap = inputs['section-market-study'].children[0];
+  assert.match(wrap.innerHTML, />إخفاء</);
+  assert.match(wrap.innerHTML, />إنهاء</);
+  assert.doesNotMatch(wrap.innerHTML, /&gt;&lt;|>×</);
 });

@@ -994,8 +994,8 @@
       bottom: 84px;
       inset-inline-end: 18px;
       z-index: 451;
-      width: min(420px, calc(100vw - 24px));
-      height: min(560px, calc(100vh - 24px));
+      width: min(400px, calc(100vw - 24px));
+      height: min(480px, calc(100vh - 96px));
       display: flex;
       flex-direction: column;
       gap: 10px;
@@ -1035,6 +1035,8 @@
       justify-content: space-between;
       gap: 8px;
       flex: 0 0 auto;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #e8eef4;
     }
 
     .land-chat-title {
@@ -1050,21 +1052,22 @@
     }
 
     .land-chat-action {
-      border: 0;
-      background: none;
-      color: #64748b;
+      border: 1px solid #e2e8f0;
+      background: var(--white, #fff);
+      color: #475569;
       font: inherit;
-      font-size: 17px;
-      font-weight: 900;
+      font-size: 12px;
+      font-weight: 800;
       line-height: 1;
       cursor: pointer;
-      padding: 5px 10px;
-      border-radius: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
     }
 
     .land-chat-action:hover {
-      background: #e8eef4;
-      color: var(--p, #07182c);
+      border-color: var(--teal, #0fa9c4);
+      background: var(--teal-soft, #dff6fb);
+      color: var(--teal-dark, #0a829b);
     }
 
     .land-chat-confirm {

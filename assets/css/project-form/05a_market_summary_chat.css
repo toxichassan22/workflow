@@ -26,6 +26,10 @@
   min-height: 0;
   max-height: none;
   overflow-y: auto;
+  background: var(--white, #FFFFFF);
+  border: 1px solid #e8eef4;
+  border-radius: 12px;
+  padding: 10px;
 }
 
 .market-summary-chat-axistag {
@@ -37,14 +41,42 @@
 .market-summary-chat-composer {
   display: grid;
   gap: 8px;
+  flex: 0 0 auto;
+}
+
+.market-summary-chat-composer textarea {
+  min-height: 52px;
+}
+
+.market-summary-chat-composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .market-summary-chat-research {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 700;
   color: #475569;
+  cursor: pointer;
+}
+
+/* The global input rule sets width:100% and min-height:42px on every input —
+   without this override the research checkbox renders as a giant blue tile. */
+.market-summary-chat-research input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--teal, #0FA9C4);
+  cursor: pointer;
 }
 
 .best-use-chat-message.error {
@@ -65,11 +97,40 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
+  flex: 0 0 auto;
   padding: 10px 12px;
   border: 1px solid #fde68a;
   border-radius: 10px;
   background: #fffbeb;
+}
+
+/* display:flex beats the UA [hidden] rule — re-declare it or the bar shows
+   permanently with an empty item list. */
+.market-summary-chat-stale[hidden] {
+  display: none;
+}
+
+.market-summary-chat-stale-text {
+  display: grid;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.market-summary-chat-stale-title {
+  font-size: 12.5px;
+  font-weight: 800;
+  color: #92400e;
+}
+
+.market-summary-chat-stale-items {
+  font-size: 12px;
+  color: #78716c;
+  overflow-wrap: anywhere;
+}
+
+.market-summary-chat-stale .btn {
+  flex: 0 0 auto;
 }
 
 .market-summary-stale-tag {

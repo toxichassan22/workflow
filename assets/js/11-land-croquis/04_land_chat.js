@@ -66,8 +66,8 @@
       const fab = document.getElementById('landChatFab');
       if (!panel || panel.hidden || !fab) return;
       const rect = fab.getBoundingClientRect();
-      const width = panel.offsetWidth || Math.min(420, window.innerWidth - 24);
-      const height = panel.offsetHeight || Math.min(560, window.innerHeight - 24);
+      const width = panel.offsetWidth || Math.min(400, window.innerWidth - 24);
+      const height = panel.offsetHeight || Math.min(480, window.innerHeight - 96);
       const gap = 10;
       let top = rect.top - gap - height;
       if (top < 12) top = rect.bottom + gap;
@@ -197,8 +197,8 @@
         '<div class="land-chat-header">' +
         '<div class="land-chat-title">شات تنظيمات الأرض</div>' +
         '<div class="land-chat-actions">' +
-        '<button type="button" class="land-chat-action" id="landChatMinimize" title="إخفاء" aria-label="إخفاء" onclick="toggleLandChat(false)">&gt;&lt;</button>' +
-        '<button type="button" class="land-chat-action" id="landChatEnd" title="إنهاء" aria-label="إنهاء" onclick="showLandChatEndConfirm()">×</button>' +
+        '<button type="button" class="land-chat-action" id="landChatMinimize" onclick="toggleLandChat(false)">إخفاء</button>' +
+        '<button type="button" class="land-chat-action" id="landChatEnd" onclick="showLandChatEndConfirm()">إنهاء</button>' +
         '</div></div>' +
         '<div class="land-chat-messages" id="landChatMessages"></div>' +
         '<div class="land-chat-input-row">' +
@@ -224,7 +224,7 @@
         const size = JSON.parse(localStorage.getItem(LAND_CHAT_SIZE_KEY) || 'null');
         if (size && Number.isFinite(size.width) && Number.isFinite(size.height)) {
           panel.style.width = Math.min(size.width, window.innerWidth - 24) + 'px';
-          panel.style.height = Math.min(size.height, window.innerHeight - 24) + 'px';
+          panel.style.height = Math.min(size.height, Math.max(260, window.innerHeight - 96)) + 'px';
         }
       } catch (error) {}
       const input = wrap.querySelector('#landChatInput');
