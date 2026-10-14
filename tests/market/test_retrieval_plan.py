@@ -138,9 +138,11 @@ class BuildSourcePlanTests(unittest.TestCase):
                             and 'شقق-للبيع/جدة' in u for u in decoded))
         self.assertTrue(any(u.startswith('https://sa.aqar.fm/')
                             and 'شقق-للإيجار/جدة' in u for u in decoded))
-        urls = [entry['url'] for entry in listings]
-        self.assertIn('https://www.bayut.sa/en/for-sale/apartments/jeddah/', urls)
-        self.assertIn('https://wasalt.sa/en/apartments-for-rent-in-jeddah', urls)
+        # Owner rule: aqar.fm is the only classifieds portal — no bayut,
+        # wasalt or dealapp anywhere in the plan (catalog or generated).
+        urls = [entry['url'] for entry in plan]
+        self.assertFalse(any(host in url for url in urls
+                             for host in ('bayut.sa', 'wasalt.sa', 'dealapp.sa')))
 
     def test_mixed_use_pulls_every_component_kind_sources(self):
         plan = market_study.build_source_plan(

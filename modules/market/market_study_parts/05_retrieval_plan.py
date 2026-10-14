@@ -65,32 +65,14 @@ _USE_TO_SOURCE_KIND = {
     'industrial': 'صناعي ولوجستي', 'logistics': 'صناعي ولوجستي',
 }
 
-# Arabic city → the English slug bayut.sa/wasalt.sa use in listing paths.
-# Keys are looked up after _fold_choice, so alef/ya variants need no dupes.
-_CITY_SLUG_EN = {_fold_choice(key): slug for key, slug in {
-    'الرياض': 'riyadh', 'جدة': 'jeddah', 'مكة المكرمة': 'makkah', 'مكة': 'makkah',
-    'المدينة المنورة': 'madinah', 'المدينة': 'madinah', 'الدمام': 'dammam',
-    'الخبر': 'khobar', 'الظهران': 'dhahran', 'أبها': 'abha', 'تبوك': 'tabuk',
-    'بريدة': 'buraydah', 'الطائف': 'taif', 'الأحساء': 'al-ahsa',
-    'القطيف': 'qatif', 'الجبيل': 'jubail', 'ينبع': 'yanbu', 'حائل': 'hail',
-    'جازان': 'jazan', 'نجران': 'najran', 'عرعر': 'arar', 'سكاكا': 'sakaka',
-    'خميس مشيط': 'khamis-mushait', 'الهفوف': 'hofuf', 'الخرج': 'kharj',
-}.items()}
-# An already-Latin city name resolves to itself.
-for _slug in list(_CITY_SLUG_EN.values()):
-    _CITY_SLUG_EN.setdefault(_slug, _slug)
-
-# Listing category slug per source kind, per portal. aqar.fm paths are Arabic
-# ({cat}-للبيع/{city}); bayut.sa English (/en/for-sale/{cat}/{city}/);
-# wasalt.sa English (/en/{cat}-for-sale-in-{city}).
+# Listing category slug per source kind on aqar.fm — the only classifieds
+# portal planned; its paths are Arabic ({cat}-للبيع/{city}).
 _LISTING_CATEGORIES = {
-    'سكني': {'aqar': ['شقق'], 'bayut': ['apartments'], 'wasalt': ['apartments']},
-    'تجاري': {'aqar': ['مكاتب', 'محلات'], 'bayut': ['offices', 'commercial'],
-              'wasalt': ['commercial-properties']},
-    'فندقي': {'aqar': ['شقق'], 'bayut': ['apartments'], 'wasalt': ['apartments']},
-    'صناعي ولوجستي': {'aqar': ['مستودعات'], 'bayut': ['commercial'],
-                      'wasalt': ['commercial-properties']},
-    '_default': {'aqar': ['شقق'], 'bayut': ['apartments'], 'wasalt': ['apartments']},
+    'سكني': ['شقق'],
+    'تجاري': ['مكاتب', 'محلات'],
+    'فندقي': ['شقق'],
+    'صناعي ولوجستي': ['مستودعات'],
+    '_default': ['شقق'],
 }
 
 _DATASET_LABELS = {
@@ -216,32 +198,19 @@ def _payload_source_kinds(payload):
 
 
 def _listing_urls(kinds, ops, city):
-    """City-scoped listing pages on the classifieds portals — the current
-    asking-price stock a resident actually sees. Every one is a bot-walled
-    SPA, so callers always emit them needs_browser=True."""
-    city_slug = _CITY_SLUG_EN.get(_fold_choice(city))
-    categories = {'aqar': [], 'bayut': [], 'wasalt': []}
+    """City-scoped aqar.fm listing pages — the current asking-price stock a
+    resident actually sees. aqar is a bot-walled SPA, so callers always emit
+    these needs_browser=True."""
+    categories = []
     for kind in kinds or ['_default']:
-        table = _LISTING_CATEGORIES.get(kind) or _LISTING_CATEGORIES['_default']
-        for portal, cats in table.items():
-            for cat in cats:
-                if cat not in categories[portal]:
-                    categories[portal].append(cat)
+        for cat in (_LISTING_CATEGORIES.get(kind) or _LISTING_CATEGORIES['_default']):
+            if cat not in categories:
+                categories.append(cat)
     for op in sorted(ops):
         rent = op == 'إيجار'
-        for cat in categories['aqar']:
+        for cat in categories:
             yield (f'https://sa.aqar.fm/{quote(cat + ("-للإيجار" if rent else "-للبيع"))}/{quote(city)}',
                    f'aqar.fm — {cat} {op} — {city}')
-        if not city_slug:
-            continue
-        for cat in categories['bayut']:
-            segment = 'to-rent' if rent else 'for-sale'
-            yield (f'https://www.bayut.sa/en/{segment}/{cat}/{city_slug}/',
-                   f'bayut.sa — {cat} {segment} — {city_slug}')
-        for cat in categories['wasalt']:
-            segment = 'rent' if rent else 'sale'
-            yield (f'https://wasalt.sa/en/{cat}-for-{segment}-in-{city_slug}',
-                   f'wasalt.sa — {cat} for {segment} — {city_slug}')
 
 
 def build_source_plan(payload, offer_lang='ar'):

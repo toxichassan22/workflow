@@ -409,7 +409,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         prompt = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
         self.assertIn('رابط النطاق وحده أو الصفحة الرئيسية غير مقبول', prompt)
         app_source = read_module_source('app.py')
-        self.assertIn("market_study.apply_search_citations(merged, citation_urls)", app_source)
+        self.assertIn("market_study.apply_search_citations(merged, evidence_urls)", app_source)
 
     def test_portal_homepage_links_resolve_to_the_dataset_page(self):
         import market_study
@@ -1149,8 +1149,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
                 'ValuStrat valustrat.com', 'Deloitte deloitte.com/middle-east',
                 'PwC pwc.com/m1', 'KPMG kpmg.com/sa', 'EY ey.com',
                 'STR str.com أو CoStar costar.com للفنادق'],
-            4: ['منصة عقار aqar.fm', 'بيوت السعودية bayut.sa', 'وصلت wasalt.sa',
-                'تطبيق ديل dealapp.sa', 'منصات المسوقين العقاريين المرخصين'],
+            4: ['منصة عقار aqar.fm', 'منصات المسوقين العقاريين المرخصين'],
             5: ['Google Maps للمواقع والمسافات والخدمات maps.google.com',
                 'Google Places للتقييمات والحركة المحيطة',
                 'المواقع الإخبارية الموثوقة',
@@ -1166,7 +1165,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
                 'سكني sakani.sa وNHC nhc.sa', 'الأمانة وبلدي balady.gov.sa',
                 'المواقع الرسمية للمطورين',
                 'تقارير CBRE cbre.sa وJLL jll.com/en-sa وKnight Frank knightfrank.com.sa وColliers colliers.com/en-sa',
-                'منصات الإعلانات العقارية aqar.fm وbayut.sa وwasalt.sa',
+                'منصة عقار aqar.fm',
                 'Google Maps للموقع والخدمات فقط',
             ],
             'تجاري': [
@@ -1177,7 +1176,7 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
                 'المواقع الرسمية للمراكز والمشروعات التجارية',
                 'تداول saudiexchange.sa وتقارير الصناديق العقارية',
                 'CBRE cbre.sa وJLL jll.com/en-sa وKnight Frank knightfrank.com.sa وColliers colliers.com/en-sa وSavills savills.me',
-                'منصات التأجير والإعلانات aqar.fm وbayut.sa وwasalt.sa',
+                'منصة عقار aqar.fm',
                 'Google Maps وGoogle Places للخدمات والتقييمات',
             ],
             'فندقي': [

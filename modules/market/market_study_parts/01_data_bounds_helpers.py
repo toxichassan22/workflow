@@ -98,8 +98,7 @@ SOURCE_PRIORITY = {
         'STR str.com أو CoStar costar.com للفنادق',
     ],
     4: [
-        'منصة عقار aqar.fm', 'بيوت السعودية bayut.sa', 'وصلت wasalt.sa',
-        'تطبيق ديل dealapp.sa', 'منصات المسوقين العقاريين المرخصين',
+        'منصة عقار aqar.fm', 'منصات المسوقين العقاريين المرخصين',
     ],
     5: [
         'Google Maps للمواقع والمسافات والخدمات maps.google.com',
@@ -208,7 +207,7 @@ TYPE_SOURCE_PRIORITY = {
         'الأمانة وبلدي balady.gov.sa',
         'المواقع الرسمية للمطورين',
         'تقارير CBRE cbre.sa وJLL jll.com/en-sa وKnight Frank knightfrank.com.sa وColliers colliers.com/en-sa',
-        'منصات الإعلانات العقارية aqar.fm وbayut.sa وwasalt.sa',
+        'منصة عقار aqar.fm',
         'Google Maps للموقع والخدمات فقط',
     ],
     'تجاري': [
@@ -221,7 +220,7 @@ TYPE_SOURCE_PRIORITY = {
         'المواقع الرسمية للمراكز والمشروعات التجارية',
         'تداول saudiexchange.sa وتقارير الصناديق العقارية',
         'CBRE cbre.sa وJLL jll.com/en-sa وKnight Frank knightfrank.com.sa وColliers colliers.com/en-sa وSavills savills.me',
-        'منصات التأجير والإعلانات aqar.fm وbayut.sa وwasalt.sa',
+        'منصة عقار aqar.fm',
         'Google Maps وGoogle Places للخدمات والتقييمات',
     ],
     'فندقي': [
