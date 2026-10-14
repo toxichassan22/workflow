@@ -220,7 +220,9 @@ def _visual_plan_create_scene(data, context=None):
         'Return ONLY a proposed footprint polygon per existing building, entries on recorded street '
         'edges, and optional open areas. Every footprint must stay wholly inside one parcel, satisfy '
         'the recorded setbacks, have the exact required footprintArea, and not overlap another '
-        'above-ground building. Basement-only footprints may overlap buildings and have no imposed '
+        'above-ground building. A buildable envelope polygon per parcel is provided below — it '
+        'already subtracts the recorded setbacks, so a footprint wholly inside it is compliant. '
+        'Basement-only footprints may overlap buildings and have no imposed '
         'above-ground setbacks. Do not invent building counts, parking capacity or floor heights. '
         'Apply every validated client note, and do not silently ignore a note. Facade styles are '
         'limited to material neutral|glass|stone|metal|render, pattern plain|grid|vertical|horizontal, '
@@ -237,7 +239,14 @@ def _visual_plan_create_scene(data, context=None):
         '"position":0.5}],"openAreas":[{"id":"open_1","componentId":"row_1",'
         '"kind":"landscape|surface_parking","polygon":[[0,0],[1,0],[1,1]]}]}.'
     )
+    envelopes = visual_plan_scene.buildable_envelopes(contract)
+    envelope_note = ''
+    if envelopes:
+        envelope_note = ('\nBUILDABLE ENVELOPE AFTER RECORDED SETBACKS — place every above-ground '
+                         'footprint inside one of these polygons:\n'
+                         + json.dumps(envelopes, ensure_ascii=False))
     user_prompt = ('COMPLETE FIXED LAND AND PROJECT CONTRACT:\n' + json.dumps(contract, ensure_ascii=False)
+                   + envelope_note
                    + '\nBUILDINGS AND FLOOR PROGRAM TO PLACE WITHOUT CHANGES:\n'
                    + json.dumps(program, ensure_ascii=False))
     feedback = ''
@@ -316,8 +325,23 @@ def _visual_plan_create_scene(data, context=None):
                         + ('\nIt returned no footprint for building ids: ' + ', '.join(missing)
                            + ' — return exactly one footprint per program building id.'
                            if missing else '')
-                        + '\nCorrect only the proposed scene; the fixed contract remains unchanged.')
-    if raw_keys:
+                        + '\nCorrect only the proposed scene; the fixed contract remains unchanged.'
+                        + ' Keep every footprint inside the provided buildable envelope polygons.')
+    fallback_error = None
+    try:
+        scene = visual_plan_scene.fallback_scene(contract, program, VISUAL_PLAN_SCENE_VERSION)
+        app.logger.info('Visual plan layout sealed by deterministic placement after model failures')
+        return _visual_plan_seal_scene(data, scene, context), context, reference_url
+    except visual_plan_geometry.PlanGeometryError as failure:
+        fallback_error = failure
+    if error is None or getattr(error, 'code', '') != 'PLANS_PROVIDER_FAILED':
+        error = fallback_error
+    else:
+        app.logger.warning('Deterministic plan fallback also failed: %s', fallback_error)
+    if error is None:
+        error = visual_plan_geometry.PlanGeometryError(
+            'تعذر إنشاء توزيع هندسي صالح للمخططات.', 'PLANS_LAYOUT_INVALID')
+    if raw_keys and error is not fallback_error:
         error = visual_plan_geometry.PlanGeometryError(
             str(error) + ' — المفاتيح الواصلة: ' + '، '.join(raw_keys[:12]), error.code)
     raise error

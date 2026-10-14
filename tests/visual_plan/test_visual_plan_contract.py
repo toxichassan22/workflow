@@ -133,6 +133,56 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(missing_notes.status_code, 400)
         self.assertEqual(missing_notes.get_json()['error_code'], 'PLANS_NOTES_INVALID')
 
+    def test_prepare_seals_a_deterministic_scene_when_the_model_breaks_setbacks(self):
+        """The layout model answered twice with a footprint parked on the west
+        boundary — inside the recorded 5 m setback — which used to surface as
+        'PLANS_SETBACK_CONFLICT' after both retries. Prepare now falls back to
+        deterministic placement inside the setback envelope and still seals a
+        valid scene."""
+        module = self.application_module
+        project = self.project()
+        bad_layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[0, 0], [10, 0], [10, 10], [0, 10]]}],
+            'entries': [], 'openAreas': []})
+        response_body = {'choices': [{'message': {'content': bad_layout}}]}
+        with patch.object(module, 'call_openrouter_chat', return_value=response_body) as chat, \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            response = self.app.test_client().post('/api/visual-concept/plans-prompts',
+                headers=self._headers(self.token_a),
+                json={'projectData': project, 'plansWorkflow': self.workflow(project)})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(chat.call_count, 2)
+        scene = response.get_json()['scene']
+        self.assertEqual(len(scene['buildings']), 1)
+        footprint = scene['buildings'][0]['footprint']
+        self.assertAlmostEqual(abs(sum(a[0] * b[1] - b[0] * a[1]
+                                       for a, b in zip(footprint, footprint[1:] + footprint[:1])) / 2),
+                               120, places=4)
+        self.assertGreaterEqual(min(point[0] for point in footprint), 5)
+        self.assertGreaterEqual(min(point[1] for point in footprint), 3)
+
+    def test_prepare_still_refuses_when_nothing_can_fit_the_setbacks(self):
+        """A program whose footprints cannot fit inside the setback envelope
+        fails with the capacity explanation instead of the model's rejection."""
+        module = self.application_module
+        project = self.project()
+        project['approved_coverage_ratio'] = 90
+        workflow = self.workflow(project)
+        workflow['distribution']['rows'][0]['floor_area_sqm'] = 900
+        bad_layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[0, 0], [10, 0], [10, 10], [0, 10]]}]})
+        response_body = {'choices': [{'message': {'content': bad_layout}}]}
+        with patch.object(module, 'call_openrouter_chat', return_value=response_body), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            response = self.app.test_client().post('/api/visual-concept/plans-prompts',
+                headers=self._headers(self.token_a),
+                json={'projectData': project, 'plansWorkflow': workflow})
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()['error_code'], 'PLANS_SETBACK_CONFLICT')
+        self.assertIn('لا تتسع', response.get_json()['error'])
+
     def test_fixed_geometry_plans_do_not_chain_image_approvals(self):
         module = self.application_module
         project = self.project()

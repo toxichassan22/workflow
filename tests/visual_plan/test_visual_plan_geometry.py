@@ -3,7 +3,8 @@ import unittest
 
 from visual_plan_context import croquis_contract, primary_frontage, recorded_setbacks
 from visual_plan_geometry import (PlanGeometryError, boundary_geometry, fit_projection,
-                                  isometric_projection, polygons_overlap, validate_footprint)
+                                  isometric_projection, polygons_overlap, setback_envelope,
+                                  validate_footprint)
 
 
 class VisualPlanGeometryTests(unittest.TestCase):
@@ -40,6 +41,34 @@ class VisualPlanGeometryTests(unittest.TestCase):
             validate_footprint([[1, 2], [10, 2], [10, 10], [1, 10]], geometry, {'west': 5})
         self.assertEqual(caught.exception.code, 'PLANS_SETBACK_CONFLICT')
         validate_footprint([[6, 4], [12, 4], [12, 10], [6, 10]], geometry, {'west': 5, 'south': 3})
+
+    def test_setback_envelope_insets_each_recorded_direction(self):
+        geometry = boundary_geometry([{'eastings': x, 'northings': y}
+                                      for x, y in ((0, 0), (40, 0), (40, 30), (0, 30))])
+        setbacks = {'west': 5, 'east': 3, 'north': 3, 'south': 3}
+        envelope = setback_envelope(geometry['parcels'][0]['polygon'], setbacks)
+        self.assertEqual(sorted((round(x, 6), round(y, 6)) for x, y in envelope),
+                         [(5, 3), (5, 27), (37, 3), (37, 27)])
+        accepted = validate_footprint([[5, 3], [37, 3], [37, 27], [5, 27]], geometry, setbacks)
+        self.assertEqual(accepted[0], [5, 3])
+        with self.assertRaises(PlanGeometryError) as caught:
+            validate_footprint([[4, 3], [37, 3], [37, 27], [4, 27]], geometry, setbacks)
+        self.assertEqual(caught.exception.code, 'PLANS_SETBACK_CONFLICT')
+
+    def test_setback_envelope_empties_when_setbacks_consume_the_parcel(self):
+        geometry = boundary_geometry([{'eastings': x, 'northings': y}
+                                      for x, y in ((0, 0), (40, 0), (40, 30), (0, 30))])
+        self.assertLess(len(setback_envelope(geometry['parcels'][0]['polygon'],
+                                             {'west': 20, 'east': 20, 'north': 10, 'south': 10})), 3)
+        no_setbacks = setback_envelope(geometry['parcels'][0]['polygon'], {})
+        self.assertEqual(len(no_setbacks), 4)
+
+    def test_setback_envelope_clips_concave_notch_edges(self):
+        geometry = boundary_geometry(self.points())
+        envelope = setback_envelope(geometry['parcels'][0]['polygon'], {'east': 4})
+        self.assertTrue(envelope)
+        accepted = validate_footprint([[x, y] for x, y in envelope], geometry, {'east': 4})
+        self.assertTrue(accepted)
 
     def test_per_point_parcel_ids_merge_into_one_boundary(self):
         points = [{'point': str(index + 1), 'parcel_id': f'P-{index + 1}',

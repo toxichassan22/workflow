@@ -3,8 +3,8 @@ import math
 import re
 
 from visual_plan_geometry import (DIRECTION_VECTORS, EPSILON, PlanGeometryError, finite_number,
-                                  parcel_edges, polygon_inside, polygons_overlap, signed_area,
-                                  validate_footprint, validate_polygon)
+                                  parcel_edges, polygon_inside, polygons_overlap, setback_envelope,
+                                  signed_area, validate_footprint, validate_polygon)
 
 
 MATERIALS = ('neutral', 'glass', 'stone', 'metal', 'render')
@@ -153,21 +153,19 @@ def validate_scene(scene, contract, program):
     return scene
 
 
-def _basement_footprint(geometry, area):
-    """Deterministic footprint for a basement-only mass the layout omitted: an
-    axis-aligned rect of the exact recorded area searched inside the largest
-    parcel. Basements carry no setbacks and may overlap other masses, so any
-    in-parcel position validates — the layout model only picks a shape."""
+def _rect_search(regions, area, blocked=()):
+    """Grid search for an axis-aligned rect of the exact required area, wholly
+    inside one region and clear of every blocked footprint — the deterministic
+    placement the layout fallbacks share. Largest region first."""
     wanted = finite_number(area)
     if not wanted or wanted <= 0:
         return None
-    parcels = sorted(geometry['parcels'], key=lambda item: -abs(signed_area(item['polygon'])))
-    for parcel in parcels:
-        poly = parcel['polygon']
-        min_x = min(point[0] for point in poly)
-        max_x = max(point[0] for point in poly)
-        min_y = min(point[1] for point in poly)
-        max_y = max(point[1] for point in poly)
+    for region in sorted((r for r in regions if len(r) >= 3),
+                         key=lambda item: -abs(signed_area(item))):
+        min_x = min(point[0] for point in region)
+        max_x = max(point[0] for point in region)
+        min_y = min(point[1] for point in region)
+        max_y = max(point[1] for point in region)
         for ratio in (1.0, 1.3, 1.7, 2.3, 0.77, 0.59, 0.44, 3.1, 0.32, 4.0, 0.25):
             width = math.sqrt(wanted * ratio)
             height = wanted / width
@@ -178,9 +176,55 @@ def _basement_footprint(geometry, area):
                     x = min_x + (max_x - min_x - width) * fx / 20
                     y = min_y + (max_y - min_y - height) * fy / 20
                     rect = [[x, y], [x + width, y], [x + width, y + height], [x, y + height]]
-                    if polygon_inside(rect, poly):
+                    if polygon_inside(rect, region) and not any(
+                            polygons_overlap(rect, item) for item in blocked):
                         return rect
     return None
+
+
+def _basement_footprint(geometry, area):
+    """Deterministic footprint for a basement-only mass the layout omitted: an
+    axis-aligned rect of the exact recorded area searched inside the largest
+    parcel. Basements carry no setbacks and may overlap other masses, so any
+    in-parcel position validates — the layout model only picks a shape."""
+    return _rect_search([parcel['polygon'] for parcel in geometry['parcels']], area)
+
+
+def buildable_envelopes(contract):
+    """Per-parcel buildable region after the recorded setbacks — handed to the
+    layout model and to the deterministic fallback so footprints start inside
+    the legal zone instead of discovering it by rejection."""
+    envelopes = []
+    for parcel in contract['geometry']['parcels']:
+        envelope = setback_envelope(parcel['polygon'], contract.get('setbacks'))
+        if len(envelope) >= 3:
+            envelopes.append({'parcelId': parcel['id'], 'polygon': envelope})
+    return envelopes
+
+
+def fallback_scene(contract, program, version=1):
+    """Deterministic last-resort layout — exact-area rects placed inside the
+    setback envelopes — tried only when the layout model fails, so prepare
+    still seals a valid scene or refuses with the precise capacity reason."""
+    envelopes = [item['polygon'] for item in buildable_envelopes(contract)]
+    placed = {}
+    for building in sorted(program['buildings'],
+                           key=lambda item: -(finite_number(item['footprintArea']) or 0)):
+        if building.get('basementOnly'):
+            continue
+        footprint = _rect_search(envelopes, building['footprintArea'], list(placed.values()))
+        if footprint is None:
+            required = sum(finite_number(item['footprintArea']) or 0
+                           for item in program['buildings'] if not item.get('basementOnly'))
+            available = sum(abs(signed_area(item)) for item in envelopes)
+            raise PlanGeometryError(
+                f'بصمات المباني المطلوبة {required:g} م² لا تتسع داخل منطقة البناء بعد الارتدادات المسجلة '
+                f'(~{available:g} م² متاحة) — قلّل مساحة أكبر دور في التوزيع أو راجع الارتدادات.',
+                'PLANS_SETBACK_CONFLICT')
+        placed[building['id']] = footprint
+    layout = [{'id': building['id'], 'footprint': placed[building['id']]}
+              for building in program['buildings'] if building['id'] in placed]
+    return make_scene(contract, program, {'buildings': layout}, version)
 
 
 def make_scene(contract, program, layout, version=1):

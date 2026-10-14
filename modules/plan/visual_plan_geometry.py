@@ -196,6 +196,58 @@ def polygons_overlap(first, second):
     return False
 
 
+def clip_halfplane(polygon, a, b, sign):
+    """Sutherland-Hodgman clip of a polygon against the line through shifted
+    edge ab, keeping the parcel-interior side: sign*cross(b-a, p-a) >= 0."""
+    direction = (b[0] - a[0], b[1] - a[1])
+
+    def offset(point):
+        return sign * (direction[0] * (point[1] - a[1]) - direction[1] * (point[0] - a[0]))
+
+    clipped = []
+    previous, previous_in = polygon[-1], offset(polygon[-1]) >= -EPSILON
+    for point in polygon:
+        current_in = offset(point) >= -EPSILON
+        if current_in != previous_in:
+            denominator = direction[0] * (point[1] - previous[1]) - direction[1] * (point[0] - previous[0])
+            if abs(denominator) > EPSILON:
+                t = (direction[0] * (a[1] - previous[1]) - direction[1] * (a[0] - previous[0])) / denominator
+                clipped.append([previous[0] + t * (point[0] - previous[0]),
+                                previous[1] + t * (point[1] - previous[1])])
+        if current_in:
+            clipped.append(point)
+        previous, previous_in = point, current_in
+    return clipped
+
+
+def setback_envelope(polygon, setbacks):
+    """The buildable region of one parcel after the recorded setbacks: the
+    parcel clipped by each recorded-direction edge shifted inward by its
+    setback. A point inside keeps at least the setback distance from every
+    setback edge's supporting line, and segment distance never undershoots line
+    distance — so a footprint wholly inside the envelope always passes the
+    recorded setback check. Convex parcels get the exact feasible region."""
+    envelope = [list(point) for point in polygon]
+    if not setbacks or len(envelope) < 3:
+        return envelope
+    sign = 1.0 if signed_area(polygon) > 0 else -1.0
+    for a, b in segments(polygon):
+        setback = finite_number(setbacks.get(edge_direction(a, b, polygon)))
+        if not setback or setback <= 0:
+            continue
+        length = math.hypot(b[0] - a[0], b[1] - a[1])
+        if not length:
+            continue
+        shift = (-(b[1] - a[1]) * sign * setback / length, (b[0] - a[0]) * sign * setback / length)
+        envelope = clip_halfplane(envelope, (a[0] + shift[0], a[1] + shift[1]),
+                                  (b[0] + shift[0], b[1] + shift[1]), sign)
+        if not envelope:
+            break
+    if len(envelope) < 3 or abs(signed_area(envelope)) <= EPSILON:
+        return []
+    return envelope
+
+
 def validate_footprint(value, geometry, setbacks=None):
     polygon = validate_polygon(value, limit=24)
     parcel = next((item for item in geometry['parcels'] if polygon_inside(polygon, item['polygon'])), None)
