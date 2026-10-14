@@ -327,5 +327,151 @@ class BestUseScanPoolTests(unittest.TestCase):
                                  call['kwargs'])
 
 
+_RESUMED_PAGE = 'https://ejar.sa/reports/previous-run'
+
+
+class FailedJobResumeTests(unittest.TestCase):
+    """A failed market job keeps the pages it already paid for, and the next
+    same-draft run of the same kind starts with them in the pool instead of
+    re-fetching — continuation after a deadline, not a restart."""
+
+    PAYLOAD = {'city': 'جدة', 'district': 'النرجس', 'projectType': 'سكني'}
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        db.DB_PATH = os.path.join(cls.temp_dir.name, 'resume-pool.db')
+        import app as application_module
+        cls.application_module = application_module
+        cls.app = application_module.app
+        cls.app.config.update(TESTING=True)
+        with cls.app.app_context():
+            db.init_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temp_dir.cleanup()
+
+    def setUp(self):
+        self.uploads = tempfile.TemporaryDirectory()
+        self.addCleanup(self.uploads.cleanup)
+
+    def _write_failed_job(self, tenant, job_id, draft_id, pages):
+        module = self.application_module
+        with patch.object(module, 'UPLOADS_DIR', self.uploads.name):
+            module._write_market_job(tenant, job_id, {
+                'status': 'failed',
+                'success': False,
+                'kind': 'summary',
+                'payload': {'kind': 'summary', 'data': {'draftId': draft_id}},
+                'evidencePages': list(pages),
+            })
+
+    def _capture_agent(self, fx, pools):
+        def fake_agent(task, usage_ctx=None, **kwargs):
+            pools.append(kwargs.get('evidence_pool'))
+            return _reply(fx.payload, pages=fx.citation_pages)
+        fx.fake_agent = fake_agent
+
+    def test_failed_job_file_keeps_the_runs_evidence_pages(self):
+        module = self.application_module
+        fx = _Fixture()
+
+        def failing_agent(task, usage_ctx=None, **kwargs):
+            # The deadline case: the agent dies mid-run but the pages it
+            # already fetched sit in the job's pool — they must survive.
+            pool = kwargs.get('evidence_pool')
+            if pool is not None:
+                pool.add_page(_RESUMED_PAGE, title='تقرير إيجار قديم',
+                              content='نص الصفحة المقروء')
+            return {'error': {'message': 'deadline_exceeded'}}
+        fx.fake_agent = failing_agent
+
+        with patch.object(module, 'UPLOADS_DIR', self.uploads.name), \
+                fx.patches(module):
+            module._market_job_worker(
+                self.app, 't-resume', 'summary',
+                dict(self.PAYLOAD, draftId='d-1'), 'jobfail001')
+            job = module._read_market_job('t-resume', 'jobfail001')
+
+        self.assertIsNotNone(job)
+        self.assertEqual(job.get('status'), 'failed')
+        kept = [page.get('url') for page in job.get('evidencePages') or []]
+        self.assertIn(_RESUMED_PAGE, kept)
+
+    def test_next_same_draft_run_preloads_failed_evidence(self):
+        module = self.application_module
+        self._write_failed_job('t-resume', 'jobfail002', 'd-9', [{
+            'url': _RESUMED_PAGE,
+            'title': 'تقرير إيجار قديم',
+            'content': 'نص الصفحة المقروء من المحاولة السابقة',
+        }])
+        fx = _Fixture()
+        pools = []
+        self._capture_agent(fx, pools)
+
+        with self.app.app_context(), \
+                patch.object(module, 'UPLOADS_DIR', self.uploads.name), \
+                fx.patches(module):
+            result = module._execute_market_summary(
+                dict(self.PAYLOAD, draftId='d-9'), tenant_id='t-resume')
+
+        self.assertTrue(result['success'], result)
+        self.assertIsNone(result.get('evidencePages'))
+        self.assertTrue(pools, 'the browse call never ran')
+        urls = [page.get('url') for page in pools[0].pages()]
+        self.assertIn(_RESUMED_PAGE, urls)
+
+    def test_resume_never_crosses_into_another_draft(self):
+        module = self.application_module
+        self._write_failed_job('t-resume', 'jobfail003', 'd-9', [{
+            'url': _RESUMED_PAGE, 'title': 'x', 'content': 'y',
+        }])
+        fx = _Fixture()
+        pools = []
+        self._capture_agent(fx, pools)
+
+        with self.app.app_context(), \
+                patch.object(module, 'UPLOADS_DIR', self.uploads.name), \
+                fx.patches(module):
+            result = module._execute_market_summary(
+                dict(self.PAYLOAD, draftId='d-10'), tenant_id='t-resume')
+
+        self.assertTrue(result['success'], result)
+        self.assertTrue(pools)
+        urls = [page.get('url') for page in pools[0].pages()]
+        self.assertNotIn(_RESUMED_PAGE, urls)
+
+    def test_stale_failed_jobs_are_not_resumed(self):
+        module = self.application_module
+        # Written by hand so `updatedAt` can sit beyond the resume window —
+        # evidence from a day-old failure must not steer a fresh run.
+        job_dir = os.path.join(self.uploads.name, '.market_jobs', 't-resume')
+        os.makedirs(job_dir)
+        with open(os.path.join(job_dir, 'jobstale01.json'), 'w',
+                  encoding='utf-8') as fh:
+            json.dump({
+                'status': 'failed', 'success': False, 'kind': 'summary',
+                'updatedAt': time.time() - 90000,
+                'payload': {'kind': 'summary', 'data': {'draftId': 'd-9'}},
+                'evidencePages': [{'url': _RESUMED_PAGE,
+                                   'title': 'x', 'content': 'y'}],
+            }, fh)
+        fx = _Fixture()
+        pools = []
+        self._capture_agent(fx, pools)
+
+        with self.app.app_context(), \
+                patch.object(module, 'UPLOADS_DIR', self.uploads.name), \
+                fx.patches(module):
+            result = module._execute_market_summary(
+                dict(self.PAYLOAD, draftId='d-9'), tenant_id='t-resume')
+
+        self.assertTrue(result['success'], result)
+        self.assertTrue(pools)
+        urls = [page.get('url') for page in pools[0].pages()]
+        self.assertNotIn(_RESUMED_PAGE, urls)
+
+
 if __name__ == '__main__':
     unittest.main()

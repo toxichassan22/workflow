@@ -255,7 +255,8 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
             evidence_pool=chat_pool,
             deadline=time.time() + _SUMMARY_CHAT_JOB_TIME_BUDGET,
             search_budget=_SUMMARY_CHAT_SEARCH_BUDGET,
-            max_steps=_SUMMARY_CHAT_MAX_STEPS, max_tokens=8000)
+            max_steps=_SUMMARY_CHAT_MAX_STEPS, max_tokens=8000,
+            reasoning_effort='low')
         research_error = (_chat_error_message(research_res)
                           if research_res.get('error') else '')
         citations = list(_market_citation_urls(research_res))

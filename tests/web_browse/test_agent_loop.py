@@ -769,5 +769,119 @@ class RunBrowseAgentPoolTests(unittest.TestCase):
         self.assertGreaterEqual(stats.get('pool_hits'), 1)
 
 
+def _truncated_response(text='{"summary": {"a":', finish='length',
+                        native=None):
+    """A final-looking reply that ran into the output cap mid-JSON."""
+    choice = {'message': {'role': 'assistant', 'content': text},
+              'finish_reason': finish}
+    if native is not None:
+        choice['native_finish_reason'] = native
+    return {'choices': [choice], 'usage': _usage()}
+
+
+class RunBrowseAgentCompactionTests(unittest.TestCase):
+    """Automatic compression + the one truncated-reply retry — the pieces that
+    keep a long market browse inside its output/context budget."""
+
+    def test_long_transcript_compacts_older_tool_results(self):
+        calls = []
+        urls = ['https://sa.aqar.fm/p/1', 'https://sa.aqar.fm/p/2',
+                'https://sa.aqar.fm/p/3']
+        chat_impl = _scripted_chat([
+            _fn_response([('open_url', {'url': url}) for url in urls]),
+            _text_response(),
+        ], calls)
+
+        with _patched_pipeline(chat_impl), \
+                mock.patch.object(agent, '_HISTORY_COMPACT_CHARS', 1500), \
+                mock.patch.object(agent, '_KEEP_FULL_TOOL_MESSAGES', 1):
+            result = agent.run_browse_agent('task', max_steps=4)
+
+        self.assertNotIn('error', result)
+        tool_msgs = [m for m in calls[-1]['messages']
+                     if m.get('role') == 'tool']
+        self.assertEqual(len(tool_msgs), 3)
+        # Older pages shrink to a digest; the freshest tool result stays
+        # verbatim for the model to quote.
+        self.assertLess(len(tool_msgs[0]['content'] or ''),
+                        len(tool_msgs[-1]['content'] or ''))
+        self.assertLess(len(tool_msgs[0]['content'] or ''), 2000)
+        self.assertGreater(len(tool_msgs[-1]['content'] or ''), 4000)
+        # The digest still carries the url — it remains citeable.
+        self.assertIn('sa.aqar.fm/p/1', tool_msgs[0]['content'] or '')
+
+    def test_small_transcripts_are_not_touched(self):
+        calls = []
+        chat_impl = _scripted_chat([
+            _fn_response(('open_url', {'url': _PAGE_URL})),
+            _text_response(),
+        ], calls)
+
+        with _patched_pipeline(chat_impl):
+            agent.run_browse_agent('task', max_steps=4)
+
+        tool_msg = [m for m in calls[-1]['messages']
+                    if m.get('role') == 'tool'][0]
+        self.assertIn(_PAGE_TITLE, tool_msg['content'])
+        self.assertGreater(len(tool_msg['content']), 4000)
+
+    def test_max_tokens_reply_is_asked_once_for_compressed_output(self):
+        calls = []
+        chat_impl = _scripted_chat([
+            _truncated_response('{"summary": {"market_definition": "قراءة'),
+            _text_response(),
+        ], calls)
+
+        with _patched_pipeline(chat_impl):
+            result = agent.run_browse_agent('task', max_steps=5)
+
+        self.assertNotIn('error', result)
+        self.assertEqual(
+            result['choices'][0]['message']['content'], _FINAL_TEXT)
+        self.assertEqual(len(calls), 2)
+        retry_messages = calls[1]['messages']
+        # The truncated turn is echoed, then the compress-yourself directive.
+        self.assertEqual(retry_messages[-2].get('role'), 'assistant')
+        self.assertEqual(retry_messages[-1].get('role'), 'user')
+        self.assertIn('قُطعت', retry_messages[-1].get('content') or '')
+
+    def test_native_finish_reason_max_tokens_counts_as_truncation(self):
+        calls = []
+        chat_impl = _scripted_chat([
+            # Anthropic-style: reasoning ate the whole cap, empty content.
+            _truncated_response('', finish='stop', native='max_tokens'),
+            _text_response(),
+        ], calls)
+
+        with _patched_pipeline(chat_impl):
+            result = agent.run_browse_agent('task', max_steps=5)
+
+        self.assertNotIn('error', result)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            result['choices'][0]['message']['content'], _FINAL_TEXT)
+
+    def test_the_compressed_retry_runs_only_once(self):
+        calls = []
+        chat_impl = _scripted_chat([
+            _truncated_response('{"a":'),
+            _truncated_response('{"b":'),
+            _text_response(),
+        ], calls)
+
+        with _patched_pipeline(chat_impl):
+            result = agent.run_browse_agent('task', max_steps=6)
+
+        self.assertNotIn('error', result)
+        # Two model rounds — never a third squeeze.
+        self.assertEqual(len(calls), 2)
+        message = result['choices'][0]['message']
+        self.assertEqual(message['content'], '{"b":')
+        # And the surviving finish reason rides the repackaged choice so the
+        # job can still report «provider finished with max_tokens» honestly.
+        self.assertEqual(
+            result['choices'][0].get('finish_reason'), 'length')
+
+
 if __name__ == '__main__':
     unittest.main()

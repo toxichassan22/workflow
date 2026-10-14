@@ -31,6 +31,19 @@ _PAGE_TEXT_CITATION_CAP = 8000
 # One tool-result message never outgrows the transcript.
 _TOOL_MESSAGE_CAP = 60000
 
+# Context compaction: once the transcript passes this size, older tool
+# results shrink to a digest — the model keeps the url and a head of the
+# text for citing, never the same page twice at full length.
+_HISTORY_COMPACT_CHARS = 90000
+_KEEP_FULL_TOOL_MESSAGES = 4    # freshest tool results stay verbatim
+_COMPACT_TOOL_CAP = 600
+
+# One automatic squeeze when the model's answer ran into the output cap:
+# it re-issues the same result compressed instead of failing on half a JSON.
+_COMPACT_REPLY_PROMPT = (
+    'إجابتك السابقة قُطعت عند حد الإخراج. أعد النتيجة نفسها الآن في صيغة '
+    'أقصر: نفس بنية JSON والحقول، قيم مختصرة، بلا شرح أو تكرار.')
+
 def _search_count_phrase(count):
     """Arabic count wording for the preamble's search cap — dual for two,
     an explicit number otherwise."""
@@ -184,6 +197,65 @@ _BROWSER_TOOLS = [
 # Hard failures (timeout, http_*, blocked) still short-circuit.
 _RETRYABLE_PAGE_FAILURES = {'needs_interaction', 'thin_content'}
 _ACTION_TOOLS = ('click_element', 'type_text', 'scroll_page')
+
+
+def _compact_tool_history(messages):
+    """Shrink older tool results once the transcript runs long.
+
+    Every tool message but the freshest ``_KEEP_FULL_TOOL_MESSAGES`` keeps
+    its url/title plus a head of the text — enough to cite, small enough
+    that a long browse run never pushes the next round over the edge.
+    Returns True when anything was compacted.
+    """
+    total = 0
+    for msg in messages:
+        content = msg.get('content')
+        total += len(content) if isinstance(content, str) \
+            else len(json.dumps(content, ensure_ascii=False, default=str))
+    if total <= _HISTORY_COMPACT_CHARS:
+        return False
+    tool_indexes = [i for i, msg in enumerate(messages)
+                    if msg.get('role') == 'tool']
+    if len(tool_indexes) <= _KEEP_FULL_TOOL_MESSAGES:
+        return False
+    compacted = False
+    for index in tool_indexes[:-_KEEP_FULL_TOOL_MESSAGES]:
+        content = messages[index].get('content')
+        if not isinstance(content, str) or len(content) <= _COMPACT_TOOL_CAP:
+            continue
+        try:
+            parsed = json.loads(content)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            for key in ('text', 'content', 'snippet'):
+                value = parsed.get(key)
+                if isinstance(value, str) and len(value) > _COMPACT_TOOL_CAP:
+                    parsed[key] = value[:_COMPACT_TOOL_CAP] + ' ...'
+            if isinstance(parsed.get('results'), list):
+                parsed['results'] = parsed['results'][:5]
+            parsed.pop('elements', None)
+            new_content = json.dumps(parsed, ensure_ascii=False)
+        else:
+            new_content = content[:_COMPACT_TOOL_CAP] + ' ...'
+        if len(new_content) < len(content):
+            messages[index]['content'] = new_content
+            compacted = True
+    if compacted:
+        _log_line('[BROWSE AGENT] compacted tool history')
+    return compacted
+
+
+def _truncated_reply(response):
+    """The reply hit the output cap — finish_reason length/max_tokens."""
+    if not isinstance(response, dict):
+        return False
+    choice = (response.get('choices') or [{}])[0]
+    if not isinstance(choice, dict):
+        return False
+    finish = str(choice.get('native_finish_reason')
+                 or choice.get('finish_reason') or '').lower()
+    return finish in ('length', 'max_tokens')
 
 
 def openrouter_chat(messages, **kwargs):
@@ -630,6 +702,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     prompt_tokens = 0
     completion_tokens = 0
     final_text = ''
+    final_finish = ''
     error = None
     if max_steps is None:
         try:
@@ -650,6 +723,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
         out_cap = 4000
     effort = str(reasoning_effort or '').strip() or None
     effort_disabled = False
+    compact_retried = False
     try:
         deadline = float(deadline) if deadline is not None else None
     except (TypeError, ValueError):
@@ -679,6 +753,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
             if _deadline_hit():
                 error = {'message': 'deadline_exceeded'}
                 break
+            _compact_tool_history(messages)
             response = _round()
             if effort and not effort_disabled and _effort_refusal(response):
                 # The hint is model-specific — a provider that rejects it gets
@@ -702,8 +777,23 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                 break
             if not msg['tool_calls']:
                 final_text = str(msg.get('content') or '').strip()
+                if (not compact_retried and _truncated_reply(response)
+                        and not _deadline_hit()):
+                    # The answer ran into the output cap mid-JSON — spend one
+                    # step asking for the same result compressed instead of
+                    # surfacing a truncated parse failure downstream.
+                    compact_retried = True
+                    final_text = ''
+                    messages.append(_assistant_echo(msg))
+                    messages.append(
+                        {'role': 'user', 'content': _COMPACT_REPLY_PROMPT})
+                    continue
                 if not final_text:
                     error = {'message': 'model returned no text and no tool call'}
+                choice = (response.get('choices') or [{}])[0] \
+                    if isinstance(response, dict) else {}
+                final_finish = str((choice or {}).get('native_finish_reason')
+                                   or (choice or {}).get('finish_reason') or '')
                 break
             if session is None:
                 # No point launching the caller's browser once the budget is
@@ -757,8 +847,13 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
             # a deadline stops the loop, it does not throw away evidence.
             result['annotations'] = annotations
         return result
-    return {'choices': [{'message': {'role': 'assistant',
-                                    'content': final_text,
-                                    'annotations': annotations}}],
+    final_choice = {'message': {'role': 'assistant',
+                                'content': final_text,
+                                'annotations': annotations}}
+    if final_finish:
+        # The downstream error reporter reads the choice's finish reason — a
+        # still-truncated retry must surface as MAX_TOKENS, not a mystery.
+        final_choice['finish_reason'] = final_finish
+    return {'choices': [final_choice],
             'usage': usage,
             'browse_trace': trace}

@@ -102,7 +102,10 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                          module._SUMMARY_MAX_STEPS)
         self.assertEqual(captured['kwargs'].get('max_tokens'),
                          module.MARKET_STUDY_MAX_TOKENS)
-        self.assertEqual(captured['kwargs'].get('reasoning_effort'), 'max')
+        # The agent mostly searches and opens pages — low effort keeps the
+        # output budget for the answer itself instead of burning it on
+        # reasoning tokens (the MAX_TOKENS failures).
+        self.assertEqual(captured['kwargs'].get('reasoning_effort'), 'low')
         # The task's own model drives the loop — not a separate agent model.
         self.assertEqual(captured['kwargs'].get('model'),
                          module.MARKET_STUDY_MODEL)

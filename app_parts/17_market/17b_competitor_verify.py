@@ -150,7 +150,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     response = _browse_agent_call(
         market_study.build_consultant_system_prompt(offer_lang), prompt,
         usage_ctx, evidence_pool=evidence_pool, deadline=deadline,
-        session=session)
+        session=session, reasoning_effort='low')
     last_error = _chat_error_message(response)
     search_ran_any = False
     if response.get('error') is None:

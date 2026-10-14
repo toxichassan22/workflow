@@ -130,7 +130,8 @@ def _best_use_price_scan_use(use, prompt, city, draft, data, usage_ctx,
         'إذا لم يوجد سعر موثق observations=[]؛ لا تعوض النقص بأرقام مفترضة.',
         prompt, usage_ctx,
         search_budget=3, max_steps=8, max_tokens=12000,
-        evidence_pool=evidence_pool, deadline=deadline, session=session)
+        evidence_pool=evidence_pool, deadline=deadline, session=session,
+        reasoning_effort='low')
     error = _chat_error_message(response) if response.get('error') else ''
     if error or not _market_search_ran(response):
         # Surface the run's real reason — quota, timeout, zero pages read —

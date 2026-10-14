@@ -166,11 +166,17 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     every stage that browses (source plan, main call, expansion rounds,
     row verify, logo pass)."""
     report = progress if callable(progress) else (lambda *_args: None)
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
     evidence_pool = _new_evidence_pool()
+    _preload_failed_run_evidence(tenant_id, 'competitors', data, evidence_pool)
     deadline = time.time() + _MARKET_JOB_TIME_BUDGET
     session = _market_browser_session()
     try:
-        return _run_market_competitors(
+        result = _run_market_competitors(
             data, tenant_id=tenant_id, progress=report,
             evidence_pool=evidence_pool, deadline=deadline, session=session)
     finally:
@@ -179,6 +185,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
                 session.close()
             except Exception:
                 pass
+    return _attach_failure_evidence(result, evidence_pool)
 
 
 def _run_market_competitors(data, tenant_id=None, progress=None,
@@ -215,7 +222,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         evidence_pool=evidence_pool, deadline=deadline, session=session,
         search_budget=_COMPETITORS_SEARCH_BUDGET,
         max_steps=_COMPETITORS_MAX_STEPS,
-        max_tokens=14000)
+        max_tokens=14000, reasoning_effort='low')
     provider_error = _chat_error_message(res) if res.get('error') else ''
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
@@ -378,7 +385,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             system_prompt, expansion_prompt,
             _usage_ctx('market', data, tenant_id=tenant_id),
             evidence_pool=evidence_pool, deadline=deadline, session=session,
-            search_budget=4, max_steps=10, max_tokens=14000)
+            search_budget=4, max_steps=10, max_tokens=14000,
+            reasoning_effort='low')
         _err2 = _chat_error_message(res2) if res2.get('error') else ''
         provider_error = provider_error or _err2
         _collect_citations(res2)
@@ -535,11 +543,17 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
     session for the source plan and the main browse call, mirroring the
     competitors job's wiring."""
     report = progress if callable(progress) else (lambda *_args: None)
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
     evidence_pool = _new_evidence_pool()
+    _preload_failed_run_evidence(tenant_id, 'summary', data, evidence_pool)
     deadline = time.time() + _SUMMARY_JOB_TIME_BUDGET
     session = _market_browser_session()
     try:
-        return _run_market_summary(
+        result = _run_market_summary(
             data, tenant_id=tenant_id, progress=report,
             evidence_pool=evidence_pool, deadline=deadline, session=session)
     finally:
@@ -548,6 +562,7 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
                 session.close()
             except Exception:
                 pass
+    return _attach_failure_evidence(result, evidence_pool)
 
 
 def _run_market_summary(data, tenant_id=None, progress=None,
@@ -593,7 +608,7 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         system_prompt, user_prompt, usage_ctx,
         evidence_pool=evidence_pool, deadline=deadline, session=session,
         search_budget=_SUMMARY_SEARCH_BUDGET, max_steps=_SUMMARY_MAX_STEPS,
-        max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='max')
+        max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='low')
     failed = res.get('error') is not None
     provider_error = _chat_error_message(res) if failed else ''
     if not failed and not _market_citation_pages(res):
@@ -829,7 +844,8 @@ def api_market_study_competitor_logo():
         response = _browse_agent_call(
             market_study.build_consultant_system_prompt(), discovery_prompt,
             _usage_ctx('market', data),
-            search_budget=3, max_steps=8, max_tokens=1600)
+            search_budget=3, max_steps=8, max_tokens=1600,
+            reasoning_effort='low')
         provider_error = _chat_error_message(response) if response.get('error') else ''
         parsed, parse_error = _parse_market_model_json(response)
         discovered_official = str(parsed.get('official_url') or parsed.get('logo_source_url') or '').strip()
@@ -854,7 +870,8 @@ def api_market_study_competitor_logo():
         response = _browse_agent_call(
             market_study.build_consultant_system_prompt(), prompt,
             _usage_ctx('market', data),
-            search_budget=2, max_steps=6, max_tokens=1200)
+            search_budget=2, max_steps=6, max_tokens=1200,
+            reasoning_effort='low')
         provider_error = _chat_error_message(response) if response.get('error') else ''
         parsed, parse_error = _parse_market_model_json(response)
         if parse_error:

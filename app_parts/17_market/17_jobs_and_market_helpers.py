@@ -210,7 +210,7 @@ def _redispatch_job(namespace, tenant_id, job_id, job):
     return False
 
 
-_JOB_INTERNAL_KEYS = ('payload', 'actor', 'pid')
+_JOB_INTERNAL_KEYS = ('payload', 'actor', 'pid', 'evidencePages')
 
 
 def _public_job(job):
@@ -238,6 +238,121 @@ def _write_market_job(tenant_id, job_id, payload):
 
 def _read_market_job(tenant_id, job_id):
     return _read_job('.market_jobs', tenant_id, job_id)
+
+
+# A failed market job keeps a trimmed copy of the pages it already paid for;
+# the next run of the same draft+kind picks them up instead of re-fetching
+# every source — continuation after a deadline, not a restart.
+_RESUME_MAX_JOB_AGE_SECONDS = 24 * 3600
+_RESUME_SCAN_JOBS = 15
+_RESUME_MAX_PAGES = 40
+_RESUME_PAGE_CONTENT_CAP = 2500
+
+
+def _pool_evidence_snapshot(evidence_pool):
+    """Bounded page list for the failed-job record — url + title + a trimmed
+    body, so the job file stays small while the next run inherits evidence."""
+    pages = []
+    if evidence_pool is None:
+        return pages
+    try:
+        pool_pages = evidence_pool.pages()
+    except Exception:
+        return pages
+    for page in pool_pages or []:
+        if not isinstance(page, dict):
+            continue
+        url = str(page.get('url') or '').strip()
+        if not url.startswith('http'):
+            continue
+        pages.append({
+            'url': url,
+            'title': str(page.get('title') or '')[:300],
+            'content': str(page.get('content') or '')[:_RESUME_PAGE_CONTENT_CAP],
+        })
+        if len(pages) >= _RESUME_MAX_PAGES:
+            break
+    return pages
+
+
+def _preload_failed_run_evidence(tenant_id, kind, data, evidence_pool):
+    """Load the newest failed same-draft job's pages into this run's pool.
+
+    The job file persists `payload.data` alongside the result, so the retry
+    matches on the draft id — another project's evidence never leaks in.
+    Returns the number of pages adopted (0 when nothing resumable exists).
+    """
+    if evidence_pool is None or not tenant_id:
+        return 0
+    data = data if isinstance(data, dict) else {}
+    draft = str(data.get('draftId') or data.get('draft_id') or '').strip()
+    if not draft:
+        return 0
+    try:
+        job_dir = _market_job_dir(tenant_id)
+        names = [name for name in os.listdir(job_dir)
+                 if name.endswith('.json') and '.tmp-' not in name]
+        names.sort(key=lambda name: os.path.getmtime(
+            os.path.join(job_dir, name)), reverse=True)
+    except OSError:
+        return 0
+    for name in names[:_RESUME_SCAN_JOBS]:
+        try:
+            job = _read_market_job(tenant_id, name[:-5])
+        except Exception:
+            continue
+        if not isinstance(job, dict):
+            continue
+        if str(job.get('status') or '') != 'failed':
+            continue
+        if str(job.get('kind') or '') != str(kind):
+            continue
+        try:
+            age = time.time() - float(job.get('updatedAt') or 0)
+        except (TypeError, ValueError):
+            continue
+        if age > _RESUME_MAX_JOB_AGE_SECONDS:
+            continue
+        prev = job.get('payload') if isinstance(job.get('payload'), dict) else {}
+        prev_data = prev.get('data') if isinstance(prev.get('data'), dict) else {}
+        prev_draft = str(prev_data.get('draftId')
+                         or prev_data.get('draft_id') or '').strip()
+        if not prev_draft or prev_draft != draft:
+            continue
+        pages = job.get('evidencePages')
+        if not isinstance(pages, list) or not pages:
+            continue
+        loaded = 0
+        for page in pages:
+            if not isinstance(page, dict):
+                continue
+            url = str(page.get('url') or '').strip()
+            if not url.startswith('http'):
+                continue
+            try:
+                if evidence_pool.add_page(
+                        url, title=str(page.get('title') or ''),
+                        content=str(page.get('content') or ''),
+                        final_url=url, via='resumed'):
+                    loaded += 1
+            except Exception:
+                continue
+        if loaded:
+            print(f'[MARKET JOB] resume preload: {loaded} pages '
+                  f'for kind={kind} draft={draft[:12]}')
+        return loaded
+    return 0
+
+
+def _attach_failure_evidence(result, evidence_pool):
+    """A failed run hands its pool to the job file so the next attempt can
+    resume — the snapshot only attaches to failures, never to clean runs."""
+    if not isinstance(result, dict) or result.get('success'):
+        return result
+    snapshot = _pool_evidence_snapshot(evidence_pool)
+    if snapshot:
+        result['evidencePages'] = snapshot
+    return result
 
 
 def _market_search_ran(res):
