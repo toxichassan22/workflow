@@ -1,7 +1,9 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Browse agent loop: one chat-completions conversation per research task. The
 # task's own model (the big mind — MARKET_STUDY_MODEL for market work) decides
-# when to web_search and which pages to open_url; this module executes those
+# when to web_search and which pages to open_url — and, for pages a passive
+# read cannot serve, inspect_page/click_element/type_text/scroll_page let it
+# operate the page like a user. This module executes those
 # tool calls locally against the per-run headless-Chromium session
 # (browser.py) and feeds each result back as a ``tool`` message, then
 # repackages the outcome into the OpenRouter-shaped dict the market pipeline
@@ -45,8 +47,12 @@ def _agent_preamble(budget):
     # refusal — at the default budget this reads «عمليتي بحث», unchanged.
     advertised = max(1, budget - 1)
     return (
-        'أنت وكيل تصفّح ويب. لديك أداتان: web_search تُرجع عناوين وروابط ومقتطفات، '
-        'و open_url تقرأ نص الصفحة الفعلي. نفّذ ' + _search_count_phrase(advertised) +
+        'أنت وكيل تصفّح ويب. أدواتك: web_search تُرجع عناوين وروابط ومقتطفات، '
+        'و open_url تقرأ نص الصفحة الفعلي، و inspect_page تعرض عناصر الصفحة '
+        'التفاعلية مرقّمة، و click_element و type_text و scroll_page تنفّذ عليها '
+        '(أرقام العناصر تخص آخر نتيجة فقط). استخدم open_url للقراءة المباشرة، '
+        'وأدوات التفاعل فقط حين تحتاج الصفحة إدخالًا أو ضغطًا أو تمريرًا. نفّذ '
+        + _search_count_phrase(advertised) +
         ' كحد أقصى طوال المهمة، ثم افتح أقرب نتيجة للمطلوب — ويمكنك فتح أكثر من رابط '
         'في الخطوة نفسها — وأجِب بما طُلب منك فقط دون شرح خطواتك. لا تُعِد البحث بنفس '
         'الغرض: إن شحّت النتائج فافتح أفضل ما وجدت أو أجب بما لديك.\n\n'
@@ -98,7 +104,86 @@ _BROWSER_TOOLS = [
             },
         },
     },
+    # The interaction surface — for pages a passive read cannot serve (SPA
+    # filters, site search boxes, lazy listings). Element indexes come from
+    # the latest inspect_page/action result only.
+    {
+        'type': 'function',
+        'function': {
+            'name': 'inspect_page',
+            'description': ('Open a page (or re-read the current one when url is '
+                            'omitted) and return its interactive elements '
+                            'numbered, alongside the readable text. Use when a '
+                            'page needs input, a click or scrolling — filters, '
+                            'search boxes, tabs, menus.'),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'url': {'type': 'string',
+                            'description': 'Absolute page URL to open first (optional)'},
+                },
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'click_element',
+            'description': ('Click the element carrying this number in the latest '
+                            'inspect_page/action result. Returns the updated page '
+                            'state with fresh element numbers.'),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'index': {'type': 'integer',
+                              'description': 'Element number from the latest element list'},
+                },
+                'required': ['index'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'type_text',
+            'description': ('Fill the input element carrying this number with text; '
+                            'set submit=true to press Enter afterwards (site search '
+                            'boxes). Returns the updated page state.'),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'index': {'type': 'integer',
+                              'description': 'Input element number from the latest list'},
+                    'text': {'type': 'string', 'description': 'Text to type'},
+                    'submit': {'type': 'boolean',
+                               'description': 'Press Enter after typing (default false)'},
+                },
+                'required': ['index', 'text'],
+            },
+        },
+    },
+    {
+        'type': 'function',
+        'function': {
+            'name': 'scroll_page',
+            'description': ("Scroll the current page ('down' default, or 'up') to "
+                            'reveal lazy-loaded content. Returns the updated page '
+                            'state.'),
+            'parameters': {
+                'type': 'object',
+                'properties': {
+                    'direction': {'type': 'string', 'enum': ['down', 'up']},
+                },
+            },
+        },
+    },
 ]
+
+# Soft pool failure reasons an interactive open may retry: both mean "the
+# passive read got a shell", which is exactly what inspect_page exists for.
+# Hard failures (timeout, http_*, blocked) still short-circuit.
+_RETRYABLE_PAGE_FAILURES = {'needs_interaction', 'thin_content'}
+_ACTION_TOOLS = ('click_element', 'type_text', 'scroll_page')
 
 
 def openrouter_chat(messages, **kwargs):
@@ -404,6 +489,92 @@ def _pool_mark_failed(evidence_pool, url, reason):
             pass
 
 
+def _absorb_state(result, url, trace, pages, evidence_pool=None,
+                  action=None):
+    """Shared tail for the interaction tools: an errored result is traced and
+    pooled as a failure; a successful one is a genuinely-read page — it lands
+    in the run's citation set and the job's evidence pool, and the tool gets
+    back url/title/text plus the fresh numbered-elements list."""
+    result = result if isinstance(result, dict) else {}
+    title = str(result.get('title') or '')
+    text = str(result.get('text') or '')
+    final_url = str(result.get('final_url') or result.get('url')
+                    or url).strip() or url
+    error = result.get('error')
+    entry = {'url': final_url, 'title': title, 'chars': len(text)}
+    if action:
+        entry['action'] = action
+    if error:
+        entry['error'] = str(error)
+        trace.append(entry)
+        if final_url.startswith('http'):
+            _pool_mark_failed(evidence_pool, final_url, str(error))
+        return {'url': final_url or url, 'error': str(error)}
+    trace.append(entry)
+    if final_url.startswith('http'):
+        pages[final_url] = {'title': title,
+                            'content': text[:_PAGE_TEXT_CITATION_CAP]}
+        _pool_add_page(evidence_pool, final_url, title, text, final_url)
+    out = {'url': final_url, 'title': title,
+           'text': text[:_PAGE_TEXT_TOOL_CAP]}
+    elements = result.get('elements')
+    if isinstance(elements, list):
+        out['elements'] = elements
+    return out
+
+
+def _run_inspect_page(session, args, trace, pages, evidence_pool=None):
+    """The interactive open: numbered elements + text. A URL the pool marked
+    'needs_interaction'/'thin_content' is exactly what this tool exists for —
+    those soft failures are bypassed; hard failures still short-circuit."""
+    url = str(args.get('url') or '').strip()
+    if url:
+        failed_reason = _pool_page_failed(evidence_pool, url)
+        if failed_reason is not None \
+                and str(failed_reason) not in _RETRYABLE_PAGE_FAILURES:
+            trace.append({'url': url, 'title': '', 'chars': 0,
+                          'error': str(failed_reason), 'pool': True})
+            return {'url': url, 'error': str(failed_reason)}
+    fn = _tool_callable(session, 'inspect_page')
+    if fn is None:
+        return {'error': 'inspect_page_unavailable'}
+    try:
+        result = fn(url) if url else fn()
+    except TypeError:
+        # A narrower fake/older session without the url parameter.
+        try:
+            result = fn()
+        except Exception as exc:
+            return {'error': str(exc) or exc.__class__.__name__}
+    except Exception as exc:
+        return {'error': str(exc) or exc.__class__.__name__}
+    return _absorb_state(result, url, trace, pages, evidence_pool,
+                         action='inspect_page' if url else None)
+
+
+def _run_page_action(session, name, args, trace, pages, evidence_pool=None):
+    """click_element / type_text / scroll_page on the worker's live page."""
+    fn = _tool_callable(session, name)
+    if fn is None:
+        return {'error': f'{name}_unavailable'}
+    try:
+        if name == 'click_element':
+            result = fn(int(args.get('index')))
+        elif name == 'type_text':
+            result = fn(int(args.get('index')), str(args.get('text') or ''),
+                        submit=bool(args.get('submit')))
+        elif name == 'scroll_page':
+            result = fn(str(args.get('direction') or 'down'))
+        else:
+            return {'error': 'unknown_tool'}
+    except (TypeError, ValueError):
+        return {'error': 'invalid_arguments'}
+    except Exception as exc:
+        return {'error': str(exc) or exc.__class__.__name__}
+    return _absorb_state(result, '', trace, pages, evidence_pool,
+                         action=name)
+
+
 def _execute_tool(session, name, args, trace, pages, search_state,
                   evidence_pool=None):
     """Dispatch one model tool call. Returns the compact tool-result payload —
@@ -414,6 +585,11 @@ def _execute_tool(session, name, args, trace, pages, search_state,
         return _run_web_search(session, args, search_state, evidence_pool)
     if name == 'open_url':
         return _run_open_url(session, args, trace, pages, evidence_pool)
+    if name == 'inspect_page':
+        return _run_inspect_page(session, args, trace, pages, evidence_pool)
+    if name in _ACTION_TOOLS:
+        return _run_page_action(session, name, args, trace, pages,
+                                evidence_pool)
     return {'error': 'unknown_tool'}
 
 

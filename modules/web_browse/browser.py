@@ -5,7 +5,10 @@ instances, so each agent thread opens its own session; there is deliberately
 no module-level browser. Two entry points share the same worker:
 
 - `BrowserWorker` / `browser_session()` — explicit lifecycle for the agent
-  loop (lazily launched on first tool call, closed in `finally`).
+  loop (lazily launched on first tool call, closed in `finally`). Beyond the
+  read tools (`open_url`/`web_search`) the worker carries the interaction
+  surface — `inspect_page` numbers the live DOM's elements and
+  `click_element`/`type_text`/`scroll_page` act on them.
 - `thread_local_browser()` / `close_thread_browser()` — a long-lived worker
   bound to the calling thread, for pools that run many fetches per thread.
 - module-level `open_url()` / `web_search()` — contract helpers that reuse the
@@ -102,6 +105,48 @@ _YAHOO_JS = """() => Array.from(document.querySelectorAll('div.algo')).map(r => 
           url: a ? a.href : '',
           snippet: sn ? sn.textContent.trim() : ''};
 }).filter(r => r.url)"""
+
+# --- Interactive surface -----------------------------------------------------
+# The snapshot strips only non-interactive noise — nav/footer/forms stay,
+# because menus, filters and search inputs live there (unlike _EXTRACT_JS,
+# whose text-only job removes them). Every visible a/button/input/select/
+# textarea is tagged data-ll-el="<n>" so click_element/type_text can aim at
+# the number the model saw; a navigation wipes the tags, so indexes always
+# belong to the latest snapshot.
+_MAX_ELEMENTS = 40
+_EL_ATTR = 'data-ll-el'
+_SCROLL_DELTA = 720              # ~0.8 viewport at the 900px height
+_SNAPSHOT_STRIP = 'script,style,noscript,iframe'
+_SNAPSHOT_JS = """() => {
+  for (const n of document.querySelectorAll('%s')) n.remove();
+  const sel = 'a[href],button,input,select,textarea,summary,'
+      + '[role="button"],[role="link"]';
+  const elements = [];
+  let i = 0;
+  for (const el of document.querySelectorAll(sel)) {
+    const r = el.getBoundingClientRect();
+    if (!r || r.width < 2 || r.height < 2) continue;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') continue;
+    el.setAttribute('data-ll-el', String(i));
+    const text = (el.innerText || el.value || el.getAttribute('aria-label')
+        || el.getAttribute('placeholder') || el.name || '').trim().slice(0, 120);
+    elements.push({i: i, tag: el.tagName.toLowerCase(),
+                   type: el.getAttribute('type') || '',
+                   text: text,
+                   href: (el.tagName === 'A' ? (el.href || '') : ''),
+                   placeholder: el.getAttribute('placeholder') || ''});
+    if (++i >= %d) break;
+  }
+  const pick = document.querySelector('article')
+    || document.querySelector('main')
+    || document.querySelector('[role="main"]')
+    || document.body;
+  let t = (pick && pick.innerText) || '';
+  if (!t.trim() && pick !== document.body)
+    t = (document.body && document.body.innerText) || '';
+  return {text: t, elements: elements};
+}""" % (_SNAPSHOT_STRIP, _MAX_ELEMENTS)
 
 _tls = threading.local()
 
@@ -369,6 +414,107 @@ class BrowserWorker:
             if len(hits) >= cap:
                 break
         return hits
+
+    # ------------------------------------------------------------------
+    # Interaction tools — "use" the page, not just read it. Every method
+    # answers with the refreshed page state ({url, final_url, title, text,
+    # elements, error}) so the agent sees the effect, and never raises.
+    # Element indexes are the data-ll-el tags left by the latest snapshot.
+    # ------------------------------------------------------------------
+    def _snapshot(self, page):
+        try:
+            data = page.evaluate(_SNAPSHOT_JS)
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _state(self, page, url=''):
+        try:
+            final_url = page.url or url
+            title = page.title() or ''
+        except Exception:
+            final_url, title = url or '', ''
+        snap = self._snapshot(page)
+        return {'url': url or final_url,
+                'final_url': final_url,
+                'title': title,
+                'text': _clean_text(snap.get('text') or ''),
+                'elements': snap.get('elements') or [],
+                'error': None}
+
+    @staticmethod
+    def _state_error(url, reason):
+        return {'url': url or '', 'final_url': url or '', 'title': '',
+                'text': '', 'elements': [], 'error': reason}
+
+    def inspect_page(self, url=None, timeout=DEFAULT_TIMEOUT):
+        """Numbered-elements snapshot. ``url`` opens the page through
+        open_url first (bot walls still surface as 'blocked'); omitted, it
+        snapshots the page the worker is already on. Never raises."""
+        if url:
+            opened = self.open_url(url, timeout=timeout)
+            if opened.get('error'):
+                opened['elements'] = []
+                return opened
+        try:
+            page = self._ensure_page()
+        except Exception as exc:
+            return self._state_error(url, _launch_reason(exc))
+        state = self._state(page, str(url or ''))
+        if _looks_blocked(state['title'], state['text']):
+            state['error'] = 'blocked'
+        return state
+
+    def _element_action(self, index, act):
+        """Shared shell for click/fill: resolve the page, run ``act`` on the
+        tagged selector, settle, and return the refreshed state."""
+        try:
+            index = int(index)
+        except (TypeError, ValueError):
+            return self._state_error('', 'invalid_index')
+        try:
+            page = self._ensure_page()
+        except Exception as exc:
+            return self._state_error('', _launch_reason(exc))
+        try:
+            act(page, f'[{_EL_ATTR}="{index}"]')
+            page.wait_for_timeout(SETTLE_MS)
+        except Exception as exc:
+            state = self._state(page)
+            state['error'] = _nav_reason(exc)
+            return state
+        return self._state(page)
+
+    def click_element(self, index):
+        """Click element #index from the latest snapshot. Never raises."""
+        return self._element_action(
+            index, lambda page, sel: page.click(sel, timeout=5000))
+
+    def type_text(self, index, text, submit=False):
+        """Fill input #index with ``text``; ``submit`` presses Enter after
+        (site search boxes). Never raises."""
+        def act(page, sel):
+            page.fill(sel, str(text or ''), timeout=5000)
+            if submit:
+                page.keyboard.press('Enter')
+        return self._element_action(index, act)
+
+    def scroll_page(self, direction='down'):
+        """Scroll the live page ~one viewport ('down' default, 'up' back) —
+        lazy-loaded listings. Never raises."""
+        try:
+            page = self._ensure_page()
+        except Exception as exc:
+            return self._state_error('', _launch_reason(exc))
+        delta = -_SCROLL_DELTA if str(direction).strip().lower() == 'up' else _SCROLL_DELTA
+        try:
+            page.evaluate("(dy) => window.scrollBy(0, dy)", delta)
+            page.wait_for_timeout(SETTLE_MS)
+        except Exception as exc:
+            state = self._state(page)
+            state['error'] = _nav_reason(exc)
+            return state
+        return self._state(page)
 
 
 def thread_local_browser(headless=True):

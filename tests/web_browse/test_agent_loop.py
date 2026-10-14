@@ -445,10 +445,12 @@ class RunBrowseAgentLoopTests(unittest.TestCase):
         self.assertEqual(
             [kw.get('model') for kw in seen],
             ['anthropic/claude-haiku-5.5'] * len(seen))
-        # And every round declares the same two local tools.
+        # And every round declares the same local tools — the two readers plus
+        # the interaction surface (inspect/click/type/scroll).
         names = {tool['function']['name'] for kw in seen
                  for tool in kw.get('tools') or []}
-        self.assertEqual(names, {'web_search', 'open_url'})
+        self.assertEqual(names, {'web_search', 'open_url', 'inspect_page',
+                                 'click_element', 'type_text', 'scroll_page'})
 
     def test_reasoning_effort_refusal_retries_without_it(self):
         """A provider that rejects the effort knob gets the same model again,

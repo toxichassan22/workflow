@@ -82,6 +82,8 @@ class _FakePage:
     def __init__(self, net):
         self._net = net
         self.url = 'about:blank'
+        self._keyboard = _FakeKeyboard(net)
+        self._mouse = _FakeMouse(net)
 
     def goto(self, url, timeout=None, wait_until=None, **_kw):
         if self._net['goto_error'] is not None:
@@ -111,12 +113,34 @@ class _FakePage:
         return self._net['html']
 
     def _eval(self, script):
+        if 'data-ll-el' in (script or ''):
+            # The interaction snapshot tagger: elements carry i/tag/text and
+            # get data-ll-el attributes click/fill target later.
+            return {'text': self._net['text'],
+                    'elements': [dict(e) for e in self._net['elements']]}
+        if 'scrollBy' in (script or ''):
+            self._net['scrolls'].append(script)
+            return None
         if 'duckduckgo' in self.url or 'bing' in self.url:
             return self._net['serp']
         return self._net['text']
 
     def evaluate(self, script=None, arg=None, **_kw):
         return self._eval(script)
+
+    def click(self, selector=None, **_kw):
+        self._net['clicks'].append(selector)
+
+    def fill(self, selector=None, text='', **_kw):
+        self._net['fills'].append((selector, text))
+
+    @property
+    def keyboard(self):
+        return self._keyboard
+
+    @property
+    def mouse(self):
+        return self._mouse
 
     def eval_on_selector_all(self, selector=None, script=None, **_kw):
         return self._eval(script)
@@ -144,6 +168,22 @@ class _FakePage:
 
     def close(self):
         pass
+
+
+class _FakeKeyboard:
+    def __init__(self, net):
+        self._net = net
+
+    def press(self, key, **_kw):
+        self._net['keys'].append(key)
+
+
+class _FakeMouse:
+    def __init__(self, net):
+        self._net = net
+
+    def wheel(self, dx=0, dy=0, **_kw):
+        self._net['scrolls'].append((dx, dy))
 
 
 class _FakeContext:
@@ -251,6 +291,16 @@ def _new_net():
         'launched': False,
         'browser_closed': False,
         'cdp_endpoint': None,
+        'elements': [
+            {'i': 0, 'tag': 'input', 'type': 'search', 'text': '',
+             'href': '', 'placeholder': 'ابحث عن مدينة'},
+            {'i': 1, 'tag': 'button', 'type': 'submit',
+             'text': 'تطبيق الفلاتر', 'href': '', 'placeholder': ''},
+        ],
+        'clicks': [],
+        'fills': [],
+        'keys': [],
+        'scrolls': [],
     }
 
 
@@ -487,6 +537,78 @@ class ThreadLocalBrowserTests(unittest.TestCase):
             self.assertIs(browser._tls.worker, session_worker)
         self.assertIs(browser._tls.worker, worker)
         self.assertTrue(worker.is_open)
+
+
+class InteractContractTests(unittest.TestCase):
+    """The interactive surface on BrowserWorker: inspect_page numbers the
+    page's live elements (data-ll-el tags) and click/type/scroll act on them —
+    every method returns the refreshed page state and never raises."""
+
+    def setUp(self):
+        _NET['visited'] = []
+        _NET['clicks'] = []
+        _NET['fills'] = []
+        _NET['keys'] = []
+        _NET['scrolls'] = []
+        _NET['goto_error'] = None
+        _NET['launch_error'] = None
+        self._pw_patch = mock.patch.object(
+            browser, 'sync_playwright', _MANAGER, create=True)
+        self._pw_patch.start()
+        self.addCleanup(self._pw_patch.stop)
+
+    def test_inspect_page_returns_numbered_elements_and_text(self):
+        result = _call_operation('inspect_page', 'https://sa.aqar.fm/')
+        self.assertIsInstance(result, dict)
+        for key in ('url', 'final_url', 'title', 'text', 'elements'):
+            self.assertIn(key, result)
+        self.assertFalse(result.get('error'))
+        elements = result.get('elements') or []
+        self.assertEqual([e.get('i') for e in elements], list(range(len(elements))))
+        self.assertEqual(elements[1].get('text'), 'تطبيق الفلاتر')
+        self.assertTrue(result.get('text'))
+
+    def test_inspect_page_navigation_error_returns_error_dict(self):
+        _NET['goto_error'] = _FakeTimeoutError('timeout 20000ms exceeded')
+        result = _call_operation('inspect_page', 'https://wasalt.sa/x')
+        self.assertTrue(result.get('error'))
+        self.assertEqual(result.get('elements'), [])
+
+    def test_click_element_targets_the_tagged_element(self):
+        with browser.BrowserWorker() as worker:
+            worker.inspect_page('https://sa.aqar.fm/')
+            result = worker.click_element(1)
+        self.assertIn('[data-ll-el="1"]', _NET['clicks'])
+        self.assertFalse(result.get('error'))
+        self.assertIn('elements', result)
+
+    def test_type_text_fills_and_submits_with_enter(self):
+        with browser.BrowserWorker() as worker:
+            worker.inspect_page('https://sa.aqar.fm/')
+            result = worker.type_text(0, 'الرياض', submit=True)
+        self.assertIn(('[data-ll-el="0"]', 'الرياض'), _NET['fills'])
+        self.assertIn('Enter', _NET['keys'])
+        self.assertFalse(result.get('error'))
+
+    def test_type_text_without_submit_does_not_press_enter(self):
+        with browser.BrowserWorker() as worker:
+            worker.inspect_page('https://sa.aqar.fm/')
+            worker.type_text(0, 'جدة')
+        self.assertEqual(_NET['keys'], [])
+
+    def test_scroll_page_scrolls_and_returns_state(self):
+        with browser.BrowserWorker() as worker:
+            worker.inspect_page('https://sa.aqar.fm/')
+            result = worker.scroll_page('down')
+        self.assertTrue(_NET['scrolls'])
+        self.assertFalse(result.get('error'))
+        self.assertIn('elements', result)
+
+    def test_invalid_index_never_raises(self):
+        with browser.BrowserWorker() as worker:
+            worker.inspect_page('https://sa.aqar.fm/')
+            result = worker.click_element('nope')
+        self.assertTrue(result.get('error'))
 
 
 if __name__ == '__main__':
