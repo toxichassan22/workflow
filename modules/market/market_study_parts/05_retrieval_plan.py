@@ -28,7 +28,10 @@ _PLAN_BROWSER_TIMEOUT = 20
 # Fallback progress percent for the (pct, msg) report shape — the plan runs
 # inside the executor's "searching" stage (report(18, ...)), so entry updates
 # keep that percent and only move the message.
-_PLAN_PROGRESS_PCT = 18
+# Job-progress band the source-plan stage walks per entry — from the first
+# known-source fetch to the last, fetched or failed, the bar advances.
+_PLAN_PROGRESS_LO = 10
+_PLAN_PROGRESS_HI = 22
 
 # Hosts whose data pages are client-rendered apps or bot-walled — a plain GET
 # buys nothing, so their entries are born needs_browser=True and go straight
@@ -370,10 +373,12 @@ def _store_browser_page(pool, url, session, deadline, spa_target):
     return reason
 
 
-def _emit_plan_event(report, entry, status, via='', reason=''):
+def _emit_plan_event(report, entry, status, via='', reason='', pct=None):
     """Per-entry progress. ``report`` may be the dict-event sink tests inject
     or the job's (percent, message) UI progress callable — try the structured
-    event first, fall back to the progress shape on a signature mismatch."""
+    event first, fall back to the progress shape on a signature mismatch.
+    ``pct`` is the caller-computed band position for this entry so the bar
+    moves on fetched, failed and skipped alike."""
     if not callable(report):
         return
     event = {'url': str(entry.get('url') or ''),
@@ -388,7 +393,7 @@ def _emit_plan_event(report, entry, status, via='', reason=''):
     except Exception:
         return
     try:
-        report(_PLAN_PROGRESS_PCT,
+        report(_PLAN_PROGRESS_LO if pct is None else int(pct),
                str(entry.get('label') or entry.get('url') or status))
     except Exception:
         pass
@@ -414,16 +419,19 @@ def run_source_plan(plan, pool, fetch_http, session=None, deadline=None, report=
             return 9
 
     entries.sort(key=_tier)
-    for entry in entries:
+    total = max(1, len(entries))
+    for index, entry in enumerate(entries):
         url = str(entry.get('url') or '').strip()
         if not url:
             continue
+        pct = _PLAN_PROGRESS_LO + int(
+            (_PLAN_PROGRESS_HI - _PLAN_PROGRESS_LO) * (index + 1) / total)
         if deadline is not None and time.time() >= float(deadline):
-            _emit_plan_event(report, entry, 'deadline')
+            _emit_plan_event(report, entry, 'deadline', pct=pct)
             break
         if pool.get_page(url) or pool.page_failed(url):
             counts['skipped'] += 1
-            _emit_plan_event(report, entry, 'skipped', via='pool')
+            _emit_plan_event(report, entry, 'skipped', via='pool', pct=pct)
             continue
         spa_host = _host_in(_source_host(url), _BROWSER_ONLY_HOSTS)
         if entry.get('needs_browser') or spa_host:
@@ -435,30 +443,32 @@ def run_source_plan(plan, pool, fetch_http, session=None, deadline=None, report=
                                              spa_target=True)
             counts['failed' if reason else 'fetched'] += 1
             _emit_plan_event(report, entry, 'failed' if reason else 'fetched',
-                             via='browser', reason=reason)
+                             via='browser', reason=reason, pct=pct)
             continue
         body, error = _call_fetch_http(fetch_http, url)
         if error:
             pool.mark_failed(url, error)
             counts['failed'] += 1
-            _emit_plan_event(report, entry, 'failed', via='http', reason=error)
+            _emit_plan_event(report, entry, 'failed', via='http', reason=error,
+                             pct=pct)
             continue
         text = _html_to_text(body)
         if len(text) >= _THIN_TEXT_CHARS:
             pool.add_page(url, title=_html_title(body), content=text,
                           final_url=url, via='http')
             counts['fetched'] += 1
-            _emit_plan_event(report, entry, 'fetched', via='http')
+            _emit_plan_event(report, entry, 'fetched', via='http', pct=pct)
             continue
         if session is None:
             reason = 'needs_interaction' if spa_host else 'thin_content'
             pool.mark_failed(url, reason)
             counts['failed'] += 1
-            _emit_plan_event(report, entry, 'failed', via='http', reason=reason)
+            _emit_plan_event(report, entry, 'failed', via='http', reason=reason,
+                             pct=pct)
             continue
         reason = _store_browser_page(pool, url, session, deadline,
                                      spa_target=spa_host)
         counts['failed' if reason else 'fetched'] += 1
         _emit_plan_event(report, entry, 'failed' if reason else 'fetched',
-                         via='browser', reason=reason)
+                         via='browser', reason=reason, pct=pct)
     return counts

@@ -59,8 +59,10 @@
       loaderProgressStartValue = loaderProgressValue;
       loaderProgressTimer = setInterval(() => {
         const elapsed = Date.now() - loaderProgressAnchorAt;
+        // Once real numbers arrive the drift only smooths the gap to the next
+        // report — +3 keeps the bar honest instead of inventing a stage.
         const ceiling = loaderProgressReal
-          ? Math.min(loaderProgressMax, loaderProgressStartValue + 10)
+          ? Math.min(loaderProgressMax, loaderProgressStartValue + 3)
           : loaderProgressMax;
         const estimated = Math.min(ceiling, loaderProgressStartValue + Math.max(1, Math.floor(elapsed / 900)));
         if (estimated > loaderProgressValue) renderLoaderProgress(estimated);

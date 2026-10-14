@@ -180,7 +180,14 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
         self.assertIs(plan_calls['fetch_http'], module._market_source_fetch_http)
         self.assertIs(plan_calls['pool'], captured.get('evidence_pool'))
         self.assertIs(plan_calls['session'], captured.get('session'))
-        self.assertEqual(plan_calls['deadline'], captured.get('deadline'))
+        # The plan stage runs under its own capped sub-deadline
+        # (MARKET_SOURCE_PLAN_BUDGET), never the job's full budget — a chain
+        # of dead catalog URLs must not eat the whole run.
+        plan_deadline = plan_calls['deadline']
+        self.assertIsNotNone(plan_deadline)
+        self.assertLessEqual(plan_deadline, captured.get('deadline'))
+        self.assertLessEqual(
+            plan_deadline, time.time() + module._SOURCE_PLAN_TIME_BUDGET + 5)
         budget = module._SUMMARY_JOB_TIME_BUDGET
         self.assertTrue(before + budget - 20 < captured.get('deadline')
                         < before + budget + 20)

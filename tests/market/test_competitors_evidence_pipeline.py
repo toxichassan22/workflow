@@ -649,5 +649,60 @@ class LogoPassPoolTests(_MarketTestBase):
         self.assertTrue(row.get('logo_import_warning'))
 
 
+class VerifyProgressBandTests(_MarketTestBase):
+    """The verify stage reports real movement: one tick per finished row and
+    a narrated tool event while a row's own agent run is still browsing —
+    the bar never sits frozen for the minutes a row search can take."""
+
+    def test_verify_band_ticks_per_row_and_narrates_tool_events(self):
+        module = self.module
+        rows = [{'name': 'منافس أول'}, {'name': 'منافس ثاني'}]
+        progress = []
+
+        def fake_pooled(row, payload, data, tenant_id=None, evidence_pool=None,
+                        deadline=None, on_event=None):
+            if callable(on_event):
+                on_event({'phase': 'tool', 'tool': 'web_search',
+                          'hint': 'استعلام تجريبي', 'step': 1,
+                          'max_steps': 8})
+
+        with self.app.app_context(), \
+                patch.object(module, '_verify_competitor_row_pooled',
+                             side_effect=fake_pooled):
+            module._verify_competitor_rows(
+                rows, {}, {}, progress=lambda p, m: progress.append((p, m)),
+                evidence_pool=None, deadline=None, band=(52, 70))
+
+        pcts = [pct for pct, _msg in progress]
+        self.assertTrue(pcts)
+        self.assertTrue(all(52 <= pct <= 70 for pct in pcts), pcts)
+        # Two finished rows land the band's end; tool events narrate between.
+        self.assertEqual(pcts[-1], 70)
+        tool_msgs = [msg for _pct, msg in progress if 'يبحث عن' in msg]
+        self.assertTrue(tool_msgs)
+        self.assertIn('استعلام تجريبي', tool_msgs[0])
+        tick_msgs = [msg for _pct, msg in progress if 'من 2' in msg]
+        self.assertEqual(len(tick_msgs), 2)
+
+    def test_agent_progress_maps_events_onto_the_stage_band(self):
+        module = self.module
+        progress = []
+        report = lambda p, m: progress.append((p, m))
+        on_event = module._market_agent_progress(report, 22, 40, 'البحث الرئيسي')
+
+        on_event({'phase': 'round', 'step': 1, 'max_steps': 20})
+        on_event({'phase': 'tool', 'step': 10, 'max_steps': 20,
+                  'tool': 'web_search', 'hint': 'فنادق الأندلس'})
+        on_event({'phase': 'tool_done', 'step': 10, 'max_steps': 20,
+                  'tool': 'open_url', 'hint': 'https://x.sa', 'ok': False})
+        on_event({'phase': 'done', 'ok': True})
+
+        pcts = [pct for pct, _msg in progress]
+        self.assertEqual(pcts, sorted(pcts))
+        self.assertTrue(all(22 <= pct <= 40 for pct in pcts), pcts)
+        self.assertIn('يبحث في الويب عن «فنادق الأندلس»', progress[1][1])
+        self.assertIn('تعذّر', progress[2][1])
+
+
 if __name__ == '__main__':
     unittest.main()

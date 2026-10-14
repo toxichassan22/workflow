@@ -341,8 +341,28 @@ class RunSourcePlanTests(unittest.TestCase):
             [_entry('https://a.test/ok', label='مؤشر')], pool,
             lambda url: (_big_html(), ''),
             report=lambda pct, msg: progress.append((pct, msg)))
-        self.assertEqual(progress[0][0], 18)
+        self.assertEqual(progress[0][0], 22)
         self.assertIn('مؤشر', progress[0][1])
+
+    def test_report_advances_the_pct_per_entry_success_or_failure(self):
+        """The plan band walks per entry — a bar that only moved on fetched
+        pages would freeze through a run of failures."""
+        pool = _FakePool()
+        progress = []
+        entries = [_entry(f'https://e{i}.test/p', tier=i, label=f'مصدر {i}')
+                   for i in range(4)]
+
+        def flaky(url):
+            return (_big_html(), '') if 'e0' in url or 'e2' in url else ('', 'boom')
+
+        market_study.run_source_plan(
+            entries, pool, flaky,
+            report=lambda pct, msg: progress.append((pct, msg)))
+        pcts = [pct for pct, _msg in progress]
+        self.assertEqual(len(pcts), 4)
+        # Sorted tier-first: index order 0..3 regardless of input order.
+        self.assertEqual(sorted(set(pcts)), pcts)
+        self.assertTrue(all(10 < pct <= 22 for pct in pcts), pcts)
 
 
 class RealPoolIntegrationTests(unittest.TestCase):

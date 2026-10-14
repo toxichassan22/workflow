@@ -577,7 +577,9 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
         market_study.build_consultant_system_prompt(), prompt,
         _usage_ctx('market', data, tenant_id=tenant_id),
         evidence_pool=evidence_pool, deadline=deadline, session=session,
-        search_budget=max(3, len(batch)), max_steps=16, max_tokens=4000)
+        search_budget=max(3, len(batch)), max_steps=16, max_tokens=4000,
+        on_event=_market_agent_progress(report, 82, 86,
+                                        'البحث عن الشعارات الرسمية'))
     if not _market_search_ran(response):
         for row in batch:
             row.setdefault('logo_import_warning', 'تعذر التحقق من الموقع الرسمي للشعار')

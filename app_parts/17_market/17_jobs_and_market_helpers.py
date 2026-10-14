@@ -592,8 +592,11 @@ def _market_url_alive(url, timeout=8):
     return True
 
 
-def _verify_market_urls(urls, max_workers=6):
-    """Return the subset of urls that provably fail; never raises."""
+def _verify_market_urls(urls, max_workers=6, progress=None, band=None):
+    """Return the subset of urls that provably fail; never raises.
+
+    ``progress``/``band`` let the caller tick the job bar per checked URL —
+    the pool results arrive in order, so each completed check advances."""
     unique = []
     seen = set()
     for url in urls or []:
@@ -605,13 +608,22 @@ def _verify_market_urls(urls, max_workers=6):
         unique.append(value)
     if not unique:
         return set()
+    report = progress if callable(progress) else (lambda *_args: None)
+    lo, hi = (band if isinstance(band, (tuple, list)) and len(band) == 2
+              else (0, 0))
     from concurrent.futures import ThreadPoolExecutor
     dead = set()
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            checked = 0
             for url, alive in zip(unique, pool.map(_market_url_alive, unique)):
                 if not alive:
                     dead.add(url)
+                checked += 1
+                if band:
+                    host = url.split('/')[2] if '/' in url else url
+                    report(lo + int((hi - lo) * checked / len(unique)),
+                           f'فحص رابط {host} ({checked} من {len(unique)})...')
     except Exception as exc:
         print(f'[MARKET STUDY] url verification failed: {exc}')
         return set()

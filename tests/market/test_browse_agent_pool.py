@@ -316,6 +316,69 @@ class EvidencePoolFeedTests(unittest.TestCase):
         self.assertEqual(result['choices'][0]['message']['content'], _FINAL_TEXT)
 
 
+class ProgressEventTests(unittest.TestCase):
+    """``on_event`` turns a multi-minute browse run into a live progress feed —
+    without it the job bar only moved between stages and looked dead."""
+
+    def test_on_event_fires_round_tool_tool_done_and_done(self):
+        worker = _FakeWorker()
+        calls = []
+        chat = _scripted_chat([
+            _fn_response(('web_search', {'query': 'منافس تجريبي'})),
+            _fn_response(('open_url', {'url': _PAGE_URL})),
+            _text_response(),
+        ], calls)
+        events = []
+        with _patched_transport(chat, worker):
+            result = agent.run_browse_agent('task', max_steps=6,
+                                            on_event=events.append)
+        self.assertNotIn('error', result)
+        phases = [event.get('phase') for event in events]
+        self.assertEqual(phases[0], 'round')
+        self.assertIn('tool', phases)
+        self.assertIn('tool_done', phases)
+        self.assertEqual(phases[-1], 'done')
+        tool_events = [event for event in events if event.get('phase') == 'tool']
+        self.assertEqual([event['tool'] for event in tool_events],
+                         ['web_search', 'open_url'])
+        self.assertEqual(tool_events[0]['hint'], 'منافس تجريبي')
+        self.assertEqual(tool_events[1]['hint'], _PAGE_URL)
+        done = events[-1]
+        self.assertTrue(done.get('ok'))
+        self.assertGreaterEqual(done.get('searches') or 0, 1)
+
+    def test_on_event_failure_does_not_kill_the_run(self):
+        calls = []
+        chat = _scripted_chat([
+            _fn_response(('web_search', {'query': 'q'})),
+            _text_response(),
+        ], calls)
+
+        def boom(_event):
+            raise RuntimeError('ui died')
+
+        with _patched_transport(chat):
+            result = agent.run_browse_agent('task', max_steps=4, on_event=boom)
+        self.assertNotIn('error', result)
+        self.assertEqual(result['choices'][0]['message']['content'], _FINAL_TEXT)
+
+    def test_tool_done_marks_a_failed_open(self):
+        worker = _FakeWorker(open_url=lambda url: {
+            'url': url, 'final_url': url, 'title': '', 'text': '',
+            'error': 'timeout'})
+        calls = []
+        chat = _scripted_chat([
+            _fn_response(('open_url', {'url': 'https://dead.sa/x'})),
+            _text_response(),
+        ], calls)
+        events = []
+        with _patched_transport(chat, worker):
+            agent.run_browse_agent('task', max_steps=4, on_event=events.append)
+        tool_dones = [e for e in events if e.get('phase') == 'tool_done']
+        self.assertEqual(len(tool_dones), 1)
+        self.assertFalse(tool_dones[0]['ok'])
+
+
 class DeadlineTests(unittest.TestCase):
     def test_expired_deadline_stops_before_the_first_round(self):
         calls = []

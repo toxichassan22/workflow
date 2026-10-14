@@ -43,7 +43,8 @@ def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
                 + str(user_content or '')).strip()
         forwarded = dict(agent_kwargs)
         for _key, _value in (('evidence_pool', evidence_pool),
-                             ('deadline', deadline), ('session', session)):
+                             ('deadline', deadline), ('session', session),
+                             ('on_event', forwarded.pop('on_event', None))):
             if _value is not None and _agent_run_accepts(_agent_module, _key):
                 forwarded[_key] = _value
         response = _agent_module.run_browse_agent(
@@ -95,7 +96,8 @@ def _absorb_verify_response(row, prompt_response, tokens, needed, matched_pages,
 
 
 def _verify_competitor_row(row, payload, data, tenant_id=None,
-                           evidence_pool=None, deadline=None, session=None):
+                           evidence_pool=None, deadline=None, session=None,
+                           on_event=None):
     """One targeted browse-agent run per competitor — the last-resort path.
 
     A market-wide listing query only surfaces index pages, so the model fills
@@ -153,7 +155,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     response = _browse_agent_call(
         market_study.build_consultant_system_prompt(offer_lang), prompt,
         usage_ctx, evidence_pool=evidence_pool, deadline=deadline,
-        session=session, reasoning_effort='low')
+        session=session, reasoning_effort='low', on_event=on_event)
     last_error = _chat_error_message(response)
     search_ran_any = False
     if response.get('error') is None:
@@ -666,7 +668,8 @@ def _verify_row_deterministic(row, payload, data, evidence_pool, deadline):
 
 
 def _verify_competitor_row_pooled(row, payload, data, tenant_id=None,
-                                  evidence_pool=None, deadline=None):
+                                  evidence_pool=None, deadline=None,
+                                  on_event=None):
     """Pool-thread phases: deterministic search first, the browse agent only
     for rows still without any evidence. An expired job deadline is an honest
     search_not_run — the row never silently skipped its verdict."""
@@ -679,11 +682,11 @@ def _verify_competitor_row_pooled(row, payload, data, tenant_id=None,
         return
     _verify_competitor_row(row, payload, data, tenant_id=tenant_id,
                            evidence_pool=evidence_pool, deadline=deadline,
-                           session=_verify_agent_session())
+                           session=_verify_agent_session(), on_event=on_event)
 
 
 def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
-                            evidence_pool=None, deadline=None):
+                            evidence_pool=None, deadline=None, band=(52, 70)):
     report = progress if callable(progress) else (lambda *_args: None)
     # Manual rows verify too: fill mode exists to complete the cells the user
     # left empty, and the per-name search is the only priced lookup they get.
@@ -692,13 +695,29 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
                and str(row.get('name') or '').strip()]
     if not targets:
         return
+    lo, hi = band
     done = [0]
     total = len(targets)
 
+    def _floor():
+        return lo + int((hi - lo) * done[0] / total)
+
     def _tick(row):
         done[0] += 1
-        report(30 + int(28 * done[0] / total),
+        report(_floor(),
                f'التحقق من «{row.get("name") or "منافس"}» ({done[0]} من {total})...')
+
+    def _row_event(row, event):
+        # A row's agent run can browse for minutes between ticks — narrate its
+        # searches/opens at the current floor so the bar never looks dead.
+        if not isinstance(event, dict) or event.get('phase') != 'tool':
+            return
+        hint = str(event.get('hint') or '').strip()[:80]
+        tool = str(event.get('tool') or '')
+        verb = ('يبحث عن' if tool == 'web_search'
+                else 'يفتح صفحة' if tool == 'open_url' else 'ينفذ')
+        report(_floor(),
+               f'التحقق من «{row.get("name") or "منافس"}» — {verb} {hint}'.rstrip())
 
     # Phase 1 — pure matching, sequential: pages the source plan and earlier
     # browse calls already fetched carry most names; those rows absorb the
@@ -721,9 +740,10 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
             # Pool threads share no Flask context — without one the key gate
             # misreads every company as unkeyed and db-backed helpers die.
             with _worker_app_context():
-                _verify_competitor_row_pooled(row, payload, data, tenant_id=tenant_id,
-                                              evidence_pool=evidence_pool,
-                                              deadline=deadline)
+                _verify_competitor_row_pooled(
+                    row, payload, data, tenant_id=tenant_id,
+                    evidence_pool=evidence_pool, deadline=deadline,
+                    on_event=lambda event: _row_event(row, event))
         finally:
             _close_verify_thread_browser()
             _tick(row)

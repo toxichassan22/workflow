@@ -123,6 +123,46 @@ def _market_source_fetch_http(url):
     return html or ''
 
 
+def _market_agent_progress(report, lo, hi, label):
+    """Map a browse-agent run's on_event dicts onto (percent, message) reports.
+
+    The bar moves with the agent's own steps — model rounds, searches, page
+    opens, and their failures — instead of freezing for the minutes a run can
+    take. ``label`` is the stage name the step detail is attached to.
+    """
+    if not callable(report):
+        return None
+    span = max(1, int(hi) - int(lo))
+
+    def _on_event(event):
+        if not isinstance(event, dict):
+            return
+        phase = event.get('phase')
+        if phase not in ('round', 'tool', 'tool_done'):
+            return
+        try:
+            step = max(1, int(event.get('step') or 1))
+            max_steps = max(step, int(event.get('max_steps') or step))
+        except (TypeError, ValueError):
+            step, max_steps = 1, 1
+        pct = int(lo) + int(span * min(step, max_steps) / max_steps)
+        hint = str(event.get('hint') or '').strip()[:80]
+        tool = str(event.get('tool') or '')
+        if phase == 'tool':
+            verb = ('يبحث في الويب عن' if tool == 'web_search'
+                    else 'يفتح صفحة' if tool == 'open_url' else 'ينفذ أداة')
+            report(pct, f'{label} — {verb} «{hint}»' if hint
+                   else f'{label} — {verb}')
+        elif phase == 'tool_done':
+            if event.get('ok') is False:
+                report(pct, f'{label} — تعذّر «{hint}»' if hint
+                       else f'{label} — تعذّرت خطوة')
+        else:
+            report(pct, f'{label} — يخطط الخطوة {step} من {max_steps}')
+
+    return _on_event
+
+
 def _run_market_source_plan(payload, offer_lang='ar', evidence_pool=None,
                             session=None, deadline=None, report=None):
     """Known-sources-first retrieval: the catalog's deep links (REGA datasets,
@@ -221,7 +261,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     user_prompt = market_study.build_competitors_user_prompt(
         payload, existing, mode=mode, offer_lang=offer_lang)
-    report(18, 'جاري البحث في الويب عن المنافسين وبياناتهم — قد يستغرق دقائق...')
+    report(10, 'جاري البحث في الويب عن المنافسين وبياناتهم — قد يستغرق دقائق...')
     # Known sources first: the catalog's deep links land in the evidence pool
     # before the model searches, so rows built on them verify without refetch.
     _run_market_source_plan(payload, offer_lang=offer_lang,
@@ -236,7 +276,9 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         evidence_pool=evidence_pool, deadline=deadline, session=session,
         search_budget=_COMPETITORS_SEARCH_BUDGET,
         max_steps=_COMPETITORS_MAX_STEPS,
-        max_tokens=14000, reasoning_effort='low')
+        max_tokens=14000, reasoning_effort='low',
+        on_event=_market_agent_progress(report, 22, 40,
+                                        'البحث الرئيسي عن المنافسين'))
     provider_error = _chat_error_message(res) if res.get('error') else ''
     parsed, parse_error = _parse_market_model_json(res)
     if parse_error:
@@ -372,7 +414,9 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             # or stored pages carry its tokens, so a fresh browse call would
             # mostly read pool hits instead of surfacing new names.
             continue
-        report(24 + round_no,
+        round_lo = 40 + int(12 * round_no / max_rounds)
+        round_hi = 40 + int(12 * (round_no + 1) / max_rounds)
+        report(round_lo,
                f'عدد منافسي محور {deficit_labels} أقل من الحد الأدنى — بحث إضافي ({round_no + 1})...'
                if multi_axis else
                f'عدد المنافسين أقل من الحد الأدنى — بحث إضافي ({round_no + 1}) عن مشاريع مسماة أخرى...')
@@ -401,7 +445,10 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             _usage_ctx('market', data, tenant_id=tenant_id),
             evidence_pool=evidence_pool, deadline=deadline, session=session,
             search_budget=4, max_steps=10, max_tokens=14000,
-            reasoning_effort='low')
+            reasoning_effort='low',
+            on_event=_market_agent_progress(
+                report, round_lo, round_hi,
+                f'بحث إضافي ({round_no + 1})'))
         _err2 = _chat_error_message(res2) if res2.get('error') else ''
         provider_error = provider_error or _err2
         _collect_citations(res2)
@@ -447,14 +494,14 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             pass
     market_study.apply_search_citations(merged, evidence_urls)
     _attach_retrieved_citations(merged, evidence_pages)
-    report(30, 'التحقق من كل منافس ببحث مستقل في الويب...')
+    report(52, 'التحقق من كل منافس ببحث مستقل في الويب...')
     _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id,
                             progress=report, evidence_pool=evidence_pool,
-                            deadline=deadline)
+                            deadline=deadline, band=(52, 70))
     for row in merged:
         market_study.canonicalize_competitor_source_urls(row)
         _drop_foreign_competitor_urls(row)
-    report(62, 'التحقق من روابط المصادر واحدًا واحدًا...')
+    report(70, 'التحقق من روابط المصادر واحدًا واحدًا...')
     search_ran = _market_search_ran(res) or bool(citation_urls)
     if search_ran:
         # A grounded run that still leaves a row with zero source URLs means the
@@ -464,7 +511,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                 row['no_search_evidence'] = True
     if search_ran:
         dead_urls = _verify_market_urls(
-            url for row in merged for url in _competitor_claimed_urls(row))
+            [url for row in merged for url in _competitor_claimed_urls(row)],
+            progress=report, band=(70, 74))
         for row in merged:
             _flag_dead_competitor_urls(row, dead_urls)
     else:
@@ -607,7 +655,7 @@ def _run_market_summary(data, tenant_id=None, progress=None,
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
         user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
-    report(18, 'جاري تحليل السوق والمنافسين بالبحث في الويب — قد يستغرق دقائق...')
+    report(10, 'جاري تحليل السوق والمنافسين بالبحث في الويب — قد يستغرق دقائق...')
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
     # The browse agent is the only search layer: it runs the searches and
     # opens the pages itself through headless Chromium, so the sources table
@@ -623,7 +671,9 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         system_prompt, user_prompt, usage_ctx,
         evidence_pool=evidence_pool, deadline=deadline, session=session,
         search_budget=_SUMMARY_SEARCH_BUDGET, max_steps=_SUMMARY_MAX_STEPS,
-        max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='low')
+        max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='low',
+        on_event=_market_agent_progress(report, 24, 70,
+                                        'بحث الويب لملخص السوق'))
     failed = res.get('error') is not None
     provider_error = _chat_error_message(res) if failed else ''
     if not failed and not _market_citation_pages(res):

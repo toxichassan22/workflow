@@ -88,9 +88,11 @@
         12
       );
       try {
+        let lastJobPct = 10;
         const onProgress = job => {
           const pct = Number(job && job.progress);
-          updateLoaderProgress(Number.isFinite(pct) && pct > 0 ? Math.min(pct, 99) : (job && job.status === 'running' ? 55 : 40),
+          if (Number.isFinite(pct) && pct > 0) lastJobPct = Math.min(pct, 99);
+          updateLoaderProgress(lastJobPct,
             (job && job.message) || 'جاري البحث...');
         };
         let res = await resumeMarketJob('competitors', onProgress,
@@ -102,7 +104,7 @@
           res = await api('POST', '/api/market-study/competitors', payload);
           if (res && res.jobId && !Array.isArray(res.competitors)) {
             rememberMarketJob('competitors', res.jobId);
-            updateLoaderProgress(35, res.message || 'بدأت المهمة في الخلفية...');
+            updateLoaderProgress(10, res.message || 'بدأت المهمة في الخلفية...');
             res = await pollMarketStudyJob(res.jobId, onProgress);
           }
         }
@@ -222,9 +224,11 @@
       if (fail) fail.textContent = '';
       showLoader('توليد ملخص السوق', 'جاري البحث في المصادر الرسمية وكتابة الملخص التنفيذي...', 12);
       try {
+        let lastJobPct = 10;
         const onProgress = job => {
           const pct = Number(job && job.progress);
-          updateLoaderProgress(Number.isFinite(pct) && pct > 0 ? Math.min(pct, 99) : (job && job.status === 'running' ? 60 : 45),
+          if (Number.isFinite(pct) && pct > 0) lastJobPct = Math.min(pct, 99);
+          updateLoaderProgress(lastJobPct,
             (job && job.message) || 'جاري إعداد الملخص...');
         };
         const priorState = getMarketStudyState();
@@ -238,7 +242,7 @@
           res = await api('POST', '/api/market-study/summary', payload);
           if (res && res.jobId && !res.summary) {
             rememberMarketJob('summary', res.jobId);
-            updateLoaderProgress(35, res.message || 'بدأت المهمة في الخلفية...');
+            updateLoaderProgress(10, res.message || 'بدأت المهمة في الخلفية...');
             res = await pollMarketStudyJob(res.jobId, onProgress);
           }
         }

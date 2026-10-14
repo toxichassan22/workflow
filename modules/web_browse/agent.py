@@ -698,7 +698,8 @@ def _execute_tool(session, name, args, trace, pages, search_state,
 
 def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                      max_tokens=None, reasoning_effort=None, model=None,
-                     evidence_pool=None, deadline=None, session=None):
+                     evidence_pool=None, deadline=None, session=None,
+                     on_event=None):
     """Drive one OpenRouter tool-call loop against a real browser session.
 
     ``model`` is the caller's own task model — the same model that would have
@@ -721,6 +722,14 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     collected. ``session`` is a caller-owned browser worker (a BrowserWorker
     or the ``browser_session()`` yield) used for all tool execution; only a
     session this function opened itself is closed on exit.
+
+    ``on_event`` is an optional callable fired with structured progress dicts
+    so a caller's UI bar moves with the run instead of only between stages:
+    ``{'phase': 'round', 'step', 'max_steps', 'searches', 'pages'}`` before each
+    model round, ``{'phase': 'tool', ..., 'tool', 'hint'}`` before each tool
+    executes, ``{'phase': 'tool_done', ..., 'ok'}`` after it, and
+    ``{'phase': 'done', 'steps', 'pages', 'searches', 'ok'}`` once at the end.
+    A raising callback is ignored — reporting never kills a run.
 
     Returns an OpenRouter-shaped dict: choices[0].message.content holds the
     model's final text, every successfully opened page becomes a url_citation
@@ -770,6 +779,14 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     session_cm = None
     search_state = {'count': 0, 'budget': budget}
 
+    def _emit(event):
+        if not callable(on_event):
+            return
+        try:
+            on_event(event)
+        except Exception:
+            pass
+
     def _round():
         kwargs = {'tools': _BROWSER_TOOLS, 'max_tokens': out_cap,
                   'usage_ctx': usage_ctx}
@@ -785,6 +802,8 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                 error = {'message': 'deadline_exceeded'}
                 break
             _compact_tool_history(messages)
+            _emit({'phase': 'round', 'step': step + 1, 'max_steps': max_steps,
+                   'searches': search_state['count'], 'pages': len(pages)})
             response = _round()
             if effort and not effort_disabled and _effort_refusal(response):
                 # The hint is model-specific — a provider that rejects it gets
@@ -844,9 +863,17 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                 args = call['arguments']
                 hint = str(args.get('url') or args.get('query') or '')[:120]
                 _log_step(step + 1, call['name'] or '?', hint)
+                _emit({'phase': 'tool', 'step': step + 1, 'max_steps': max_steps,
+                       'tool': call['name'] or '', 'hint': hint,
+                       'searches': search_state['count'], 'pages': len(pages)})
                 result = _execute_tool(session, call['name'], args,
                                        trace, pages, search_state,
                                        evidence_pool)
+                _emit({'phase': 'tool_done', 'step': step + 1,
+                       'max_steps': max_steps, 'tool': call['name'] or '',
+                       'hint': hint, 'searches': search_state['count'],
+                       'pages': len(pages),
+                       'ok': not bool((result or {}).get('error'))})
                 messages.append(_tool_message(call, result))
             if error is not None:
                 break
@@ -866,6 +893,8 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     usage = {'prompt_tokens': prompt_tokens,
              'completion_tokens': completion_tokens,
              'total_tokens': prompt_tokens + completion_tokens}
+    _emit({'phase': 'done', 'pages': len(pages), 'searches': search_state['count'],
+           'ok': error is None})
     _log_line(f"[BROWSE AGENT] done: pages={len(pages)} trace={len(trace)} "
               f"{'error=' + str((error or {}).get('message')) if error else 'ok'}")
     annotations = [{'url_citation': {'url': url, 'title': page['title'],
