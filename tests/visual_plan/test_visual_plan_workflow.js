@@ -218,6 +218,33 @@ test('unchecked notes approve through the responsibility dialog with a signed ac
   assert.equal(context.visualConceptPlanNotesCleared(context.tenantVisualConceptState.plansWorkflow), true);
 });
 
+test('the processing lock repaints once prepare finishes instead of lingering', async () => {
+  const context = fixture();
+  const locks = [];
+  context.renderVisualConceptPage = () =>
+    locks.push(context.visualConceptLockMessage('plan_site'));
+  context.showLoader = () => {};
+  context.hideLoader = () => {};
+  context.toast = () => {};
+  context.api = async () => ({ success: true,
+    prompts: { site: 'site', uses: 'uses', massing: 'massing' },
+    scene: { version: 1, token: 'sealed' }, planContext: {} });
+  context.tenantVisualConceptState = { slots: { cover: {} },
+    plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+      verification: { approved: true },
+      boundary: { approved: true, points: [
+        { eastings: 0, northings: 0 }, { eastings: 10, northings: 0 },
+        { eastings: 10, northings: 10 }] },
+      distribution: { approved: true,
+        rows: [{ id: 'row_1', building: 'A', component: 'res' }] },
+    }) };
+  await context.prepareVisualConceptPlansPrompts();
+  assert.ok(locks.length > 0);
+  // Every render inside the request runs with the pending flag up; the
+  // trailing repaint after it clears is what stops «قيد المعالجة» lingering.
+  assert.notEqual(locks[locks.length - 1], 'المشهد الهندسي قيد المعالجة.');
+});
+
 test('a clean verification still approves without opening the dialog', () => {
   const context = fixture();
   let created = false;

@@ -180,16 +180,35 @@ def _visual_plan_input_signature(data, context=None):
                                      separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
 
 
-def _visual_plan_token(kind, data, signature, payload):
+def _visual_plan_token(kind, data, signature, payload, legacy=False):
     normalized = db.normalize_generation_input(payload)
     body = hashlib.sha256(json.dumps(normalized, sort_keys=True, ensure_ascii=False,
                                     separators=(',', ':'), allow_nan=False).encode('utf-8')).hexdigest()
-    project = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     tenant = str(getattr(g, 'tenant_id', '') or '')
-    draft_id = str(data.get('draftId') or project.get('draftId') or '')
-    message = json.dumps(['visual-plan', VISUAL_PLAN_SCENE_VERSION, kind, tenant, draft_id,
-                          signature, body], separators=(',', ':'), ensure_ascii=False)
+    parts = ['visual-plan', VISUAL_PLAN_SCENE_VERSION, kind, tenant]
+    if legacy:
+        # First-run tokens also bound the client-minted draft id — but draftId
+        # is relabeled on draft loads and lazy saves while the signature already
+        # covers every input the scene depends on, so the binding only produced
+        # false "changed outside the edit path" rejections. Verification still
+        # accepts this shape so scenes sealed before the fix stay valid.
+        project = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+        parts.append(str(data.get('draftId') or project.get('draftId') or ''))
+    message = json.dumps(parts + [signature, body], separators=(',', ':'), ensure_ascii=False)
     return _visual_plan_hmac.new(auth.JWT_SECRET.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
+
+
+def _visual_plan_token_matches(kind, data, signature, payload, token):
+    """Accept the current token or the first-run variant that carried the
+    client-minted draft id — sealed scenes and notes proofs stay valid across
+    a draft relabel, while a genuinely edited body still fails both."""
+    if not isinstance(token, str):
+        return False
+    for legacy in (False, True):
+        expected = _visual_plan_token(kind, data, signature, payload, legacy=legacy)
+        if _visual_plan_hmac.compare_digest(expected, token):
+            return True
+    return False
 
 
 def _visual_plan_notes_cleared(data, context=None):
@@ -204,16 +223,15 @@ def _visual_plan_notes_cleared(data, context=None):
     signature = _visual_plan_input_signature(data, context)
     if (review.get('acknowledged') and review.get('ackSignature') == signature
             and isinstance(review.get('ackToken'), str)):
-        expected = _visual_plan_token('notes-ack', data, signature, {'acknowledged': True})
-        if _visual_plan_hmac.compare_digest(expected, review['ackToken']):
+        if _visual_plan_token_matches('notes-ack', data, signature, {'acknowledged': True},
+                                      review['ackToken']):
             return True
     if not review.get('verified') or not review.get('canProceed'):
         return False
     if review.get('inputSignature') != signature or not isinstance(review.get('token'), str):
         return False
     payload = {key: review.get(key) for key in ('verified', 'canProceed', 'checks', 'issues')}
-    expected = _visual_plan_token('notes', data, signature, payload)
-    return _visual_plan_hmac.compare_digest(expected, review['token'])
+    return _visual_plan_token_matches('notes', data, signature, payload, review['token'])
 
 
 def _visual_plan_notes_ack(data, context=None):

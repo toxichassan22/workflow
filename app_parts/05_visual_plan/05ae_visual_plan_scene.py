@@ -85,9 +85,8 @@ def _visual_plan_scene_from_request(data):
     signature = _visual_plan_input_signature(data, context)
     if scene.get('inputSignature') != signature:
         raise visual_plan_geometry.PlanGeometryError('المشهد الهندسي لا يطابق بيانات المشروع الحالية.', 'PLANS_CONTEXT_CHANGED')
-    expected = _visual_plan_token('scene', data, signature,
-                                 {key: value for key, value in scene.items() if key != 'token'})
-    if not _visual_plan_hmac.compare_digest(expected, scene['token']):
+    posted = {key: value for key, value in scene.items() if key != 'token'}
+    if not _visual_plan_token_matches('scene', data, signature, posted, scene['token']):
         raise visual_plan_geometry.PlanGeometryError('تغيرت بيانات المشهد خارج مسار التعديل.', 'PLANS_SCENE_INVALID')
     program = _visual_plan_program(contract, context)
     visual_plan_scene.validate_scene(scene, contract, program)

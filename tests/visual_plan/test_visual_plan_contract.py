@@ -183,6 +183,71 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(response.get_json()['error_code'], 'PLANS_SETBACK_CONFLICT')
         self.assertIn('لا تتسع', response.get_json()['error'])
 
+    def test_sealed_scene_survives_a_draft_relabel(self):
+        """The scene token used to bind the client-minted draftId — a draft
+        reload or a lazy save between prepare and render re-labelled it, and
+        every scene check then failed with 'تغيرت بيانات المشهد خارج مسار
+        التعديل' even though the scene and its inputs were untouched. The
+        binding now stops at the input signature: the same sealed scene
+        verifies after a relabel, and the first-run draft-bound shape stays
+        accepted for scenes sealed before the fix."""
+        module = self.application_module
+        project = self.project()
+        client = self.app.test_client()
+        layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[5, 3], [15, 3], [15, 15], [5, 15]]}],
+            'entries': [], 'openAreas': []})
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': layout}}]
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            prepared = client.post('/api/visual-concept/plans-prompts',
+                headers=self._headers(self.token_a),
+                json={'projectData': project, 'plansWorkflow': self.workflow(project)})
+        self.assertEqual(prepared.status_code, 200, prepared.get_json())
+        scene = prepared.get_json()['scene']
+        workflow = {**self.workflow(project), 'scene': scene}
+
+        # The signature covers every input the scene depends on — a relabeled
+        # draftId changes nothing it should care about.
+        relabeled = dict(project, draftId='reloaded-draft-id')
+        with patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
+            render = client.post('/api/visual-concept/generate',
+                headers=self._headers(self.token_a),
+                json={'slotId': 'plan_site', 'prompt': 'PROMPT',
+                      'projectData': relabeled, 'plansWorkflow': workflow})
+        self.assertEqual(render.status_code, 200, render.get_json())
+        self.assertEqual(render.get_json()['image'], '/uploads/creative/out.png')
+
+        # Scenes sealed by the first-run draft-bound formula still verify as
+        # long as the current draftId matches the one they were sealed under.
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            data = {'projectData': dict(project, draftId='draft-at-seal'),
+                    'plansWorkflow': self.workflow(project)}
+            signature = module._visual_plan_input_signature(data)
+            posted = {key: value for key, value in scene.items() if key != 'token'}
+            legacy_scene = dict(scene, token=module._visual_plan_token(
+                'scene', data, signature, posted, legacy=True))
+        with patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
+            render = client.post('/api/visual-concept/generate',
+                headers=self._headers(self.token_a),
+                json={'slotId': 'plan_site', 'prompt': 'PROMPT',
+                      'projectData': dict(project, draftId='draft-at-seal'),
+                      'plansWorkflow': {**self.workflow(project), 'scene': legacy_scene}})
+        self.assertEqual(render.status_code, 200, render.get_json())
+
+        # A tampered body fails both formulas — the relabel escape is not a bypass.
+        tampered = json.loads(json.dumps(scene))
+        tampered['buildings'][0]['footprint'][0] = [0, 0]
+        refused = client.post('/api/visual-concept/generate',
+            headers=self._headers(self.token_a),
+            json={'slotId': 'plan_site', 'prompt': 'PROMPT',
+                  'projectData': relabeled,
+                  'plansWorkflow': {**self.workflow(project), 'scene': tampered}})
+        self.assertEqual(refused.status_code, 400, refused.get_json())
+        self.assertEqual(refused.get_json()['error_code'], 'PLANS_SCENE_INVALID')
+
     def test_fixed_geometry_plans_do_not_chain_image_approvals(self):
         module = self.application_module
         project = self.project()

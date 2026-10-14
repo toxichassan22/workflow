@@ -512,6 +512,9 @@
         visualConceptPlansPromptsPending = false;
         visualConceptPlanScenePending = false;
         visualConceptPlanActionBusy('prepare-prompts', false);
+        // The last in-try render painted while the pending flag was still up —
+        // repaint once it clears so the "قيد المعالجة" lock text never lingers.
+        renderVisualConceptPage();
       }
     }
 

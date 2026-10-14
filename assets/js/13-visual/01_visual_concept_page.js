@@ -547,6 +547,9 @@
         hideLoader();
         toast(error.message || WFT('vc.edit_failed', 'تعذر تعديل الصورة'));
       } finally {
-        if (planWorkflowSlot) visualConceptPlanScenePending = false;
+        if (planWorkflowSlot) {
+          visualConceptPlanScenePending = false;
+          renderVisualConceptPage();
+        }
       }
     }
