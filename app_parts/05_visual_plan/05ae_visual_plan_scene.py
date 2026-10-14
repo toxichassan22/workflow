@@ -359,14 +359,13 @@ def _visual_plan_slot_prompt(workflow, kind, context):
     return _visual_concept_plan_drawing_prompt(kind, context, model)
 
 
-def _visual_plan_illustrate(scene, kind, prompt, contract, data, base_image='', extra_refs=None):
-    """The image model draws the shipped illustration — never the geometry.
-    The deterministic layout render still runs, but as a reference pinning the
-    sealed scene's exact footprints, labels, entries and open areas; the
-    surveyed parcel outline rides beside it so the drawn boundary is the real
-    one. The sealed scene stays the only geometry authority."""
+def _visual_plan_illustrate(prompt, contract, data, base_image='', extra_refs=None):
+    """The image model draws the shipped illustration straight from the
+    validated scene spec carried inside the prompt — no intermediate render
+    ships or steers it. The only attached geometry is the surveyed parcel
+    outline so the drawn boundary is the real one. The sealed scene stays
+    the only geometry authority and still gates every render."""
     references = [base_image] if base_image else []
-    references.append(visual_plan_renderer.render_plan(scene, kind))
     boundary_url = _visual_concept_render_plan_boundary_reference(
         contract['geometry']['surveyPoints'], g.tenant_id)
     if boundary_url:
@@ -375,10 +374,8 @@ def _visual_plan_illustrate(scene, kind, prompt, contract, data, base_image='', 
     image_prompt = (prompt
         + ('\nThe first attached image is the current approved illustration of this plan — '
            'keep its look and every unrequested detail identical. ' if base_image else '\n')
-        + 'The attached layout render is the validated engineering scene — match it exactly: '
-        'same parcel, footprint placements, labels, entries and open areas, only illustrated '
-        'in the requested drawing style. The surveyed parcel outline attachment is the true '
-        'boundary — trace it exactly.')
+        + 'The attached outline is the true surveyed parcel boundary — trace it exactly and '
+        'draw only the buildings, entries and open areas the prompt describes, nothing else.')
     image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             usage_ctx=_usage_ctx('image', data))
     if image:
@@ -398,7 +395,7 @@ def _visual_plan_render_response(data, slot_id):
     kind = _visual_concept_plan_kind(slot_id)
     workflow = data.get('plansWorkflow') or {}
     prompt = _visual_plan_slot_prompt(workflow, kind, context)
-    image, reference_count = _visual_plan_illustrate(scene, kind, prompt, contract, data)
+    image, reference_count = _visual_plan_illustrate(prompt, contract, data)
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
             'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry',
             'model': VISUAL_CONCEPT_IMAGE_MODEL, 'geometryMode': 'surveyed_xy_schematic_z',
@@ -466,7 +463,7 @@ def _visual_plan_edit_scene(data, slot_id):
     kind = _visual_concept_plan_kind(slot_id)
     prompt = _visual_plan_slot_prompt(data.get('plansWorkflow') or {}, kind, context)
     image, _count = _visual_plan_illustrate(
-        edited, kind, prompt, contract, data, base_image=base_image,
+        prompt, contract, data, base_image=base_image,
         extra_refs=_visual_concept_edit_reference_uris(data))
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
             'scene': edited, 'engine': 'surveyed_geometry',

@@ -300,9 +300,10 @@ class VisualPlanContractTests(MeetingRequirementsTests):
             self.assertEqual(raised.exception.code, 'PLANS_SCENE_INVALID')
 
     def test_plan_render_illustrates_the_sealed_scene_with_the_image_model(self):
-        """The shipped plan artwork comes from the image model — the
-        deterministic renderer still runs, but as a layout reference pinning
-        the sealed scene's geometry, never as the returned image."""
+        """The shipped plan artwork comes from the image model drawing the
+        validated scene spec in the prompt — the PIL scene renderer never
+        runs, so its output can neither ship nor steer the illustration;
+        the surveyed parcel outline is the only geometry reference."""
         module = self.application_module
         project = self.project()
         client = self.app.test_client()
@@ -322,6 +323,7 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                     'prompts': prepared.get_json()['prompts']}
 
         with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT') as image_call, \
+                patch.object(module.visual_plan_renderer, 'render_plan') as pil_render, \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/plan.png'), \
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
             render = client.post('/api/visual-concept/generate',
@@ -332,16 +334,16 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(body['image'], '/uploads/creative/plan.png')
         self.assertEqual(body['model'], module.VISUAL_CONCEPT_IMAGE_MODEL)
         image_call.assert_called_once()
+        pil_render.assert_not_called()
         sent_prompt = image_call.call_args.args[0]
         self.assertIn('DRAWING REQUESTED', sent_prompt)
-        self.assertIn('layout render is the validated engineering scene', sent_prompt)
+        self.assertIn('true surveyed parcel boundary', sent_prompt)
+        self.assertNotIn('layout render', sent_prompt)
         self.assertEqual(image_call.call_args.kwargs.get('model'), module.VISUAL_CONCEPT_IMAGE_MODEL)
         references = image_call.call_args.args[1]
-        # The sealed scene's own deterministic layout render leads the
-        # reference set — the illustration redraws it, it cannot redraw
-        # geometry the scene never approved.
-        self.assertTrue(references[0].startswith('data:image/png;base64,'))
-        self.assertIn('ref:parcel', references)
+        # No scene render is attached — the surveyed parcel outline is the
+        # only geometry reference the illustration may trace.
+        self.assertEqual(references, ['ref:parcel'])
 
         with patch.object(module, 'call_images_api', return_value=None), \
                 patch.object(module, 'last_images_api_error', return_value=None), \
