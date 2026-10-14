@@ -79,6 +79,60 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(response.get_json()['error_code'], 'PLANS_NOTES_CHECK_REQUIRED')
         image_call.assert_not_called()
 
+    def test_notes_acknowledgement_token_clears_the_notes_gate(self):
+        """Unchecked or conflicting notes used to hard-block generation. The
+        responsibility acknowledgement mints a server token bound to the exact
+        input signature — it clears the gate, and a forged token still refuses."""
+        module = self.application_module
+        project = self.project()
+        workflow = self.workflow(project)
+        workflow['clientNotes'] = 'Build directly on the west parcel boundary.'
+        client = self.app.test_client()
+
+        def gate(wf):
+            return module._visual_concept_plan_workflow_error(
+                {'projectData': project, 'plansWorkflow': copy.deepcopy(wf)},
+                'plan_site', require_boundary=True, require_distribution=True)
+
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            self.assertEqual(gate(workflow)['error_code'], 'PLANS_NOTES_CHECK_REQUIRED')
+
+        response = client.post('/api/visual-concept/plans-notes-acknowledge',
+                               headers=self._headers(self.token_a),
+                               json={'projectData': project, 'plansWorkflow': workflow})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        ack = response.get_json()['notesAck']
+        self.assertTrue(ack['acknowledged'])
+
+        workflow['notesReview'] = {'acknowledged': True,
+                                   'ackSignature': ack['inputSignature'],
+                                   'ackToken': ack['token']}
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            self.assertIsNone(gate(workflow))
+            # The ack rides even a conflicting review — the client signed for it.
+            workflow['notesReview'].update(
+                verified=True, canProceed=False,
+                checks=[{'index': 0, 'note': 'x', 'result': 'متعارض', 'detail': ''}])
+            self.assertIsNone(gate(workflow))
+            workflow['notesReview']['ackToken'] = 'forged'
+            self.assertEqual(gate(workflow)['error_code'], 'PLANS_NOTES_CHECK_REQUIRED')
+
+    def test_notes_acknowledge_requires_written_notes_and_approved_verification(self):
+        project = self.project()
+        client = self.app.test_client()
+        missing_verification = client.post('/api/visual-concept/plans-notes-acknowledge',
+            headers=self._headers(self.token_a),
+            json={'projectData': project, 'plansWorkflow': {'clientNotes': 'x'}})
+        self.assertEqual(missing_verification.status_code, 400)
+        self.assertEqual(missing_verification.get_json()['error_code'], 'PLANS_VERIFICATION_REQUIRED')
+        missing_notes = client.post('/api/visual-concept/plans-notes-acknowledge',
+            headers=self._headers(self.token_a),
+            json={'projectData': project, 'plansWorkflow': self.workflow(project)})
+        self.assertEqual(missing_notes.status_code, 400)
+        self.assertEqual(missing_notes.get_json()['error_code'], 'PLANS_NOTES_INVALID')
+
     def test_fixed_geometry_plans_do_not_chain_image_approvals(self):
         module = self.application_module
         project = self.project()

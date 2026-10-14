@@ -133,6 +133,91 @@ test('verification conflicts approve only through the responsibility dialog', ()
   assert.equal(context.tenantVisualConceptState.plansWorkflow.viewStage, 'boundary');
 });
 
+test('plan notes results list only unresolved findings — مطابق rows never render red', () => {
+  const context = fixture();
+  const workflow = context.normalizeVisualConceptPlansWorkflow({
+    clientNotes: 'NOTE_MATCHED_TEXT\nNOTE_CONFLICT_TEXT',
+    notesReview: { verified: true, canProceed: false, inputSignature: 's', token: 't',
+      checks: [
+        { index: 0, note: 'NOTE_MATCHED_TEXT', result: 'مطابق', detail: 'DETAIL_MATCHED' },
+        { index: 1, note: 'NOTE_CONFLICT_TEXT', result: 'متعارض', detail: 'DETAIL_CONFLICT' },
+      ], issues: [] }
+  });
+  const html = context.visualConceptPlanNotesResultsHtml(workflow);
+  assert.ok(html.includes('plans-workflow-notice'));
+  assert.ok(html.includes('NOTE_CONFLICT_TEXT'));
+  assert.ok(html.includes('DETAIL_CONFLICT'));
+  assert.ok(!html.includes('NOTE_MATCHED_TEXT'));
+  assert.ok(!html.includes('DETAIL_MATCHED'));
+  const clean = context.normalizeVisualConceptPlansWorkflow({
+    clientNotes: 'NOTE_MATCHED_TEXT',
+    notesReview: { verified: true, canProceed: true, inputSignature: 's', token: 't',
+      checks: [{ index: 0, note: 'NOTE_MATCHED_TEXT', result: 'مطابق', detail: 'DETAIL_MATCHED' }],
+      issues: [] }
+  });
+  const cleanHtml = context.visualConceptPlanNotesResultsHtml(clean);
+  assert.ok(cleanHtml.includes('plans-workflow-success'));
+  assert.ok(!cleanHtml.includes('NOTE_MATCHED_TEXT'));
+  assert.ok(!cleanHtml.includes('DETAIL_MATCHED'));
+});
+
+test('distribution findings list conflicts only and approve no longer waits on notes', () => {
+  const context = fixture();
+  // Written but unchecked notes used to disable the approve button outright.
+  context.tenantVisualConceptState = { slots: {},
+    plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+      clientNotes: 'unreviewed note', notesReview: { verified: false } }) };
+  const distribution = context.normalizeVisualConceptPlansWorkflow({
+    distribution: { aiReviewed: true,
+      rows: [{ id: 'row_1', building: 'A', component: 'res' }],
+      checks: [
+        { item: 'ITEM_MATCHED', result: 'مطابق', detail: 'DETAIL_MATCHED' },
+        { item: 'ITEM_CONFLICT', result: 'متعارض' },
+      ], issues: [] }
+  }).distribution;
+  const html = context.visualConceptDistributionResultsHtml(distribution);
+  assert.ok(html.includes('ITEM_CONFLICT'));
+  assert.ok(!html.includes('ITEM_MATCHED'));
+  assert.ok(!html.includes('DETAIL_MATCHED'));
+  const button = html.match(/data-plans-workflow-action="approve-distribution"([^>]*)>/);
+  assert.ok(button);
+  assert.ok(!button[1].includes('disabled'));
+});
+
+test('unchecked notes approve through the responsibility dialog with a signed ack', async () => {
+  const context = fixture();
+  const modal = { style: {}, listeners: {},
+    setAttribute() {},
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+    querySelector() { return { textContent: '' }; } };
+  context.document.createElement = () => modal;
+  context.document.body = { appendChild() {} };
+  context.toast = () => {};
+  context.collectVisualConceptPayload = async () => ({ projectData: {} });
+  context.api = async (method, path) => {
+    assert.equal(path, '/api/visual-concept/plans-notes-acknowledge');
+    return { success: true, notesAck: { acknowledged: true, inputSignature: 'sig', token: 'ack-token' } };
+  };
+  context.tenantVisualConceptState = { slots: {},
+    plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+      clientNotes: 'ملاحظة مكتوبة', notesReview: { verified: false },
+      distribution: { aiReviewed: true, canProceed: true,
+        rows: [{ id: 'row_1', building: 'A', component: 'res' }] },
+    }) };
+  context.markVisualConceptDirty = () => {};
+  // The approve click itself never approves pending notes — it opens the
+  // warning; only the dialog's own continue signs the ack and lands approval.
+  context.approveVisualConceptPlansDistribution();
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.approved, false);
+  assert.equal(modal.style.display, 'flex');
+  modal.listeners.click({ target: { closest: sel => sel === '[data-plans-risk-continue]' ? {} : null } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.approved, true);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.notesReview.acknowledged, true);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.notesReview.ackToken, 'ack-token');
+  assert.equal(context.visualConceptPlanNotesCleared(context.tenantVisualConceptState.plansWorkflow), true);
+});
+
 test('a clean verification still approves without opening the dialog', () => {
   const context = fixture();
   let created = false;

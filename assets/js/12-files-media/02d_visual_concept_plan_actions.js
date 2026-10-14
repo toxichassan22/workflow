@@ -287,17 +287,45 @@
       }
     }
 
-    // Approving a table that still carries confirmed conflicts is allowed, but
-    // only through the risk dialog — its continue button lands on
-    // applyVisualConceptPlansDistributionApproval directly.
+    // Approving a table that still carries confirmed conflicts — or written
+    // notes that never passed a check — is allowed, but only through the risk
+    // dialog. Its continue button lands on confirmVisualConceptPlansDistributionApproval,
+    // which signs the server-side notes acknowledgement first when needed.
     function approveVisualConceptPlansDistribution() {
       const workflow = visualConceptPlansWorkflowState();
       const rows = workflow.distribution.rows || [];
-      if (!rows.length || !workflow.distribution.aiReviewed || !visualConceptPlanNotesValid(workflow)) return;
+      if (!rows.length || !workflow.distribution.aiReviewed) return;
       const hasConflicts = Boolean(visualConceptDistributionBlocking(workflow.distribution).length)
         || workflow.distribution.canProceed === false;
-      if (hasConflicts) { showVisualConceptDistributionRisk(); return; }
+      const notesPending = Boolean(workflow.clientNotes.trim()) && !visualConceptPlanNotesCleared(workflow);
+      if (hasConflicts || notesPending) { showVisualConceptDistributionRisk(hasConflicts, notesPending); return; }
       applyVisualConceptPlansDistributionApproval(workflow);
+    }
+
+    async function confirmVisualConceptPlansDistributionApproval() {
+      const workflow = visualConceptPlansWorkflowState();
+      const needsAck = Boolean(workflow.clientNotes.trim()) && !visualConceptPlanNotesCleared(workflow);
+      if (!needsAck) { applyVisualConceptPlansDistributionApproval(workflow); return; }
+      if (!visualConceptPlanActionBusy('approve-distribution', true)) return;
+      try {
+        const payload = await collectVisualConceptPlansWorkflowPayload();
+        const stamp = visualConceptPlanInputStamp();
+        const response = await api('POST', '/api/visual-concept/plans-notes-acknowledge', payload);
+        if (stamp !== visualConceptPlanInputStamp()) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
+        if (!response?.success || !response.notesAck) {
+          toast(response?.error || WFT('plans.distribution_failed', 'تعذر اعتماد التوزيع'));
+          return;
+        }
+        const current = visualConceptPlansWorkflowState();
+        current.notesReview = { ...current.notesReview, acknowledged: true,
+          ackSignature: String(response.notesAck.inputSignature || ''),
+          ackToken: String(response.notesAck.token || '') };
+        applyVisualConceptPlansDistributionApproval(current);
+      } catch (error) {
+        toast(error.message || WFT('plans.distribution_failed', 'تعذر اعتماد التوزيع'));
+      } finally {
+        visualConceptPlanActionBusy('approve-distribution', false);
+      }
     }
 
     function applyVisualConceptPlansDistributionApproval(workflow) {
@@ -354,14 +382,24 @@
       if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(modal);
     }
 
-    function showVisualConceptDistributionRisk() {
+    function showVisualConceptDistributionRisk(hasConflicts, notesPending) {
+      const review = visualConceptPlansWorkflowState().notesReview;
+      let title = WFT('plans.dist_risk_title', 'تعارضات في التوزيع');
+      let body = WFT('plans.dist_risk_body', 'فحص التعارضات سجّل بنودًا لم تُحل — نتيجة المخططات بهذه الحالة لن تكون دقيقة.');
+      if (notesPending && hasConflicts) {
+        body = WFT('plans.dist_notes_risk_body', 'فحص التعارضات وفحص الملاحظات سجّلا بنودًا لم تُحل — نتيجة المخططات بهذه الحالة لن تكون دقيقة.');
+      } else if (notesPending) {
+        title = WFT('plans.notes_risk_title', 'ملاحظات المخططات');
+        body = review.verified
+          ? WFT('plans.notes_risk_body', 'فحص الملاحظات سجّل تعارضات لم تُحل — نتيجة المخططات بهذه الحالة لن تكون دقيقة.')
+          : WFT('plans.notes_risk_body_unchecked', 'ملاحظات المخططات لم تُفحص — نتيجة المخططات بهذه الحالة لن تكون دقيقة.');
+      }
       showVisualConceptPlansRisk({
-        title: WFT('plans.dist_risk_title', 'تعارضات في التوزيع'),
-        body: WFT('plans.dist_risk_body', 'فحص التعارضات سجّل بنودًا لم تُحل — نتيجة المخططات بهذه الحالة لن تكون دقيقة.'),
+        title, body,
         own: WFT('plans.dist_risk_own', 'إذا أردت الاستمرار فهذا على مسؤوليتك الشخصية.'),
         continueLabel: WFT('plans.dist_risk_continue', 'استمرار'),
         cancelLabel: WFT('plans.dist_risk_cancel', 'إلغاء'),
-      }, () => applyVisualConceptPlansDistributionApproval(visualConceptPlansWorkflowState()));
+      }, () => confirmVisualConceptPlansDistributionApproval());
     }
 
     // The verification stage reuses the distribution disclaimer verbatim —
@@ -397,7 +435,15 @@
           return false;
         }
         const workflow = visualConceptPlansWorkflowState();
+        const previousReview = workflow.notesReview;
         workflow.notesReview = normalizeVisualConceptPlansWorkflow({ notesReview: response.notesReview }).notesReview;
+        // A re-check of unchanged inputs mints the same signature — an
+        // acknowledgement already signed for them still holds.
+        if (previousReview.ackSignature && previousReview.ackSignature === workflow.notesReview.inputSignature) {
+          workflow.notesReview.acknowledged = true;
+          workflow.notesReview.ackSignature = previousReview.ackSignature;
+          workflow.notesReview.ackToken = previousReview.ackToken;
+        }
         if (response.primaryFrontage && typeof response.primaryFrontage === 'object') {
           workflow.planContext = { ...(workflow.planContext || {}), primary_frontage: response.primaryFrontage };
         }
@@ -418,7 +464,7 @@
 
     async function prepareVisualConceptPlansPrompts() {
       const initialWorkflow = visualConceptPlansWorkflowState();
-      if (!initialWorkflow.verification.approved || !initialWorkflow.boundary.approved || !initialWorkflow.distribution.approved || !visualConceptPlanNotesValid(initialWorkflow)) return;
+      if (!initialWorkflow.verification.approved || !initialWorkflow.boundary.approved || !initialWorkflow.distribution.approved || !visualConceptPlanNotesCleared(initialWorkflow)) return;
       if (visualConceptPlansPromptsPending) return;
       visualConceptPlansPromptsPending = true;
       visualConceptPlanScenePending = true;

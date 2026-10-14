@@ -36,7 +36,8 @@
         distributionRevision: '',
         conflictChats: { verify: [], distribution: [] },
         clientNotes: '',
-        notesReview: { verified: false, canProceed: false, checks: [], issues: [], inputSignature: '', token: '' },
+        notesReview: { verified: false, canProceed: false, checks: [], issues: [], inputSignature: '', token: '',
+          acknowledged: false, ackSignature: '', ackToken: '' },
         scene: null,
         sourceStamp: '',
         prompts: { site: '', uses: '', massing: '' },
@@ -108,7 +109,10 @@
           checks: Array.isArray(review.checks) ? review.checks.slice(0, 30) : [],
           issues: Array.isArray(review.issues) ? review.issues.slice(0, 30) : [],
           inputSignature: String(review.inputSignature || '').slice(0, 64),
-          token: String(review.token || '').slice(0, 128)
+          token: String(review.token || '').slice(0, 128),
+          acknowledged: Boolean(review.acknowledged),
+          ackSignature: String(review.ackSignature || '').slice(0, 64),
+          ackToken: String(review.ackToken || '').slice(0, 128)
         },
         scene,
         sourceStamp: String(source.sourceStamp || '').slice(0, 80),

@@ -80,7 +80,7 @@ def _visual_plan_scene_from_request(data):
     if scene.get('version') != VISUAL_PLAN_SCENE_VERSION or not isinstance(scene.get('token'), str):
         raise visual_plan_geometry.PlanGeometryError('المشهد الهندسي غير جاهز.', 'PLANS_SCENE_REQUIRED')
     contract, context = _visual_plan_contract(data)
-    if not _visual_plan_notes_review_valid(data, context):
+    if not _visual_plan_notes_cleared(data, context):
         raise visual_plan_geometry.PlanGeometryError('فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.', 'PLANS_NOTES_CHECK_REQUIRED')
     signature = _visual_plan_input_signature(data, context)
     if scene.get('inputSignature') != signature:
@@ -204,7 +204,7 @@ def _visual_plan_create_scene(data, context=None):
             context['primary_frontage'] = dict(resolved)
     if not contract['primaryFrontage']['direction']:
         raise visual_plan_geometry.PlanGeometryError('الواجهة الرئيسية غير محددة بوضوح في الكروكي والملخص.', 'PLANS_MAIN_FRONTAGE_REQUIRED')
-    if not _visual_plan_notes_review_valid(data, context):
+    if not _visual_plan_notes_cleared(data, context):
         raise visual_plan_geometry.PlanGeometryError('فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.', 'PLANS_NOTES_CHECK_REQUIRED')
     program = _visual_plan_program(contract, context)
     visual_plan_scene.check_program_feasibility(contract, program)

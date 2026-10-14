@@ -25,7 +25,7 @@ def _visual_plan_execute(kind, data, slot_id=''):
                 scene, _contract, context, _program = _visual_plan_scene_from_request(data)
             else:
                 context = _visual_plan_prompt_context(data)
-                if not _visual_plan_notes_review_valid(data, context):
+                if not _visual_plan_notes_cleared(data, context):
                     raise visual_plan_geometry.PlanGeometryError('فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.', 'PLANS_NOTES_CHECK_REQUIRED')
             context['client_notes'] = _visual_plan_notes(data)
             distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
@@ -125,6 +125,24 @@ def api_visual_concept_plan_notes_check():
         if billing_guard is not None:
             return billing_guard
     return _visual_plan_dispatch('notes', data)
+
+
+@app.route('/api/visual-concept/plans-notes-acknowledge', methods=['POST'])
+@require_permission('generate_images')
+def api_visual_concept_plan_notes_acknowledge():
+    """Mints the signed responsibility acknowledgement that clears written
+    notes which are unchecked or failed their review — the acknowledge call
+    itself is the client's signature, so it stays instant and free."""
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({'success': False, 'error_code': 'INVALID_REQUEST'}), 400
+    workflow_error = _visual_concept_plan_workflow_error(data, 'plan_site')
+    if workflow_error:
+        return jsonify(workflow_error), 400
+    try:
+        return jsonify({'success': True, 'notesAck': _visual_plan_notes_ack(data)})
+    except visual_plan_geometry.PlanGeometryError as error:
+        return jsonify({'success': False, 'error': str(error), 'error_code': error.code}), 400
 
 
 @app.route('/api/visual-concept/plans-jobs/<job_id>', methods=['GET'])

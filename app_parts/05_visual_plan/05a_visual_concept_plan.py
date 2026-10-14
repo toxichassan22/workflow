@@ -893,7 +893,7 @@ def _visual_concept_plan_workflow_error(data, slot_id, require_boundary=False, r
     # approved images are references only, never additional approval gates.
     if require_distribution:
         try:
-            if not _visual_plan_notes_review_valid(data):
+            if not _visual_plan_notes_cleared(data):
                 return {'success': False, 'error': 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
                         'error_code': 'PLANS_NOTES_CHECK_REQUIRED'}
         except visual_plan_geometry.PlanGeometryError as error:

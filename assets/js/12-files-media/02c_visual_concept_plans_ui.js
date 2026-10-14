@@ -117,27 +117,52 @@
         && workflow.notesReview.token && workflow.notesReview.inputSignature);
     }
 
+    function visualConceptPlanNotesAcked(workflow = visualConceptPlansWorkflowState()) {
+      return Boolean(workflow.clientNotes.trim() && workflow.notesReview.acknowledged && workflow.notesReview.ackToken);
+    }
+
+    // Notes clear generation two ways: a clean check, or the client's signed
+    // responsibility acknowledgement from the risk dialog. The server
+    // re-verifies whichever token is present — presence here is display only.
+    function visualConceptPlanNotesCleared(workflow = visualConceptPlansWorkflowState()) {
+      return visualConceptPlanNotesValid(workflow) || visualConceptPlanNotesAcked(workflow);
+    }
+
     function visualConceptPlanNotesResultsHtml(workflow = visualConceptPlansWorkflowState()) {
       if (!workflow.clientNotes.trim()) return '';
       const review = workflow.notesReview;
-      if (!review.verified) return '<p class="tenant-hint">' + escapeHtml(WFT('plans.notes_unchecked', 'الملاحظات غير مفحوصة.')) + '</p>';
-      const labels = { 'مطابق': WFT('plans.note_valid', 'مطابق'), 'متعارض': WFT('plans.note_conflict', 'متعارض'),
+      if (!review.verified) {
+        return '<p class="tenant-hint">' + escapeHtml(review.acknowledged
+          ? WFT('plans.notes_acknowledged', 'الملاحظات معتمدة بإخلاء مسؤولية دون فحص.')
+          : WFT('plans.notes_unchecked', 'الملاحظات غير مفحوصة.')) + '</p>';
+      }
+      const labels = { 'متعارض': WFT('plans.note_conflict', 'متعارض'),
         'يحتاج توضيح': WFT('plans.note_unclear', 'يحتاج توضيح') };
-      const rows = review.checks.map(check => '<li><strong>' + escapeHtml(labels[check.result] || check.result) +
+      // Only unresolved findings render — a «مطابق» verdict listed in the
+      // warning box read as a conflict.
+      const pending = review.checks.filter(check => check.result !== 'مطابق');
+      if (!pending.length) {
+        return '<p class="plans-workflow-success">' + escapeHtml(WFT('plans.notes_clear', 'لا توجد تعارضات في الملاحظات.')) + '</p>';
+      }
+      const rows = pending.map(check => '<li><strong>' + escapeHtml(labels[check.result] || check.result) +
         '</strong>: ' + escapeHtml(check.note || '') + (check.detail ? '<div>' + escapeHtml(check.detail) + '</div>' : '') + '</li>').join('');
-      return '<div class="' + (visualConceptPlanNotesValid(workflow) ? 'plans-workflow-success' : 'plans-workflow-notice') +
-        '"><ul class="plans-issue-list">' + rows + '</ul></div>';
+      return '<div class="plans-workflow-notice"><ul class="plans-issue-list">' + rows + '</ul></div>' +
+        (review.acknowledged
+          ? '<p class="tenant-hint">' + escapeHtml(WFT('plans.notes_acknowledged_conflicts', 'الملاحظات معتمدة بإخلاء مسؤولية رغم التعارضات.')) + '</p>'
+          : '');
     }
 
     function visualConceptDistributionResultsHtml(distribution) {
       const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
       const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
       const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
-      const findings = checks.map(item => {
+      // A «مطابق» verdict is not a finding — only conflicts and open items
+      // render, so a clean row never shows inside the warning box.
+      const findings = checks.filter(item => item.result !== 'مطابق').map(item => {
           const label = item.result === 'متعارض' && item.fixable === false
             ? 'متعارض — مصدره بيانات المشروع المعتمدة أو الاشتراطات'
             : (item.result || '');
-          return (label && label !== 'مطابق' ? label + ': ' : '') + (item.detail || item.item || '');
+          return (label ? label + ': ' : '') + (item.detail || item.item || '');
         })
         .concat(issues.flatMap(item =>
           (Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''])))
@@ -151,9 +176,10 @@
             ? '<p class="plans-workflow-success">لا توجد تعارضات في التوزيع.</p>'
             : '<p class="tenant-hint">لم يُفحص بعد.</p>')
           : '');
-      // Findings keep the button live — approving through them routes via the
-      // responsibility warning dialog instead of a dead disabled control.
-      const canApprove = rows.length > 0 && reviewed && visualConceptPlanNotesValid();
+      // Findings and pending notes keep the button live — approving through
+      // them routes via the responsibility warning dialog instead of a dead
+      // disabled control.
+      const canApprove = rows.length > 0 && reviewed;
       return findingsHtml +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +
@@ -178,7 +204,7 @@
       const distribution = workflow.distribution || {};
       const verified = Boolean(verification.approved);
       const boundaryApproved = Boolean(boundary.approved);
-      const distApproved = Boolean(distribution.approved) && visualConceptPlanNotesValid(workflow);
+      const distApproved = Boolean(distribution.approved) && visualConceptPlanNotesCleared(workflow);
       const promptReady = Boolean(workflow.promptReady);
       const defaultStage = !verified ? 'verify' : ((boundaryApproved && distApproved) ? 'generate' : 'boundary');
       const requestedStage = ['verify', 'boundary', 'generate'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
@@ -258,7 +284,7 @@
             const stage = tab.getAttribute('data-plans-workflow-tab');
             const state = visualConceptPlansWorkflowState();
             if (stage === 'boundary' && !state.verification.approved) return;
-            if (stage === 'generate' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesValid(state))) return;
+            if (stage === 'generate' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
             state.viewStage = stage;
             persistVisualConceptDraftState();
             renderVisualConceptPage();

@@ -178,19 +178,38 @@ def _visual_plan_token(kind, data, signature, payload):
     return _visual_plan_hmac.new(auth.JWT_SECRET.encode('utf-8'), message.encode('utf-8'), hashlib.sha256).hexdigest()
 
 
-def _visual_plan_notes_review_valid(data, context=None):
+def _visual_plan_notes_cleared(data, context=None):
+    """Written notes gate generation until either a clean review passes or the
+    client signs the responsibility acknowledgement — both are server-minted
+    tokens bound to the exact input signature, so neither can be forged or
+    carried onto edited inputs."""
     if not _visual_plan_notes(data):
         return True
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     review = workflow.get('notesReview') if isinstance(workflow.get('notesReview'), dict) else {}
+    signature = _visual_plan_input_signature(data, context)
+    if (review.get('acknowledged') and review.get('ackSignature') == signature
+            and isinstance(review.get('ackToken'), str)):
+        expected = _visual_plan_token('notes-ack', data, signature, {'acknowledged': True})
+        if _visual_plan_hmac.compare_digest(expected, review['ackToken']):
+            return True
     if not review.get('verified') or not review.get('canProceed'):
         return False
-    signature = _visual_plan_input_signature(data, context)
     if review.get('inputSignature') != signature or not isinstance(review.get('token'), str):
         return False
     payload = {key: review.get(key) for key in ('verified', 'canProceed', 'checks', 'issues')}
     expected = _visual_plan_token('notes', data, signature, payload)
     return _visual_plan_hmac.compare_digest(expected, review['token'])
+
+
+def _visual_plan_notes_ack(data, context=None):
+    """The signed responsibility acknowledgement: the client confirms unchecked
+    or conflicting notes ride into generation at their own risk."""
+    if not _visual_plan_notes(data):
+        raise visual_plan_geometry.PlanGeometryError('لا توجد ملاحظات تحتاج إخلاء مسؤولية.', 'PLANS_NOTES_INVALID')
+    signature = _visual_plan_input_signature(data, context)
+    return {'acknowledged': True, 'inputSignature': signature,
+            'token': _visual_plan_token('notes-ack', data, signature, {'acknowledged': True})}
 
 
 def _visual_plan_review_notes(data, context=None):
