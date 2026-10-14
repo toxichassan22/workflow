@@ -655,6 +655,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "plans.dist_risk_own": "إذا أردت الاستمرار فهذا على مسؤوليتك الشخصية.",
   "plans.dist_risk_continue": "استمرار",
   "plans.dist_risk_cancel": "إلغاء",
+  "plans.verify_risk_title": "تعارضات في التحقق",
   "plans.dist_chat_empty": "شات مخصص لشرح التوزيع المقترح ونتائج فحصه — يوضح سبب التعارض ويقترح التعديل دون تغيير أي بيانات.",
   "plans.dist_revise_placeholder": "انقل المكاتب من الدور الثالث إلى الخامس",
   "plans.dist_revise_button": "تطبيق التعديل",

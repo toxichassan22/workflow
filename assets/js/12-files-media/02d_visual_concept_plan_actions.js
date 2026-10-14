@@ -76,11 +76,22 @@
       }
     }
 
+    // Approving a verification that still carries conflicts is allowed, but
+    // only through the risk dialog — the same responsibility warning the
+    // distribution stage shows. Its continue button lands on
+    // applyVisualConceptPlansVerificationApproval directly.
     function approveVisualConceptPlansVerification() {
       const workflow = visualConceptPlansWorkflowState();
       const checks = Array.isArray(workflow.verification.checks) ? workflow.verification.checks : [];
-      const conflicts = checks.filter(item => item.result === 'متعارض');
-      if (conflicts.length || workflow.verification.canProceed === false || (!checks.length && !workflow.verification.canProceed)) return;
+      const issues = Array.isArray(workflow.verification.issues) ? workflow.verification.issues : [];
+      if (!checks.length && !issues.length && !workflow.verification.canProceed) return;
+      const hasConflicts = checks.some(item => item.result === 'متعارض')
+        || workflow.verification.canProceed === false;
+      if (hasConflicts) { showVisualConceptVerificationRisk(); return; }
+      applyVisualConceptPlansVerificationApproval(workflow);
+    }
+
+    function applyVisualConceptPlansVerificationApproval(workflow) {
       workflow.verification.approved = true;
       workflow.status = 'verified';
       workflow.viewStage = 'boundary';
@@ -297,7 +308,13 @@
       renderVisualConceptPage();
     }
 
-    function showVisualConceptDistributionRisk() {
+    // One risk dialog serves every stage's approve-through-conflicts path:
+    // the caller hands it the stage's copy plus the approval it lands on, so
+    // the client reads the same responsibility warning no matter what they
+    // are overriding.
+    let visualConceptPlansRiskContinue = null;
+
+    function showVisualConceptPlansRisk(copy, onContinue) {
       let modal = document.getElementById('plansDistributionRisk');
       if (!modal) {
         modal = document.createElement('div');
@@ -317,30 +334,49 @@
         document.body.appendChild(modal);
         modal.addEventListener('click', event => {
           if (event.target === modal || event.target.closest('[data-plans-risk-cancel]')) {
-            closeVisualConceptDistributionRisk();
+            closeVisualConceptPlansRisk();
             return;
           }
           if (event.target.closest('[data-plans-risk-continue]')) {
-            closeVisualConceptDistributionRisk();
-            applyVisualConceptPlansDistributionApproval(visualConceptPlansWorkflowState());
+            const proceed = visualConceptPlansRiskContinue;
+            closeVisualConceptPlansRisk();
+            if (typeof proceed === 'function') proceed();
           }
         });
       }
-      modal.querySelector('#plansDistributionRiskTitle').textContent =
-        WFT('plans.dist_risk_title', 'تعارضات في التوزيع');
-      modal.querySelector('#plansDistributionRiskBody').textContent =
-        WFT('plans.dist_risk_body', 'فحص التعارضات سجّل بنودًا لم تُحل — نتيجة المخططات بهذه الحالة لن تكون دقيقة.');
-      modal.querySelector('#plansDistributionRiskOwn').textContent =
-        WFT('plans.dist_risk_own', 'إذا أردت الاستمرار فهذا على مسؤوليتك الشخصية.');
-      modal.querySelector('[data-plans-risk-continue]').textContent =
-        WFT('plans.dist_risk_continue', 'استمرار');
-      modal.querySelector('[data-plans-risk-cancel]').textContent =
-        WFT('plans.dist_risk_cancel', 'إلغاء');
+      visualConceptPlansRiskContinue = onContinue;
+      modal.querySelector('#plansDistributionRiskTitle').textContent = copy.title;
+      modal.querySelector('#plansDistributionRiskBody').textContent = copy.body;
+      modal.querySelector('#plansDistributionRiskOwn').textContent = copy.own;
+      modal.querySelector('[data-plans-risk-continue]').textContent = copy.continueLabel;
+      modal.querySelector('[data-plans-risk-cancel]').textContent = copy.cancelLabel;
       modal.style.display = 'flex';
       if (typeof a11yModalDidOpen === 'function') a11yModalDidOpen(modal);
     }
 
-    function closeVisualConceptDistributionRisk() {
+    function showVisualConceptDistributionRisk() {
+      showVisualConceptPlansRisk({
+        title: WFT('plans.dist_risk_title', 'تعارضات في التوزيع'),
+        body: WFT('plans.dist_risk_body', 'فحص التعارضات سجّل بنودًا لم تُحل — نتيجة المخططات بهذه الحالة لن تكون دقيقة.'),
+        own: WFT('plans.dist_risk_own', 'إذا أردت الاستمرار فهذا على مسؤوليتك الشخصية.'),
+        continueLabel: WFT('plans.dist_risk_continue', 'استمرار'),
+        cancelLabel: WFT('plans.dist_risk_cancel', 'إلغاء'),
+      }, () => applyVisualConceptPlansDistributionApproval(visualConceptPlansWorkflowState()));
+    }
+
+    // The verification stage reuses the distribution disclaimer verbatim —
+    // the client signs off on the identical responsibility warning.
+    function showVisualConceptVerificationRisk() {
+      showVisualConceptPlansRisk({
+        title: WFT('plans.verify_risk_title', 'تعارضات في التحقق'),
+        body: WFT('plans.dist_risk_body', 'فحص التعارضات سجّل بنودًا لم تُحل — نتيجة المخططات بهذه الحالة لن تكون دقيقة.'),
+        own: WFT('plans.dist_risk_own', 'إذا أردت الاستمرار فهذا على مسؤوليتك الشخصية.'),
+        continueLabel: WFT('plans.dist_risk_continue', 'استمرار'),
+        cancelLabel: WFT('plans.dist_risk_cancel', 'إلغاء'),
+      }, () => applyVisualConceptPlansVerificationApproval(visualConceptPlansWorkflowState()));
+    }
+
+    function closeVisualConceptPlansRisk() {
       const modal = document.getElementById('plansDistributionRisk');
       if (!modal) return;
       modal.style.display = 'none';

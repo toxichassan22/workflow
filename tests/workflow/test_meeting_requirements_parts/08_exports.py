@@ -598,8 +598,12 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn("api('POST', '/api/visual-concept/plans-distribution-check'", index_source)
         self.assertIn("visualConceptPlanJobApi('POST', '/api/visual-concept/plans-prompts'", index_source)
         self.assertIn("const conflicts = checks.filter(item => item.result === 'متعارض')", index_source)
-        self.assertIn('const canApprove = !conflicts.length', index_source)
-        self.assertIn("if (conflicts.length || workflow.verification.canProceed === false || (!checks.length && !workflow.verification.canProceed)) return;", index_source)
+        self.assertIn('const canApprove = checks.length > 0 || verification.canProceed', index_source)
+        # Verification conflicts approve the same way distribution ones do:
+        # through the responsibility warning, never through a dead button.
+        self.assertIn("if (hasConflicts) { showVisualConceptVerificationRisk(); return; }", index_source)
+        self.assertIn("function showVisualConceptVerificationRisk()", index_source)
+        self.assertIn("function applyVisualConceptPlansVerificationApproval(workflow)", index_source)
         self.assertIn("WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')", index_source)
         self.assertIn('plans-conflict-solution', index_source)
         self.assertIn("WFT('plans.proposed_solution', 'الحل المقترح:')", index_source)

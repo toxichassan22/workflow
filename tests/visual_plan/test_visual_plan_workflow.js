@@ -100,3 +100,58 @@ test('changing notes invalidates their review and scene without removing saved i
   assert.equal(workflow.scene, null);
   assert.equal(context.tenantVisualConceptState.slots.plan_site.imageUrl, '/uploads/creative/old.png');
 });
+
+test('verification conflicts approve only through the responsibility dialog', () => {
+  const context = fixture();
+  const modal = { style: {}, listeners: {},
+    setAttribute() {},
+    addEventListener(type, fn) { this.listeners[type] = fn; },
+    querySelector() { return { textContent: '' }; } };
+  context.document.createElement = () => modal;
+  context.document.body = { appendChild() {} };
+  context.tenantVisualConceptState = { slots: {},
+    plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+      verification: { canProceed: false, summary: 'يوجد تعارض واحد',
+        checks: [{ item: 'الارتداد', result: 'متعارض', issues: ['الشمالي 5م مقابل 3م'] }] },
+      boundary: { points: [
+        { eastings: 500000, northings: 2000000 },
+        { eastings: 500100, northings: 2000000 },
+        { eastings: 500050, northings: 2000100 }] },
+    }) };
+  context.markVisualConceptDirty = () => {};
+  context.approveVisualConceptPlansVerification();
+  // The state getter re-normalizes into a fresh object each call — read the
+  // stored workflow again after every step instead of holding a reference.
+  // The approve click itself never approves a conflicted result — it opens
+  // the warning instead.
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.verification.approved, false);
+  assert.equal(modal.style.display, 'flex');
+  // Only the dialog's own continue lands the approval, on the client's
+  // responsibility.
+  modal.listeners.click({ target: { closest: sel => sel === '[data-plans-risk-continue]' ? {} : null } });
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.verification.approved, true);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.viewStage, 'boundary');
+});
+
+test('a clean verification still approves without opening the dialog', () => {
+  const context = fixture();
+  let created = false;
+  context.document.createElement = () => {
+    created = true;
+    return { style: {}, setAttribute() {}, addEventListener() {},
+      querySelector() { return { textContent: '' }; } };
+  };
+  context.tenantVisualConceptState = { slots: {},
+    plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+      verification: { canProceed: true,
+        checks: [{ item: 'الارتداد', result: 'مطابق' }] },
+      boundary: { points: [
+        { eastings: 500000, northings: 2000000 },
+        { eastings: 500100, northings: 2000000 },
+        { eastings: 500050, northings: 2000100 }] },
+    }) };
+  context.markVisualConceptDirty = () => {};
+  context.approveVisualConceptPlansVerification();
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.verification.approved, true);
+  assert.equal(created, false);
+});

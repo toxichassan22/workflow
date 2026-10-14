@@ -187,7 +187,10 @@
         : (requestedStage === 'boundary' && !verified ? 'verify' : requestedStage);
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
       const conflicts = checks.filter(item => item.result === 'متعارض');
-      const canApprove = !conflicts.length && verification.canProceed !== false && (checks.length > 0 || verification.canProceed);
+      // Conflicts keep the button live — approving through them routes via the
+      // responsibility warning dialog, same as the distribution approval does.
+      const canApprove = checks.length > 0 || verification.canProceed
+        || (Array.isArray(verification.issues) && verification.issues.length > 0);
       const checkRows = conflicts.length ? conflicts.map(item =>
         '<tr><td>' + escapeHtml(item.item || '') +
         ((item.section || item.field) ? '<div class="plans-conflict-location">' + escapeHtml(item.section || '') + (item.field ? ' — ' + escapeHtml(item.field) : '') + '</div>' : '') +

@@ -655,6 +655,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "plans.dist_risk_own": "If you choose to continue, you do so at your own responsibility.",
   "plans.dist_risk_continue": "Continue",
   "plans.dist_risk_cancel": "Cancel",
+  "plans.verify_risk_title": "Verification conflicts",
   "plans.dist_chat_empty": "A chat scoped to the proposed distribution and its check results — it explains a conflict and suggests an edit without changing any data.",
   "plans.dist_revise_placeholder": "Move the offices from floor three to floor five",
   "plans.dist_revise_button": "Apply edit",
