@@ -410,7 +410,8 @@ def _designer_agent_plan(ctx, session=None):
     """Run the planner loop. Returns (turn_dict, messages, errors)."""
     slides = ctx['slides']
     notes = {
-        'memory': (f"\n\n## ذاكرة المحادثة\n{ctx['chat_memory']}" if ctx.get('chat_memory') else ''),
+        'memory': (f"\n\n## ذاكرة المحادثة (ملخص ما سبق — قد تحمل قيمًا سبق تعديلها؛ "
+                   f"ملف بيانات المشروع هو المرجع)\n{ctx['chat_memory']}" if ctx.get('chat_memory') else ''),
         'history': ("\n\n## آخر رسائل المحادثة\n" + '\n'.join(ctx['history_lines']))
                    if ctx.get('history_lines') else '',
         'focus': (f"\n\n## نطاق الحديث السابق: {'، '.join(str(n) for n in ctx['focus_indexes'])}"

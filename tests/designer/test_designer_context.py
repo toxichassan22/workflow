@@ -67,6 +67,82 @@ class DesignerContextTests(unittest.TestCase):
         with self.assertRaises(context.DesignerContextError):
             context.build_project_context(source)
 
+    def test_internal_snapshot_copies_strip_at_every_depth(self):
+        """Drift-check copies stored inside the payload must not sit beside the
+        live values: a context carrying both reads them as conflicting facts
+        («الأدوار 10 أم 12»)."""
+        source = {
+            'financial_study_model': json.dumps({
+                'inputs': {'floorCount': 12, 'landArea': 5000},
+                'parkingSnapshot': {'floorCount': 10, 'landArea': 5000},
+                'parkingPlan': {'id': 'p1', 'approved': True,
+                                'sourceSnapshot': {'floorCount': 10},
+                                'sourceHash': 'hash-1',
+                                'components': [{'name': 'مواقف'}]},
+            }),
+            'best_use_data': {
+                'title': 'التوزيع', 'components': [{'name': 'شقق'}],
+                'approved': True,
+                'sourceSnapshot': {'approved_floor_count': 10},
+                'sourceHash': 'h1', 'inputHash': 'h2', 'contentHash': 'h3'},
+            'visual_concept': {'plansWorkflow': {
+                'planContext': {'floor_count': '10'},
+                'distribution': {'rows': [{'component': 'مول', 'units': 4}]}}},
+            'market_study_data': {'competitors': [
+                {'name': 'منافس', 'price': 9000,
+                 'price_cache': {'price': 8000}, 'area_cache': {'area': 700},
+                 'benchmarks': {'avg': 8500}}]},
+        }
+        result = json.loads(context.build_project_context(source))['project_data']
+        model = result['financial_study_model']
+        self.assertEqual(model['inputs']['floorCount'], 12)
+        self.assertNotIn('parkingSnapshot', model)
+        self.assertNotIn('sourceSnapshot', model['parkingPlan'])
+        self.assertNotIn('sourceHash', model['parkingPlan'])
+        self.assertEqual(model['parkingPlan']['components'], [{'name': 'مواقف'}])
+        best_use = result['best_use_data']
+        self.assertNotIn('sourceSnapshot', best_use)
+        self.assertNotIn('sourceHash', best_use)
+        self.assertNotIn('inputHash', best_use)
+        self.assertNotIn('contentHash', best_use)
+        self.assertEqual(best_use['components'], [{'name': 'شقق'}])
+        workflow = result['visual_concept']['plansWorkflow']
+        self.assertNotIn('planContext', workflow)
+        self.assertEqual(workflow['distribution']['rows'][0]['units'], 4)
+        competitor = result['market_study_data']['competitors'][0]
+        self.assertNotIn('price_cache', competitor)
+        self.assertNotIn('area_cache', competitor)
+        self.assertNotIn('benchmarks', competitor)
+        self.assertEqual(competitor['price'], 9000)
+
+    def test_root_chat_and_run_state_keys_strip(self):
+        """Stored conversations and run state are bookkeeping — the snapshot
+        used to dump them beside the facts as if they were data."""
+        source = {
+            'project_name': 'مشروع',
+            'best_use_chat': {'messages': ['OLD_TURN']},
+            'designerChatSessions': {'s1': {'memory': 'OLD'}},
+            'chatHistory': [{'content': 'OLD_TURN'}],
+            'draftHistory': [{'change': 'OLD'}],
+            'tenantArchiveCache': {'html': 'OLD'},
+            'slide_generation_checkpoint': {'nextIndex': 1},
+            'tenantSlidePlan': {'slides': []}, 'slidesData': [{'html': 'x'}],
+            'presentation_scope': 'all', 'schema_version': 3,
+            'draftId': 'd1', 'draft_id': 'd1',
+        }
+        result = json.loads(context.build_project_context(source))['project_data']
+        self.assertEqual(result, {'project_name': 'مشروع'})
+
+    def test_strip_internal_snapshots_decodes_string_blobs(self):
+        blob = json.dumps({'inputs': {'floorCount': 12},
+                           'parkingSnapshot': {'floorCount': 10}})
+        self.assertEqual(context.strip_internal_snapshots(blob),
+                         {'inputs': {'floorCount': 12}})
+        self.assertEqual(context.strip_internal_snapshots('نص عادي'), 'نص عادي')
+        self.assertEqual(
+            context.strip_internal_snapshots({'a': [{'sourceHash': 'h', 'b': 1}]}),
+            {'a': [{'b': 1}]})
+
 
 if __name__ == '__main__':
     unittest.main()

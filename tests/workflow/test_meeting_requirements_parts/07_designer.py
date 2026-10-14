@@ -791,7 +791,8 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertEqual(len(kept), module.DESIGNER_CHAT_VERBATIM_TURNS)
 
         app_source = read_module_source('app.py')
-        self.assertIn('## ذاكرة المحادثة (ملخص ما سبق)', app_source)
+        self.assertIn('## ذاكرة المحادثة (ملخص ما سبق — قد تحمل قيمًا سبق تعديلها', app_source)
+        self.assertIn('ملف بيانات المشروع هو المرجع', app_source)
         self.assertIn('## آخر رسائل المحادثة بالترتيب', app_source)
         self.assertIn('## نطاق الحديث السابق', app_source)
         self.assertIn("preferred_indexes = list(focus_indexes)", app_source)

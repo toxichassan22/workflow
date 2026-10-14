@@ -16,9 +16,23 @@ import re
 from collections.abc import Mapping
 
 
-# These are stored previous output, not project facts. Apply ONLY at project root.
+# These are stored previous output, stored conversations or run state, not
+# project facts. Apply ONLY at project root.
 PROJECT_BOOKKEEPING_KEYS = frozenset({
-    'tenantSlidesData', 'slides', 'pageDrafts', 'designerChat',
+    'tenantSlidesData', 'slides', 'slidesData', 'pageDrafts', 'tenantSlidePlan',
+    'designerChat', 'designerChatSessions', 'chatHistory', 'best_use_chat',
+    'draftHistory', 'tenantArchiveCache', 'slide_generation_checkpoint',
+    'presentation_scope', 'schema_version', 'draftId', 'draft_id',
+})
+# Frozen copies stored inside the payload for server-side drift checks —
+# parking/best-use input snapshots, the cached plans context, hash fields and
+# per-competitor price/area caches. They keep last run's values right beside
+# the live ones, so a context carrying both teaches the model two conflicting
+# answers («الأدوار 10 أم 12»). Unlike the root-only set above, these are
+# stripped at EVERY depth.
+PROJECT_INTERNAL_SNAPSHOT_KEYS = frozenset({
+    'sourceSnapshot', 'sourceHash', 'inputHash', 'contentHash',
+    'parkingSnapshot', 'planContext', 'price_cache', 'area_cache', 'benchmarks',
 })
 # Explicit transport slots, not a prefix rule: unknown underscore fields are facts.
 # Keep snapshots in local variables, but exclude these slots if a caller attached one.
@@ -97,14 +111,16 @@ def _image_text(value, path):
     return _IMAGE_DATA_RE.sub(replace, value)
 
 
-def _snapshot(value, path, *, decode_json=True, omit_keys=frozenset(), ancestors=None):
+def _snapshot(value, path, *, decode_json=True, omit_keys=frozenset(),
+              nested_omit=frozenset(), ancestors=None):
     if ancestors is None:
         ancestors = set()
     if isinstance(value, str):
         decoded = _decode_structure(value) if decode_json else value
         if not isinstance(decoded, str):
             return _snapshot(decoded, path, decode_json=decode_json,
-                             omit_keys=omit_keys, ancestors=ancestors)
+                             omit_keys=omit_keys, nested_omit=nested_omit,
+                             ancestors=ancestors)
         return _image_text(value, path)
     if isinstance(value, (bytes, bytearray, memoryview)):
         raw = bytes(value)
@@ -128,11 +144,12 @@ def _snapshot(value, path, *, decode_json=True, omit_keys=frozenset(), ancestors
             if isinstance(value, Mapping):
                 return {
                     key: _snapshot(item, _path(path, key), decode_json=decode_json,
-                                   ancestors=ancestors)
-                    for key, item in value.items() if key not in omit_keys
+                                   nested_omit=nested_omit, ancestors=ancestors)
+                    for key, item in value.items()
+                    if key not in omit_keys and key not in nested_omit
                 }
             return [_snapshot(item, f'{path}[{index}]', decode_json=decode_json,
-                              ancestors=ancestors)
+                              nested_omit=nested_omit, ancestors=ancestors)
                     for index, item in enumerate(value)]
         finally:
             ancestors.remove(identity)
@@ -203,7 +220,8 @@ def build_project_context(project_data, creative_images=None, tenant_id=None):
     Without tenant_id local team entries still resolve, with no database import.
     """
     source = _snapshot(project_data, '$.project_data',
-                       omit_keys=PROJECT_BOOKKEEPING_KEYS | RUNTIME_CONTEXT_KEYS)
+                       omit_keys=PROJECT_BOOKKEEPING_KEYS | RUNTIME_CONTEXT_KEYS,
+                       nested_omit=PROJECT_INTERNAL_SNAPSHOT_KEYS)
     database = None
     if tenant_id is not None:
         try:
@@ -220,6 +238,31 @@ def build_project_context(project_data, creative_images=None, tenant_id=None):
         'field_labels': _snapshot(labels, '$.field_labels', decode_json=False),
     }
     return json.dumps(context, ensure_ascii=False, indent=2, allow_nan=False)
+
+
+def strip_internal_snapshots(value):
+    """Deep copy minus every internal snapshot/cache key, at any depth.
+
+    ``_snapshot`` removes them while it serializes, but callers that render a
+    stored blob themselves — the planner's get_project_data tool — need the
+    same strip on plain dicts. JSON strings decode like ``_decode_structure``;
+    the decoded container is returned so ``_readable_fact`` can narrate it.
+    """
+    if isinstance(value, str):
+        if value.lstrip()[:1] in ('{', '['):
+            try:
+                decoded = json.loads(value)
+            except (TypeError, ValueError):
+                decoded = value
+            if isinstance(decoded, (dict, list)):
+                return strip_internal_snapshots(decoded)
+        return value
+    if isinstance(value, dict):
+        return {key: strip_internal_snapshots(item) for key, item in value.items()
+                if key not in PROJECT_INTERNAL_SNAPSHOT_KEYS}
+    if isinstance(value, list):
+        return [strip_internal_snapshots(item) for item in value]
+    return value
 
 
 def build_deck_context(slides):

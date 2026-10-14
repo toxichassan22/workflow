@@ -17,6 +17,7 @@ from design_templates import (
     normalize_hex_color, readable_text_color,
 )
 import db
+import designer_chat_context
 # emoji_icons is intentionally not imported: it converted emojis into inline SVG icons, which the
 # icon stripper then removed. The product rule is that no icon is ever generated.
 

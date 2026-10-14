@@ -123,6 +123,14 @@ def api_designer_chat():
     # The conversation so far. Merge the browser snapshot with the presentation copy so a stale
     # client cannot replace a complete saved conversation with only its last visible messages.
     stored_chat = project_data.get('designerChat') if isinstance(project_data.get('designerChat'), dict) else {}
+    # A conversation stamped for another presentation belongs to that session:
+    # the merged draft keeps whichever presentation's chat saved last, so
+    # without this check one presentation would inherit the other's memory
+    # verbatim — the same presentationId rule restoreDesignerChat applies
+    # client-side.
+    stored_chat_pid = str(stored_chat.get('presentationId') or '').strip()
+    if stored_chat_pid and presentation_id and stored_chat_pid != str(presentation_id):
+        stored_chat = {}
     incoming_history = data.get('history') if isinstance(data.get('history'), list) else []
     history_for_turn = _merge_designer_chat_messages(stored_chat.get('messages'), incoming_history)
     memory_seed = data.get('memory') if isinstance(data.get('memory'), str) and data.get('memory') else stored_chat.get('memory')
@@ -216,7 +224,8 @@ def api_designer_chat():
         'type': s.get('type', 'content') if isinstance(s, dict) else 'content'
     } for i, s in enumerate(slides)]
     all_note = "\n تنبيه هام جداً: المستخدم طلب صراحة تعديل جميع الشرائح دون استثناء! يجب أن تعيد target='all' في الأداة edit_slides." if is_all_slides_request else ""
-    memory_note = f"\n\n## ذاكرة المحادثة (ملخص ما سبق)\n{chat_memory}" if chat_memory else ""
+    memory_note = (f"\n\n## ذاكرة المحادثة (ملخص ما سبق — قد تحمل قيمًا سبق تعديلها؛ "
+                   f"عند التعارض ملف بيانات المشروع هو المرجع)\n{chat_memory}") if chat_memory else ""
     history_note = ("\n\n## آخر رسائل المحادثة بالترتيب\n" + '\n'.join(history_lines)) if history_lines else ""
     focus_note = (
         f"\n\n## نطاق الحديث السابق: {'، '.join(str(n) for n in focus_indexes)}\n"

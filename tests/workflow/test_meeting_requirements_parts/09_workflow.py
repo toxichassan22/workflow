@@ -1424,18 +1424,22 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             'tenantArchiveCache': {'html': 'STALE_SENTINEL'},
             'slide_generation_checkpoint': {'note': 'STALE_SENTINEL'},
             'slidesData': [{'html': 'STALE_SENTINEL'}],
-            'best_use_data': {'title': 'التوزيع',
-                              'components': [{'name': 'شقق'}],
-                              'sourceSnapshot': {'approved_floor_count': 'STALE_SENTINEL'},
-                              'sourceHash': 'STALE_SENTINEL'},
+            'custom_block': {'title': 'التوزيع',
+                             'items': [{'name': 'شقق'}],
+                             'sourceSnapshot': {'approved_floor_count': 'STALE_SENTINEL'},
+                             'sourceHash': 'STALE_SENTINEL',
+                             'nested': {'parkingSnapshot': {'x': 'STALE_SENTINEL'},
+                                        'keep': 'REAL'}},
         }
         facts = slide_engine.build_project_facts(draft)
         self.assertIn('مشروع تجريبي', facts)
         self.assertIn('التوزيع', facts)
         self.assertIn('شقق', facts)
+        self.assertIn('REAL', facts)
         self.assertNotIn('STALE_SENTINEL', facts)
         self.assertNotIn('sourceSnapshot', facts)
         self.assertNotIn('sourceHash', facts)
+        self.assertNotIn('parkingSnapshot', facts)
 
     def test_heatmap_polarity_and_three_tier_colors(self):
         engine = self.application_module.slide_engine

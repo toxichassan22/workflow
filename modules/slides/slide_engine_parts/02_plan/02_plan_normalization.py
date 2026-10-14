@@ -1367,8 +1367,11 @@ PROMPT_COVERED_ELSEWHERE = {
 }
 
 # The deck itself. Feeding a model the slides it produced last time invites it to copy them.
-# `designerChat` is the editing conversation: it belongs to the chat, never to a slide prompt.
-PROMPT_PREVIOUS_OUTPUT = {'tenantSlidesData', 'pageDrafts', 'slides', 'designerChat', 'presentation_scope'}
+# `designerChat` and the other stored conversations belong to their chats — quoting their
+# verbatim turns back as facts re-injects values the project has since replaced.
+PROMPT_PREVIOUS_OUTPUT = {'tenantSlidesData', 'pageDrafts', 'slides', 'slidesData',
+                        'designerChat', 'designerChatSessions', 'chatHistory',
+                        'best_use_chat', 'presentation_scope'}
 
 # Machine artefacts of the land analysis and the map pipeline: the facts they produced are already
 # in the visible land and location fields.
@@ -1383,6 +1386,9 @@ PROMPT_INTERNAL_KEYS = {
     'draftId', 'draft_id', 'sectionStatuses', 'site_analysis_approved',
     'conceptual_plans', 'land_documents_files', 'land_photos', 'project_logo',
     'land_use_status',
+    # Working and run state stored on the draft — bookkeeping, never facts.
+    'draftHistory', 'tenantArchiveCache', 'slide_generation_checkpoint',
+    'schema_version',
     # Superseded by building_ratio_coverage / setbacks and allowed_uses; kept in drafts for
     # backwards compatibility only.
     'building_ratio_setbacks', 'allowed_uses_restrictions', 'secondary_roads',
@@ -1651,7 +1657,9 @@ def build_project_facts(project_data, tenant_id=None):
             continue
         if key in ('market_study_data', 'executive_content', 'team_selection'):
             continue
-        text = _readable_fact(value)
+        # Frozen drift-check copies stored inside a blob (sourceSnapshot,
+        # parkingSnapshot, hashes, caches) must not narrate as facts.
+        text = _readable_fact(designer_chat_context.strip_internal_snapshots(value))
         if not text:
             continue
         if key in labels:

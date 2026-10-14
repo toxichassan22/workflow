@@ -248,7 +248,11 @@ def _designer_project_data_tool_result(args, ctx):
     fields, total, truncated = [], 0, False
     for key in selected[:60]:
         try:
-            text = slide_engine._readable_fact(merged.get(key)) or ''
+            # Stored blobs embed frozen drift-check snapshots (parkingSnapshot,
+            # sourceSnapshot, planContext…) — hand the planner the live copy
+            # only, or the same field reads two different values at once.
+            text = slide_engine._readable_fact(
+                designer_chat_context.strip_internal_snapshots(merged.get(key))) or ''
         except Exception:
             text = str(merged.get(key) or '')
         if len(text) > 4000:
