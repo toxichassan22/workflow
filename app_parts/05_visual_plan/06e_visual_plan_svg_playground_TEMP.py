@@ -257,8 +257,10 @@ def _svg_playground_prompts(payload, contract=None):
         'Compose a real brochure layout, not scattered rectangles: group related masses, wrap '
         'housing around a landscaped courtyard with the listed pool and play areas, towers on '
         'the high-rise side, front setback open for surface parking and the main entry. '
-        'The attached reference image is the true surveyed parcel outline — trace its exact '
-        'shape and proportions for the parcel boundary.')
+        'The first attached images are owner-approved site plans — imitate their colors, '
+        'legend, parking stalls, trees and entry arrows. The last attached image is the '
+        'true surveyed parcel outline — trace its exact shape and proportions for the '
+        'parcel boundary.')
     fields = {
         'project': {key: (contract or {}).get(key) for key in
                     ('projectName', 'projectIdea') if isinstance(contract, dict)},
@@ -352,21 +354,56 @@ def _svg_playground_thinking(response):
         return ''
 
 
+_SVG_PLAYGROUND_STYLE_IMAGES = (
+    'svg_playground_style_site_1.jpg',
+    'svg_playground_style_site_2.jpg',
+    'svg_playground_style_site_3.jpg',
+)
+
+
+def _svg_playground_style_references():
+    """Owner-approved site-plan style examples, shipped beside this file.
+    Missing files are skipped, never fatal — the comparison still runs."""
+    try:
+        root = os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        return []
+    references = []
+    for name in _SVG_PLAYGROUND_STYLE_IMAGES:
+        try:
+            path = os.path.join(root, 'app_parts', '05_visual_plan', name)
+            if not os.path.isfile(path) or os.path.getsize(path) > 5 * 1024 * 1024:
+                continue
+            with open(path, 'rb') as handle:
+                encoded = base64.b64encode(handle.read()).decode('ascii')
+            references.append('data:image/jpeg;base64,' + encoded)
+        except OSError:
+            continue
+    return references
+
+
 def _svg_playground_references(contract):
-    """The surveyed-parcel outline as an attached reference image, so the models
-    trace a seen shape instead of guessing from numbers. Built once per run;
-    any failure degrades to text-only rather than breaking the comparison."""
+    """Attached reference images, built once per run: first the owner-approved
+    style examples to imitate, last the surveyed-parcel outline to trace — so
+    the models copy a seen look and a seen shape instead of guessing from
+    numbers. Any failure degrades to text-only rather than breaking the
+    comparison."""
+    references = []
+    try:
+        references += _svg_playground_style_references()
+    except Exception:
+        pass
     try:
         geometry = (contract or {}).get('geometry') or {}
         points = geometry.get('surveyPoints') or []
         if len(points) < 3:
-            return []
+            return references
         url = _visual_concept_render_plan_boundary_reference(points, g.tenant_id)
         if not url:
-            return []
-        return _visual_concept_reference_uris(urls=[url], tenant_id=g.tenant_id) or []
+            return references
+        return references + (_visual_concept_reference_uris(urls=[url], tenant_id=g.tenant_id) or [])
     except Exception:
-        return []
+        return references
 
 
 def _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx=None,
@@ -374,8 +411,8 @@ def _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx
     """Run one model, measuring wall time. A model failure is recorded on its
     own result — it never aborts the remaining models.
 
-    Each model runs on its owner-ordered budget (argon 66K/high, the rest
-    128K/max) with a 10-minute provider timeout: a length-truncated reply is
+    Each model runs on its owner-ordered budget (argon 66K, the rest 128K,
+    all at medium effort) with a 10-minute provider timeout: a length-truncated reply is
     retried once at the same cap with an emit-markup-only nudge before it is
     reported as a failure."""
     started = time.perf_counter()

@@ -456,7 +456,19 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertTrue(result['success'])
         self.assertTrue(render.called)
         self.assertTrue(uris.called)
-        self.assertEqual(seen.get('image_references'), [{'url': '/uploads/creative/parcel.png'}])
+        refs = seen.get('image_references')
+        # Three owner-approved style examples first, the parcel outline last.
+        self.assertEqual(len(refs), 4)
+        self.assertTrue(all(str(item).startswith('data:image/jpeg;base64,') for item in refs[:3]))
+        self.assertEqual(refs[3], {'url': '/uploads/creative/parcel.png'})
+
+    def test_style_examples_load_from_disk_and_degrade_quietly(self):
+        module = self.application_module
+        refs = module._svg_playground_style_references()
+        self.assertEqual(len(refs), 3)
+        self.assertTrue(all(item.startswith('data:image/jpeg;base64,') for item in refs))
+        with patch.object(module, '_SVG_PLAYGROUND_STYLE_IMAGES', ('no-such-file.jpg',)):
+            self.assertEqual(module._svg_playground_style_references(), [])
 
     def test_broken_reference_builder_still_runs_text_only(self):
         module = self.application_module
