@@ -364,6 +364,8 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertIn('padel court', system_prompt)
         self.assertIn('swimming pool', system_prompt)
         self.assertIn('canopy trees', system_prompt)
+        self.assertIn('<defs>', (system_prompt + user_prompt).lower())
+        self.assertIn('<use', (system_prompt + user_prompt).lower())
 
     def test_cards_open_svg_and_export_png_in_a_two_column_grid(self):
         source = read_frontend_text()
@@ -391,7 +393,7 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
             raw = module._svg_playground_run_model('test-model', 'sys', 'user', {})
         self.assertEqual(len(calls), 2, 'a length-truncated reply must be retried once')
-        self.assertEqual(calls[0].get('reasoning_effort'), 'xhigh')
+        self.assertEqual(calls[0].get('reasoning_effort'), 'low')
         self.assertEqual(calls[0].get('max_tokens'), 128000)
         self.assertEqual(calls[1].get('max_tokens'), calls[0].get('max_tokens'))
         self.assertEqual(calls[0].get('timeout'), 600)
@@ -411,7 +413,7 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
             raw = module._svg_playground_run_model('google/gemini-4-argon', 'sys', 'user', {})
         self.assertEqual(seen.get('max_tokens'), 66000)
-        self.assertEqual(seen.get('reasoning_effort'), 'high')
+        self.assertEqual(seen.get('reasoning_effort'), 'low')
         final = module._svg_playground_finalize(raw, ['CONCEPTUAL SITE PLAN'], [])
         self.assertTrue(final['ok'])
 
@@ -463,18 +465,24 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertTrue(render.called)
         self.assertTrue(uris.called)
         refs = seen.get('image_references')
-        # Three owner-approved style examples first, the parcel outline last.
-        self.assertEqual(len(refs), 4)
-        self.assertTrue(all(str(item).startswith('data:image/jpeg;base64,') for item in refs[:3]))
-        self.assertEqual(refs[3], {'url': '/uploads/creative/parcel.png'})
+        # Single owner-approved style benchmark first, the parcel outline last.
+        self.assertEqual(len(refs), 2)
+        self.assertTrue(str(refs[0]).startswith('data:image/jpeg;base64,'))
+        self.assertEqual(refs[1], {'url': '/uploads/creative/parcel.png'})
 
     def test_style_examples_load_from_disk_and_degrade_quietly(self):
         module = self.application_module
         refs = module._svg_playground_style_references()
-        self.assertEqual(len(refs), 3)
+        self.assertEqual(len(refs), 1)
         self.assertTrue(all(item.startswith('data:image/jpeg;base64,') for item in refs))
         with patch.object(module, '_SVG_PLAYGROUND_STYLE_IMAGES', ('no-such-file.jpg',)):
             self.assertEqual(module._svg_playground_style_references(), [])
+
+    def test_score_is_case_insensitive_and_format_tolerant(self):
+        module = self.application_module
+        svg = '<svg><text>MAIN ENTRY</text><path d="M 85 100"/></svg>'
+        score = module._svg_playground_score(svg, ['Main Entry'], ['85.0'])
+        self.assertEqual(score, 100.0)
 
     def test_broken_reference_builder_still_runs_text_only(self):
         module = self.application_module

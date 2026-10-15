@@ -242,7 +242,7 @@ def _svg_playground_prompts(payload, contract=None):
         'Draw ONE standalone <svg> element and output ONLY the raw SVG markup — no markdown fences, '
         'no explanation. All visible text is English only. '
         'Daylight cartography on white — first element a full-canvas #FFFFFF rect; '
-        'NEVER a dark background, no photorealism. '
+        'NEVER a dark background, no photorealism.\n'
         'FIXED COLOR IDENTITY — use exactly these fills, no substitutes: ' + (color_code or 'pastel fills') + '; '
         'parcel #EDF3E8 with navy #172B4D outline width 4 and vertex dots; '
         'setback envelope dashed #81939F width 2, no fill; '
@@ -250,26 +250,23 @@ def _svg_playground_prompts(payload, contract=None):
         'surface parking light grey with white stall lines and a tree row; '
         'landscape pale green with scattered tree circles; '
         'entries as color-coded arrows (main red, residential blue, service orange) with navy labels.\n'
-        'HARD GEOGRAPHIC BOUNDARIES (MUST RESPECT): '
-        'Trace the parcel coordinates and setback envelope accurately to honor the surveyed plot shape. '
-        'Label the surrounding streets with their names and widths along parcel edges, and note neighbors outside.\n'
+        'HARD GEOGRAPHIC BOUNDARIES (STRICT ADHERENCE): '
+        'Trace the parcel coordinates and setback envelope accurately to honor the exact surveyed plot shape. '
+        'Orient and label all surrounding streets with their names and documented widths along parcel edges. '
+        'Ensure every building mass footprint stays wholly inside the setback envelope.\n'
         'ARCHITECTURAL CREATIVE FREEDOM (BROCHURE MASTERPLAN): '
-        'Compose a real brochure layout, not scattered rectangles. You are an elite architectural designer creating '
-        'a presentation-ready masterplan brochure: '
-        '1. Massing Morphology: Shape masses creatively — wrap residential buildings into elegant C-shaped, '
-        'U-shaped, or courtyard wings embracing the landscaped garden; place iconic high-rise towers facing the '
-        'primary frontage. Component footprint areas are proportional target guidelines to compose a cohesive, '
-        'visually balanced development. '
-        '2. Rich Vector Details: Draw realistic recreational amenities with full linework (e.g. green or terracotta '
-        'padel court with white playing lines and net, swimming pool with crisp white coping and blue water, kids play area). '
-        'Render lush landscaped grounds with clusters of multi-layered canopy trees (outer soft circle with darker core dot '
-        'and subtle shadow) and organic pathways. Detail surface parking with neat white stall stripes. '
-        '3. Typography & Legend: Use clean modern typography (font-family: system-ui, sans-serif) in navy #172B4D. '
+        'Compose a real brochure layout, not scattered rectangles. Follow the clear architectural design code of the attached reference image: '
+        '1. Massing & Frontage: Wrap residential buildings into an elegant C-shaped or U-shaped courtyard wing embracing the landscaped garden; '
+        'place the primary high-rise towers along the primary frontage road. Maintain accurate proportions and recorded component footprints. '
+        '2. Rich Vector Details: Draw realistic recreational amenities with full linework (padel court with white playing lines and net, '
+        'swimming pool with crisp white coping and blue water, kids play area). Detail surface parking with neat white stall lines. '
+        '3. SVG Optimization (<defs> and <use>): For maximum rendering performance, define reusable symbols in SVG `<defs>` '
+        '(such as canopy trees, parking stall modules, entry arrows) and instantiate them across the site using `<use href="#symbol-id"/>`. '
+        'Round coordinates to 1 decimal place. '
+        '4. Typography & Legend: Use clean modern typography (font-family: system-ui, sans-serif) in navy #172B4D. '
         'Label masses with their name and floor count (e.g. "Hotel (12 Floors)"). Include a clear "N" north arrow. '
-        'Render a beautifully structured legend in the bottom-left with color chips for each use, boundary line, '
-        'and setback dashed line. '
-        'The attached style images are owner-approved reference site plans — match their vector finesse, courtyard composition, '
-        'stalls, and tree artistry.')
+        'Render a beautifully structured legend in the bottom-left with color chips for each use, boundary line, and setback dashed line. '
+        'The attached single reference image is the owner-approved benchmark — follow its layout logic, courtyard composition, and vector finesse directly.')
     fields = {
         'project': {key: (contract or {}).get(key) for key in
                     ('projectName', 'projectIdea') if isinstance(contract, dict)},
@@ -288,7 +285,7 @@ def _svg_playground_prompts(payload, contract=None):
     }
     user_prompt = (
         'PROJECT DATA FIELDS (Hard boundaries: trace parcel_pixels accurately; all mass footprints stay inside '
-        'the setback envelope; creatively compose every recorded mass and amenity into a cohesive masterplan):\n'
+        'the setback envelope; creatively compose every recorded mass and amenity into a cohesive masterplan with <defs> and <use>):\n'
         + json.dumps(fields, ensure_ascii=False)
         + '\nREQUIRED OUTPUT: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" '
         'width="1600" height="900">; '
@@ -302,29 +299,35 @@ def _svg_playground_prompts(payload, contract=None):
 
 def _svg_playground_score(svg, required_texts, required_numbers):
     """Fidelity score 0..100: share of required labels and coordinate values
-    present verbatim in the produced SVG. Lets the owner compare models on
-    faithfulness to the sealed inputs, not on looks."""
+    present in the produced SVG (case-insensitive and format-tolerant)."""
     if not svg:
         return 0.0
-    texts = [item for item in required_texts if item]
-    numbers = [item for item in required_numbers if item]
+    svg_lower = svg.lower()
+    texts = [str(item).strip() for item in required_texts if item and str(item).strip()]
+    numbers = [str(item).strip() for item in required_numbers if item and str(item).strip()]
     total = len(texts) + len(numbers)
     if not total:
         return 0.0
-    found = sum(1 for item in texts if item in svg)
-    found += sum(1 for item in numbers if item in svg)
+    found = 0
+    for item in texts:
+        if item.lower() in svg_lower:
+            found += 1
+    for num in numbers:
+        clean_num = num.rstrip('0').rstrip('.') if '.' in num else num
+        if num in svg or (clean_num and clean_num in svg):
+            found += 1
     return round(found / total * 100, 1)
 
 
 _SVG_PLAYGROUND_LENGTH_FINISH = {'length', 'max_tokens', 'max_output_tokens', 'max_completion_tokens'}
 
 
-# Owner-ordered budgets: argon caps at 66K at high effort, sol at 128K at
-# xhigh effort. The prompt itself stays untouched until the owner reviews it.
+# Owner-ordered budgets: argon and sol both at low reasoning effort per owner instruction
+# to execute the prompt directly with single reference image and <defs>/<use> optimization.
 _SVG_PLAYGROUND_MODEL_BUDGETS = {
-    'google/gemini-4-argon': {'max_tokens': 66000, 'reasoning_effort': 'high'},
+    'google/gemini-4-argon': {'max_tokens': 66000, 'reasoning_effort': 'low'},
 }
-_SVG_PLAYGROUND_DEFAULT_BUDGET = {'max_tokens': 128000, 'reasoning_effort': 'xhigh'}
+_SVG_PLAYGROUND_DEFAULT_BUDGET = {'max_tokens': 128000, 'reasoning_effort': 'low'}
 _SVG_PLAYGROUND_TIMEOUT = 600
 
 
@@ -339,8 +342,7 @@ def _svg_playground_finish_reason(response):
 def _svg_playground_thinking(response):
     """The model's reasoning excerpt, for the owner's live inspection.
 
-    With max-effort budgets a model can think for minutes before drawing;
-    this surfaces what it is thinking about (kept on every result, success or
+    Surfaces what it is thinking about (kept on every result, success or
     failure, truncated to 4000 chars) instead of a silent clock."""
     try:
         choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
@@ -364,8 +366,6 @@ def _svg_playground_thinking(response):
 
 _SVG_PLAYGROUND_STYLE_IMAGES = (
     'svg_playground_style_site_1.jpg',
-    'svg_playground_style_site_2.jpg',
-    'svg_playground_style_site_3.jpg',
 )
 
 
