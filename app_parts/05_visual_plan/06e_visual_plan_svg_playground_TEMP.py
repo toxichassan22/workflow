@@ -85,11 +85,11 @@ def _svg_playground_geometry(scene, contract, program=None):
         raise visual_plan_geometry.PlanGeometryError(
             'هندسة المشهد لا تحمل حدودًا صالحة للرسم.', 'PLANS_SCENE_INVALID')
     project = visual_plan_geometry.fit_projection(
-        flat, 1180, 520, 110)
+        flat, 1200, 640, 50)
 
     def screen(point):
         x, y = project(point)
-        return [round(x + 150, 1), round(y + 130, 1)]
+        return [round(x + 50, 1), round(y + 160, 1)]
 
     envelopes = []
     try:
@@ -254,11 +254,19 @@ def _svg_playground_prompts(payload, contract=None):
         'Trace the parcel coordinates and setback envelope accurately to honor the exact surveyed plot shape. '
         'Orient and label all surrounding streets with their names and documented widths along parcel edges. '
         'Ensure every building mass footprint stays wholly inside the setback envelope.\n'
-        'ZERO-COLLISION & CLEAN LAYOUT RULES (CRITICAL): '
-        '1. NO OVERLAPPING TEXT OR BADGES: Street names must remain 100% visible and centered along their road ribbons without any text or badges covering them. Place entry badges and callout boxes in the clear white canvas margins with thin leader lines. '
-        '2. ISOLATED BOTTOM LEGEND: Place the Legend table cleanly in the bottom-left margin (below y=720) on pure white canvas — NEVER overlapping the parcel, setback envelope, or southern street. '
-        '3. NO DIMENSION ARROWS OR EXCESSIVE ANNOTATIONS: Do NOT draw dimension lines with arrows across the site (e.g. no `<--- 205m depth --->` arrows) and do not repeat setback dimension notes across edges. Keep internal courtyards, lawns, and building interiors clean, uncluttered, and breathable. '
-        '4. CLEAR TYPOGRAPHY & LABELS: Use clean modern typography (font-family: system-ui, sans-serif) in navy #172B4D. Label masses with only their essential name and floor count (e.g. "Hotel (12 Floors)"). Include a clear "N" north arrow.\n'
+        'CANVAS LAYOUT & NUMBERED KEY SYSTEM (CRITICAL RULES):\n'
+        '1. TOP-RIGHT SITE KEY & PROGRAM TABLE (1/8th CANVAS): '
+        'The canvas is pre-structured with an opaque architectural card in the top-right corner at x=1220, y=40, width=340, height=340. '
+        'Inside this card, populate each building and site component by its Key Number (01, 02, 03...) with its name, floor count, GFA/units, and color indicator chip. '
+        'Include a compact legend at the bottom of the card for parcel boundary, setback line, and North arrow. '
+        'Do NOT draw any legend in the bottom-left — the bottom margin is reserved for the site plan and streets.\n'
+        '2. NUMBERED BADGES ON MASSES ONLY (ZERO CLUTTER): '
+        'Do NOT write building names, unit counts, or long descriptions inside the building masses, courtyards, or gardens. '
+        'Instead, draw ONLY an elegant circular Key Number badge (e.g. circle r=12 fill="#07182C" with white text "01") at the center of each building mass and amenity, '
+        'matching its row in the top-right Site Key table. Keep building interiors, courtyards, and lawns clean, elegant, and breathable.\n'
+        '3. ZERO-COLLISION STREETS & NO DIMENSION ARROWS: '
+        'Keep street names centered and 100% visible along their road ribbons. Place entry arrows neatly at parcel boundaries without overlapping road names. '
+        'Do NOT draw dimension lines with arrows across the site (no `<--- 205m depth --->` arrows) and do not repeat setback notes.\n'
         'ARCHITECTURAL CREATIVE FREEDOM (BROCHURE MASTERPLAN): '
         'Compose a real brochure layout, not scattered rectangles. Follow the clear architectural design code of the attached reference image: '
         '1. Massing & Frontage: Wrap residential buildings into an elegant C-shaped or U-shaped courtyard wing embracing the landscaped garden; '
@@ -285,16 +293,47 @@ def _svg_playground_prompts(payload, contract=None):
         'regulatory_constraints': (contract or {}).get('regulatoryConstraints')
         if isinstance(contract, dict) else '',
     }
+    proj_name = str((contract or {}).get('projectName') or 'MASTERPLAN').upper()
+    proj_city = str((contract or {}).get('city') or '').upper()
+    proj_area = (contract or {}).get('croquis_land_area') or (contract or {}).get('approved_financial_area') or ''
+    title_line = f'PROJECT: {proj_name}'
+    if proj_city:
+        title_line += f' — {proj_city}'
+    if proj_area:
+        title_line += f' | PLOT: {proj_area} m²'
     user_prompt = (
         'PROJECT DATA FIELDS (Hard boundaries: trace parcel_pixels accurately; all mass footprints stay inside '
         'the setback envelope; creatively compose every recorded mass and amenity into a cohesive masterplan with <defs> and <use>):\n'
         + json.dumps(fields, ensure_ascii=False)
-        + '\nREQUIRED OUTPUT: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" '
-        'width="1600" height="900">; '
-        "top-left title 'CONCEPTUAL SITE PLAN' 30px navy plus project name and city; "
-        "bottom-right caption 'ILLUSTRATIVE REFERENCE - NOT TO SCALE'; "
-        "north arrow 'N' pointing up; "
-        "bottom-left legend 'SITE PLAN LEGEND & APPROVED PROGRAM' with one chip per use color above."
+        + '\nPOPULATE AND EXPAND THIS PRE-STRUCTURED ARCHITECTURAL SVG CANVAS (Output ONLY the completed raw SVG markup starting with <svg> and ending with </svg>):\n'
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">\n'
+        '  <!-- 1. FULL CANVAS WHITE BACKGROUND -->\n'
+        '  <rect width="1600" height="900" fill="#FFFFFF"/>\n'
+        '  <!-- 2. REUSABLE ASSETS (<defs>): Define symbols for canopy trees, parking stall modules, entry arrows -->\n'
+        '  <defs>\n'
+        '  </defs>\n'
+        '  <!-- 3. TOP-LEFT PROJECT IDENTITY -->\n'
+        '  <g id="project-title" transform="translate(50, 45)">\n'
+        '    <text font-family="system-ui, sans-serif" font-size="26" font-weight="800" fill="#07182C">CONCEPTUAL SITE PLAN</text>\n'
+        f'    <text y="26" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#4A5568">{title_line}</text>\n'
+        '  </g>\n'
+        '  <!-- 4. TOP-RIGHT SITE KEY & PROGRAM TABLE (1/8th CANVAS, x=1220..1560, y=40..380) -->\n'
+        '  <g id="site-key-table" transform="translate(1220, 40)">\n'
+        '    <rect width="340" height="340" rx="8" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="1.5"/>\n'
+        '    <rect width="340" height="36" rx="8" fill="#07182C"/>\n'
+        '    <text x="14" y="23" font-family="system-ui, sans-serif" font-size="13" font-weight="700" fill="#FFFFFF">SITE KEY &amp; PROGRAM</text>\n'
+        '    <g transform="translate(310, 18)"><polygon points="0,-9 5,5 0,2 -5,5" fill="#17C8E3"/><text y="-11" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="800" fill="#FFFFFF">N</text></g>\n'
+        '    <!-- Populate rows here for each recorded component (01, 02, 03...): -->\n'
+        '    <g transform="translate(14, 62)"><circle cx="11" cy="-4" r="11" fill="#07182C"/><text x="11" y="0" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="700" fill="#FFFFFF">01</text><text x="30" y="0" font-family="sans-serif" font-size="12" font-weight="700" fill="#07182C">Component Name</text><text x="30" y="16" font-family="sans-serif" font-size="10" font-weight="500" fill="#64748B">Levels / GFA</text><rect x="290" y="-10" width="14" height="14" rx="3" fill="#COLOR"/></g>\n'
+        '    <!-- Add remaining rows (02, 03, 04...) and a compact line legend at bottom of card (Boundary, Setback) -->\n'
+        '  </g>\n'
+        '  <!-- 5. SURROUNDING STREETS: Ribbons with centered street names -->\n'
+        '  <!-- 6. PARCEL & SETBACK ENVELOPE: Draw surveyed parcel polygon and dashed setback envelope using parcel_pixels -->\n'
+        '  <!-- 7. MASTERPLAN MASSES WITH KEY NUMBER BADGES ONLY: Draw building footprints and amenities. -->\n'
+        '  <!-- ON EACH BUILDING MASS: Draw ONLY a circular badge with its Key Number matching the table (e.g. 01, 02). NO text inside buildings! -->\n'
+        '  <!-- 8. BOTTOM-RIGHT CAPTION -->\n'
+        '  <text x="1560" y="875" text-anchor="end" font-family="system-ui, sans-serif" font-size="11" font-weight="600" fill="#94A3B8">ILLUSTRATIVE REFERENCE - NOT TO SCALE</text>\n'
+        '</svg>'
     )
     return system_prompt, user_prompt
 
