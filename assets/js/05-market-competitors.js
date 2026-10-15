@@ -857,6 +857,7 @@
       const disclaimer = document.getElementById('marketDisclaimer');
       if (decision) decision.value = next.decision || '';
       if (disclaimer) disclaimer.value = next.disclaimer || 'هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.';
+      if (typeof renderMarketSummaryScope === 'function') renderMarketSummaryScope(next.summary_scope);
       next.one_block_summary = buildMarketStudyOneBlockSummary(next);
       const oneBlock = document.getElementById('marketStudyOneBlockSummary');
       if (oneBlock) oneBlock.value = next.one_block_summary;
@@ -948,6 +949,7 @@
         components,
         competitorRadius: state.competitor_radius,
         competitorRadiusCustomKm: state.competitor_radius_custom_km,
+        summaryScope: state.summary_scope,
         dataPeriod: state.data_period,
         dataPeriodFrom: state.data_period_from,
         dataPeriodTo: state.data_period_to,

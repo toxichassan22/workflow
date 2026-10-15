@@ -633,7 +633,8 @@ def build_summary_chat_turn_prompt(payload, axis, message, history, state):
     )
 
 
-def build_summary_chat_research_prompt(payload, axis, message, history, state, queries):
+def build_summary_chat_research_prompt(payload, axis, message, history, state, queries,
+                                     offer_lang=None):
     """Phase-B user prompt for native Google search: the same context plus the
     queries phase A asked for, native-search instructions inside the binding
     scope/period, and the research output shape {reply, ops, sources_add}."""
@@ -650,10 +651,9 @@ def build_summary_chat_research_prompt(payload, axis, message, history, state, q
         'تعليمات البحث (بحث جوجل الأصلي — بلا فتح صفحات):\n'
         '- ابحث عبر بحث جوجل الأصلي أولًا — لا تجب من الذاكرة؛ '
         'كل رقم في reply أو في ops يجب أن يستند إلى نتائج البحث.\n'
-        '- ابقَ داخل النطاق الجغرافي الملزم (حي المشروع ونطاق المنافسين المدخلان '
-        'في البيانات، أو البديل الأقرب الوحيد مع ذكره صراحةً) وداخل فترة البيانات '
-        'المحددة — أي مصدر خارج الفترة مرفوض ولا يُدرج.\n'
-        '- كل مصدر في sources_add يحمل رابط الصفحة المحددة التي ظهرت فيها المعلومة '
+        '- التزم بفترة البيانات المحددة — أي مصدر خارج الفترة مرفوض ولا يُدرج.\n'
+        + _summary_scope_block(payload, offer_lang)
+        + '- كل مصدر في sources_add يحمل رابط الصفحة المحددة التي ظهرت فيها المعلومة '
         '(لا الصفحة الرئيسية للموقع) وتاريخ بياناتها كما ورد فيها.\n\n'
         'أرجع JSON فقط بهذا الشكل — بلا أي نص خارج JSON:\n'
         '{\n'

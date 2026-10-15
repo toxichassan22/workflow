@@ -246,7 +246,8 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     if turn.get('needs_research') and research_allowed and not clarification:
         report(46, 'جاري البحث في الويب داخل نطاق المشروع...')
         research_prompt = market_study.build_summary_chat_research_prompt(
-            payload, detected_axis, message, history, state, turn.get('queries') or [])
+            payload, detected_axis, message, history, state, turn.get('queries') or [],
+            offer_lang=offer_lang)
         # The turn shares the job contract: one evidence pool and one
         # deadline bound the native search like every other market search.
         chat_pool = _new_evidence_pool()

@@ -62,6 +62,8 @@ def _prepare_market_payload(data, tenant_id=None):
     )
     mixed = payload.get('projectComponents') or payload.get('project_mixed_components') or payload.get('project_components')
     payload['projectComponents'] = mixed
+    payload['summaryScope'] = market_study.normalize_summary_scope(
+        payload.get('summaryScope') or payload.get('summary_scope'))
     payload['projectFacts'] = _market_project_facts(data, tenant_id)
     return payload
 

@@ -815,6 +815,7 @@
       return {
         competitor_radius: '10',
         competitor_radius_custom_km: '',
+        summary_scope: { mode: 'distance', distance: '10', distance_custom_km: '', places: [] },
         data_period: '12m',
         data_period_from: '',
         data_period_to: '',

@@ -611,6 +611,79 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
     )
 
 
+def _summary_scope_block(payload, offer_lang=None):
+    """The binding geographic frame of the market summary, per its own scope
+    mode — separate from the competitors radius. 'distance' keeps the
+    historical district-plus-radius rule byte for byte; 'city' / 'district'
+    bind the analysis to the user-entered place list instead, with the same
+    listed-only discipline and no invented substitutes."""
+    en = (offer_lang == 'en')
+    scope = normalize_summary_scope(
+        (payload or {}).get('summaryScope') or (payload or {}).get('summary_scope'))
+    mode = scope.get('mode')
+    if mode in ('city', 'district'):
+        places = '، '.join(scope.get('places') or [])
+        if en:
+            unit = 'cities' if mode == 'city' else 'districts'
+            single = 'city' if mode == 'city' else 'district'
+            return (
+                f'The binding summary scope is these {unit} only: {places}. '
+                f'Analyze each {single} by name inside the relevant axes — never mix '
+                f'one {single}\'s figures into another\'s. Every figure, deal and price '
+                f'must belong to one of these {unit} exclusively; a source describing '
+                f'any other place is excluded. Do not analyze unlisted {unit} and do not '
+                f'invent substitutes — if a {single} has no data for an axis, write that '
+                f'the data is unavailable. Country-level figures may appear only as '
+                f'clearly-labeled background, never as the basis of a judgment on '
+                f'this project\'s market.\n'
+            )
+        unit = 'المدن' if mode == 'city' else 'الأحياء'
+        single = 'مدينة' if mode == 'city' else 'حي'
+        return (
+            f'نطاق الملخص المحدد ملزم في كل محاور التحليل: سوق هذا المشروع هو '
+            f'هذه {unit} وحدها: {places}. حلل كل {single} باسمها داخل المحاور ذات '
+            f'الصلة — لا تخلط أرقام {single} بأخرى. كل رقم أو صفقة أو سعر يجب أن '
+            f'يخص واحدة من هذه {unit} حصرًا، والمصدر الذي يصف مكانًا خارجها '
+            f'يُستبعد. لا تحلل {unit} غير مدخلة ولا تخترع بدائل من عندك — وإن لم '
+            f'تتوفر بيانات {single} لمحور فاكتب أنها غير متوفرة. أرقام المملكة '
+            f'العامة تصلح خلفيةً مذكورة صراحةً فقط، ولا تُبنى عليها أحكام سوق '
+            f'المشروع.\n'
+        )
+    return (
+        'The geographic scope is binding on every axis: this project\'s market is the district '
+        'entered in the project data and the competitor scope stated there (or the stated scope '
+        'alone when no district is entered). Do not analyze distant districts or wider areas — '
+        'not in sector performance, supply, demand, competition or the market gap. Only if the '
+        'project scope has too little data to read an axis may you extend to ONE single '
+        'substitute: the district physically closest to the project location. At most one '
+        'neighboring district may appear in the whole output — the same closest district '
+        'wherever in-scope data is missing; naming two different neighboring districts is '
+        'forbidden. If that closest district also lacks data for an axis, write that the data '
+        'is unavailable — do not move on to a second district. State the fallback openly in '
+        'the axis, e.g. "the entered district lacks data on X; figures shown are from district '
+        'Y, the nearest area to the site". Never jump to farther areas just because they '
+        'publish more data, and never present a neighboring district\'s figures as if they '
+        'were the project district\'s own. Every figure, deal and price must belong to that '
+        'scope or its single nearest substitute; a source describing any other district is '
+        'excluded. City-level figures may appear only as clearly-labeled background, never '
+        'as the basis of a judgment on this project\'s market.\n'
+        if en else
+        'النطاق الجغرافي ملزم في كل محاور التحليل: سوق هذا المشروع هو الحي المدخل في بيانات '
+        'المشروع ونطاق المنافسين المحدد فيها (أو النطاق المحدد وحده إن لم يُدخل حي). لا تحلل '
+        'أحياء بعيدة ولا نطاقات أوسع من المدخل — لا في أداء القطاع ولا في العرض أو الطلب أو '
+        'المنافسة أو الفجوة. وإن لم توجد داخل نطاق المشروع بيانات كافية لقراءة محور، وسّع إلى '
+        'بديل واحد فقط: أقرب حي لموقع المشروع فعليًا. الحد الأقصى حي مجاور واحد في المخرجات '
+        'كلها — نفس الحي الأقرب أينما نقصت البيانات، وذكر حيين مجاورين مختلفين ممنوع. وإن لم '
+        'يتوفر لدى أقرب حي بيانات المحور أيضًا فاكتب أنها غير متوفرة — لا تنتقل إلى حي ثانٍ. '
+        'واكتب الاستعانة صراحةً داخل المحور، مثل: «لم تتوفر داخل حي المشروع بيانات عن كذا؛ '
+        'والأرقام المعروضة من حي كذا كأقرب نطاق لموقع المشروع» — ولا تقفز إلى مناطق أبعد '
+        'لمجرد توفر بياناتها، ولا تعرض أرقام حي مجاور على أنها أرقام حي المشروع نفسه. كل رقم '
+        'أو صفقة أو سعر يجب أن يخص نفس النطاق أو بديله الأقرب الوحيد، والمصدر الذي يصف أي '
+        'حي آخر يُستبعد. أرقام المدينة العامة تصلح خلفيةً مذكورة صراحةً فقط، ولا تُبنى عليها '
+        'أحكام سوق المشروع.\n'
+    )
+
+
 def build_summary_user_prompt(payload, competitors, current_summary=None, current_sources=None, current_swot=None, offer_lang=None):
     en = (offer_lang == 'en')
     today = date.today().isoformat()
@@ -685,42 +758,12 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         + ('Write the detailed market analysis inside summary as organized axes, one independent value per axis, specific to this project — not a generic city description.\n'
            if en else
            'اكتب تحليل السوق التفصيلي داخل summary على شكل محاور منظمة، قيمة مستقلة لكل محور، مع تحليل خاص بهذا المشروع وليس وصفًا عامًا للمدينة.\n')
-        + f'المفاتيح الإلزامية لمحاور summary بالترتيب: {section_keys}.\n'
-        + ('Cover each axis with the brief elements, using short bullets inside an axis value when needed. Never put the detailed analysis in one paragraph or mix its axes.\n'
-           if en else
-           'غطِّ في كل محور عناصر brief النظام، واستخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n')
-        + ('The geographic scope is binding on every axis: this project\'s market is the district '
-           'entered in the project data and the competitor scope stated there (or the stated scope '
-           'alone when no district is entered). Do not analyze distant districts or wider areas — '
-           'not in sector performance, supply, demand, competition or the market gap. Only if the '
-           'project scope has too little data to read an axis may you extend to ONE single '
-           'substitute: the district physically closest to the project location. At most one '
-           'neighboring district may appear in the whole output — the same closest district '
-           'wherever in-scope data is missing; naming two different neighboring districts is '
-           'forbidden. If that closest district also lacks data for an axis, write that the data '
-           'is unavailable — do not move on to a second district. State the fallback openly in '
-           'the axis, e.g. "the entered district lacks data on X; figures shown are from district '
-           'Y, the nearest area to the site". Never jump to farther areas just because they '
-           'publish more data, and never present a neighboring district\'s figures as if they '
-           'were the project district\'s own. Every figure, deal and price must belong to that '
-           'scope or its single nearest substitute; a source describing any other district is '
-           'excluded. City-level figures may appear only as clearly-labeled background, never '
-           'as the basis of a judgment on this project\'s market.\n'
-           if en else
-           'النطاق الجغرافي ملزم في كل محاور التحليل: سوق هذا المشروع هو الحي المدخل في بيانات '
-           'المشروع ونطاق المنافسين المحدد فيها (أو النطاق المحدد وحده إن لم يُدخل حي). لا تحلل '
-           'أحياء بعيدة ولا نطاقات أوسع من المدخل — لا في أداء القطاع ولا في العرض أو الطلب أو '
-           'المنافسة أو الفجوة. وإن لم توجد داخل نطاق المشروع بيانات كافية لقراءة محور، وسّع إلى '
-           'بديل واحد فقط: أقرب حي لموقع المشروع فعليًا. الحد الأقصى حي مجاور واحد في المخرجات '
-           'كلها — نفس الحي الأقرب أينما نقصت البيانات، وذكر حيين مجاورين مختلفين ممنوع. وإن لم '
-           'يتوفر لدى أقرب حي بيانات المحور أيضًا فاكتب أنها غير متوفرة — لا تنتقل إلى حي ثانٍ. '
-           'واكتب الاستعانة صراحةً داخل المحور، مثل: «لم تتوفر داخل حي المشروع بيانات عن كذا؛ '
-           'والأرقام المعروضة من حي كذا كأقرب نطاق لموقع المشروع» — ولا تقفز إلى مناطق أبعد '
-           'لمجرد توفر بياناتها، ولا تعرض أرقام حي مجاور على أنها أرقام حي المشروع نفسه. كل رقم '
-           'أو صفقة أو سعر يجب أن يخص نفس النطاق أو بديله الأقرب الوحيد، والمصدر الذي يصف أي '
-           'حي آخر يُستبعد. أرقام المدينة العامة تصلح خلفيةً مذكورة صراحةً فقط، ولا تُبنى عليها '
-           'أحكام سوق المشروع.\n')
-        + 'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
+         + f'المفاتيح الإلزامية لمحاور summary بالترتيب: {section_keys}.\n'
+         + ('Cover each axis with the brief elements, using short bullets inside an axis value when needed. Never put the detailed analysis in one paragraph or mix its axes.\n'
+            if en else
+            'غطِّ في كل محور عناصر brief النظام، واستخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n')
+         + _summary_scope_block(payload, offer_lang)
+         + 'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
         + ('Never name sources, websites or bodies inside the axis values or inside '
            'one_block_summary — no "according to", "per", "source:" or site-name mentions in the '
            'text at all; sources are only collected into the sources table, which is already '
