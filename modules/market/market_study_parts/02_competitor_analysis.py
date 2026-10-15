@@ -374,7 +374,8 @@ def _project_input_block(payload):
         f"- المكونات الأولية: {components_text or payload.get('projectComponents') or payload.get('project_components') or 'غير مدخل'}",
         f"- مستوى المشروع: {payload.get('projectLevel') or payload.get('project_level') or 'غير مدخل'}",
         f"- الفئة المستهدفة: {audience_text or 'غير مدخل'}",
-        f"- نطاق المنافسين: {competitor_scope_text(payload)}",
+        f"- نطاق المنافسين (لجدول المنافسين فقط): {competitor_scope_text(payload)}",
+        f"- نطاق الملخص (الملزم لمحاور الملخص): {summary_scope_label(normalize_summary_scope(payload.get('summaryScope') or payload.get('summary_scope')))}",
         f"- فترة البيانات المطلوبة: {payload.get('dataPeriodLabel') or payload.get('data_period') or 'غير مدخل'}",
         f"- فترة البيانات الملزمة (تاريخ نشر المصدر): {data_period_window_text(payload) or 'غير مقيدة'}",
     ]
@@ -613,14 +614,16 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
 
 def _summary_scope_block(payload, offer_lang=None):
     """The binding geographic frame of the market summary, per its own scope
-    mode — separate from the competitors radius. 'distance' keeps the
-    historical district-plus-radius rule byte for byte; 'city' / 'district'
-    bind the analysis to the user-entered place list instead, with the same
-    listed-only discipline and no invented substitutes."""
+    mode — separate from the competitors radius. 'distance' binds to the
+    summary's own distance setting (district plus that distance); 'city' /
+    'district' bind the analysis to the user-entered place list instead,
+    with the same listed-only discipline and no invented substitutes. The
+    competitors radius never widens the summary frame."""
     en = (offer_lang == 'en')
     scope = normalize_summary_scope(
         (payload or {}).get('summaryScope') or (payload or {}).get('summary_scope'))
     mode = scope.get('mode')
+    scope_label = summary_scope_label(scope)
     if mode in ('city', 'district'):
         places = '، '.join(scope.get('places') or [])
         if en:
@@ -633,7 +636,10 @@ def _summary_scope_block(payload, offer_lang=None):
                 f'must belong to one of these {unit} exclusively; a source describing '
                 f'any other place is excluded. Do not analyze unlisted {unit} and do not '
                 f'invent substitutes — if a {single} has no data for an axis, write that '
-                f'the data is unavailable. Country-level figures may appear only as '
+                f'the data is unavailable. This rule overrides any axis hint about the project district, '
+                f'the competitors radius, or a single nearest-district fallback. In market_definition, '
+                f'state these {unit} by name as the market and never cite the competitors scope there. '
+                f'Country-level figures may appear only as '
                 f'clearly-labeled background, never as the basis of a judgment on '
                 f'this project\'s market.\n'
             )
@@ -645,14 +651,19 @@ def _summary_scope_block(payload, offer_lang=None):
             f'الصلة — لا تخلط أرقام {single} بأخرى. كل رقم أو صفقة أو سعر يجب أن '
             f'يخص واحدة من هذه {unit} حصرًا، والمصدر الذي يصف مكانًا خارجها '
             f'يُستبعد. لا تحلل {unit} غير مدخلة ولا تخترع بدائل من عندك — وإن لم '
-            f'تتوفر بيانات {single} لمحور فاكتب أنها غير متوفرة. أرقام المملكة '
+            f'تتوفر بيانات {single} لمحور فاكتب أنها غير متوفرة. هذه القاعدة تلغي ما يخالفها في وصف المحاور '
+            f'(تعريف السوق وأداء القطاع): لا تستخدم حي المشروع ولا نطاق المنافسين كنطاق للتحليل ولا قاعدة الحي الأقرب الوحيد. '
+            f'وفي محور تعريف السوق اذكر هذه {unit} بالاسم كنطاق السوق ولا تذكر نطاق المنافسين هناك. '
+            f'أرقام المملكة '
             f'العامة تصلح خلفيةً مذكورة صراحةً فقط، ولا تُبنى عليها أحكام سوق '
             f'المشروع.\n'
         )
+    scope_suffix = f' ({scope_label})' if scope_label else ''
     return (
         'The geographic scope is binding on every axis: this project\'s market is the district '
-        'entered in the project data and the competitor scope stated there (or the stated scope '
-        'alone when no district is entered). Do not analyze distant districts or wider areas — '
+        f'entered in the project data and the summary scope{scope_suffix} stated here (or the stated summary '
+        'scope alone when no district is entered). The competitors scope in the project data covers '
+        'the competitors table only and never widens this summary frame. Do not analyze distant districts or wider areas — '
         'not in sector performance, supply, demand, competition or the market gap. Only if the '
         'project scope has too little data to read an axis may you extend to ONE single '
         'substitute: the district physically closest to the project location. At most one '
@@ -666,10 +677,11 @@ def _summary_scope_block(payload, offer_lang=None):
         'were the project district\'s own. Every figure, deal and price must belong to that '
         'scope or its single nearest substitute; a source describing any other district is '
         'excluded. City-level figures may appear only as clearly-labeled background, never '
-        'as the basis of a judgment on this project\'s market.\n'
+        'as the basis of a judgment on this project\'s market. In market_definition, state the entered district '
+        'with its summary scope and never cite the competitors scope as the market.\n'
         if en else
         'النطاق الجغرافي ملزم في كل محاور التحليل: سوق هذا المشروع هو الحي المدخل في بيانات '
-        'المشروع ونطاق المنافسين المحدد فيها (أو النطاق المحدد وحده إن لم يُدخل حي). لا تحلل '
+        f'المشروع ونطاق الملخص المحدد هنا{(" (" + scope_label + ")") if scope_label else ""} (أو نطاق الملخص وحده إن لم يُدخل حي). نطاق المنافسين في بيانات المشروع يخص جدول المنافسين فقط ولا يوسع نطاق الملخص. لا تحلل '
         'أحياء بعيدة ولا نطاقات أوسع من المدخل — لا في أداء القطاع ولا في العرض أو الطلب أو '
         'المنافسة أو الفجوة. وإن لم توجد داخل نطاق المشروع بيانات كافية لقراءة محور، وسّع إلى '
         'بديل واحد فقط: أقرب حي لموقع المشروع فعليًا. الحد الأقصى حي مجاور واحد في المخرجات '
@@ -680,7 +692,7 @@ def _summary_scope_block(payload, offer_lang=None):
         'لمجرد توفر بياناتها، ولا تعرض أرقام حي مجاور على أنها أرقام حي المشروع نفسه. كل رقم '
         'أو صفقة أو سعر يجب أن يخص نفس النطاق أو بديله الأقرب الوحيد، والمصدر الذي يصف أي '
         'حي آخر يُستبعد. أرقام المدينة العامة تصلح خلفيةً مذكورة صراحةً فقط، ولا تُبنى عليها '
-        'أحكام سوق المشروع.\n'
+        'أحكام سوق المشروع. وفي محور تعريف السوق اذكر الحي المدخل ونطاق الملخص الخاص به ولا تذكر نطاق المنافسين كنطاق السوق.\n'
     )
 
 

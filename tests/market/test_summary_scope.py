@@ -124,6 +124,83 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('النرجس', prompt)
         self.assertIn('بحث جوجل الأصلي', prompt)
 
+    def test_distance_scope_binds_to_own_distance_not_competitors(self):
+        # Regression: the distance scope used to point at the competitors
+        # radius, so a 3 km summary with a 10 km competitor radius still
+        # analyzed 10 km. It must bind to its own distance instead.
+        payload = {
+            'summaryScope': {'mode': 'distance', 'distance': '3'},
+            'resolvedRadiusKm': 10,
+            'competitorRadiusLabel': '10 km',
+        }
+        block = market_study._summary_scope_block(payload)
+        self.assertIn('نطاق 3 كم', block)
+        self.assertIn('نطاق الملخص', block)
+        self.assertIn('جدول المنافسين فقط', block)
+        self.assertNotIn('نطاق المنافسين المحدد فيها', block)
+        self.assertIn('حيين مجاورين مختلفين ممنوع', block)
+
+    def test_distance_scope_english_binds_to_own_distance(self):
+        payload = {
+            'summaryScope': {'mode': 'distance', 'distance': '5'},
+            'resolvedRadiusKm': 10,
+            'competitorRadiusLabel': '10 km',
+        }
+        block = market_study._summary_scope_block(payload, 'en')
+        self.assertIn('summary scope', block.lower())
+        self.assertIn('competitors table only', block)
+        self.assertNotIn('competitor scope stated there', block)
+
+    def test_project_block_shows_both_scopes_separately(self):
+        # The project facts must carry the two frames side by side so the
+        # model never reads the competitors line as the summary frame.
+        payload = {
+            'summaryScope': {'mode': 'distance', 'distance': '3'},
+            'resolvedRadiusKm': 10,
+            'competitorRadiusLabel': '10 km',
+        }
+        block = market_study._project_input_block(payload)
+        self.assertIn('نطاق المنافسين (لجدول المنافسين فقط)', block)
+        self.assertIn('نطاق الملخص (الملزم لمحاور الملخص)', block)
+        self.assertIn('نطاق 3 كم', block)
+
+    def test_city_scope_binds_market_definition_to_listed_cities(self):
+        # Regression: with scope جدة+الرياض the model wrote market_definition
+        # as "حي الأندلس ضمن نطاق المنافسين 3 كم" instead of the two cities.
+        payload = {
+            'city': 'جدة',
+            'district': 'الأندلس',
+            'summaryScope': {'mode': 'city', 'places': ['جدة', 'الرياض']},
+            'resolvedRadiusKm': 3,
+            'competitorRadiusLabel': '3 km',
+        }
+        block = market_study._summary_scope_block(payload)
+        self.assertIn('جدة', block)
+        self.assertIn('الرياض', block)
+        self.assertIn('تعريف السوق', block)
+        self.assertIn('ولا تذكر نطاق المنافسين', block)
+        prompt = market_study.build_summary_user_prompt(payload, [])
+        self.assertIn('جدة', prompt)
+        self.assertIn('الرياض', prompt)
+
+    def test_city_scope_english_binds_market_definition(self):
+        block = market_study._summary_scope_block(
+            {'summaryScope': {'mode': 'city', 'places': ['Jeddah', 'Riyadh']}},
+            'en')
+        self.assertIn('Jeddah', block)
+        self.assertIn('Riyadh', block)
+        self.assertIn('market_definition', block)
+
+    def test_distance_scope_binds_market_definition_to_summary_distance(self):
+        payload = {
+            'summaryScope': {'mode': 'distance', 'distance': '3'},
+            'resolvedRadiusKm': 10,
+            'competitorRadiusLabel': '10 km',
+        }
+        block = market_study._summary_scope_block(payload)
+        self.assertIn('تعريف السوق', block)
+        self.assertIn('ولا تذكر نطاق المنافسين كنطاق السوق', block)
+
 
 class SummaryScopePayloadTests(unittest.TestCase):
 
