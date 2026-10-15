@@ -356,6 +356,41 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         css = '\n'.join(open(path, encoding='utf-8').read() for path in css_files)
         self.assertIn('repeat(2, minmax(0, 1fr))', css)
 
+    def test_truncated_svg_retries_with_doubled_cap_and_low_reasoning(self):
+        module = self.application_module
+        calls = []
+
+        def fake_chat(system_prompt, user_content, **kwargs):
+            calls.append(dict(kwargs))
+            if len(calls) == 1:
+                return {'choices': [{'finish_reason': 'length',
+                                     'message': {'content': '<svg viewBox="0 0 1600 900"><rect'}}]}
+            return {'choices': [{'finish_reason': 'stop',
+                                 'message': {'content': '<svg viewBox="0 0 1600 900">'
+                                                       '<text>CONCEPTUAL SITE PLAN</text></svg>'}}]}
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
+            raw = module._svg_playground_run_model('test-model', 'sys', 'user', {})
+        self.assertEqual(len(calls), 2, 'a length-truncated reply must be retried once')
+        self.assertEqual(calls[0].get('reasoning_effort'), 'low')
+        self.assertGreater(calls[1].get('max_tokens'), calls[0].get('max_tokens'))
+        final = module._svg_playground_finalize(raw, ['CONCEPTUAL SITE PLAN'], [])
+        self.assertTrue(final['ok'])
+        self.assertIn('<svg', final['svg'])
+
+    def test_truncated_twice_reports_diagnostics_not_a_blank_error(self):
+        module = self.application_module
+
+        def fake_chat(system_prompt, user_content, **kwargs):
+            return {'choices': [{'finish_reason': 'length',
+                                 'message': {'content': '<svg><rect' + ('x' * 500)}}]}
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
+            raw = module._svg_playground_run_model('test-model', 'sys', 'user', {})
+        self.assertFalse(raw['ok'])
+        self.assertIn('انقطع', raw['error'])
+        self.assertIn('حرفًا', raw['error'])
+
     def test_svg_helpers_extract_fences_and_strip_active_content(self):
         module = self.application_module
         raw = 'note\n```svg\n<svg><text onload="x()">hi</text></svg>\n```'

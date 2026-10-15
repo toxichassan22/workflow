@@ -301,33 +301,74 @@ def _svg_playground_score(svg, required_texts, required_numbers):
     return round(found / total * 100, 1)
 
 
+_SVG_PLAYGROUND_LENGTH_FINISH = {'length', 'max_tokens', 'max_output_tokens', 'max_completion_tokens'}
+
+
+def _svg_playground_finish_reason(response):
+    try:
+        choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
+        return str(choice.get('native_finish_reason') or choice.get('finish_reason') or '').lower()
+    except Exception:
+        return ''
+
+
 def _svg_playground_run_model(model, system_prompt, user_prompt, data):
     """Run one model, measuring wall time. A model failure is recorded on its
-    own result — it never aborts the remaining models."""
+    own result — it never aborts the remaining models.
+
+    Reasoning is kept low so the token budget goes to the drawing, not to
+    thinking: with the designer prompt every model otherwise spends the whole
+    cap reasoning and the SVG arrives truncated (no closing tag), which reads
+    as "no valid SVG" on all four cards at once. A length-truncated reply is
+    retried once with a doubled cap before it is reported as a failure."""
     started = time.perf_counter()
-    try:
-        response = call_openrouter_chat(
-            system_prompt, user_prompt, temperature=None, max_tokens=16000,
-            model=model, usage_ctx=_usage_ctx('image', data))
-    except Exception as error:
-        fatal = _ai_fatal_http_response(error)
+    cap = 16000
+    content = user_prompt
+    for attempt in range(2):
+        try:
+            response = call_openrouter_chat(
+                system_prompt, content, temperature=None, max_tokens=cap,
+                model=model, reasoning_effort='low', usage_ctx=_usage_ctx('image', data))
+        except Exception as error:
+            fatal = _ai_fatal_http_response(error)
+            if fatal is not None:
+                detail = _client_safe_llm_error(str(error)[:300])
+            else:
+                detail = str(error)[:300]
+            return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
+                    'chars': 0, 'score': 0.0, 'svg': '', 'error': detail or 'تعذر التوليد'}
+        fatal = _ai_fatal_error_dict(response)
         if fatal is not None:
-            detail = _client_safe_llm_error(str(error)[:300])
-        else:
-            detail = str(error)[:300]
-        return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
-                'chars': 0, 'score': 0.0, 'svg': '', 'error': detail or 'تعذر التوليد'}
-    fatal = _ai_fatal_error_dict(response)
-    if fatal is not None:
+            return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
+                    'chars': 0, 'score': 0.0, 'svg': '',
+                    'error': _client_safe_llm_error(fatal.get('message')) or 'تعذر التوليد'}
+        if isinstance(response, dict) and response.get('error'):
+            return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
+                    'chars': 0, 'score': 0.0, 'svg': '',
+                    'error': _client_safe_llm_error(_chat_error_message(response)) or 'تعذر التوليد'}
+        text = _get_chat_response_text(response)
+        if _svg_playground_extract_svg(text):
+            return {'model': model, '_svg': text,
+                    '_ms': int((time.perf_counter() - started) * 1000)}
+        finish = _svg_playground_finish_reason(response)
+        if finish in _SVG_PLAYGROUND_LENGTH_FINISH and attempt == 0:
+            # Truncated mid-drawing, not a refusal — give it a doubled cap and
+            # tell it to spend the budget on markup, not on thinking out loud.
+            cap *= 2
+            content = (user_prompt
+                       + '\nYour previous reply hit the output limit before </svg>. '
+                         'Emit the complete <svg> now with minimal preamble — no reasoning text, '
+                         'no explanation, just the markup.')
+            continue
+        detail = 'انقطع رد الموديل قبل اكتمال SVG' if finish in _SVG_PLAYGROUND_LENGTH_FINISH else ''
+        received = len(text or '')
+        if received:
+            detail += f' (وصل {received} حرفًا' + (f'، السبب: {finish}' if finish else '') + ')'
         return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
                 'chars': 0, 'score': 0.0, 'svg': '',
-                'error': _client_safe_llm_error(fatal.get('message')) or 'تعذر التوليد'}
-    if isinstance(response, dict) and response.get('error'):
-        return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
-                'chars': 0, 'score': 0.0, 'svg': '',
-                'error': _client_safe_llm_error(_chat_error_message(response)) or 'تعذر التوليد'}
-    return {'model': model, '_svg': _get_chat_response_text(response),
-            '_ms': int((time.perf_counter() - started) * 1000)}
+                'error': (detail or 'لا يوجد SVG صالح في رد الموديل') + ' — أعد التشغيل'}
+    return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
+            'chars': 0, 'score': 0.0, 'svg': '', 'error': 'لا يوجد SVG صالح في رد الموديل — أعد التشغيل'}
 
 
 def _svg_playground_finalize(raw, payload_texts, payload_numbers):
