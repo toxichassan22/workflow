@@ -82,7 +82,12 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertIn("import market_study", app_source)
         self.assertIn("@app.route('/api/market-study/competitors'", app_source)
         self.assertIn('run_browse_agent', app_source)
-        self.assertNotIn('openrouter:web_search', app_source)
+        # Owner-ordered exception: the market summary researches through the
+        # provider-native server tool (Google grounding) with zero page opens.
+        # That is the only sanctioned 'openrouter:web_search' occurrence —
+        # a second one anywhere is the deleted paid layer coming back.
+        self.assertEqual(app_source.count('openrouter:web_search'), 1)
+        self.assertIn('_SUMMARY_NATIVE_SEARCH_TOOLS', app_source)
         self.assertIn('def _start_market_job(kind, executor):', app_source)
 
         self.assertIn('project_idea', {field['key'] for field in db.PREBUILT_FIELDS})
@@ -375,12 +380,16 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
     def test_market_search_layer_is_the_browse_agent(self):
         """The paid OpenRouter/Exa layer was deleted outright — every market
         web task rides one self-hosted Chromium agent driven by the task's own
-        model. The old seam must never come back."""
+        model, with one owner-ordered exception: the market summary researches
+        through the provider-native server tool (Google grounding, zero page
+        opens). The old plugin seam must never come back, and no second
+        server-search usage may appear."""
         module = self.application_module
         self.assertFalse(hasattr(module, '_call_market_study_model'))
         self.assertFalse(hasattr(module, 'MARKET_SEARCH_ENGINE'))
         app_source = read_module_source('app.py')
-        self.assertNotIn('openrouter:web_search', app_source)
+        self.assertEqual(app_source.count('openrouter:web_search'), 1)
+        self.assertIn('_SUMMARY_NATIVE_SEARCH_TOOLS', app_source)
         self.assertNotIn("'id': 'web'", app_source)
         self.assertIn('_browse_agent_call(', app_source)
 
@@ -842,9 +851,10 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
         self.assertFalse(sources[2].get('outside_data_period'))
 
     def test_market_search_ran_counts_only_opened_pages(self):
-        """Under the browse agent a reply is "searched" only when the Chromium
-        workers actually opened pages — url_citation annotations — not merely
-        because the model produced JSON."""
+        """A reply is "searched" when the Chromium workers actually opened
+        pages (url_citation annotations) or provider-native grounding proves
+        a real search ran (webSearchQueries) — not merely because the model
+        produced JSON."""
         module = self.application_module
         memory = {'choices': [{'message': {'content': '{"competitors": []}'}}]}
         browsed = {'choices': [{'message': {
@@ -852,8 +862,14 @@ class MeetingRequirementsTestsPart08(MeetingRequirementsTests):
             'annotations': [{'url_citation': {
                 'url': 'https://rei.rega.gov.sa/ar', 'title': 'صفحة'}}],
         }}]}
+        grounded = {'choices': [{'message': {
+            'content': '{"competitors": []}',
+            'annotations': [],
+            'groundingMetadata': {'webSearchQueries': ['صفقات جدة']},
+        }}]}
         self.assertFalse(module._market_search_ran(memory))
         self.assertTrue(module._market_search_ran(browsed))
+        self.assertTrue(module._market_search_ran(grounded))
 
     def test_verify_row_marks_agent_failure_as_search_not_run(self):
         """A hard agent error — transport or launch — is an explicit

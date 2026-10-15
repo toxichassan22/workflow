@@ -1,12 +1,9 @@
-"""The market executive summary rides the self-hosted browse agent.
-
-The summary's web research runs through one headless-Chromium agent loop
-driven by the task's own model (MARKET_STUDY_MODEL): the model decides the
-searches and which pages to open, the workers execute them, and every page
-actually read arrives as a url_citation annotation — the retrieved evidence
-that makes ``searchVerified`` true. An agent error, or a clean reply that
-opened zero pages, is an explicit ``search_not_run`` failure — there is no
-paid search layer left to fall back to and never a memory study.
+"""The market executive summary researches through provider-native Google
+search (an OpenRouter server tool, owner-ordered) with zero local page
+opens — the model's own grounding plus its url_citation annotations are the
+retrieved evidence that makes ``searchVerified`` true. A transport error, or
+a clean reply with neither citations nor grounding proof, is an explicit
+``search_not_run`` failure — never a memory study.
 
 Run like every other suite::
 
@@ -77,7 +74,33 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 {'url': url, 'title': 'صفحة', 'chars': 2} for url in urls],
         }
 
-    def test_summary_rides_the_browse_agent(self):
+    @staticmethod
+    def _grounded_reply():
+        """A native-search synthesis with zero opened pages: grounding proof
+        on the message, no url_citation annotations at all."""
+        text = json.dumps({
+            'summary': {'market_definition': 'قراءة المحور من البحث الأصلي'},
+            'decision': 'مجدٍ بشروط',
+            'sources': [{'name': 'بحث جوجل الأصلي', 'url': ''}],
+        }, ensure_ascii=False)
+        return {
+            'choices': [{'message': {
+                'role': 'assistant',
+                'content': text,
+                'annotations': [],
+                'groundingMetadata': {
+                    'webSearchQueries': ['صفقات البيع جدة 2026'],
+                },
+            }}],
+            'usage': {'prompt_tokens': 12, 'completion_tokens': 7},
+            'browse_trace': [],
+        }
+
+    def test_summary_rides_native_server_search(self):
+        """Owner-ordered: the summary researches through provider-native
+        Google search (an OpenRouter server tool) with zero local page
+        opens — the self-hosted Chromium agent stays the competitors and
+        row-verification path only."""
         module = self.application_module
         captured = {}
 
@@ -96,10 +119,12 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertTrue(result['searchVerified'])
         # The consultant brief and the summary brief ride in as one task.
         self.assertIn('المفاتيح الإلزامية لمحاور summary', captured['task'])
-        self.assertEqual(captured['kwargs'].get('search_budget'),
-                         module._SUMMARY_SEARCH_BUDGET)
-        self.assertEqual(captured['kwargs'].get('max_steps'),
-                         module._SUMMARY_MAX_STEPS)
+        server_tools = captured['kwargs'].get('server_tools')
+        self.assertEqual(server_tools,
+                         [{"type": "openrouter:web_search", "engine": "native"}])
+        self.assertIs(captured['kwargs'].get('local_tools'), False)
+        # No local search budget is consumed on the native path.
+        self.assertNotIn('search_budget', captured['kwargs'])
         self.assertEqual(captured['kwargs'].get('max_tokens'),
                          module.MARKET_STUDY_MAX_TOKENS)
         # The agent mostly searches and opens pages — low effort keeps the
@@ -111,6 +136,19 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                          module.MARKET_STUDY_MODEL)
         self.assertEqual(captured['usage_ctx'].get('tenant_id'), 't1')
         self.assertTrue(result['sources'])
+
+    def test_grounding_proof_without_opened_pages_is_accepted(self):
+        """AI-overview reliance: a grounded synthesis with zero opened pages
+        (groundingMetadata proof, no annotations) still ships as a study —
+        only a proof-less memory answer stays search_not_run."""
+        module = self.application_module
+        with self.app.app_context(), \
+                patch.object(agent, 'run_browse_agent',
+                             return_value=self._grounded_reply()), \
+                patch.object(module, '_verify_market_urls', return_value=set()):
+            result = module._execute_market_summary({'city': 'جدة'}, tenant_id=None)
+        self.assertTrue(result['success'], result)
+        self.assertTrue(result['searchVerified'])
 
     def test_agent_error_is_explicit_search_not_run(self):
         module = self.application_module
@@ -149,28 +187,33 @@ class SummaryBrowseAgentTests(unittest.TestCase):
 
     def test_legacy_search_layer_is_gone(self):
         """Regression guard: the paid OpenRouter/Exa layer was deleted — the
-        browse agent is the only web-research path a market call can take."""
+        deprecated `web` plugin must never come back. The single sanctioned
+        server-search usage is the summary's native tool
+        (`_SUMMARY_NATIVE_SEARCH_TOOLS`); anything else is the old layer."""
         module = self.application_module
         self.assertFalse(hasattr(module, '_call_market_study_model'))
         self.assertFalse(hasattr(module, 'MARKET_SEARCH_ENGINE'))
+        self.assertTrue(hasattr(module, '_SUMMARY_NATIVE_SEARCH_TOOLS'))
 
     def test_summary_prompt_carries_mandatory_search_protocol(self):
         """The summary failed as search_not_run with queries=0: the model
         answered from memory because its prompt — unlike the competitors
         prompt — carried no mandatory search protocol. The prompt must order
-        separate web searches per axis group and page opens before citing."""
+        per-axis native Google searches and source-table citations, and must
+        not name local browser tools that do not exist on this path."""
         import market_study as market_study_module
         payload = {'city': 'جدة', 'district': 'الياسمين',
                    'projectType': 'سكني'}
         prompt = market_study_module.build_summary_user_prompt(
             payload, [], offer_lang='ar')
         self.assertIn('بروتوكول البحث الإلزامي', prompt)
-        self.assertIn('web_search', prompt)
-        self.assertIn('open_url', prompt)
+        self.assertIn('بحث جوجل الأصلي', prompt)
+        self.assertNotIn('open_url', prompt)
         prompt_en = market_study_module.build_summary_user_prompt(
             payload, [], offer_lang='en')
         self.assertIn('Mandatory search protocol', prompt_en)
-        self.assertIn('open_url', prompt_en)
+        self.assertIn('native Google search', prompt_en)
+        self.assertNotIn('open_url', prompt_en)
 
 
 if __name__ == '__main__':

@@ -585,11 +585,16 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     }
 
 
-# A summary researches several axes at once — sale deals, live indicators,
-# rent tables, supply and demand — so the competitor-verify budget of three
-# searches and ten steps cannot cover it, and its final JSON needs the full
-# MARKET_STUDY_MAX_TOKENS cap rather than the agent's 4000-token default.
-_SUMMARY_SEARCH_BUDGET = 8
+# The summary researches through provider-native search only (Google
+# grounding via the OpenRouter server tool — owner-ordered): the model asks
+# Google's own search inside the request and cites it, so no page is opened
+# by our browser and the datacenter bot-wall never comes into play.
+# Competitors and row verification stay on the self-hosted browse agent.
+_SUMMARY_NATIVE_SEARCH_TOOLS = [
+    {"type": "openrouter:web_search", "engine": "native"},
+]
+# The native call answers inside one request, but the loop cap stays as a
+# guard so a stalled model cannot spin rounds against the job deadline.
 _SUMMARY_MAX_STEPS = 16
 
 # The whole summary job — source plan plus the one wide browse call — spends
@@ -661,26 +666,27 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     report(10, 'جاري تحليل السوق والمنافسين بالبحث في الويب — قد يستغرق دقائق...')
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
-    # The browse agent is the only search layer: it runs the searches and
-    # opens the pages itself through headless Chromium, so the sources table
-    # and the figures rest only on pages it actually read. A transport
-    # failure — or a clean reply that opened zero pages — is an explicit
-    # search_not_run, never a silent memory answer.
+    # Native Google search inside the request itself: the model queries and
+    # cites provider search (AI-overview style) with zero page opens, so the
+    # reply's url_citation annotations — or provider grounding metadata — are
+    # the retrieved evidence. A transport failure, or a clean reply with
+    # neither, is an explicit search_not_run, never a silent memory answer.
     # Known sources first: the catalog's deep links land in the shared pool
-    # before the model searches, so its queries and page opens reuse them.
+    # before the model searches, so their pages still enrich the sources table.
     _run_market_source_plan(payload, offer_lang=offer_lang,
                             evidence_pool=evidence_pool, session=session,
                             deadline=deadline, report=report)
     res = _browse_agent_call(
         system_prompt, user_prompt, usage_ctx,
         evidence_pool=evidence_pool, deadline=deadline, session=session,
-        search_budget=_SUMMARY_SEARCH_BUDGET, max_steps=_SUMMARY_MAX_STEPS,
+        server_tools=_SUMMARY_NATIVE_SEARCH_TOOLS, local_tools=False,
+        max_steps=_SUMMARY_MAX_STEPS,
         max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='low',
         on_event=_market_agent_progress(report, 24, 70,
                                         'بحث الويب لملخص السوق'))
     failed = res.get('error') is not None
     provider_error = _chat_error_message(res) if failed else ''
-    if not failed and not _market_citation_pages(res):
+    if not failed and not _market_search_ran(res):
         provider_error = 'browse_agent: no browsed evidence'
         failed = True
     if failed and _ai_fatal_error_dict(res) is None:

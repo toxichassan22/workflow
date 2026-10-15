@@ -624,5 +624,52 @@ class ThreadLocalBrowserTests(unittest.TestCase):
             self.assertIsNone(getattr(browser._tls, 'worker', None))
 
 
+class NativeServerSearchTests(unittest.TestCase):
+    """Provider-native runs (the market summary's Google grounding): the loop
+    declares only the server tool, never the local browser tools, and keeps
+    the reply's own citations — no page is ever opened."""
+
+    _SERVER = [{"type": "openrouter:web_search", "engine": "native"}]
+
+    def test_native_run_declares_only_the_server_tool(self):
+        calls = []
+        chat = _scripted_chat([_text_response()], calls)
+        with _patched_transport(chat):
+            result = agent.run_browse_agent(
+                'ملخص', max_steps=2, server_tools=self._SERVER,
+                local_tools=False)
+        self.assertNotIn('error', result)
+        self.assertEqual(calls[0]['kwargs'].get('tools'), self._SERVER)
+        system = calls[0]['messages'][0]['content']
+        self.assertNotIn('open_url', system)
+        self.assertNotIn('web_search', system)
+
+    def test_default_run_still_declares_local_browser_tools(self):
+        calls = []
+        chat = _scripted_chat([_text_response()], calls)
+        with _patched_transport(chat):
+            agent.run_browse_agent('task', max_steps=2)
+        self.assertEqual(calls[0]['kwargs'].get('tools'),
+                         agent._BROWSER_TOOLS)
+
+    def test_provider_annotations_survive_without_page_opens(self):
+        ann = {'type': 'url_citation',
+               'url_citation': {'url': 'https://native.sa/p',
+                                'title': 'صفحة', 'content': 'نص'}}
+        resp = {'choices': [{'message': {
+            'role': 'assistant', 'content': _FINAL_TEXT,
+            'annotations': [ann]}, 'finish_reason': 'stop'}],
+            'usage': _usage()}
+        calls = []
+        with _patched_transport(_scripted_chat([resp], calls)):
+            result = agent.run_browse_agent(
+                'ملخص', max_steps=2, server_tools=self._SERVER,
+                local_tools=False)
+        cites = [(item.get('url_citation') or {}).get('url')
+                 for item in (result['choices'][0]['message'].get('annotations')
+                              or [])]
+        self.assertIn('https://native.sa/p', cites)
+
+
 if __name__ == '__main__':
     unittest.main()

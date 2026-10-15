@@ -107,6 +107,18 @@ _SEARCH_BUDGET_REFUSAL = {
 }
 
 
+# Native-search runs declare no local browser tools — the model researches
+# through provider-native search (e.g. Google grounding via the OpenRouter
+# server tool) inside the request itself, so the preamble must not name
+# web_search/open_url: those tools do not exist on the wire in this mode.
+_NATIVE_PREAMBLE = (
+    'أنت محلل سوق يعمل ببحث جوجل الأصلي. ابحث عبر البحث الأصلي أولًا — '
+    'لا تجب من الذاكرة: نفّذ بحثًا منفصلًا لكل محور مطلوب في المهمة، ثم أجب '
+    'بما طُلب منك فقط دون شرح خطواتك. الأرقام التقريبية من نتائج البحث مقبولة؛ '
+    'رقم بلا بحث مرفوض.\n\n'
+)
+
+
 # OpenAI/OpenRouter tool declarations — executed locally by this module, never
 # by the provider: only pages open_url actually read become citations.
 _BROWSER_TOOLS = [
@@ -752,7 +764,7 @@ def _execute_tool(session, name, args, trace, pages, search_state,
 def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                      max_tokens=None, reasoning_effort=None, model=None,
                      evidence_pool=None, deadline=None, session=None,
-                     on_event=None):
+                     on_event=None, server_tools=None, local_tools=True):
     """Drive one OpenRouter tool-call loop against a real browser session.
 
     ``model`` is the caller's own task model — the same model that would have
@@ -763,6 +775,12 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     market-summary JSON needs MARKET_STUDY_MAX_TOKENS); ``reasoning_effort``
     passes straight through and is dropped for the rest of the run if the
     provider refuses it.
+
+    ``server_tools`` are provider-executed tools (e.g. the OpenRouter
+    ``openrouter:web_search`` server tool) declared alongside — or, with
+    ``local_tools=False``, instead of — the local browser tools. A native-only
+    run researches through provider search inside the request itself: no
+    Chromium opens, and the reply's url_citation annotations are the evidence.
 
     ``evidence_pool`` (an ``EvidencePool`` from evidence.py) is the job's
     shared evidence store: a query the pool already ran is answered from its
@@ -796,6 +814,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     completion_tokens = 0
     final_text = ''
     final_finish = ''
+    msg = None
     error = None
     if max_steps is None:
         try:
@@ -827,9 +846,12 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
         return deadline is not None and time.time() >= deadline
 
     messages = [
-        {'role': 'system', 'content': _agent_preamble(budget)},
+        {'role': 'system', 'content': _agent_preamble(budget) if local_tools else _NATIVE_PREAMBLE},
         {'role': 'user', 'content': str(task or '')},
     ]
+    request_tools = list(server_tools or [])
+    if local_tools:
+        request_tools = list(_BROWSER_TOOLS) + request_tools
     session_cm = None
     search_state = {'count': 0, 'budget': budget}
 
@@ -842,8 +864,9 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
             pass
 
     def _round():
-        kwargs = {'tools': _BROWSER_TOOLS, 'max_tokens': out_cap,
-                  'usage_ctx': usage_ctx}
+        kwargs = {'max_tokens': out_cap, 'usage_ctx': usage_ctx}
+        if request_tools:
+            kwargs['tools'] = request_tools
         if model:
             kwargs['model'] = model
         if effort and not effort_disabled:
@@ -997,6 +1020,20 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     annotations = [{'url_citation': {'url': url, 'title': page['title'],
                                      'content': page['content']}}
                    for url, page in pages.items()]
+    # Provider-native citations (a server-tool search cites without any page
+    # open) ride on the final message itself — union them so a native-only run
+    # keeps its evidence instead of shipping an empty annotation list.
+    _seen_urls = set(pages)
+    for _ann in ((msg or {}).get('raw_message') or {}).get('annotations') or []:
+        _ann = _ann if isinstance(_ann, dict) else {}
+        _cit = _ann.get('url_citation')
+        _cit = _cit if isinstance(_cit, dict) else {}
+        _url = str(_cit.get('url') or _ann.get('url') or '').strip()
+        if _url and _url not in _seen_urls:
+            _seen_urls.add(_url)
+            annotations.append({'url_citation': {
+                'url': _url, 'title': str(_cit.get('title') or ''),
+                'content': str(_cit.get('content') or '')}})
     if error:
         result = {'error': error, 'usage': usage, 'browse_trace': trace}
         if annotations:
