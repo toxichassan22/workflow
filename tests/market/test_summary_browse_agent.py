@@ -154,6 +154,24 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertFalse(hasattr(module, '_call_market_study_model'))
         self.assertFalse(hasattr(module, 'MARKET_SEARCH_ENGINE'))
 
+    def test_summary_prompt_carries_mandatory_search_protocol(self):
+        """The summary failed as search_not_run with queries=0: the model
+        answered from memory because its prompt — unlike the competitors
+        prompt — carried no mandatory search protocol. The prompt must order
+        separate web searches per axis group and page opens before citing."""
+        import market_study as market_study_module
+        payload = {'city': 'جدة', 'district': 'الياسمين',
+                   'projectType': 'سكني'}
+        prompt = market_study_module.build_summary_user_prompt(
+            payload, [], offer_lang='ar')
+        self.assertIn('بروتوكول البحث الإلزامي', prompt)
+        self.assertIn('web_search', prompt)
+        self.assertIn('open_url', prompt)
+        prompt_en = market_study_module.build_summary_user_prompt(
+            payload, [], offer_lang='en')
+        self.assertIn('Mandatory search protocol', prompt_en)
+        self.assertIn('open_url', prompt_en)
+
 
 if __name__ == '__main__':
     unittest.main()

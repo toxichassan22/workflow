@@ -652,9 +652,39 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         decision_example = '"decision": "قيمة من قائمة القرار",\n'
         disclaimer_example = '"disclaimer": "هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا",\n'
         one_block_example = '"one_block_summary": "فقرة عربية واحدة متماسكة تلخص سوق المشروع كاملًا بلا عناوين ولا ترقيم ولا نقاط"\n'
+    if en:
+        search_protocol = (
+            'Mandatory search protocol:\n'
+            '1. Search the web first — never answer from memory: run a separate '
+            'web_search for each axis group (city sale deals and indicators, '
+            'rent index, supply and demand with listings, competition and news) '
+            'using the city, district and project type. Every figure must appear '
+            'literally in a page you opened in this run.\n'
+            '2. Open the two closest results of each search with open_url before '
+            'citing them — a snippet-only answer is rejected. An acceptable source '
+            'is a specific page you actually read, never a site homepage.\n'
+            '3. Never write a figure from prior knowledge. A figure counts only '
+            'when its exact page URL sits in the sources table with its data_date; '
+            'a missing figure stays unavailable instead of an invented number.\n'
+        )
+    else:
+        search_protocol = (
+            'بروتوكول البحث الإلزامي:\n'
+            '1. ابحث في الويب أولًا — لا تجب من الذاكرة: نفّذ web_search منفصلًا '
+            'لكل مجموعة محاور (صفقات البيع ومؤشرات المدينة، مؤشر الإيجار، العرض '
+            'والطلب والقوائم، المنافسة والأخبار) باسم المدينة والحي ونوع المشروع. '
+            'كل رقم يجب أن يظهر حرفيًا في صفحة فتحتها في هذا البحث.\n'
+            '2. افتح أقرب نتيجتين لكل بحث بـ open_url قبل الاستشهاد بهما — إجابة '
+            'من المقتطفات وحدها مرفوضة. المصدر المقبول صفحة محددة قرأتها فعلًا، '
+            'وليس الصفحة الرئيسية للموقع.\n'
+            '3. لا تكتب رقمًا من معرفتك السابقة. الرقم يُقبل فقط عندما يكون رابط '
+            'صفحته نفسها في جدول sources مع data_date؛ والمعلومة الغائبة تبقى '
+            '«غير متوفر من مصدر موثوق» بدل الرقم المختلق.\n'
+        )
     return (
         f'تاريخ اليوم / تاريخ الوصول للمصادر: {today}\n'
         f'ابدأ المخرجات بعنوان: {SUMMARY_TITLE}.\n'
+        + search_protocol
         + ('Write the detailed market analysis inside summary as organized axes, one independent value per axis, specific to this project — not a generic city description.\n'
            if en else
            'اكتب تحليل السوق التفصيلي داخل summary على شكل محاور منظمة، قيمة مستقلة لكل محور، مع تحليل خاص بهذا المشروع وليس وصفًا عامًا للمدينة.\n')
