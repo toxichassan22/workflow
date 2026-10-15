@@ -281,9 +281,16 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         # The tab unlocks on stages 1 and 2 — verification, boundary and an
         # approved distribution — and never on the generation stage, so it can
         # not lead to an endpoint that would refuse the request.
+        self.assertIn("if (stage === 'svgcompare') {", source)
         self.assertIn(
-            "if (stage === 'svgcompare' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;",
+            "if (!(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;",
             source)
+        self.assertIn('setVisualConceptPlansSvgCompareStage4(true);', source)
+        # The selection is NOT kept in workflow.viewStage: the workflow normalizer
+        # only accepts the three permanent stage names and rewrites anything else
+        # to 'verify', which is what made the tab look dead.
+        self.assertNotIn("viewStage = 'svgcompare'", source)
+        self.assertIn("viewStage: ['verify', 'boundary', 'generate'].includes(source.viewStage)", source)
         self.assertNotIn('workflow.promptReady && tempStage4Active', source)
         # The retired standalone page is really gone, route included.
         self.assertNotIn('/playground-plans-svg', source)

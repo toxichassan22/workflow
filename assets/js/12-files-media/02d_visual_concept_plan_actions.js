@@ -523,11 +523,23 @@
     // is display-only, so it stays in this session instead of the draft — four
     // inline SVG bodies would bloat every later draft save.
     const visualConceptPlansSvgCompareRun = { status: 'idle', results: [], error: '',
-      startedAt: 0, elapsedMs: 0 };
+      startedAt: 0, elapsedMs: 0, stage: false };
     let visualConceptPlansSvgCompareTimer = null;
 
     function visualConceptPlansSvgCompareState() {
       return visualConceptPlansSvgCompareRun;
+    }
+
+    // Which stage the rail shows lives here, NOT in workflow.viewStage: the
+    // workflow normalizer only accepts the three permanent stage names and would
+    // rewrite 'svgcompare' to 'verify' on the very next read, which is what made
+    // the tab look dead. Nothing is persisted — this is a session view.
+    function visualConceptPlansSvgCompareStage4() {
+      return Boolean(visualConceptPlansSvgCompareRun.stage);
+    }
+
+    function setVisualConceptPlansSvgCompareStage4(active) {
+      visualConceptPlansSvgCompareRun.stage = Boolean(active);
     }
 
     function visualConceptPlansSvgCompareStopTimer() {

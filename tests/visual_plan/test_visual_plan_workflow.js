@@ -245,6 +245,30 @@ test('the processing lock repaints once prepare finishes instead of lingering', 
   assert.notEqual(locks[locks.length - 1], 'المشهد الهندسي قيد المعالجة.');
 });
 
+test('approving stages one and two survives a saved draft and a reload', () => {
+  const context = fixture();
+  const data = {
+    verification: { approved: true, canProceed: true, summary: '', checks: [], issues: [] },
+    boundary: { approved: true, referenceUrl: '/uploads/creative/parcel.png', points: [
+      { point: '1', eastings: 500000, northings: 2000000 },
+      { point: '2', eastings: 500020, northings: 2000000 },
+      { point: '3', eastings: 500020, northings: 2000020 }] },
+    distribution: { approved: true, aiReviewed: true,
+      rows: [{ id: 'row_1', building: 'A', component: 'res' }] },
+  };
+  // The draft stores the workflow as JSON; a reload normalizes it right back.
+  const reloaded = context.normalizeVisualConceptPlansWorkflow(
+    JSON.stringify(context.normalizeVisualConceptPlansWorkflow(data)));
+  assert.equal(reloaded.verification.approved, true);
+  assert.equal(reloaded.boundary.approved, true);
+  assert.equal(reloaded.distribution.approved, true);
+  assert.equal(reloaded.distribution.aiReviewed, true);
+  assert.equal(reloaded.boundary.points.length, 3);
+  assert.equal(reloaded.boundary.referenceUrl, '/uploads/creative/parcel.png');
+  // No notes written, so the notes gate is already clear — nothing to redo.
+  assert.equal(context.visualConceptPlanNotesCleared(reloaded), true);
+});
+
 // >>> TEMP_STAGE4
 // TEMP: remove this block together with the model-comparison stage.
 test('stage 4 renders one card per model, failures included', () => {
@@ -270,6 +294,82 @@ test('stage 4 renders one card per model, failures included', () => {
   assert.ok(html.includes('&lt;svg viewBox'));
   assert.ok(!html.includes('<svg viewBox'));
 });
+// A root whose querySelectorAll rebuilds the panels from the rendered markup and
+// keeps them, so a second call sees the same objects the render mutated.
+function workflowRoot(context) {
+  const root = {
+    innerHTML: '', dataset: {}, panels: [],
+    addEventListener(type, fn) { root.listeners[type] = fn; },
+    listeners: {},
+    querySelector() { return null; },
+    querySelectorAll(selector) {
+      if (selector !== '[data-plans-workflow-stage]') return [];
+      if (!root.panels.length) {
+        // Panels start hidden exactly as the markup says, then the render's own
+        // post-pass flips the flag — the registry keeps those same objects.
+        root.panels = Array.from(
+          root.innerHTML.matchAll(/<section[^>]*data-plans-workflow-stage="([a-z0-9]+)"([^>]*)>/g))
+          .map(match => ({ stage: match[1], hidden: /\bhidden\b/.test(match[2]),
+            getAttribute: () => match[1] }));
+      }
+      return root.panels;
+    },
+  };
+  context.document.getElementById = id => (id === 'visualConceptPlansWorkflow' ? root : null);
+  return root;
+}
+
+// The post-pass only reads the panels when stage 4 is selected, so the test
+// parses them on demand from the rendered markup.
+function panelsOf(root) {
+  root.querySelectorAll('[data-plans-workflow-stage]');
+  return root.panels;
+}
+
+function sealedWorkflowState(context) {
+  context.tenantVisualConceptState = { slots: {}, plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+    verification: { approved: true },
+    boundary: { approved: true, referenceUrl: '/uploads/creative/parcel.png', points: [
+      { eastings: 0, northings: 0 }, { eastings: 10, northings: 0 }, { eastings: 10, northings: 10 }] },
+    distribution: { approved: true, rows: [{ id: 'row_1', building: 'A', component: 'res' }] },
+  }) };
+  return context.tenantVisualConceptState.plansWorkflow;
+}
+
+function clickWorkflowTab(context, root, stage) {
+  const tab = { disabled: false, getAttribute: () => stage };
+  root.listeners.click({ target: { closest: sel => (sel === '[data-plans-workflow-tab]' ? tab : null) } });
+}
+
+test('selecting the comparison stage shows its own panel, not another stage\'s', () => {
+  const context = fixture();
+  sealedWorkflowState(context);
+  context.markVisualConceptDirty = () => {};
+  const root = workflowRoot(context);
+  context.renderVisualConceptPlansWorkflow();
+  // Approved stages 1+2 unlock both later stages.
+  const svgTab = root.innerHTML.match(/data-plans-workflow-tab="svgcompare"([^>]*)>/);
+  assert.ok(svgTab, 'the rail must draw the comparison tab');
+  assert.ok(!svgTab[1].includes('disabled'), 'approved stages 1+2 must unlock it');
+  // Nothing is selected yet: only the pending permanent stage is on screen.
+  assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['verify']);
+  root.panels = [];
+  clickWorkflowTab(context, root, 'svgcompare');
+  assert.equal(context.visualConceptPlansSvgCompareStage4(), true);
+  context.renderVisualConceptPlansWorkflow();
+  // The comparison panel is the only one on screen — the exact behaviour that
+  // was broken while the stage was kept in workflow.viewStage, which the
+  // normalizer rewrites back to 'verify'.
+  assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage),
+    ['svgcompare'], 'stage 4 must own the panel');
+  // Going back to a permanent stage hands the panel back.
+  root.panels = [];
+  clickWorkflowTab(context, root, 'generate');
+  assert.equal(context.visualConceptPlansSvgCompareStage4(), false);
+  context.renderVisualConceptPlansWorkflow();
+  assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['generate']);
+});
+
 test('stage 4 streams each finished model and reports its seconds', async () => {
   const context = fixture();
   const resultsHost = { innerHTML: '' };

@@ -271,7 +271,7 @@
       // Stage 4 (the model comparison) is gated exactly like generation, and the
       // three-stage computation above stays untouched: while stage 4 is selected
       // the permanent panels and step highlights stand down below.
-      const tempStage4Active = workflow.viewStage === 'svgcompare' && boundaryApproved && distApproved;
+      const tempStage4Active = visualConceptPlansSvgCompareStage4() && boundaryApproved && distApproved;
       const svgCompare = visualConceptPlansSvgCompareState();
       /* <<< TEMP_STAGE4 */
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
@@ -371,7 +371,13 @@
             const state = visualConceptPlansWorkflowState();
             if (stage === 'boundary' && !state.verification.approved) return;
             /* >>> TEMP_STAGE4 */
-            if (stage === 'svgcompare' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
+            if (stage === 'svgcompare') {
+              if (!(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
+              setVisualConceptPlansSvgCompareStage4(true);
+              renderVisualConceptPage();
+              return;
+            }
+            setVisualConceptPlansSvgCompareStage4(false);
             /* <<< TEMP_STAGE4 */
             if (stage === 'generate' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
             state.viewStage = stage;

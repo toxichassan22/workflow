@@ -616,7 +616,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         # the generation stage uses. Delete this block with the stage.
         # >>> TEMP_STAGE4
         self.assertIn("data-plans-workflow-tab=\"svgcompare\"", index_source)
-        self.assertIn("const tempStage4Active = workflow.viewStage === 'svgcompare' && boundaryApproved && distApproved;", index_source)
+        self.assertIn("const tempStage4Active = visualConceptPlansSvgCompareStage4() && boundaryApproved && distApproved;", index_source)
         # <<< TEMP_STAGE4
         self.assertIn('<ol class="plans-workflow-steps">', index_source)
         self.assertNotIn('plans-workflow-stage-tabs', index_source)
