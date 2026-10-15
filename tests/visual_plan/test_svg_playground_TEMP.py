@@ -422,6 +422,60 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertIn('انقطع', raw['error'])
         self.assertIn('حرفًا', raw['error'])
 
+    def test_models_receive_the_parcel_outline_as_reference_image(self):
+        module = self.application_module
+        seen = {}
+
+        def fake_chat(system_prompt, user_content, **kwargs):
+            seen.update(kwargs)
+            return {'choices': [{'finish_reason': 'stop',
+                                 'message': {'content': '<svg><text>CONCEPTUAL SITE PLAN</text></svg>'}}]}
+
+        scene = _scene()
+        scene['geometry']['surveyPoints'] = [
+            {'point': '1', 'eastings': 1, 'northings': 2},
+            {'point': '2', 'eastings': 41, 'northings': 2},
+            {'point': '3', 'eastings': 41, 'northings': 32},
+            {'point': '4', 'eastings': 1, 'northings': 32},
+        ]
+        contract = {'geometry': scene['geometry']}
+        # Reference building reads g.tenant_id like the worker thread does.
+        with self.app.test_request_context('/'):
+            from flask import g as flask_g
+            flask_g.tenant_id = 'test-tenant'
+            with patch.object(module, '_visual_plan_scene_from_request',
+                              return_value=(scene, contract, {}, {})), \
+                    patch.object(module, '_visual_concept_render_plan_boundary_reference',
+                                 return_value='/uploads/creative/parcel.png') as render, \
+                    patch.object(module, '_visual_concept_reference_uris',
+                                 return_value=[{'url': '/uploads/creative/parcel.png'}]) as uris, \
+                    patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
+                result, status = module._svg_playground_execute(
+                    {'projectData': _project(), 'plansWorkflow': _workflow(_project())})
+        self.assertEqual(status, 200)
+        self.assertTrue(result['success'])
+        self.assertTrue(render.called)
+        self.assertTrue(uris.called)
+        self.assertEqual(seen.get('image_references'), [{'url': '/uploads/creative/parcel.png'}])
+
+    def test_broken_reference_builder_still_runs_text_only(self):
+        module = self.application_module
+        scene = _scene()
+        scene['geometry']['surveyPoints'] = [
+            {'point': '1', 'eastings': 1, 'northings': 2},
+            {'point': '2', 'eastings': 41, 'northings': 2},
+            {'point': '3', 'eastings': 41, 'northings': 32},
+        ]
+        with patch.object(module, '_visual_plan_scene_from_request',
+                          return_value=(scene, {'geometry': scene['geometry']}, {}, {})), \
+                patch.object(module, '_visual_concept_render_plan_boundary_reference',
+                             side_effect=RuntimeError('disk full')), \
+                self._mock_chat(module):
+            result, status = module._svg_playground_execute(
+                {'projectData': _project(), 'plansWorkflow': _workflow(_project())})
+        self.assertEqual(status, 200)
+        self.assertTrue(result['success'])
+
     def test_svg_helpers_extract_fences_and_strip_active_content(self):
         module = self.application_module
         raw = 'note\n```svg\n<svg><text onload="x()">hi</text></svg>\n```'

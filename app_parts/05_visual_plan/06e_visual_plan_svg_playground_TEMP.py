@@ -256,7 +256,9 @@ def _svg_playground_prompts(payload, contract=None):
         'NEVER a dark background, no photorealism, no invented dimensions. '
         'Compose a real brochure layout, not scattered rectangles: group related masses, wrap '
         'housing around a landscaped courtyard with the listed pool and play areas, towers on '
-        'the high-rise side, front setback open for surface parking and the main entry.')
+        'the high-rise side, front setback open for surface parking and the main entry. '
+        'The attached reference image is the true surveyed parcel outline — trace its exact '
+        'shape and proportions for the parcel boundary.')
     fields = {
         'project': {key: (contract or {}).get(key) for key in
                     ('projectName', 'projectIdea') if isinstance(contract, dict)},
@@ -350,7 +352,25 @@ def _svg_playground_thinking(response):
         return ''
 
 
-def _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx=None):
+def _svg_playground_references(contract):
+    """The surveyed-parcel outline as an attached reference image, so the models
+    trace a seen shape instead of guessing from numbers. Built once per run;
+    any failure degrades to text-only rather than breaking the comparison."""
+    try:
+        geometry = (contract or {}).get('geometry') or {}
+        points = geometry.get('surveyPoints') or []
+        if len(points) < 3:
+            return []
+        url = _visual_concept_render_plan_boundary_reference(points, g.tenant_id)
+        if not url:
+            return []
+        return _visual_concept_reference_uris(urls=[url], tenant_id=g.tenant_id) or []
+    except Exception:
+        return []
+
+
+def _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx=None,
+                              image_references=None):
     """Run one model, measuring wall time. A model failure is recorded on its
     own result — it never aborts the remaining models.
 
@@ -370,7 +390,7 @@ def _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx
             response = call_openrouter_chat(
                 system_prompt, content, temperature=None, max_tokens=cap,
                 model=model, reasoning_effort=effort, timeout=_SVG_PLAYGROUND_TIMEOUT,
-                usage_ctx=usage_ctx)
+                image_references=image_references or None, usage_ctx=usage_ctx)
         except Exception as error:
             fatal = _ai_fatal_http_response(error)
             if fatal is not None:
@@ -477,11 +497,13 @@ def _svg_playground_execute(data, on_model=None):
     payload, required_texts, required_numbers = _svg_playground_geometry(scene, contract, program)
     system_prompt, user_prompt = _svg_playground_prompts(payload, contract)
     ctx = _usage_ctx('image', data)
+    references = _svg_playground_references(contract)
     slots = [None] * len(SVG_PLAYGROUND_MODELS)
     lock = threading.Lock()
 
     def run_index(index, model):
-        raw = _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx=ctx)
+        raw = _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx=ctx,
+                                        image_references=references)
         if '_svg' in raw:
             raw = _svg_playground_finalize(raw, required_texts, required_numbers)
         with lock:
