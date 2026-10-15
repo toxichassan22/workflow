@@ -872,6 +872,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "market.summary_scope_city_name": "اسم المدينة",
   "market.summary_scope_district_name": "اسم الحي",
   "market.summary_scope_delete": "حذف",
+  "market.summary_scope_required": "أضف مدينة أو حيًا واحدًا على الأقل لنطاق الملخص",
   "market.job_resumed": "توجد مهمة قيد التنفيذ — جاري متابعة نتيجتها.",
   "market.job_still_running": "المهمة ما زالت تعمل في الخلفية.",
   "market.job_done_count": "اكتمل تحديث المنافسين — {n} في الجدول",

@@ -872,6 +872,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "market.summary_scope_city_name": "City name",
   "market.summary_scope_district_name": "District name",
   "market.summary_scope_delete": "Delete",
+  "market.summary_scope_required": "Add at least one city or district to the summary scope",
   "market.job_resumed": "A task is already running — following its progress.",
   "market.job_still_running": "The task is still running in the background.",
   "market.job_done_count": "Competitors update finished — {n} in the table",

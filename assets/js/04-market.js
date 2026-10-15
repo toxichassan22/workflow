@@ -88,6 +88,27 @@
             <div><label>المدينة</label><input id="marketCityMirror" readonly></div>
             <div><label>الحي</label><input id="marketDistrictMirror" readonly></div>
           </div>
+        </div>
+        <div class="market-block">
+          <h4>المنافسون</h4>
+          <div class="market-actions">
+            <button type="button" class="btn ghost" onclick="addMarketCompetitorRow()">إضافة منافس</button>
+            <button type="button" class="btn ghost" id="marketFillCompetitorsBtn" onclick="runMarketCompetitorsJob('fill')">إكمال بيانات المنافسين بالاسم</button>
+            <button type="button" class="btn primary" id="marketGenerateCompetitorsBtn" onclick="runMarketCompetitorsJob('generate')">توليد المنافسين</button>
+          </div>
+          <div id="marketCompetitorsNote"></div>
+          <div class="table-wrap">
+            <table id="marketCompetitorsTable">
+              <thead><tr>
+                <th>اسم المشروع</th><th>الشعار</th><th>النوع</th><th>التصنيف</th><th data-benchmarks-col>يُقاس على</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
+                <th>نوع العملية</th><th>نوع السعر</th><th>القيمة (ر.س)</th><th></th>
+              </tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="market-block">
+          <h4>الملخص التنفيذي لسوق المشروع</h4>
           <div style="margin-top:12px">
             <div><label data-i18n="market.summary_scope">نطاق الملخص</label>
               <select id="marketSummaryScopeMode">
@@ -114,28 +135,7 @@
               <div class="market-actions" style="margin-top:8px"><button type="button" class="btn ghost" id="marketSummaryScopeAddBtn" data-i18n="market.summary_scope_add_city" onclick="addMarketSummaryScopePlace()">إضافة مدينة</button></div>
             </div>
           </div>
-        </div>
-        <div class="market-block">
-          <h4>المنافسون</h4>
-          <div class="market-actions">
-            <button type="button" class="btn ghost" onclick="addMarketCompetitorRow()">إضافة منافس</button>
-            <button type="button" class="btn ghost" id="marketFillCompetitorsBtn" onclick="runMarketCompetitorsJob('fill')">إكمال بيانات المنافسين بالاسم</button>
-            <button type="button" class="btn primary" id="marketGenerateCompetitorsBtn" onclick="runMarketCompetitorsJob('generate')">توليد المنافسين</button>
-          </div>
-          <div id="marketCompetitorsNote"></div>
-          <div class="table-wrap">
-            <table id="marketCompetitorsTable">
-              <thead><tr>
-                <th>اسم المشروع</th><th>الشعار</th><th>النوع</th><th>التصنيف</th><th data-benchmarks-col>يُقاس على</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
-                <th>نوع العملية</th><th>نوع السعر</th><th>القيمة (ر.س)</th><th></th>
-              </tr></thead>
-              <tbody></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="market-block">
-          <h4>الملخص التنفيذي لسوق المشروع</h4>
-          <div class="market-actions">
+          <div class="market-actions" style="margin-top:12px">
             <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
           </div>
           <div id="marketSummaryFailure"></div>

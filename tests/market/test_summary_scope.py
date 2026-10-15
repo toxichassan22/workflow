@@ -180,6 +180,25 @@ class SummaryScopeFrontendTests(unittest.TestCase):
         self.assertIn('summary_scope', text)
         self.assertIn('addMarketSummaryScopePlace', text)
 
+    def test_scope_controls_live_above_the_summary(self):
+        # Owner rule: the scope picker belongs to the executive-summary
+        # block, not to the competitors scope block at the top.
+        text = self.frontend
+        scope_at = text.index('marketSummaryScopeMode')
+        summary_at = text.index('الملخص التنفيذي لسوق المشروع')
+        generate_at = text.index('marketGenerateSummaryBtn')
+        competitors_at = text.index('marketCompetitorRadius')
+        self.assertGreater(scope_at, summary_at)
+        self.assertLess(scope_at, generate_at)
+        self.assertGreater(scope_at, competitors_at)
+
+    def test_summary_generation_refuses_an_empty_listed_scope(self):
+        # A city/district mode with no names cannot bind any figure — the
+        # run is refused in the browser before any request is sent.
+        text = self.frontend
+        self.assertIn('market.summary_scope_required', text)
+        self.assertIn('collectMarketSummaryScope', text)
+
 
 if __name__ == '__main__':
     unittest.main()
