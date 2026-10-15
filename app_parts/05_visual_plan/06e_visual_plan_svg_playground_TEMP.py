@@ -1,7 +1,7 @@
 # TEMPORARY — SVG model playground (remove by reverting this file's commit).
 #
-# Stage 4 of the plans section (مقارنة الموديلات): the same 4 text models draw
-# the simplified site plan (plan_site) as raw SVG from the sealed visual-plan
+# Stage 4 of the plans section (مقارنة الموديلات): the two finalist text models
+# draw the simplified site plan (plan_site) as raw SVG from the sealed visual-plan
 # scene, measuring wall time per model so the owner can pick the winner to fix
 # as the permanent SVG path.
 #
@@ -17,8 +17,6 @@
 # to remove the whole tool (plus tests/visual_plan/test_svg_playground_TEMP.py).
 
 SVG_PLAYGROUND_MODELS = (
-    'anthropic/claude-sonnet-5.5',
-    'anthropic/claude-haiku-5.5',
     'openai/gpt-6.1-sol',
     'google/gemini-4-argon',
 )
@@ -514,7 +512,7 @@ def _svg_playground_scene(data):
 
 
 def _svg_playground_execute(data, on_model=None):
-    """Build the SVG prompt from the sealed scene, then run the 4 models in
+    """Build the SVG prompt from the sealed scene, then run the finalist models in
     parallel threads — sequential runs summed every model's wall time, which is
     why a comparison took several minutes with nothing on screen.
 

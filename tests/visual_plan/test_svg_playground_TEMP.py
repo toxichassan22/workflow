@@ -78,11 +78,7 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
     def _mock_chat(self, module):
         def fake_chat(system_prompt, user_content, **kwargs):
             model = kwargs.get('model')
-            if model == 'anthropic/claude-sonnet-5.5':
-                body = ('<svg viewBox="0 0 1600 900"><title>CONCEPTUAL SITE PLAN</title>'
-                        '<polygon points="1,2 3,4"/><text>Tower</text>'
-                        '<script>alert(1)</script></svg>')
-            elif model == 'openai/gpt-6.1-sol':
+            if model == 'openai/gpt-6.1-sol':
                 body = ('Done.\n```svg\n<svg viewBox="0 0 1600 900">'
                         '<text>CONCEPTUAL SITE PLAN</text></svg>\n```')
             elif model == 'google/gemini-4-argon':
@@ -103,10 +99,9 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
                 json={'projectData': project, 'plansWorkflow': workflow})
         return response, image_call
 
-    def test_playground_compares_exactly_the_four_approved_models(self):
+    def test_playground_compares_exactly_the_two_finalist_models(self):
         module = self.application_module
         self.assertEqual(tuple(module.SVG_PLAYGROUND_MODELS), (
-            'anthropic/claude-sonnet-5.5', 'anthropic/claude-haiku-5.5',
             'openai/gpt-6.1-sol', 'google/gemini-4-argon'))
         project = _project()
         workflow = _workflow(project)
@@ -129,19 +124,19 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         project = _project()
         response, _image_call = self._run(module, project, _workflow(project))
         by_model = {item['model']: item for item in response.get_json()['results']}
-        sonnet = by_model['anthropic/claude-sonnet-5.5']
-        self.assertTrue(sonnet['ok'])
-        self.assertIn('Tower', sonnet['svg'])
-        self.assertNotIn('<script', sonnet['svg'])
-        self.assertNotIn('alert', sonnet['svg'])
-        self.assertGreater(sonnet['score'], 0)
-        haiku = by_model['anthropic/claude-haiku-5.5']
-        self.assertFalse(haiku['ok'])
-        self.assertEqual(haiku['svg'], '')
-        self.assertTrue(haiku['error'])
+        self.assertEqual(set(by_model), {'openai/gpt-6.1-sol', 'google/gemini-4-argon'})
+        sol = by_model['openai/gpt-6.1-sol']
+        self.assertTrue(sol['ok'])
+        self.assertIn('CONCEPTUAL SITE PLAN', sol['svg'])
+        self.assertGreater(sol['score'], 0)
         argon = by_model['google/gemini-4-argon']
         self.assertTrue(argon['ok'])
-        self.assertLess(argon['score'], sonnet['score'])
+        self.assertLess(argon['score'], sol['score'])
+        # Active content is still stripped at the helper level.
+        dirty = module._svg_playground_sanitize_svg(
+            '<svg><script>alert(1)</script><text>Tower</text></svg>')
+        self.assertIn('Tower', dirty)
+        self.assertNotIn('script', dirty)
 
     def test_stage4_seals_the_scene_itself_when_stage3_never_ran(self):
         """Stages 1 and 2 approved, no scene and no prompts from stage 3.
@@ -205,7 +200,7 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         models = list(module.SVG_PLAYGROUND_MODELS)
         # Parallel threads finish in any order: every snapshot adds exactly one
         # new model, each snapshot stays in model order, and the last one is whole.
-        self.assertEqual(len(seen), 4)
+        self.assertEqual(len(seen), 2)
         accumulated = set()
         for snapshot in seen:
             names = [item['model'] for item in snapshot]
@@ -222,9 +217,9 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
                 {'projectData': project, 'plansWorkflow': _workflow(project)},
                 on_model=lambda results: timings.append(
                     [isinstance(item.get('ms'), int) for item in results]))
-        self.assertEqual(len(timings), 4)
+        self.assertEqual(len(timings), 2)
         self.assertTrue(all(all(row) for row in timings))
-        self.assertEqual(sorted(len(row) for row in timings), [1, 2, 3, 4])
+        self.assertEqual(sorted(len(row) for row in timings), [1, 2])
 
     def test_the_job_carries_partial_results_while_it_runs(self):
         backend = read_module_source('app.py')
