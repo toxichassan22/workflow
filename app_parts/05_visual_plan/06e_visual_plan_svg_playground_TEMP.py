@@ -163,24 +163,85 @@ def _svg_playground_geometry(scene, contract):
     return payload, required_texts, required_numbers
 
 
-def _svg_playground_prompts(payload):
+def _svg_playground_brief(contract):
+    """The same project facts stage 3 feeds its site-plan drawing prompt:
+    recorded survey, land brief, regulatory constraints, street edges,
+    setbacks, approved distribution rows and the stage-2 client notes.
+    Geometry stays fixed (payload above); this brief is the creative context
+    the four models lay out from — identical inputs, different hands."""
+    contract = contract if isinstance(contract, dict) else {}
+    lines = []
+    if contract.get('projectName'):
+        lines.append('Project: ' + str(contract['projectName'])[:160])
+    if contract.get('projectIdea'):
+        lines.append('Project idea: ' + str(contract['projectIdea'])[:2000])
+    if contract.get('landBrief'):
+        lines.append('Land brief: ' + str(contract['landBrief'])[:8000])
+    if contract.get('regulatoryConstraints'):
+        lines.append('Regulatory constraints: ' + str(contract['regulatoryConstraints'])[:8000])
+    if contract.get('recordedSurvey'):
+        try:
+            lines.append('Recorded survey coordinates (metres, x east / y north): '
+                         + json.dumps(contract['recordedSurvey'], ensure_ascii=False)[:6000])
+        except Exception:
+            pass
+    directions = contract.get('directions') or []
+    if directions:
+        try:
+            lines.append('Recorded edges: ' + json.dumps(directions, ensure_ascii=False)[:4000])
+        except Exception:
+            pass
+    if contract.get('setbackText'):
+        lines.append('Recorded setbacks: ' + str(contract['setbackText'])[:2000])
+    if contract.get('boundaryLengths'):
+        lines.append('Documented boundary lengths: ' + str(contract['boundaryLengths'])[:2000])
+    distribution = contract.get('distribution') or {}
+    rows = distribution.get('rows') or []
+    if rows:
+        try:
+            lines.append('Approved distribution (stage-2 table): '
+                         + json.dumps(rows, ensure_ascii=False)[:8000])
+        except Exception:
+            pass
+    if contract.get('clientNotes'):
+        lines.append('Stage-2 generation notes (apply every one): '
+                     + str(contract['clientNotes'])[:8000])
+    return '\n'.join(lines)[:30000]
+
+
+def _svg_playground_prompts(payload, contract=None):
     system_prompt = (
-        'You are a precise SVG draftsman for conceptual real-estate site plans. '
-        'You receive exact pre-projected pixel geometry on a 1600x900 canvas plus a fixed style spec. '
-        'Transcribe them into ONE standalone <svg> element: reuse every coordinate number EXACTLY as given — '
-        'never recompute, rescale, round differently or invent geometry. '
+        'You are a precise SVG draftsman for conceptual real-estate site plans, with a '
+        'restrained creative hand. You receive exact pre-projected pixel geometry on a '
+        '1600x900 canvas plus the same project brief the permanent site-plan prompt uses. '
+        'Draw ONE standalone <svg> element: reuse every parcel/building coordinate number '
+        'EXACTLY as given — never recompute, rescale, round differently or invent geometry. '
+        'Style is natural daylight cartography, exactly like a printed site plan: '
+        'the very first element is a full-canvas white rect (width 1600 height 900 fill #FFFFFF); '
+        'parcels = very light green-grey fill #EDF3E8 with navy #172B4D outline width 4; '
+        'setback envelopes = dashed #81939F width 2, no fill; buildings = their given pastel '
+        'fill, navy outline width 3, centered navy label plus area in m2; open areas = soft '
+        'pastel fills with navy outline; entries = navy dot r5 plus navy label; streets = '
+        'small navy edge labels; all text and outlines dark navy on light fills — NEVER a dark '
+        'or night background, no black/navy canvas, no photorealism, no satellite imagery, '
+        'no invented dimensions. Within those fixed footprints you have a creative margin: '
+        'landscape texture, parking hatching, entry arrows, label placement and legend '
+        'arrangement should feel designed, not mechanical — while every measurement, edge '
+        'and footprint stays exactly as briefed. '
         'All visible text is English only. '
         'Output ONLY the raw SVG markup — no markdown fences, no explanation, no surrounding text.')
     user_prompt = (
         'EXACT GEOMETRY (pixel coordinates, use verbatim):\n'
         + json.dumps(payload, ensure_ascii=False)
-        + '\nSTYLE (fixed): parcels = navy #172B4D outline width 4, fill #EDF3E8; '
-        'setback_envelopes = dashed #81939F width 2, no fill; '
-        'buildings = given fill, navy outline width 3, centered label plus area in m2; '
-        'entries = navy dot r5 plus label; streets = small edge labels; '
-        "title top-left 'CONCEPTUAL SITE PLAN' 30px navy; "
+        + '\nPROJECT BRIEF (same facts as the permanent site-plan prompt — inform the creative '
+        'margin only, never the geometry):\n' + (_svg_playground_brief(contract) or '—')
+        + '\nCANVAS (fixed): <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" '
+        'width="1600" height="900"> starting with '
+        '<rect width="1600" height="900" fill="#FFFFFF"/>; '
+        "title top-left 'CONCEPTUAL SITE PLAN' 30px navy #172B4D; "
         "caption bottom-right 'ILLUSTRATIVE REFERENCE - NOT TO SCALE' 18px navy; "
-        "north mark 'N' top-right; white background; no photorealism, no invented dimensions.")
+        "north mark 'N' with upward arrow top-right; bottom-left legend with the use color chips "
+        'plus Parcel Boundary and Setback Envelope keys.')
     return system_prompt, user_prompt
 
 
@@ -287,7 +348,7 @@ def _svg_playground_execute(data, on_model=None):
         return {'success': False, 'error': 'بيانات المشهد الهندسي غير صالحة.',
                 'error_code': 'PLANS_DATA_INVALID'}, 400
     payload, required_texts, required_numbers = _svg_playground_geometry(scene, contract)
-    system_prompt, user_prompt = _svg_playground_prompts(payload)
+    system_prompt, user_prompt = _svg_playground_prompts(payload, contract)
     results = []
     for model in SVG_PLAYGROUND_MODELS:
         raw = _svg_playground_run_model(model, system_prompt, user_prompt, data)

@@ -312,6 +312,39 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertNotIn('plansWorkflow.svgCompare', source)
         self.assertNotIn('workflow.svgCompare', source)
 
+    def test_prompts_carry_the_stage3_brief_and_daylight_style(self):
+        module = self.application_module
+        scene = _scene()
+        contract = {'projectName': 'Iconic', 'projectIdea': 'Mixed use tower',
+                    'landBrief': 'West main facade.', 'regulatoryConstraints': 'No east entry.',
+                    'recordedSurvey': [{'point': '1', 'eastings': 1, 'northings': 2}],
+                    'directions': [{'direction': 'west', 'street': True}],
+                    'setbackText': '5 m west', 'boundaryLengths': 'West 40m',
+                    'distribution': {'rows': [{'component': 'Residential'}]},
+                    'clientNotes': 'Keep the courtyard.'}
+        payload, _texts, _numbers = module._svg_playground_geometry(scene, contract)
+        system_prompt, user_prompt = module._svg_playground_prompts(payload, contract)
+        self.assertIn('EXACT GEOMETRY', user_prompt)
+        self.assertIn('PROJECT BRIEF', user_prompt)
+        brief = module._svg_playground_brief(contract)
+        self.assertIn('West main facade', brief)
+        self.assertIn('Keep the courtyard', brief)
+        self.assertIn('Residential', brief)
+        self.assertIn('WHITE', system_prompt.upper() + user_prompt.upper())
+        self.assertIn('NEVER a dark', system_prompt)
+        self.assertIn('viewBox="0 0 1600 900"', user_prompt)
+        self.assertIn('creative', system_prompt.lower())
+
+    def test_cards_open_svg_and_export_png_in_a_two_column_grid(self):
+        source = read_frontend_text()
+        self.assertIn('data-svg-compare-open', source)
+        self.assertIn('data-svg-compare-png', source)
+        self.assertIn('URL.createObjectURL', source)
+        self.assertIn("canvas.toDataURL('image/png')", source)
+        css_files = __import__('glob').glob('assets/css/**/*.css', recursive=True)
+        css = '\n'.join(open(path, encoding='utf-8').read() for path in css_files)
+        self.assertIn('repeat(2, minmax(0, 1fr))', css)
+
     def test_svg_helpers_extract_fences_and_strip_active_content(self):
         module = self.application_module
         raw = 'note\n```svg\n<svg><text onload="x()">hi</text></svg>\n```'

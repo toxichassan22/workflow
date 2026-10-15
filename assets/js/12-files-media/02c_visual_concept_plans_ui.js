@@ -226,7 +226,7 @@
       return prefix + ' — ' + status;
     }
 
-    function visualConceptPlansSvgCompareCard(item) {
+    function visualConceptPlansSvgCompareCard(item, index) {
       const model = String(item && item.model ? item.model : '');
       let html = '<div class="plans-svg-compare-card"><span class="plans-svg-compare-model">' + escapeHtml(model) + '</span>';
       if (!item || !item.ok) {
@@ -237,11 +237,66 @@
       html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_seconds', 'الوقت: {seconds} ثانية', { seconds: visualConceptPlansSvgCompareSeconds(item.ms) })) + '</p>';
       html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_size_score', 'الحجم: {chars} حرف — الدقة: {score}%', { chars: item.chars, score: item.score })) + '</p>';
       if (item.svg) {
-        html += '<img alt="' + escapeHtml(model) + '" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(item.svg) + '">';
+        html += '<button type="button" class="plans-svg-compare-preview" data-svg-compare-open="' + index + '" title="' + escapeHtml(model) + '">' +
+          '<img alt="' + escapeHtml(model) + '" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(item.svg) + '"></button>';
+        html += '<div class="plans-svg-compare-actions">' +
+          '<button type="button" class="btn ghost small" data-svg-compare-open="' + index + '">' + escapeHtml(WFT('plans.svg_compare_open', 'فتح')) + '</button>' +
+          '<button type="button" class="btn ghost small" data-svg-compare-png="' + index + '">' + escapeHtml(WFT('plans.svg_compare_png', 'تحميل PNG')) + '</button></div>';
       }
       html += '<details><summary>' + escapeHtml(WFT('plans.svg_compare_code', 'عرض الكود')) +
         '</summary><pre>' + escapeHtml(item.svg || '') + '</pre></details>';
       return html + '</div>';
+    }
+
+    function visualConceptPlansSvgCompareByIndex(index) {
+      const compare = visualConceptPlansSvgCompareState();
+      const results = Array.isArray(compare && compare.results) ? compare.results : [];
+      return results[Number(index)] || null;
+    }
+
+    function openVisualConceptPlansSvgCompare(index) {
+      const item = visualConceptPlansSvgCompareByIndex(index);
+      if (!item || !item.svg) return;
+      const blob = new Blob([item.svg], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const tab = window.open(url, '_blank');
+      if (!tab) {
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
+
+    function downloadVisualConceptPlansSvgComparePng(index) {
+      const item = visualConceptPlansSvgCompareByIndex(index);
+      if (!item || !item.svg) return;
+      const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(item.svg);
+      const image = new Image();
+      image.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = 1600;
+          canvas.height = 900;
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+          const link = document.createElement('a');
+          const slug = String(item.model || 'plan').replace(/[^a-zA-Z0-9]+/g, '_');
+          link.download = slug + '_site_plan.png';
+          link.href = canvas.toDataURL('image/png');
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        } catch (error) { toast(String((error && error.message) || error)); }
+      };
+      image.onerror = () => toast(WFT('plans.svg_compare_png_failed', 'تعذر تصدير PNG'));
+      image.src = svgUrl;
     }
 
     function visualConceptPlansSvgCompareHtml(compare) {
@@ -430,6 +485,18 @@
           /* >>> TEMP_STAGE4 */
           else if (action === 'run-svg-compare') runVisualConceptPlansSvgCompare();
           /* <<< TEMP_STAGE4 */
+        });
+        root.addEventListener('click', event => {
+          const openBtn = event.target.closest('[data-svg-compare-open]');
+          if (openBtn) {
+            openVisualConceptPlansSvgCompare(openBtn.getAttribute('data-svg-compare-open'));
+            return;
+          }
+          const pngBtn = event.target.closest('[data-svg-compare-png]');
+          if (pngBtn) {
+            downloadVisualConceptPlansSvgComparePng(pngBtn.getAttribute('data-svg-compare-png'));
+            return;
+          }
         });
         root.addEventListener('input', event => {
           const revisionInput = event.target.closest('[data-plans-distribution-revision]');
