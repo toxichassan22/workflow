@@ -318,13 +318,23 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         contract = {'projectName': 'Iconic', 'projectIdea': 'Mixed use tower',
                     'landBrief': 'West main facade.', 'regulatoryConstraints': 'No east entry.',
                     'recordedSurvey': [{'point': '1', 'eastings': 1, 'northings': 2}],
-                    'directions': [{'direction': 'west', 'street': True}],
+                    'directions': [{'direction': 'west', 'street': True,
+                                    'streetName': 'Nour St', 'streetWidth': 20}],
                     'setbackText': '5 m west', 'boundaryLengths': 'West 40m',
                     'distribution': {'rows': [{'component': 'Residential'}]},
                     'clientNotes': 'Keep the courtyard.'}
-        payload, _texts, _numbers = module._svg_playground_geometry(scene, contract)
+        program = {'buildings': [{'name': 'Tower', 'label': 'Tower', 'footprintArea': 300,
+                                  'levels': 3, 'bands': [{'kind': 'range', 'category': 'residential',
+                                                          'label': 'Residential', 'floorRange': '1-3'}]}],
+                   'siteItems': [{'name': 'Pool', 'label': 'Pool', 'category': 'amenity', 'area': 800}]}
+        payload, texts, _numbers = module._svg_playground_geometry(scene, contract, program)
+        self.assertIn('Tower', [item['label'] for item in payload['masses']])
+        self.assertIn('Pool', [item['name'] for item in payload['site_program']])
+        self.assertTrue(any('Nour St' in item['label'] for item in payload['streets']))
+        self.assertIn('Tower', texts)
         system_prompt, user_prompt = module._svg_playground_prompts(payload, contract)
-        self.assertIn('EXACT GEOMETRY', user_prompt)
+        self.assertIn('FIXED PARCEL FRAME', user_prompt)
+        self.assertIn('PROGRAM TO LAY OUT', user_prompt)
         self.assertIn('PROJECT BRIEF', user_prompt)
         brief = module._svg_playground_brief(contract)
         self.assertIn('West main facade', brief)
@@ -333,7 +343,8 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertIn('WHITE', system_prompt.upper() + user_prompt.upper())
         self.assertIn('NEVER a dark', system_prompt)
         self.assertIn('viewBox="0 0 1600 900"', user_prompt)
-        self.assertIn('creative', system_prompt.lower())
+        self.assertIn('legend', (system_prompt + user_prompt).lower())
+        self.assertIn('scattered rectangles is a failure', system_prompt)
 
     def test_cards_open_svg_and_export_png_in_a_two_column_grid(self):
         source = read_frontend_text()
