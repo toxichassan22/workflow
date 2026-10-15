@@ -564,7 +564,9 @@
     async function visualConceptPlansSvgCompareJobApi(payload, onPartial) {
       const initial = await api('POST', '/api/visual-concept/plans-svg-playground', payload);
       if (!initial || !initial.jobId) return initial;
-      const deadline = Date.now() + 300000;
+      // Max-effort models can take several minutes each — keep polling up to
+      // 15 minutes while partial results stream in per finished model.
+      const deadline = Date.now() + 900000;
       let job = initial;
       while (job && (job.status === 'queued' || job.status === 'running') && Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 2000));

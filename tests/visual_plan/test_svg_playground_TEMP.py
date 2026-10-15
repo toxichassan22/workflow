@@ -372,11 +372,29 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
             raw = module._svg_playground_run_model('test-model', 'sys', 'user', {})
         self.assertEqual(len(calls), 2, 'a length-truncated reply must be retried once')
-        self.assertEqual(calls[0].get('reasoning_effort'), 'low')
-        self.assertGreater(calls[1].get('max_tokens'), calls[0].get('max_tokens'))
+        self.assertEqual(calls[0].get('reasoning_effort'), 'max')
+        self.assertEqual(calls[0].get('max_tokens'), 128000)
+        self.assertEqual(calls[1].get('max_tokens'), calls[0].get('max_tokens'))
+        self.assertEqual(calls[0].get('timeout'), 600)
         final = module._svg_playground_finalize(raw, ['CONCEPTUAL SITE PLAN'], [])
         self.assertTrue(final['ok'])
         self.assertIn('<svg', final['svg'])
+
+    def test_argon_runs_on_its_smaller_high_effort_budget(self):
+        module = self.application_module
+        seen = {}
+
+        def fake_chat(system_prompt, user_content, **kwargs):
+            seen.update(kwargs)
+            return {'choices': [{'finish_reason': 'stop',
+                                 'message': {'content': '<svg><text>CONCEPTUAL SITE PLAN</text></svg>'}}]}
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
+            raw = module._svg_playground_run_model('google/gemini-4-argon', 'sys', 'user', {})
+        self.assertEqual(seen.get('max_tokens'), 66000)
+        self.assertEqual(seen.get('reasoning_effort'), 'high')
+        final = module._svg_playground_finalize(raw, ['CONCEPTUAL SITE PLAN'], [])
+        self.assertTrue(final['ok'])
 
     def test_truncated_twice_reports_diagnostics_not_a_blank_error(self):
         module = self.application_module

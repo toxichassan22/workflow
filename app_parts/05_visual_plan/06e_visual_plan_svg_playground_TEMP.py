@@ -304,6 +304,16 @@ def _svg_playground_score(svg, required_texts, required_numbers):
 _SVG_PLAYGROUND_LENGTH_FINISH = {'length', 'max_tokens', 'max_output_tokens', 'max_completion_tokens'}
 
 
+# Owner-ordered budgets: result quality over token burn. Argon caps at 66K,
+# the other three at 128K; reasoning runs at the maximum (gemini high, the
+# rest max) so each model thinks as hard as it can before drawing.
+_SVG_PLAYGROUND_MODEL_BUDGETS = {
+    'google/gemini-4-argon': {'max_tokens': 66000, 'reasoning_effort': 'high'},
+}
+_SVG_PLAYGROUND_DEFAULT_BUDGET = {'max_tokens': 128000, 'reasoning_effort': 'max'}
+_SVG_PLAYGROUND_TIMEOUT = 600
+
+
 def _svg_playground_finish_reason(response):
     try:
         choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
@@ -316,19 +326,21 @@ def _svg_playground_run_model(model, system_prompt, user_prompt, data):
     """Run one model, measuring wall time. A model failure is recorded on its
     own result — it never aborts the remaining models.
 
-    Reasoning is kept low so the token budget goes to the drawing, not to
-    thinking: with the designer prompt every model otherwise spends the whole
-    cap reasoning and the SVG arrives truncated (no closing tag), which reads
-    as "no valid SVG" on all four cards at once. A length-truncated reply is
-    retried once with a doubled cap before it is reported as a failure."""
+    Each model runs on its owner-ordered budget (argon 66K/high, the rest
+    128K/max) with a 10-minute provider timeout: a length-truncated reply is
+    retried once at the same cap with an emit-markup-only nudge before it is
+    reported as a failure."""
     started = time.perf_counter()
-    cap = 16000
+    budget = _SVG_PLAYGROUND_MODEL_BUDGETS.get(model, _SVG_PLAYGROUND_DEFAULT_BUDGET)
+    cap = budget['max_tokens']
+    effort = budget['reasoning_effort']
     content = user_prompt
     for attempt in range(2):
         try:
             response = call_openrouter_chat(
                 system_prompt, content, temperature=None, max_tokens=cap,
-                model=model, reasoning_effort='low', usage_ctx=_usage_ctx('image', data))
+                model=model, reasoning_effort=effort, timeout=_SVG_PLAYGROUND_TIMEOUT,
+                usage_ctx=_usage_ctx('image', data))
         except Exception as error:
             fatal = _ai_fatal_http_response(error)
             if fatal is not None:
@@ -352,9 +364,8 @@ def _svg_playground_run_model(model, system_prompt, user_prompt, data):
                     '_ms': int((time.perf_counter() - started) * 1000)}
         finish = _svg_playground_finish_reason(response)
         if finish in _SVG_PLAYGROUND_LENGTH_FINISH and attempt == 0:
-            # Truncated mid-drawing, not a refusal — give it a doubled cap and
-            # tell it to spend the budget on markup, not on thinking out loud.
-            cap *= 2
+            # Truncated mid-drawing, not a refusal — the cap is already at the
+            # model maximum, so retry at the same budget asking for markup only.
             content = (user_prompt
                        + '\nYour previous reply hit the output limit before </svg>. '
                          'Emit the complete <svg> now with minimal preamble — no reasoning text, '
