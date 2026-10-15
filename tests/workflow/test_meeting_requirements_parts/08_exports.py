@@ -608,14 +608,16 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('plans-conflict-solution', index_source)
         self.assertIn("WFT('plans.proposed_solution', 'الحل المقترح:')", index_source)
         self.assertIn("const defaultStage = !verified ? 'verify'", index_source)
-        # Stages 3 and 4 share one sealed-scene gate; the tab is never enabled
-        # ahead of the endpoint that would refuse the request.
-        self.assertIn("const sealed = boundaryApproved && distApproved;", index_source)
-        self.assertIn("const activeStage = (requestedStage === 'generate' || requestedStage === 'svgcompare') && !sealed", index_source)
+        self.assertIn("const activeStage = requestedStage", index_source)
         self.assertIn("data-plans-workflow-tab=\"verify\"", index_source)
         self.assertIn("data-plans-workflow-tab=\"boundary\"", index_source)
         self.assertIn("data-plans-workflow-tab=\"generate\"", index_source)
+        # TEMP stage 4 — the model-comparison tab, gated on the same sealed scene
+        # the generation stage uses. Delete this block with the stage.
+        # >>> TEMP_STAGE4
         self.assertIn("data-plans-workflow-tab=\"svgcompare\"", index_source)
+        self.assertIn("const tempStage4Active = workflow.viewStage === 'svgcompare' && boundaryApproved && distApproved;", index_source)
+        # <<< TEMP_STAGE4
         self.assertIn('<ol class="plans-workflow-steps">', index_source)
         self.assertNotIn('plans-workflow-stage-tabs', index_source)
         self.assertNotIn('visual-concept-mode-btn" data-plans-workflow-tab', index_source)

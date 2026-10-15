@@ -11,7 +11,8 @@ import copy
 import unittest
 from unittest.mock import patch
 
-from tests.workflow.test_meeting_requirements import MeetingRequirementsTests, read_frontend_text
+from tests.workflow.test_meeting_requirements import (
+    MeetingRequirementsTests, read_frontend_text, read_module_source)
 
 
 def _project():
@@ -142,6 +143,80 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertTrue(argon['ok'])
         self.assertLess(argon['score'], sonnet['score'])
 
+    def test_stage4_seals_the_scene_itself_when_stage3_never_ran(self):
+        """Stages 1 and 2 approved, no scene and no prompts from stage 3.
+
+        The comparison must not wait for the generation stage: it seals the same
+        scene stage 3 would have, from the project data, and hands it back so
+        stage 3 can reuse it.
+        """
+        module = self.application_module
+        project = _project()
+        workflow = _workflow(project)
+        self.assertNotIn('scene', workflow)
+        self.assertNotIn('promptReady', workflow)
+        calls = {'create': 0}
+
+        def fake_scene_from_request(data):
+            posted = (data.get('plansWorkflow') or {}).get('scene') or {}
+            if posted.get('token') != 'sealed-by-stage-4':
+                raise module.visual_plan_geometry.PlanGeometryError(
+                    'المشهد الهندسي غير جاهز.', 'PLANS_SCENE_REQUIRED')
+            return _scene(), {}, {}, {}
+
+        def fake_create_scene(data, context=None):
+            calls['create'] += 1
+            return ({**_scene(), 'version': 1, 'token': 'sealed-by-stage-4'}, {},
+                    '/uploads/creative/parcel.png')
+
+        with patch.object(module, '_visual_plan_scene_from_request',
+                          side_effect=fake_scene_from_request), \
+                patch.object(module, '_visual_plan_create_scene',
+                             side_effect=fake_create_scene), \
+                self._mock_chat(module), \
+                patch.object(module, 'call_images_api') as image_call:
+            response = self.app.test_client().post(
+                '/api/visual-concept/plans-svg-playground',
+                headers=self._headers(self.token_a),
+                json={'projectData': project, 'plansWorkflow': workflow})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()
+        self.assertTrue(body['success'])
+        self.assertEqual(calls['create'], 1, 'stage 4 must seal the scene itself')
+        self.assertEqual([item['model'] for item in body['results']],
+                         list(module.SVG_PLAYGROUND_MODELS))
+        self.assertEqual(body['scene']['token'], 'sealed-by-stage-4')
+        image_call.assert_not_called()
+
+    def test_stage4_reuses_the_scene_the_generation_stage_already_sealed(self):
+        module = self.application_module
+        project = _project()
+        workflow = _workflow(project)
+        workflow['scene'] = {'version': 1, 'token': 'sealed-by-stage-3'}
+        with patch.object(module, '_visual_plan_scene_from_request',
+                          return_value=(_scene(), {}, {}, {})), \
+                patch.object(module, '_visual_plan_create_scene') as create_scene, \
+                self._mock_chat(module):
+            response = self.app.test_client().post(
+                '/api/visual-concept/plans-svg-playground',
+                headers=self._headers(self.token_a),
+                json={'projectData': project, 'plansWorkflow': workflow})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertIsNone(response.get_json()['scene'], 'nothing new to persist')
+        create_scene.assert_not_called()
+
+    def test_playground_gate_needs_stages_one_and_two_only(self):
+        """No prompt, no scene token and no promptReady flag is demanded."""
+        backend = read_module_source('app.py')
+        self.assertIn(
+            "workflow_error = _visual_concept_plan_workflow_error(\n"
+            "        data, 'plan_site', require_boundary=True, require_distribution=True)",
+            backend)
+        self.assertIn('_svg_playground_scene(data)', backend)
+        self.assertIn("_SVG_PLAYGROUND_RESEAL_CODES = ('PLANS_SCENE_REQUIRED', 'PLANS_SCENE_INVALID',", backend)
+        source = read_frontend_text()
+        self.assertIn('workflow.scene = response.scene;', source)
+
     def test_playground_refuses_unsealed_inputs_like_render(self):
         module = self.application_module
         project = _project()
@@ -161,12 +236,13 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertIn('data-plans-workflow-stage="svgcompare"', source)
         self.assertIn('data-plans-workflow-action="run-svg-compare"', source)
         self.assertIn("'plans.svg_compare_tab', 'مقارنة الموديلات'", source)
-        # Stage 4 unlocks on the same sealed scene the generation stage runs on,
-        # so the tab can never lead to an endpoint that refuses the request.
+        # The tab unlocks on stages 1 and 2 — verification, boundary and an
+        # approved distribution — and never on the generation stage, so it can
+        # not lead to an endpoint that would refuse the request.
         self.assertIn(
-            "if ((stage === 'generate' || stage === 'svgcompare')\n"
-            "              && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;",
+            "if (stage === 'svgcompare' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;",
             source)
+        self.assertNotIn('workflow.promptReady && tempStage4Active', source)
         # The retired standalone page is really gone, route included.
         self.assertNotIn('/playground-plans-svg', source)
         self.assertEqual(

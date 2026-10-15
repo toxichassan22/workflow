@@ -242,10 +242,39 @@ def _svg_playground_finalize(raw, payload_texts, payload_numbers):
     return raw
 
 
+# Stage 4 sits after verification, boundary and distribution — never after the
+# generation stage. A scene that stage 3 has not sealed yet, or sealed against
+# other inputs, is rebuilt here from the same contract stage 3 uses, so the
+# comparison is reachable as soon as stages 1 and 2 are approved.
+_SVG_PLAYGROUND_RESEAL_CODES = ('PLANS_SCENE_REQUIRED', 'PLANS_SCENE_INVALID',
+                                'PLANS_CONTEXT_CHANGED')
+
+
+def _svg_playground_scene(data):
+    """Return (scene, contract, created) for the comparison.
+
+    A sealed scene already stored by the generation stage is reused as-is.
+    Anything missing or stale is sealed right here and handed back in `created`
+    so the client can keep it — the exact information stage 3 consumes, just
+    obtained without stage 3.
+    """
+    try:
+        scene, contract, _context, _program = _visual_plan_scene_from_request(data)
+        return scene, contract, None
+    except visual_plan_geometry.PlanGeometryError as error:
+        if error.code not in _SVG_PLAYGROUND_RESEAL_CODES:
+            raise
+    created_scene, _context, _reference_url = _visual_plan_create_scene(data)
+    sealed = dict(data)
+    sealed['plansWorkflow'] = {**(data.get('plansWorkflow') or {}), 'scene': created_scene}
+    scene, contract, _context, _program = _visual_plan_scene_from_request(sealed)
+    return scene, contract, created_scene
+
+
 def _svg_playground_execute(data):
     """Build the SVG prompt from the sealed scene, then run the 4 models."""
     try:
-        scene, contract, _context, _program = _visual_plan_scene_from_request(data)
+        scene, contract, created_scene = _svg_playground_scene(data)
     except visual_plan_geometry.PlanGeometryError as error:
         status = 503 if error.code in ('PLANS_NOTES_CHECK_FAILED', 'PLANS_PROVIDER_FAILED') else 400
         return {'success': False, 'error': str(error), 'error_code': error.code}, status
@@ -260,7 +289,8 @@ def _svg_playground_execute(data):
         if '_svg' in raw:
             raw = _svg_playground_finalize(raw, required_texts, required_numbers)
         results.append(raw)
-    return {'success': True, 'results': results, 'models': list(SVG_PLAYGROUND_MODELS)}, 200
+    return {'success': True, 'results': results, 'models': list(SVG_PLAYGROUND_MODELS),
+            'scene': created_scene}, 200
 
 
 def _svg_playground_worker(flask_app, actor, data, job_id):

@@ -195,6 +195,7 @@
         .concat(issues.filter(item => item.severity === 'high'));
     }
 
+    /* >>> TEMP_STAGE4 */
     // Stage 4 renders the four-model SVG comparison in place: the SVG bodies are
     // display-only and would bloat the saved draft, so they live in this session
     // (visualConceptPlansSvgCompareState) and never enter plansWorkflow.
@@ -233,6 +234,7 @@
       if (!results.length) return '';
       return '<div class="plans-svg-compare-grid">' + results.map(visualConceptPlansSvgCompareCard).join('') + '</div>';
     }
+    /* <<< TEMP_STAGE4 */
 
     function renderVisualConceptPlansWorkflow() {
       const root = document.getElementById('visualConceptPlansWorkflow');
@@ -245,16 +247,19 @@
       const boundaryApproved = Boolean(boundary.approved);
       const distApproved = Boolean(distribution.approved) && visualConceptPlanNotesCleared(workflow);
       const promptReady = Boolean(workflow.promptReady);
-      // Stages 3 and 4 both run on the sealed scene — boundary and distribution
-      // approved with the notes check cleared — so they unlock together.
-      const sealed = boundaryApproved && distApproved;
-      const svgCompare = visualConceptPlansSvgCompareState();
-      const projectLabel = String((typeof tenantProjectData === 'object' && tenantProjectData && tenantProjectData.project_name) || '').trim();
-      const defaultStage = !verified ? 'verify' : (sealed ? 'generate' : 'boundary');
-      const requestedStage = ['verify', 'boundary', 'generate', 'svgcompare'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
-      const activeStage = (requestedStage === 'generate' || requestedStage === 'svgcompare') && !sealed
+      const defaultStage = !verified ? 'verify' : ((boundaryApproved && distApproved) ? 'generate' : 'boundary');
+      const requestedStage = ['verify', 'boundary', 'generate'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
+      const activeStage = requestedStage === 'generate' && !(boundaryApproved && distApproved)
         ? (verified ? 'boundary' : 'verify')
         : (requestedStage === 'boundary' && !verified ? 'verify' : requestedStage);
+      /* >>> TEMP_STAGE4 */
+      // Stage 4 (the model comparison) is gated exactly like generation, and the
+      // three-stage computation above stays untouched: while stage 4 is selected
+      // the permanent panels and step highlights stand down below.
+      const tempStage4Active = workflow.viewStage === 'svgcompare' && boundaryApproved && distApproved;
+      const svgCompare = visualConceptPlansSvgCompareState();
+      const projectLabel = String((typeof tenantProjectData === 'object' && tenantProjectData && tenantProjectData.project_name) || '').trim();
+      /* <<< TEMP_STAGE4 */
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
       const conflicts = checks.filter(item => item.result === 'متعارض');
       // Conflicts keep the button live — approving through them routes via the
@@ -284,8 +289,10 @@
         '<ol class="plans-workflow-steps">' +
         '<li class="' + (activeStage === 'verify' ? 'is-active' : (verified ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="verify">التحقق من التضارب</button></li>' +
         '<li class="' + (activeStage === 'boundary' ? 'is-active' : (boundaryApproved && distApproved ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="boundary" ' + (!verified ? 'disabled' : '') + '>رسم الحدود وتوزيع المكونات</button></li>' +
-        '<li class="' + (activeStage === 'generate' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="generate" ' + (!sealed ? 'disabled' : '') + '>توليد المخططات</button></li>' +
-        '<li class="' + (activeStage === 'svgcompare' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="svgcompare" ' + (!sealed ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.svg_compare_tab', 'مقارنة الموديلات')) + '</button></li>' +
+        '<li class="' + (activeStage === 'generate' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="generate" ' + (!(boundaryApproved && distApproved) ? 'disabled' : '') + '>توليد المخططات</button></li>' +
+        /* >>> TEMP_STAGE4 */
+        '<li class="' + (tempStage4Active ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="svgcompare" ' + (!(boundaryApproved && distApproved) ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.svg_compare_tab', 'مقارنة الموديلات')) + '</button></li>' +
+        /* <<< TEMP_STAGE4 */
         '</ol>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="verify"' + (activeStage !== 'verify' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>التحقق من التضارب</h4><button type="button" class="btn primary small" data-plans-workflow-action="verify">تحقق</button></div>' +
@@ -317,12 +324,26 @@
         '<p class="tenant-hint">' + escapeHtml(promptReady ? 'المخططات جاهزة للتوليد.' : (workflow.promptsError ? 'تعذر تجهيز توليد المخططات: ' + workflow.promptsError : 'المخططات الثلاثة غير جاهزة للتوليد.')) + '</p>' +
         '<div data-plans-workflow-prompts>' + promptCards + '</div>' +
         '</section>' +
-        '<section class="plans-workflow-panel" data-plans-workflow-stage="svgcompare"' + (activeStage !== 'svgcompare' ? ' hidden' : '') + '>' +
+        /* >>> TEMP_STAGE4 */
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="svgcompare" hidden>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.svg_compare_title', 'مقارنة موديلات رسم المخطط')) + '</h4>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="run-svg-compare"' + (svgCompare.status === 'running' ? ' disabled' : '') + '>' + escapeHtml(WFT('plans.svg_compare_run', 'تشغيل المقارنة')) + '</button></div>' +
         '<p class="tenant-hint" data-plans-svg-compare-status>' + escapeHtml(visualConceptPlansSvgCompareStatusText(svgCompare, projectLabel)) + '</p>' +
         '<div data-plans-svg-compare-results>' + visualConceptPlansSvgCompareHtml(svgCompare) + '</div>' +
-        '</section></div>';
+        '</section>' +
+        /* <<< TEMP_STAGE4 */
+        '</div>';
+      /* >>> TEMP_STAGE4 */
+      if (tempStage4Active) {
+        root.querySelectorAll('[data-plans-workflow-stage]').forEach(panel => {
+          panel.hidden = panel.getAttribute('data-plans-workflow-stage') !== 'svgcompare';
+        });
+        root.querySelectorAll('.plans-workflow-steps li').forEach(item => {
+          const button = item.querySelector('[data-plans-workflow-tab]');
+          item.classList.toggle('is-active', Boolean(button) && button.getAttribute('data-plans-workflow-tab') === 'svgcompare');
+        });
+      }
+      /* <<< TEMP_STAGE4 */
       const preview = root.querySelector('[data-plans-boundary-preview]');
       renderVisualConceptBoundarySvg(preview, boundary.points);
       // Delegated binding, once: the distribution results container is re-rendered
@@ -335,8 +356,10 @@
             const stage = tab.getAttribute('data-plans-workflow-tab');
             const state = visualConceptPlansWorkflowState();
             if (stage === 'boundary' && !state.verification.approved) return;
-            if ((stage === 'generate' || stage === 'svgcompare')
-              && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
+            /* >>> TEMP_STAGE4 */
+            if (stage === 'svgcompare' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
+            /* <<< TEMP_STAGE4 */
+            if (stage === 'generate' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
             state.viewStage = stage;
             persistVisualConceptDraftState();
             renderVisualConceptPage();
@@ -384,7 +407,9 @@
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
+          /* >>> TEMP_STAGE4 */
           else if (action === 'run-svg-compare') runVisualConceptPlansSvgCompare();
+          /* <<< TEMP_STAGE4 */
         });
         root.addEventListener('input', event => {
           const revisionInput = event.target.closest('[data-plans-distribution-revision]');

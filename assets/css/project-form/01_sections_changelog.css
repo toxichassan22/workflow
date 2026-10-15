@@ -475,6 +475,7 @@
       max-height: 320px;
     }
 
+    /* >>> TEMP_STAGE4 */
     /* Stage 4 — the four-model SVG comparison. Model slugs are Latin, so the
        card header alone is forced LTR; the Arabic labels stay RTL. */
     .plans-svg-compare-grid {
@@ -530,6 +531,7 @@
       color: #b91c1c;
       font-size: 12px;
     }
+    /* <<< TEMP_STAGE4 */
 
     @media (max-width: 860px) {
       .plans-boundary-editor,

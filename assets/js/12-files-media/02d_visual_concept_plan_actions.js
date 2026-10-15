@@ -518,6 +518,7 @@
       }
     }
 
+    /* >>> TEMP_STAGE4 */
     // Stage 4 of the plans workflow: the four-model SVG comparison. The result
     // is display-only, so it stays in this session instead of the draft — four
     // inline SVG bodies would bloat every later draft save.
@@ -570,6 +571,15 @@
         } else {
           state.status = 'done';
           state.results = results;
+          // The comparison seals the scene itself when the generation stage has
+          // not run yet — keep it, so the generation stage reuses this exact
+          // scene instead of paying for the same layout twice.
+          if (response.scene && typeof response.scene === 'object') {
+            const workflow = visualConceptPlansWorkflowState();
+            workflow.scene = response.scene;
+            workflow.sourceStamp = visualConceptPlanInputStamp();
+            markVisualConceptDirty();
+          }
         }
       } catch (error) {
         hideLoader();
@@ -579,6 +589,7 @@
       }
       renderVisualConceptPlansWorkflow();
     }
+    /* <<< TEMP_STAGE4 */
 
     function addVisualConceptPlan() {
       if (visualConceptPlans().length >= VISUAL_CONCEPT_MAX_PLANS) {

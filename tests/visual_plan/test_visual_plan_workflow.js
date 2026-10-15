@@ -245,6 +245,8 @@ test('the processing lock repaints once prepare finishes instead of lingering', 
   assert.notEqual(locks[locks.length - 1], 'المشهد الهندسي قيد المعالجة.');
 });
 
+// >>> TEMP_STAGE4
+// TEMP: remove this block together with the model-comparison stage.
 test('stage 4 renders one card per model, failures included', () => {
   const context = fixture();
   assert.equal(context.visualConceptPlansSvgCompareHtml({ status: 'idle', results: [] }), '');
@@ -267,6 +269,7 @@ test('stage 4 renders one card per model, failures included', () => {
   assert.ok(html.includes('&lt;svg viewBox'));
   assert.ok(!html.includes('<svg viewBox'));
 });
+// <<< TEMP_STAGE4
 
 test('a clean verification still approves without opening the dialog', () => {
   const context = fixture();
