@@ -309,12 +309,12 @@ def _svg_playground_score(svg, required_texts, required_numbers):
 _SVG_PLAYGROUND_LENGTH_FINISH = {'length', 'max_tokens', 'max_output_tokens', 'max_completion_tokens'}
 
 
-# Owner-ordered budgets: argon caps at 66K, the other three at 128K, and all
-# four reason at medium effort to keep the token burn economical.
+# Owner-ordered budgets: argon caps at 66K at high effort, sol at 128K at
+# xhigh effort. The prompt itself stays untouched until the owner reviews it.
 _SVG_PLAYGROUND_MODEL_BUDGETS = {
-    'google/gemini-4-argon': {'max_tokens': 66000, 'reasoning_effort': 'medium'},
+    'google/gemini-4-argon': {'max_tokens': 66000, 'reasoning_effort': 'high'},
 }
-_SVG_PLAYGROUND_DEFAULT_BUDGET = {'max_tokens': 128000, 'reasoning_effort': 'medium'}
+_SVG_PLAYGROUND_DEFAULT_BUDGET = {'max_tokens': 128000, 'reasoning_effort': 'xhigh'}
 _SVG_PLAYGROUND_TIMEOUT = 600
 
 
