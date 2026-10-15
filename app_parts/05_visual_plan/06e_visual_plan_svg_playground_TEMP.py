@@ -85,11 +85,11 @@ def _svg_playground_geometry(scene, contract, program=None):
         raise visual_plan_geometry.PlanGeometryError(
             'هندسة المشهد لا تحمل حدودًا صالحة للرسم.', 'PLANS_SCENE_INVALID')
     project = visual_plan_geometry.fit_projection(
-        flat, _SVG_PLAYGROUND_WIDTH - 100, _SVG_PLAYGROUND_HEIGHT - 170, 110)
+        flat, 1180, 520, 110)
 
     def screen(point):
         x, y = project(point)
-        return [round(x + 50, 1), round(y + 85, 1)]
+        return [round(x + 150, 1), round(y + 130, 1)]
 
     envelopes = []
     try:
@@ -254,6 +254,11 @@ def _svg_playground_prompts(payload, contract=None):
         'Trace the parcel coordinates and setback envelope accurately to honor the exact surveyed plot shape. '
         'Orient and label all surrounding streets with their names and documented widths along parcel edges. '
         'Ensure every building mass footprint stays wholly inside the setback envelope.\n'
+        'ZERO-COLLISION & CLEAN LAYOUT RULES (CRITICAL): '
+        '1. NO OVERLAPPING TEXT OR BADGES: Street names must remain 100% visible and centered along their road ribbons without any text or badges covering them. Place entry badges and callout boxes in the clear white canvas margins with thin leader lines. '
+        '2. ISOLATED BOTTOM LEGEND: Place the Legend table cleanly in the bottom-left margin (below y=720) on pure white canvas — NEVER overlapping the parcel, setback envelope, or southern street. '
+        '3. NO DIMENSION ARROWS OR EXCESSIVE ANNOTATIONS: Do NOT draw dimension lines with arrows across the site (e.g. no `<--- 205m depth --->` arrows) and do not repeat setback dimension notes across edges. Keep internal courtyards, lawns, and building interiors clean, uncluttered, and breathable. '
+        '4. CLEAR TYPOGRAPHY & LABELS: Use clean modern typography (font-family: system-ui, sans-serif) in navy #172B4D. Label masses with only their essential name and floor count (e.g. "Hotel (12 Floors)"). Include a clear "N" north arrow.\n'
         'ARCHITECTURAL CREATIVE FREEDOM (BROCHURE MASTERPLAN): '
         'Compose a real brochure layout, not scattered rectangles. Follow the clear architectural design code of the attached reference image: '
         '1. Massing & Frontage: Wrap residential buildings into an elegant C-shaped or U-shaped courtyard wing embracing the landscaped garden; '
@@ -263,9 +268,6 @@ def _svg_playground_prompts(payload, contract=None):
         '3. SVG Optimization (<defs> and <use>): For maximum rendering performance, define reusable symbols in SVG `<defs>` '
         '(such as canopy trees, parking stall modules, entry arrows) and instantiate them across the site using `<use href="#symbol-id"/>`. '
         'Round coordinates to 1 decimal place. '
-        '4. Typography & Legend: Use clean modern typography (font-family: system-ui, sans-serif) in navy #172B4D. '
-        'Label masses with their name and floor count (e.g. "Hotel (12 Floors)"). Include a clear "N" north arrow. '
-        'Render a beautifully structured legend in the bottom-left with color chips for each use, boundary line, and setback dashed line. '
         'The attached single reference image is the owner-approved benchmark — follow its layout logic, courtyard composition, and vector finesse directly.')
     fields = {
         'project': {key: (contract or {}).get(key) for key in

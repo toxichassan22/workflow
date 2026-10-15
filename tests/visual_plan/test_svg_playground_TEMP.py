@@ -366,6 +366,18 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertIn('canopy trees', system_prompt)
         self.assertIn('<defs>', (system_prompt + user_prompt).lower())
         self.assertIn('<use', (system_prompt + user_prompt).lower())
+        self.assertIn('ZERO-COLLISION & CLEAN LAYOUT RULES (CRITICAL)', system_prompt)
+        self.assertIn('NO OVERLAPPING TEXT OR BADGES', system_prompt)
+        self.assertIn('ISOLATED BOTTOM LEGEND', system_prompt)
+        self.assertIn('NO DIMENSION ARROWS', system_prompt)
+        # Bounding box of projected parcel coordinates respects margins
+        flat_parcel_pts = [pt for poly in payload['parcels'] for pt in poly]
+        parcel_xs = [pt[0] for pt in flat_parcel_pts]
+        parcel_ys = [pt[1] for pt in flat_parcel_pts]
+        self.assertGreaterEqual(min(parcel_xs), 150)
+        self.assertGreaterEqual(min(parcel_ys), 130)
+        self.assertLessEqual(max(parcel_xs), 1330 + 1)
+        self.assertLessEqual(max(parcel_ys), 650 + 1)
 
     def test_cards_open_svg_and_export_png_in_a_two_column_grid(self):
         source = read_frontend_text()
