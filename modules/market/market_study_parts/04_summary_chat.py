@@ -9,8 +9,8 @@
 # summary_has_content come from the loader / sibling parts — never redefine).
 #
 # Turn contract: phase A is a discuss call that may propose targeted ops
-# ({reply, needs_research, queries, ops}); phase B re-asks through the browse
-# agent when needs_research fires and returns {reply, ops, sources_add}. Ops
+# ({reply, needs_research, queries, ops}); phase B re-asks through native
+# Google search when needs_research fires and returns {reply, ops, sources_add}. Ops
 # are proposals — the client shows them and the user applies them; nothing
 # here mutates the live summary state except apply_summary_ops, which is a
 # pure transform returning a new state plus the touched-field set.
@@ -634,8 +634,8 @@ def build_summary_chat_turn_prompt(payload, axis, message, history, state):
 
 
 def build_summary_chat_research_prompt(payload, axis, message, history, state, queries):
-    """Phase-B user prompt for the browse agent: the same context plus the
-    queries phase A asked for, real-browsing instructions inside the binding
+    """Phase-B user prompt for native Google search: the same context plus the
+    queries phase A asked for, native-search instructions inside the binding
     scope/period, and the research output shape {reply, ops, sources_add}."""
     axis = _norm(axis) or SUMMARY_CHAT_AXIS_GENERAL
     if axis not in _SUMMARY_CHAT_AXIS_KEYSET and axis != SUMMARY_CHAT_AXIS_GENERAL:
@@ -647,9 +647,9 @@ def build_summary_chat_research_prompt(payload, axis, message, history, state, q
                                     state if isinstance(state, dict) else {})
         + '\nاستعلامات البحث التي حددتها مرحلة النقاش:\n'
         f'{query_lines}\n\n'
-        'تعليمات البحث:\n'
-        '- ابحث فعلًا في الويب وافتح الصفحات قبل الاستشهاد بها — لا تجب من الذاكرة؛ '
-        'كل رقم في reply أو في ops يجب أن يستند إلى صفحة فتحتها فعلًا.\n'
+        'تعليمات البحث (بحث جوجل الأصلي — بلا فتح صفحات):\n'
+        '- ابحث عبر بحث جوجل الأصلي أولًا — لا تجب من الذاكرة؛ '
+        'كل رقم في reply أو في ops يجب أن يستند إلى نتائج البحث.\n'
         '- ابقَ داخل النطاق الجغرافي الملزم (حي المشروع ونطاق المنافسين المدخلان '
         'في البيانات، أو البديل الأقرب الوحيد مع ذكره صراحةً) وداخل فترة البيانات '
         'المحددة — أي مصدر خارج الفترة مرفوض ولا يُدرج.\n'

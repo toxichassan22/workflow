@@ -3,8 +3,9 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Market summary chat: a per-axis discuss/research turn plus the final
 # consolidate pass. Every message is a market job — phase A answers with
-# optional targeted ops, phase B re-asks through the self-hosted browse agent
-# when the turn needs fresh evidence. Ops are validated and proposed, never
+# optional targeted ops, phase B re-asks through provider-native Google
+# search (same owner-ordered protocol as the summary: zero page opens) when
+# the turn needs fresh evidence. Ops are validated and proposed, never
 # applied server-side; an approved market-study section locks op-producing
 # turns while pure discussion keeps answering.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -14,9 +15,8 @@ _SUMMARY_CHAT_MESSAGE_MAX = 4000
 _SUMMARY_CHAT_HISTORY_MAX = 12
 _SUMMARY_CHAT_SOURCES_MAX = 8
 
-# One chat turn's research is a targeted follow-up — a few searches and page
-# opens, far below the full summary sweep (_SUMMARY_SEARCH_BUDGET/_MAX_STEPS).
-_SUMMARY_CHAT_SEARCH_BUDGET = 3
+# One chat turn's research is a targeted native-search follow-up — a short
+# forced Google search, far below the full summary sweep.
 _SUMMARY_CHAT_MAX_STEPS = 8
 
 # The research phase gets its own short wall-clock budget — a chat reply
@@ -248,13 +248,14 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
         research_prompt = market_study.build_summary_chat_research_prompt(
             payload, detected_axis, message, history, state, turn.get('queries') or [])
         # The turn shares the job contract: one evidence pool and one
-        # deadline bound the browse run like every other market search.
+        # deadline bound the native search like every other market search.
         chat_pool = _new_evidence_pool()
         research_res = _browse_agent_call(
             system_prompt, research_prompt, usage_ctx, model=chat_model,
             evidence_pool=chat_pool,
             deadline=time.time() + _SUMMARY_CHAT_JOB_TIME_BUDGET,
-            search_budget=_SUMMARY_CHAT_SEARCH_BUDGET,
+            server_tools=_SUMMARY_NATIVE_SEARCH_TOOLS, local_tools=False,
+            tool_choice=_SUMMARY_NATIVE_TOOL_CHOICE,
             max_steps=_SUMMARY_CHAT_MAX_STEPS, max_tokens=8000,
             reasoning_effort='low',
             on_event=_market_agent_progress(report, 46, 68,
