@@ -1,0 +1,112 @@
+
+@app.route('/api/market-study/catalog', methods=['GET'])
+@require_auth
+def api_market_study_catalog():
+    return jsonify({'success': True, 'catalog': market_study.catalog_payload()})
+
+
+@app.route('/api/market-study/competitors', methods=['POST'])
+@require_permission('create_presentation')
+def api_market_study_competitors():
+    return _start_market_job('competitors', _execute_market_competitors)
+
+
+@app.route('/api/market-study/summary', methods=['POST'])
+@require_permission('create_presentation')
+def api_market_study_summary():
+    return _start_market_job('summary', _execute_market_summary)
+
+
+@app.route('/api/market-study/competitors/logo', methods=['POST'])
+@require_permission('create_presentation')
+def api_market_study_competitor_logo():
+    data = request.json or {}
+    competitor = market_study.normalize_competitor_row(
+        data.get('competitor') or {}, fallback_source='manual',
+        offer_lang=slide_engine.resolve_offer_lang(data))
+    if not competitor:
+        return jsonify({'success': False, 'error': 'بيانات المنافس غير صالحة'}), 400
+    if competitor.get('logo_file_id') or competitor.get('logo_path'):
+        return jsonify({'success': True, 'competitor': competitor})
+    official_url = competitor.get('logo_source_url') or competitor.get('source_url')
+    verified_official = bool(official_url and market_study.official_source_reliability(
+        competitor.get('name'), competitor.get('source'), official_url))
+    if not verified_official:
+        _billing_guard = _require_billing_balance('ai_text')
+        if _billing_guard is not None:
+            return _billing_guard
+        discovery_prompt = (
+            f'ابحث عن الموقع الرسمي وشعار «{competitor["name"]}». '
+            'أعد JSON فقط بالمفاتيح official_url وlogo_url وlogo_source_url. '
+            'official_url صفحة HTTPS من الموقع الرسمي للمشروع أو المطور، '
+            'logo_url رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP من الموقع الرسمي أو نطاق الصور التابع له، '
+            'وlogo_source_url الصفحة الرسمية التي تثبت الشعار. إذا لم تجد دليلًا رسميًا أعد القيم فارغة.'
+        )
+        response = _browse_agent_call(
+            market_study.build_consultant_system_prompt(), discovery_prompt,
+            _usage_ctx('market', data),
+            search_budget=3, max_steps=8, max_tokens=1600,
+            reasoning_effort='low')
+        provider_error = _chat_error_message(response) if response.get('error') else ''
+        parsed, parse_error = _parse_market_model_json(response)
+        discovered_official = str(parsed.get('official_url') or parsed.get('logo_source_url') or '').strip()
+        citations = _market_citation_urls(response)
+        cited_official = bool(discovered_official and any(
+            _related_official_hosts(discovered_official, citation) for citation in citations))
+        if parse_error or not cited_official:
+            return jsonify({'success': False, 'error': provider_error or 'لم يُعثر على موقع رسمي موثق'}), 404
+        official_url = discovered_official
+        competitor['logo_url'] = str(parsed.get('logo_url') or '').strip()
+        competitor['logo_source_url'] = str(parsed.get('logo_source_url') or official_url).strip()
+        competitor['logo_official_verified'] = True
+    else:
+        competitor['logo_official_verified'] = True
+    if not competitor.get('logo_url'):
+        prompt = (
+            f'ابحث داخل الموقع الرسمي فقط عن شعار «{competitor["name"]}»: {official_url}. '
+            'أعد JSON فقط بالمفتاحين logo_url وlogo_source_url. '
+            'logo_url رابط HTTPS مباشر لصورة PNG أو JPG أو WEBP على النطاق الرسمي أو نطاق الصور التابع له، '
+            'وlogo_source_url صفحة الموقع الرسمي. إذا لم تجده أعد القيمتين فارغتين.'
+        )
+        response = _browse_agent_call(
+            market_study.build_consultant_system_prompt(), prompt,
+            _usage_ctx('market', data),
+            search_budget=2, max_steps=6, max_tokens=1200,
+            reasoning_effort='low')
+        provider_error = _chat_error_message(response) if response.get('error') else ''
+        parsed, parse_error = _parse_market_model_json(response)
+        if parse_error:
+            return jsonify({'success': False, 'error': provider_error or 'لم يُعثر على شعار رسمي'}), 404
+        competitor['logo_url'] = str(parsed.get('logo_url') or '').strip()
+        competitor['logo_source_url'] = str(parsed.get('logo_source_url') or official_url).strip()
+    logo_source_url = competitor.get('logo_source_url') or official_url
+    if logo_source_url:
+        field_sources = market_study.competitor_field_sources(competitor)
+        field_sources['logo_url'] = [logo_source_url]
+        competitor['field_sources'] = field_sources
+        competitor['source_urls'] = list(dict.fromkeys(
+            market_study.competitor_source_urls(competitor) + [logo_source_url]))
+    competitor = _store_imported_competitor_logo(
+        competitor, draft_id=data.get('draftId') or data.get('draft_id'))
+    if not competitor.get('logo_file_id'):
+        return jsonify({'success': False, 'error': competitor.get('logo_import_warning') or 'لم يُعثر على شعار رسمي'}), 404
+    draft_id = data.get('draftId') or data.get('draft_id')
+    if draft_id:
+        _record_change('draft', draft_id, 'استيراد شعار منافس',
+                       [f'استُورد شعار «{competitor.get("name")}» من الموقع الرسمي'], source='ai')
+    return jsonify({'success': True, 'competitor': competitor})
+
+
+@app.route('/api/market-study/jobs/<job_id>', methods=['GET'])
+@require_auth
+def api_market_study_job(job_id):
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
+        return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
+    job = _read_market_job(g.tenant_id, job_id)
+    if not job:
+        return jsonify({
+            'success': False,
+            'error': 'مهمة دراسة السوق غير موجودة',
+            'failureReason': 'job_not_found',
+        }), 404
+    return jsonify(_public_job(job))

@@ -472,3 +472,51 @@ def run_source_plan(plan, pool, fetch_http, session=None, deadline=None, report=
         _emit_plan_event(report, entry, 'failed' if reason else 'fetched',
                          via='browser', reason=reason, pct=pct)
     return counts
+
+
+def format_retrieved_evidence_block(evidence_pool, max_chars=25000, offer_lang='ar'):
+    """Format pages stored in the EvidencePool as an organized evidence block
+    to feed directly into the summary model prompt."""
+    if evidence_pool is None or not hasattr(evidence_pool, 'pages'):
+        return ''
+    try:
+        pages = evidence_pool.pages()
+    except Exception:
+        pages = []
+    if not pages:
+        return ''
+    en = (offer_lang == 'en')
+    header = '## Retrieved Evidence from Primary Sources:\n' if en else '## بيانات وحقائق مستخلصة من المصادر الأساسية المعتمدة:\n'
+    intro = (
+        'The following data and excerpts were retrieved directly from official and professional sources. '
+        'You MUST rely heavily on these figures, deals, and indicators when analyzing the axes and citing sources:\n\n'
+        if en else
+        'البيانات والمقتطفات التالية تم استرجاعها مباشرة من المصادر الرسمية والمهنية المعتمدة. '
+        'يجب الاعتماد الكامل على هذه الأرقام والصفقات والمؤشرات في تحليل المحاور وربطها بمصادرها:\n\n'
+    )
+    blocks = []
+    total_len = len(header) + len(intro)
+    for idx, p in enumerate(pages, 1):
+        if not isinstance(p, dict):
+            continue
+        url = str(p.get('url') or '').strip()
+        title = str(p.get('title') or '').strip() or url
+        content = str(p.get('content') or '').strip()
+        if not content:
+            continue
+        capped_content = content[:3000].strip()
+        if en:
+            page_block = f"### [Source {idx}] {title}\n- URL: {url}\n- Extracted Evidence:\n{capped_content}\n\n"
+        else:
+            page_block = f"### [مصدر {idx}] {title}\n- الرابط: {url}\n- البيانات والمؤشرات المستخرجة:\n{capped_content}\n\n"
+        if total_len + len(page_block) > max_chars:
+            remaining = max_chars - total_len
+            if remaining > 200:
+                blocks.append(page_block[:remaining] + ('\n... [remaining content truncated]' if en else '\n... [تم اختصار باقي المحتوى]'))
+            break
+        blocks.append(page_block)
+        total_len += len(page_block)
+    if not blocks:
+        return ''
+    return header + intro + ''.join(blocks)
+

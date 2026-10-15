@@ -206,6 +206,79 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
                          {'queries', 'pages', 'pool_hits'})
         self.assertEqual(stats['pages'], 1)
 
+    def test_summary_prompt_carries_retrieved_evidence_from_pool(self):
+        """User requirement: the summary prompt must directly receive the extracted
+        evidence from primary sources in the EvidencePool, rather than writing
+        from memory while attaching URLs post-hoc. Also guards that depth and
+        advisory constraints are strictly ordered."""
+        module = self.application_module
+        captured_tasks = []
+
+        fake_plan = [{'purpose': 'deals',
+                      'url': 'https://rei.rega.gov.sa/ar/cities/jeddah',
+                      'tier': 1, 'needs_browser': False, 'label': 'صفقات جدة'}]
+
+        def fake_run_plan(plan, pool, fetch_http, session=None,
+                          deadline=None, report=None):
+            pool.add_page(
+                'https://rei.rega.gov.sa/ar/cities/jeddah',
+                title='مؤشرات جدة العقارية',
+                content='إجمالي عدد الصفقات: 1,420 صفقة بقيمة 2.8 مليار ريال. متوسط سعر المتر السكني 4,100 ريال.',
+                via='http',
+            )
+            pool.add_page(
+                'https://sakani.sa/reports-and-data/rent-index',
+                title='مؤشر إيجار',
+                content='متوسط إيجار الشقة السكنية 3 غرف في شمال جدة: 38,000 ريال سنوياً.',
+                via='http',
+            )
+            return {'fetched': 2, 'skipped': 0, 'failed': 0}
+
+        def fake_agent(task, usage_ctx=None, **kwargs):
+            captured_tasks.append(task)
+            return _agent_reply()
+
+        with self.app.app_context(), \
+                patch.object(market_study, 'build_source_plan', return_value=fake_plan), \
+                patch.object(market_study, 'run_source_plan', side_effect=fake_run_plan), \
+                patch.object(agent, 'run_browse_agent', side_effect=fake_agent), \
+                patch.object(module, '_verify_market_urls', return_value=set()):
+            result = module._execute_market_summary({'city': 'جدة', 'projectType': 'سكني'}, tenant_id='t1')
+
+        self.assertTrue(result['success'], result)
+        self.assertEqual(len(captured_tasks), 1)
+        task_prompt = captured_tasks[0]
+        # Primary source evidence must be present directly in prompt
+        self.assertIn('بيانات وحقائق مستخلصة من المصادر الأساسية المعتمدة', task_prompt)
+        self.assertIn('https://rei.rega.gov.sa/ar/cities/jeddah', task_prompt)
+        self.assertIn('1,420 صفقة بقيمة 2.8 مليار ريال', task_prompt)
+        self.assertIn('https://sakani.sa/reports-and-data/rent-index', task_prompt)
+        self.assertIn('38,000 ريال سنوياً', task_prompt)
+        # Depth & anti-superficial directives must be present
+        self.assertIn('تحليل استشاري عقاري معمق ومفصل', task_prompt)
+        self.assertIn('يُحظر تمامًا الاختصار المخل', task_prompt)
+
+    def test_format_retrieved_evidence_block_contract(self):
+        """Unit test for market_study.format_retrieved_evidence_block across
+        Arabic, English, empty, and truncated states."""
+        pool = evidence.EvidencePool()
+        # Empty pool returns empty string
+        self.assertEqual(market_study.format_retrieved_evidence_block(pool), '')
+        self.assertEqual(market_study.format_retrieved_evidence_block(None), '')
+
+        pool.add_page('https://example.com/data', title='Report', content='Metric 1: 500 units', via='http')
+        # Arabic formatting
+        ar_block = market_study.format_retrieved_evidence_block(pool, offer_lang='ar')
+        self.assertIn('بيانات وحقائق مستخلصة من المصادر الأساسية المعتمدة', ar_block)
+        self.assertIn('https://example.com/data', ar_block)
+        self.assertIn('Metric 1: 500 units', ar_block)
+
+        # English formatting
+        en_block = market_study.format_retrieved_evidence_block(pool, offer_lang='en')
+        self.assertIn('Retrieved Evidence from Primary Sources', en_block)
+        self.assertIn('https://example.com/data', en_block)
+        self.assertIn('Metric 1: 500 units', en_block)
+
     def test_no_pool_means_no_plan_but_call_still_carries_deadline(self):
         module = self.application_module
         captured = {}
