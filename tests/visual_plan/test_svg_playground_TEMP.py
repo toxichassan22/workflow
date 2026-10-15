@@ -75,6 +75,12 @@ def _scene():
 
 
 class SvgPlaygroundTempTests(MeetingRequirementsTests):
+    def setUp(self):
+        super().setUp()
+        patcher = patch.object(self.application_module, '_require_billing_balance', return_value=None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _mock_chat(self, module):
         def fake_chat(system_prompt, user_content, **kwargs):
             model = kwargs.get('model')
@@ -353,6 +359,11 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertIn('viewBox="0 0 1600 900"', user_prompt)
         self.assertIn('legend', (system_prompt + user_prompt).lower())
         self.assertIn('not scattered rectangles', system_prompt)
+        self.assertIn('HARD GEOGRAPHIC BOUNDARIES', system_prompt)
+        self.assertIn('ARCHITECTURAL CREATIVE FREEDOM', system_prompt)
+        self.assertIn('padel court', system_prompt)
+        self.assertIn('swimming pool', system_prompt)
+        self.assertIn('canopy trees', system_prompt)
 
     def test_cards_open_svg_and_export_png_in_a_two_column_grid(self):
         source = read_frontend_text()

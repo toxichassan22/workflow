@@ -239,26 +239,37 @@ def _svg_playground_prompts(payload, contract=None):
     color_code = '; '.join(f'{labels.get(key, key)} = {value}' for key, value in colors.items())
     system_prompt = (
         'You are a specialist in designing real-estate site plans by writing SVG code. '
-        'You must comply with the component counts, footprint areas, coordinates and every '
-        'field below — they are recorded facts, not suggestions. Draw ONE standalone <svg> '
-        'element and output ONLY the raw SVG markup — no markdown fences, no explanation. '
-        'All visible text is English only. '
+        'Draw ONE standalone <svg> element and output ONLY the raw SVG markup — no markdown fences, '
+        'no explanation. All visible text is English only. '
+        'Daylight cartography on white — first element a full-canvas #FFFFFF rect; '
+        'NEVER a dark background, no photorealism. '
         'FIXED COLOR IDENTITY — use exactly these fills, no substitutes: ' + (color_code or 'pastel fills') + '; '
         'parcel #EDF3E8 with navy #172B4D outline width 4 and vertex dots; '
         'setback envelope dashed #81939F width 2, no fill; '
         'basement-only masses hatched, never surface blocks; '
         'surface parking light grey with white stall lines and a tree row; '
         'landscape pale green with scattered tree circles; '
-        'entries as color-coded arrows (main red, residential blue, service orange) with navy labels. '
-        'Daylight cartography on white — first element a full-canvas #FFFFFF rect; '
-        'NEVER a dark background, no photorealism, no invented dimensions. '
-        'Compose a real brochure layout, not scattered rectangles: group related masses, wrap '
-        'housing around a landscaped courtyard with the listed pool and play areas, towers on '
-        'the high-rise side, front setback open for surface parking and the main entry. '
-        'The first attached images are owner-approved site plans — imitate their colors, '
-        'legend, parking stalls, trees and entry arrows. The last attached image is the '
-        'true surveyed parcel outline — trace its exact shape and proportions for the '
-        'parcel boundary.')
+        'entries as color-coded arrows (main red, residential blue, service orange) with navy labels.\n'
+        'HARD GEOGRAPHIC BOUNDARIES (MUST RESPECT): '
+        'Trace the parcel coordinates and setback envelope accurately to honor the surveyed plot shape. '
+        'Label the surrounding streets with their names and widths along parcel edges, and note neighbors outside.\n'
+        'ARCHITECTURAL CREATIVE FREEDOM (BROCHURE MASTERPLAN): '
+        'Compose a real brochure layout, not scattered rectangles. You are an elite architectural designer creating '
+        'a presentation-ready masterplan brochure: '
+        '1. Massing Morphology: Shape masses creatively — wrap residential buildings into elegant C-shaped, '
+        'U-shaped, or courtyard wings embracing the landscaped garden; place iconic high-rise towers facing the '
+        'primary frontage. Component footprint areas are proportional target guidelines to compose a cohesive, '
+        'visually balanced development. '
+        '2. Rich Vector Details: Draw realistic recreational amenities with full linework (e.g. green or terracotta '
+        'padel court with white playing lines and net, swimming pool with crisp white coping and blue water, kids play area). '
+        'Render lush landscaped grounds with clusters of multi-layered canopy trees (outer soft circle with darker core dot '
+        'and subtle shadow) and organic pathways. Detail surface parking with neat white stall stripes. '
+        '3. Typography & Legend: Use clean modern typography (font-family: system-ui, sans-serif) in navy #172B4D. '
+        'Label masses with their name and floor count (e.g. "Hotel (12 Floors)"). Include a clear "N" north arrow. '
+        'Render a beautifully structured legend in the bottom-left with color chips for each use, boundary line, '
+        'and setback dashed line. '
+        'The attached style images are owner-approved reference site plans — match their vector finesse, courtyard composition, '
+        'stalls, and tree artistry.')
     fields = {
         'project': {key: (contract or {}).get(key) for key in
                     ('projectName', 'projectIdea') if isinstance(contract, dict)},
@@ -276,9 +287,8 @@ def _svg_playground_prompts(payload, contract=None):
         if isinstance(contract, dict) else '',
     }
     user_prompt = (
-        'PROJECT DATA FIELDS (reuse every parcel coordinate number EXACTLY as given; '
-        'every mass footprint stays wholly inside the parcel; every program mass appears '
-        'once with its recorded area and use):\n'
+        'PROJECT DATA FIELDS (Hard boundaries: trace parcel_pixels accurately; all mass footprints stay inside '
+        'the setback envelope; creatively compose every recorded mass and amenity into a cohesive masterplan):\n'
         + json.dumps(fields, ensure_ascii=False)
         + '\nREQUIRED OUTPUT: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" '
         'width="1600" height="900">; '
