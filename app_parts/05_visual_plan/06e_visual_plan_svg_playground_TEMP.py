@@ -304,13 +304,12 @@ def _svg_playground_score(svg, required_texts, required_numbers):
 _SVG_PLAYGROUND_LENGTH_FINISH = {'length', 'max_tokens', 'max_output_tokens', 'max_completion_tokens'}
 
 
-# Owner-ordered budgets: result quality over token burn. Argon caps at 66K,
-# the other three at 128K; reasoning runs at the maximum (gemini high, the
-# rest max) so each model thinks as hard as it can before drawing.
+# Owner-ordered budgets: argon caps at 66K, the other three at 128K, and all
+# four reason at medium effort to keep the token burn economical.
 _SVG_PLAYGROUND_MODEL_BUDGETS = {
-    'google/gemini-4-argon': {'max_tokens': 66000, 'reasoning_effort': 'high'},
+    'google/gemini-4-argon': {'max_tokens': 66000, 'reasoning_effort': 'medium'},
 }
-_SVG_PLAYGROUND_DEFAULT_BUDGET = {'max_tokens': 128000, 'reasoning_effort': 'max'}
+_SVG_PLAYGROUND_DEFAULT_BUDGET = {'max_tokens': 128000, 'reasoning_effort': 'medium'}
 _SVG_PLAYGROUND_TIMEOUT = 600
 
 
@@ -322,7 +321,33 @@ def _svg_playground_finish_reason(response):
         return ''
 
 
-def _svg_playground_run_model(model, system_prompt, user_prompt, data):
+def _svg_playground_thinking(response):
+    """The model's reasoning excerpt, for the owner's live inspection.
+
+    With max-effort budgets a model can think for minutes before drawing;
+    this surfaces what it is thinking about (kept on every result, success or
+    failure, truncated to 4000 chars) instead of a silent clock."""
+    try:
+        choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
+        message = choice.get('message') if isinstance(choice.get('message'), dict) else {}
+        parts = []
+        for key in ('reasoning', 'reasoning_content'):
+            value = message.get(key)
+            if isinstance(value, str) and value.strip():
+                parts.append(value.strip())
+        details = message.get('reasoning_details')
+        if isinstance(details, list):
+            for item in details:
+                text = item.get('text') if isinstance(item, dict) else None
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+        thinking = '\n\n'.join(parts).strip()
+        return thinking[:4000]
+    except Exception:
+        return ''
+
+
+def _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx=None):
     """Run one model, measuring wall time. A model failure is recorded on its
     own result — it never aborts the remaining models.
 
@@ -334,13 +359,15 @@ def _svg_playground_run_model(model, system_prompt, user_prompt, data):
     budget = _SVG_PLAYGROUND_MODEL_BUDGETS.get(model, _SVG_PLAYGROUND_DEFAULT_BUDGET)
     cap = budget['max_tokens']
     effort = budget['reasoning_effort']
+    if usage_ctx is None:
+        usage_ctx = _usage_ctx('image', data)
     content = user_prompt
     for attempt in range(2):
         try:
             response = call_openrouter_chat(
                 system_prompt, content, temperature=None, max_tokens=cap,
                 model=model, reasoning_effort=effort, timeout=_SVG_PLAYGROUND_TIMEOUT,
-                usage_ctx=_usage_ctx('image', data))
+                usage_ctx=usage_ctx)
         except Exception as error:
             fatal = _ai_fatal_http_response(error)
             if fatal is not None:

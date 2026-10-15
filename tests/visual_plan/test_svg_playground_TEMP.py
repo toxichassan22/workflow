@@ -372,7 +372,7 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
             raw = module._svg_playground_run_model('test-model', 'sys', 'user', {})
         self.assertEqual(len(calls), 2, 'a length-truncated reply must be retried once')
-        self.assertEqual(calls[0].get('reasoning_effort'), 'max')
+        self.assertEqual(calls[0].get('reasoning_effort'), 'medium')
         self.assertEqual(calls[0].get('max_tokens'), 128000)
         self.assertEqual(calls[1].get('max_tokens'), calls[0].get('max_tokens'))
         self.assertEqual(calls[0].get('timeout'), 600)
@@ -392,7 +392,7 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         with patch.object(module, 'call_openrouter_chat', side_effect=fake_chat):
             raw = module._svg_playground_run_model('google/gemini-4-argon', 'sys', 'user', {})
         self.assertEqual(seen.get('max_tokens'), 66000)
-        self.assertEqual(seen.get('reasoning_effort'), 'high')
+        self.assertEqual(seen.get('reasoning_effort'), 'medium')
         final = module._svg_playground_finalize(raw, ['CONCEPTUAL SITE PLAN'], [])
         self.assertTrue(final['ok'])
 
