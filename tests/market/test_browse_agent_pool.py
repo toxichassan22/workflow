@@ -637,12 +637,22 @@ class NativeServerSearchTests(unittest.TestCase):
         with _patched_transport(chat):
             result = agent.run_browse_agent(
                 'ملخص', max_steps=2, server_tools=self._SERVER,
-                local_tools=False)
+                local_tools=False,
+                tool_choice={"type": "openrouter:web_search"})
         self.assertNotIn('error', result)
         self.assertEqual(calls[0]['kwargs'].get('tools'), self._SERVER)
+        self.assertEqual(calls[0]['kwargs'].get('tool_choice'),
+                         {"type": "openrouter:web_search"})
         system = calls[0]['messages'][0]['content']
         self.assertNotIn('open_url', system)
         self.assertNotIn('web_search', system)
+
+    def test_default_run_omits_tool_choice(self):
+        calls = []
+        chat = _scripted_chat([_text_response()], calls)
+        with _patched_transport(chat):
+            agent.run_browse_agent('task', max_steps=2)
+        self.assertNotIn('tool_choice', calls[0]['kwargs'])
 
     def test_default_run_still_declares_local_browser_tools(self):
         calls = []

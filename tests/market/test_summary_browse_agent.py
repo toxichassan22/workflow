@@ -123,6 +123,10 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(server_tools,
                          [{"type": "openrouter:web_search", "engine": "native"}])
         self.assertIs(captured['kwargs'].get('local_tools'), False)
+        # The search is forced, not model-optional: tool_choice names the
+        # server tool, so a memory answer without any search cannot happen.
+        self.assertEqual(captured['kwargs'].get('tool_choice'),
+                         {"type": "openrouter:web_search"})
         # No local search budget is consumed on the native path.
         self.assertNotIn('search_budget', captured['kwargs'])
         self.assertEqual(captured['kwargs'].get('max_tokens'),

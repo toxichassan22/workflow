@@ -764,7 +764,8 @@ def _execute_tool(session, name, args, trace, pages, search_state,
 def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                      max_tokens=None, reasoning_effort=None, model=None,
                      evidence_pool=None, deadline=None, session=None,
-                     on_event=None, server_tools=None, local_tools=True):
+                     on_event=None, server_tools=None, local_tools=True,
+                     tool_choice=None):
     """Drive one OpenRouter tool-call loop against a real browser session.
 
     ``model`` is the caller's own task model — the same model that would have
@@ -781,6 +782,9 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     ``local_tools=False``, instead of — the local browser tools. A native-only
     run researches through provider search inside the request itself: no
     Chromium opens, and the reply's url_citation annotations are the evidence.
+    ``tool_choice`` forwards OpenRouter's tool-choice verbatim; naming a
+    server tool there (``{"type": "openrouter:web_search"}``) forces the
+    search instead of leaving it to the model's discretion.
 
     ``evidence_pool`` (an ``EvidencePool`` from evidence.py) is the job's
     shared evidence store: a query the pool already ran is answered from its
@@ -867,6 +871,8 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
         kwargs = {'max_tokens': out_cap, 'usage_ctx': usage_ctx}
         if request_tools:
             kwargs['tools'] = request_tools
+        if tool_choice is not None:
+            kwargs['tool_choice'] = tool_choice
         if model:
             kwargs['model'] = model
         if effort and not effort_disabled:

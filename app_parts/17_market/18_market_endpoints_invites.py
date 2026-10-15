@@ -593,6 +593,10 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
 _SUMMARY_NATIVE_SEARCH_TOOLS = [
     {"type": "openrouter:web_search", "engine": "native"},
 ]
+# Forced (not model-optional): the server tool alone lets the model answer
+# from memory, which failed twice as search_not_run. Naming the tool in
+# tool_choice compels at least one provider search per request.
+_SUMMARY_NATIVE_TOOL_CHOICE = {"type": _SUMMARY_NATIVE_SEARCH_TOOLS[0]["type"]}
 # The native call answers inside one request, but the loop cap stays as a
 # guard so a stalled model cannot spin rounds against the job deadline.
 _SUMMARY_MAX_STEPS = 16
@@ -680,6 +684,7 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         system_prompt, user_prompt, usage_ctx,
         evidence_pool=evidence_pool, deadline=deadline, session=session,
         server_tools=_SUMMARY_NATIVE_SEARCH_TOOLS, local_tools=False,
+        tool_choice=_SUMMARY_NATIVE_TOOL_CHOICE,
         max_steps=_SUMMARY_MAX_STEPS,
         max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='low',
         on_event=_market_agent_progress(report, 24, 70,
