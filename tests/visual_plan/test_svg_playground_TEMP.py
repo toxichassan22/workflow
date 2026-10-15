@@ -4,12 +4,14 @@
 # proves the playground fans out to exactly the 4 approved models, measures
 # per-model time, sanitizes active SVG content, scores fidelity against the
 # sealed scene, never touches the image model, and refuses unsealed inputs.
+# It also pins the surface it ships on: stage 4 of the plans workflow, reading
+# the current project data, with the retired standalone page gone.
 
 import copy
 import unittest
 from unittest.mock import patch
 
-from tests.workflow.test_meeting_requirements import MeetingRequirementsTests
+from tests.workflow.test_meeting_requirements import MeetingRequirementsTests, read_frontend_text
 
 
 def _project():
@@ -152,11 +154,38 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
                 json={'projectData': project, 'plansWorkflow': workflow})
         self.assertEqual(response.status_code, 400, response.get_json())
 
-    def test_playground_page_shell_lists_no_models_and_needs_no_auth(self):
-        response = self.app.test_client().get('/playground-plans-svg')
-        self.assertEqual(response.status_code, 200)
-        self.assertIn('text/html', response.content_type)
-        self.assertIn('مقارنة موديلات SVG', response.get_data(as_text=True))
+    def test_playground_is_the_fourth_stage_of_the_plans_workflow(self):
+        """The tool is not a hidden page any more: it is the 4th plans step."""
+        source = read_frontend_text()
+        self.assertIn('data-plans-workflow-tab="svgcompare"', source)
+        self.assertIn('data-plans-workflow-stage="svgcompare"', source)
+        self.assertIn('data-plans-workflow-action="run-svg-compare"', source)
+        self.assertIn("'plans.svg_compare_tab', 'مقارنة الموديلات'", source)
+        # Stage 4 unlocks on the same sealed scene the generation stage runs on,
+        # so the tab can never lead to an endpoint that refuses the request.
+        self.assertIn(
+            "if ((stage === 'generate' || stage === 'svgcompare')\n"
+            "              && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;",
+            source)
+        # The retired standalone page is really gone, route included.
+        self.assertNotIn('/playground-plans-svg', source)
+        self.assertEqual(
+            self.app.test_client().get('/playground-plans-svg').status_code, 404)
+        self.assertFalse(
+            hasattr(self.application_module, 'page_svg_playground'),
+            'the standalone playground page must be retired with its route')
+
+    def test_playground_stage_reads_the_current_project_data(self):
+        """Stage 4 sends the same payload the generation stages do."""
+        source = read_frontend_text()
+        self.assertIn('async function runVisualConceptPlansSvgCompare()', source)
+        self.assertIn("const payload = await collectVisualConceptPlansWorkflowPayload();", source)
+        self.assertIn("api('POST', '/api/visual-concept/plans-svg-playground', payload)", source)
+        self.assertIn("'/api/visual-concept/plans-svg-playground/jobs/' + encodeURIComponent(initial.jobId)", source)
+        # The four SVG bodies stay out of the saved draft: the tool keeps them in
+        # session state, so plansWorkflow is never given a compare field.
+        self.assertNotIn('plansWorkflow.svgCompare', source)
+        self.assertNotIn('workflow.svgCompare', source)
 
     def test_svg_helpers_extract_fences_and_strip_active_content(self):
         module = self.application_module

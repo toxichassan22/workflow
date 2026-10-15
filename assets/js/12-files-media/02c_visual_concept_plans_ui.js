@@ -195,6 +195,45 @@
         .concat(issues.filter(item => item.severity === 'high'));
     }
 
+    // Stage 4 renders the four-model SVG comparison in place: the SVG bodies are
+    // display-only and would bloat the saved draft, so they live in this session
+    // (visualConceptPlansSvgCompareState) and never enter plansWorkflow.
+    function visualConceptPlansSvgCompareStatusText(compare, projectLabel) {
+      const count = Array.isArray(compare.results) ? compare.results.length : 0;
+      let status = WFT('plans.svg_compare_idle', 'لم تُشغّل المقارنة بعد.');
+      if (compare.status === 'running') status = WFT('plans.svg_compare_loading', 'جاري تشغيل المقارنة');
+      else if (compare.status === 'failed') status = String(compare.error || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
+      else if (count) status = WFT('plans.svg_compare_done', 'اكتملت المقارنة — {n} موديلات.', { n: count });
+      const source = projectLabel
+        ? WFT('plans.svg_compare_source', 'من بيانات المشروع: {name}', { name: projectLabel })
+        : WFT('plans.svg_compare_source_empty', 'من بيانات المشروع الحالي');
+      return source + ' — ' + status;
+    }
+
+    function visualConceptPlansSvgCompareCard(item) {
+      const model = String(item && item.model ? item.model : '');
+      let html = '<div class="plans-svg-compare-card"><span class="plans-svg-compare-model">' + escapeHtml(model) + '</span>';
+      if (!item || !item.ok) {
+        return html + '<p class="plans-svg-compare-error">' +
+          escapeHtml((item && item.error) || WFT('plans.svg_compare_model_failed', 'لم يُنتج الموديل رسمًا صالحًا')) +
+          '</p></div>';
+      }
+      html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_ms', 'الوقت: {n} مللي ثانية', { n: item.ms })) + '</p>';
+      html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_size_score', 'الحجم: {chars} حرف — الدقة: {score}%', { chars: item.chars, score: item.score })) + '</p>';
+      if (item.svg) {
+        html += '<img alt="' + escapeHtml(model) + '" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(item.svg) + '">';
+      }
+      html += '<details><summary>' + escapeHtml(WFT('plans.svg_compare_code', 'عرض الكود')) +
+        '</summary><pre>' + escapeHtml(item.svg || '') + '</pre></details>';
+      return html + '</div>';
+    }
+
+    function visualConceptPlansSvgCompareHtml(compare) {
+      const results = Array.isArray(compare && compare.results) ? compare.results : [];
+      if (!results.length) return '';
+      return '<div class="plans-svg-compare-grid">' + results.map(visualConceptPlansSvgCompareCard).join('') + '</div>';
+    }
+
     function renderVisualConceptPlansWorkflow() {
       const root = document.getElementById('visualConceptPlansWorkflow');
       if (!root) return;
@@ -206,9 +245,14 @@
       const boundaryApproved = Boolean(boundary.approved);
       const distApproved = Boolean(distribution.approved) && visualConceptPlanNotesCleared(workflow);
       const promptReady = Boolean(workflow.promptReady);
-      const defaultStage = !verified ? 'verify' : ((boundaryApproved && distApproved) ? 'generate' : 'boundary');
-      const requestedStage = ['verify', 'boundary', 'generate'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
-      const activeStage = requestedStage === 'generate' && !(boundaryApproved && distApproved)
+      // Stages 3 and 4 both run on the sealed scene — boundary and distribution
+      // approved with the notes check cleared — so they unlock together.
+      const sealed = boundaryApproved && distApproved;
+      const svgCompare = visualConceptPlansSvgCompareState();
+      const projectLabel = String((typeof tenantProjectData === 'object' && tenantProjectData && tenantProjectData.project_name) || '').trim();
+      const defaultStage = !verified ? 'verify' : (sealed ? 'generate' : 'boundary');
+      const requestedStage = ['verify', 'boundary', 'generate', 'svgcompare'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
+      const activeStage = (requestedStage === 'generate' || requestedStage === 'svgcompare') && !sealed
         ? (verified ? 'boundary' : 'verify')
         : (requestedStage === 'boundary' && !verified ? 'verify' : requestedStage);
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
@@ -240,7 +284,8 @@
         '<ol class="plans-workflow-steps">' +
         '<li class="' + (activeStage === 'verify' ? 'is-active' : (verified ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="verify">التحقق من التضارب</button></li>' +
         '<li class="' + (activeStage === 'boundary' ? 'is-active' : (boundaryApproved && distApproved ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="boundary" ' + (!verified ? 'disabled' : '') + '>رسم الحدود وتوزيع المكونات</button></li>' +
-        '<li class="' + (activeStage === 'generate' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="generate" ' + (!(boundaryApproved && distApproved) ? 'disabled' : '') + '>توليد المخططات</button></li>' +
+        '<li class="' + (activeStage === 'generate' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="generate" ' + (!sealed ? 'disabled' : '') + '>توليد المخططات</button></li>' +
+        '<li class="' + (activeStage === 'svgcompare' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="svgcompare" ' + (!sealed ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.svg_compare_tab', 'مقارنة الموديلات')) + '</button></li>' +
         '</ol>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="verify"' + (activeStage !== 'verify' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>التحقق من التضارب</h4><button type="button" class="btn primary small" data-plans-workflow-action="verify">تحقق</button></div>' +
@@ -271,6 +316,12 @@
         '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">تجهيز توليد المخططات</button></div>' +
         '<p class="tenant-hint">' + escapeHtml(promptReady ? 'المخططات جاهزة للتوليد.' : (workflow.promptsError ? 'تعذر تجهيز توليد المخططات: ' + workflow.promptsError : 'المخططات الثلاثة غير جاهزة للتوليد.')) + '</p>' +
         '<div data-plans-workflow-prompts>' + promptCards + '</div>' +
+        '</section>' +
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="svgcompare"' + (activeStage !== 'svgcompare' ? ' hidden' : '') + '>' +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.svg_compare_title', 'مقارنة موديلات رسم المخطط')) + '</h4>' +
+        '<button type="button" class="btn primary small" data-plans-workflow-action="run-svg-compare"' + (svgCompare.status === 'running' ? ' disabled' : '') + '>' + escapeHtml(WFT('plans.svg_compare_run', 'تشغيل المقارنة')) + '</button></div>' +
+        '<p class="tenant-hint" data-plans-svg-compare-status>' + escapeHtml(visualConceptPlansSvgCompareStatusText(svgCompare, projectLabel)) + '</p>' +
+        '<div data-plans-svg-compare-results>' + visualConceptPlansSvgCompareHtml(svgCompare) + '</div>' +
         '</section></div>';
       const preview = root.querySelector('[data-plans-boundary-preview]');
       renderVisualConceptBoundarySvg(preview, boundary.points);
@@ -284,7 +335,8 @@
             const stage = tab.getAttribute('data-plans-workflow-tab');
             const state = visualConceptPlansWorkflowState();
             if (stage === 'boundary' && !state.verification.approved) return;
-            if (stage === 'generate' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
+            if ((stage === 'generate' || stage === 'svgcompare')
+              && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
             state.viewStage = stage;
             persistVisualConceptDraftState();
             renderVisualConceptPage();
@@ -332,6 +384,7 @@
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
+          else if (action === 'run-svg-compare') runVisualConceptPlansSvgCompare();
         });
         root.addEventListener('input', event => {
           const revisionInput = event.target.closest('[data-plans-distribution-revision]');

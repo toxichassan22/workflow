@@ -223,7 +223,7 @@
 
     .plans-workflow-steps {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 8px;
       margin: 0;
       padding: 0;
@@ -473,6 +473,62 @@
       width: 100%;
       height: auto;
       max-height: 320px;
+    }
+
+    /* Stage 4 — the four-model SVG comparison. Model slugs are Latin, so the
+       card header alone is forced LTR; the Arabic labels stay RTL. */
+    .plans-svg-compare-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 14px;
+    }
+
+    .plans-svg-compare-card {
+      display: grid;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      padding: 12px;
+    }
+
+    .plans-svg-compare-model {
+      direction: ltr;
+      color: var(--p);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: left;
+      word-break: break-all;
+    }
+
+    .plans-svg-compare-card img {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .plans-svg-compare-card pre {
+      direction: ltr;
+      text-align: left;
+      max-height: 240px;
+      overflow: auto;
+      background: #f8fafc;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 11px;
+    }
+
+    .plans-svg-compare-card summary {
+      cursor: pointer;
+      color: var(--p);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .plans-svg-compare-error {
+      color: #b91c1c;
+      font-size: 12px;
     }
 
     @media (max-width: 860px) {

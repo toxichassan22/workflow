@@ -518,6 +518,68 @@
       }
     }
 
+    // Stage 4 of the plans workflow: the four-model SVG comparison. The result
+    // is display-only, so it stays in this session instead of the draft — four
+    // inline SVG bodies would bloat every later draft save.
+    const visualConceptPlansSvgCompareRun = { status: 'idle', results: [], error: '' };
+
+    function visualConceptPlansSvgCompareState() {
+      return visualConceptPlansSvgCompareRun;
+    }
+
+    // Same 202-then-poll shape as the other plans endpoints, against this
+    // tool's own job namespace.
+    async function visualConceptPlansSvgCompareJobApi(payload) {
+      const initial = await api('POST', '/api/visual-concept/plans-svg-playground', payload);
+      if (!initial || !initial.jobId) return initial;
+      const deadline = Date.now() + 300000;
+      let job = initial;
+      while (job && (job.status === 'queued' || job.status === 'running') && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        job = await api('GET', '/api/visual-concept/plans-svg-playground/jobs/' + encodeURIComponent(initial.jobId));
+      }
+      if (job && job.result && typeof job.result === 'object') return job.result;
+      if (job && job.error) return { success: false, error: job.error, error_code: job.error_code };
+      return { success: false, error: WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة') };
+    }
+
+    async function runVisualConceptPlansSvgCompare() {
+      const state = visualConceptPlansSvgCompareState();
+      if (state.status === 'running') return;
+      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
+      const workflow = visualConceptPlansWorkflowState();
+      if (!workflow.boundary.approved || !workflow.distribution.approved
+        || !visualConceptPlanNotesCleared(workflow)) return;
+      state.status = 'running';
+      state.results = [];
+      state.error = '';
+      renderVisualConceptPlansWorkflow();
+      showLoader(WFT('plans.svg_compare_loading', 'جاري تشغيل المقارنة'),
+        WFT('plans.svg_compare_loading_detail', 'يتم إرسال المشهد المختوم إلى الموديلات الأربعة...'), 45);
+      try {
+        // The comparison reads the current project data and workflow, exactly
+        // like the generation stages it sits after.
+        const payload = await collectVisualConceptPlansWorkflowPayload();
+        const response = await visualConceptPlansSvgCompareJobApi(payload);
+        hideLoader();
+        const results = Array.isArray(response?.results) ? response.results : [];
+        if (!response?.success || !results.length) {
+          state.status = 'failed';
+          state.results = [];
+          state.error = String(response?.error || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
+        } else {
+          state.status = 'done';
+          state.results = results;
+        }
+      } catch (error) {
+        hideLoader();
+        state.status = 'failed';
+        state.results = [];
+        state.error = String(error.message || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
+      }
+      renderVisualConceptPlansWorkflow();
+    }
+
     function addVisualConceptPlan() {
       if (visualConceptPlans().length >= VISUAL_CONCEPT_MAX_PLANS) {
         toast('تم الوصول إلى الحد الأقصى للمخططات');

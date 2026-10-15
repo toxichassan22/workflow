@@ -1,8 +1,16 @@
 # TEMPORARY — SVG model playground (remove by reverting this file's commit).
 #
-# Compares 4 text models generating the simplified site plan (plan_site) as raw
-# SVG from the sealed visual-plan scene, measuring wall time per model so the
-# owner can pick the winner to fix as the permanent SVG path.
+# Stage 4 of the plans section (مقارنة الموديلات): the same 4 text models draw
+# the simplified site plan (plan_site) as raw SVG from the sealed visual-plan
+# scene, measuring wall time per model so the owner can pick the winner to fix
+# as the permanent SVG path.
+#
+# The tool lives inside the plans workflow now — the standalone
+# /playground-plans-svg page was retired — and it reads the same payload the
+# generation stages do (current project data + plansWorkflow), so no draft
+# picker is involved. The two routes here are the only entry points:
+#   POST /api/visual-concept/plans-svg-playground
+#   GET  /api/visual-concept/plans-svg-playground/jobs/<job_id>
 #
 # Deliberately isolated: not wired into generation, slides, exports or billing
 # flows, persists nothing, returns inline SVG only. Revert this file's commit
@@ -340,125 +348,3 @@ def api_visual_concept_svg_playground_job(job_id):
                           'error_code': 'PLANS_JOB_EXPIRED'}}
         _write_job(_SVG_PLAYGROUND_NAMESPACE, g.tenant_id, job_id, job)
     return jsonify({key: job[key] for key in ('status', 'success', 'progress', 'result', 'httpStatus') if key in job})
-
-
-@app.route('/playground-plans-svg', methods=['GET'])
-def page_svg_playground():
-    # TEMPORARY comparison page (revert with this file's commit). Public shell;
-    # every data call behind it requires sign-in plus the generate_images grant.
-    html = """<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>مقارنة موديلات SVG — الموقع العام المبسط (مؤقت)</title>
-<style>
-* { box-sizing: border-box; }
-body { font-family: Tahoma, Arial, sans-serif; background: #f4f6f8; color: #1e293b; margin: 0; padding: 24px; }
-.wrap { max-width: 1200px; margin: 0 auto; }
-h1 { font-size: 20px; margin: 0 0 4px; }
-.sub { color: #64748b; font-size: 13px; margin-bottom: 16px; }
-.temp { display: inline-block; background: #fef3c7; color: #b45309; border-radius: 6px; padding: 2px 8px; font-size: 12px; margin-right: 8px; }
-.card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
-.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-select, button { font-size: 14px; padding: 8px 12px; border-radius: 8px; }
-select { border: 1px solid #cbd5e1; min-width: 280px; }
-button { background: #0A829B; color: #fff; border: 0; cursor: pointer; }
-button:disabled { opacity: .5; cursor: default; }
-.status { font-size: 13px; color: #475569; margin-top: 8px; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
-.panel { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; }
-.panel h3 { font-size: 13px; margin: 0 0 6px; word-break: break-all; direction: ltr; text-align: left; }
-.meta { font-size: 12px; color: #475569; margin: 4px 0; }
-.panel img { width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
-.err { font-size: 13px; color: #b91c1c; }
-details { font-size: 12px; margin-top: 6px; }
-details pre { direction: ltr; text-align: left; max-height: 220px; overflow: auto; background: #f8fafc; padding: 8px; border-radius: 8px; }
-</style>
-</head>
-<body>
-<div class="wrap">
-<h1>مقارنة موديلات SVG — الموقع العام المبسط <span class="temp">مؤقت للاختبار</span></h1>
-<div class="sub">التوليد من المشهد المختوم لنفس المسودة، والوقت محسوب لكل موديل.</div>
-<div class="card">
-<div class="row">
-<select id="pgDraft"><option value="">جاري تحميل المسودات…</option></select>
-<button id="pgRun" type="button">تشغيل المقارنة</button>
-</div>
-<div class="status" id="pgStatus"></div>
-</div>
-<div class="grid" id="pgGrid"></div>
-</div>
-<script>
-(function () {
-  var token = '';
-  try { token = localStorage.getItem('tenant_token') || ''; } catch (e) {}
-  var status = document.getElementById('pgStatus');
-  var grid = document.getElementById('pgGrid');
-  var draftSel = document.getElementById('pgDraft');
-  var runBtn = document.getElementById('pgRun');
-  function headers() { return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }; }
-  function setStatus(text) { status.textContent = text || ''; }
-  if (!token) setStatus('سجل الدخول أولا ثم أعد فتح الصفحة.');
-  fetch('/api/project-drafts?limit=50', { headers: headers() }).then(function (r) { return r.json(); }).then(function (body) {
-    var drafts = (body && body.drafts) || [];
-    draftSel.innerHTML = drafts.length
-      ? drafts.map(function (d) { return '<option value="' + d.id + '">' + (d.project_name || d.id) + '</option>'; }).join('')
-      : '<option value="">لا توجد مسودات</option>';
-  }).catch(function () { draftSel.innerHTML = '<option value="">تعذر تحميل المسودات</option>'; });
-  function card(result) {
-    var box = '<div class="panel"><h3>' + result.model + '</h3>';
-    if (!result.ok) return box + '<p class="err">' + (result.error || 'فشل') + '</p></div>';
-    box += '<p class="meta">الوقت: ' + result.ms + ' مللي ثانية</p>';
-    box += '<p class="meta">الحجم: ' + result.chars + ' حرف — الدقة: ' + result.score + '%</p>';
-    box += '<img alt="SVG ' + result.model + '" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(result.svg) + '">';
-    box += '<details><summary>عرض الكود</summary><pre>' + result.svg.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre></details></div>';
-    return box;
-  }
-  function poll(jobId) {
-    fetch('/api/visual-concept/plans-svg-playground/jobs/' + jobId, { headers: headers() }).then(function (r) { return r.json(); }).then(function (job) {
-      if (job.status === 'queued' || job.status === 'running') {
-        setStatus('قيد المعالجة… ' + (job.progress || 0) + '%');
-        setTimeout(function () { poll(jobId); }, 2500);
-        return;
-      }
-      runBtn.disabled = false;
-      var res = (job.result && job.result.results) || [];
-      if (!res.length) { setStatus((job.result && job.result.error) || 'انتهت المقارنة بدون نتائج.'); return; }
-      setStatus('اكتملت المقارنة.');
-      grid.innerHTML = res.map(card).join('');
-    }).catch(function () { runBtn.disabled = false; setStatus('تعذر متابعة المهمة.'); });
-  }
-  runBtn.addEventListener('click', function () {
-    var id = draftSel.value;
-    if (!id || runBtn.disabled) return;
-    runBtn.disabled = true;
-    grid.innerHTML = '';
-    setStatus('جاري تحميل المسودة…');
-    fetch('/api/project-draft/' + id, { headers: headers() }).then(function (r) { return r.json(); }).then(function (body) {
-      var data = (body && body.draft && body.draft.draft_data) || {};
-      var visual = data.visual_concept;
-      if (typeof visual === 'string') { try { visual = JSON.parse(visual); } catch (e) { visual = {}; } }
-      var workflow = (visual && visual.plansWorkflow) || data.plansWorkflow || {};
-      var projectData = Object.assign({}, data);
-      delete projectData.visual_concept;
-      setStatus('تم تحميل المسودة — بدء المقارنة على المشهد المختوم…');
-      return fetch('/api/visual-concept/plans-svg-playground', {
-        method: 'POST', headers: headers(),
-        body: JSON.stringify({ projectData: projectData, plansWorkflow: workflow, draftId: id })
-      }).then(function (r) { return r.json().then(function (b) { return { code: r.status, body: b }; }); });
-    }).then(function (out) {
-      if (!out) return;
-      if (out.code === 202) { poll(out.body.jobId); return; }
-      runBtn.disabled = false;
-      var res = (out.body && out.body.results) || [];
-      if (!res.length) { setStatus((out.body && out.body.error) || 'تعذر بدء المقارنة.'); return; }
-      setStatus('اكتملت المقارنة.');
-      grid.innerHTML = res.map(card).join('');
-    }).catch(function () { runBtn.disabled = false; setStatus('تعذر بدء المقارنة.'); });
-  });
-})();
-</script>
-</body>
-</html>"""
-    return app.response_class(html, content_type='text/html; charset=utf-8')

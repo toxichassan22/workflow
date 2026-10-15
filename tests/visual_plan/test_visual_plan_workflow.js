@@ -245,6 +245,29 @@ test('the processing lock repaints once prepare finishes instead of lingering', 
   assert.notEqual(locks[locks.length - 1], 'المشهد الهندسي قيد المعالجة.');
 });
 
+test('stage 4 renders one card per model, failures included', () => {
+  const context = fixture();
+  assert.equal(context.visualConceptPlansSvgCompareHtml({ status: 'idle', results: [] }), '');
+  const html = context.visualConceptPlansSvgCompareHtml({ status: 'done', results: [
+    { model: 'anthropic/claude-sonnet-5.5', ok: true, ms: 4200, chars: 1200, score: 91.5,
+      svg: '<svg viewBox="0 0 1600 900"><text>CONCEPTUAL SITE PLAN</text></svg>', error: '' },
+    { model: 'anthropic/claude-haiku-5.5', ok: false, ms: 900, chars: 0, score: 0,
+      svg: '', error: 'PROVIDER_DOWN' },
+  ] });
+  assert.ok(html.includes('plans-svg-compare-grid'));
+  assert.ok(html.includes('anthropic/claude-sonnet-5.5'));
+  assert.ok(html.includes('4200'));
+  assert.ok(html.includes('91.5'));
+  assert.ok(html.includes('data:image/svg+xml;charset=utf-8,'));
+  // A failed model keeps its own card and error, and adds no drawing.
+  assert.ok(html.includes('anthropic/claude-haiku-5.5'));
+  assert.ok(html.includes('PROVIDER_DOWN'));
+  assert.equal((html.match(/<img /g) || []).length, 1);
+  // The code view escapes the markup instead of injecting it.
+  assert.ok(html.includes('&lt;svg viewBox'));
+  assert.ok(!html.includes('<svg viewBox'));
+});
+
 test('a clean verification still approves without opening the dialog', () => {
   const context = fixture();
   let created = false;
