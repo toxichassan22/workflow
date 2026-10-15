@@ -199,11 +199,20 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
                 self._mock_chat(module):
             result, status = module._svg_playground_execute(
                 {'projectData': project, 'plansWorkflow': _workflow(project)},
-                on_model=lambda results: seen.append([item['model'] for item in results]))
+                on_model=lambda results: seen.append(list(results)))
         self.assertEqual(status, 200)
         self.assertTrue(result['success'])
         models = list(module.SVG_PLAYGROUND_MODELS)
-        self.assertEqual(seen, [models[:1], models[:2], models[:3], models])
+        # Parallel threads finish in any order: every snapshot adds exactly one
+        # new model, each snapshot stays in model order, and the last one is whole.
+        self.assertEqual(len(seen), 4)
+        accumulated = set()
+        for snapshot in seen:
+            names = [item['model'] for item in snapshot]
+            self.assertEqual(names, [model for model in models if model in names])
+            accumulated.update(names)
+        self.assertEqual(accumulated, set(models))
+        self.assertEqual([item['model'] for item in result['results']], models)
         # Each published slice carries the measured time of everything so far.
         timings = []
         with patch.object(module, '_visual_plan_scene_from_request',
@@ -213,7 +222,9 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
                 {'projectData': project, 'plansWorkflow': _workflow(project)},
                 on_model=lambda results: timings.append(
                     [isinstance(item.get('ms'), int) for item in results]))
-        self.assertEqual(timings, [[True], [True, True], [True, True, True], [True, True, True, True]])
+        self.assertEqual(len(timings), 4)
+        self.assertTrue(all(all(row) for row in timings))
+        self.assertEqual(sorted(len(row) for row in timings), [1, 2, 3, 4])
 
     def test_the_job_carries_partial_results_while_it_runs(self):
         backend = read_module_source('app.py')
@@ -333,9 +344,11 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertTrue(any('Nour St' in item['label'] for item in payload['streets']))
         self.assertIn('Tower', texts)
         system_prompt, user_prompt = module._svg_playground_prompts(payload, contract)
-        self.assertIn('FIXED PARCEL FRAME', user_prompt)
-        self.assertIn('PROGRAM TO LAY OUT', user_prompt)
-        self.assertIn('PROJECT BRIEF', user_prompt)
+        self.assertIn('specialist in designing real-estate site plans by writing SVG code', system_prompt)
+        self.assertIn('FIXED COLOR IDENTITY', system_prompt)
+        self.assertIn('PROJECT DATA FIELDS', user_prompt)
+        self.assertIn('parcel_pixels', user_prompt)
+        self.assertIn('masses', user_prompt)
         brief = module._svg_playground_brief(contract)
         self.assertIn('West main facade', brief)
         self.assertIn('Keep the courtyard', brief)
@@ -344,7 +357,7 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertIn('NEVER a dark', system_prompt)
         self.assertIn('viewBox="0 0 1600 900"', user_prompt)
         self.assertIn('legend', (system_prompt + user_prompt).lower())
-        self.assertIn('scattered rectangles is a failure', system_prompt)
+        self.assertIn('not scattered rectangles', system_prompt)
 
     def test_cards_open_svg_and_export_png_in_a_two_column_grid(self):
         source = read_frontend_text()

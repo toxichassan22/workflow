@@ -236,52 +236,55 @@ def _svg_playground_brief(contract):
 
 
 def _svg_playground_prompts(payload, contract=None):
+    colors = getattr(visual_plan_renderer, 'COLORS', {}) or {}
+    labels = getattr(visual_plan_renderer, 'USE_LABELS', {}) or {}
+    color_code = '; '.join(f'{labels.get(key, key)} = {value}' for key, value in colors.items())
     system_prompt = (
-        'You are an architect drawing a conceptual site plan as vector SVG — the kind '
-        'pinned on a developer brochure: a fully designed layout inside a real surveyed '
-        'parcel, not a set of blocks dropped on a canvas. You receive the exact surveyed '
-        'parcel boundary as finished pixel coordinates plus the full building program. '
-        'Draw ONE standalone <svg> element. '
-        'HARD RULES: reuse every parcel-boundary and setback-envelope coordinate number '
-        'EXACTLY as given — never recompute, rescale, round differently or invent the '
-        'boundary; every mass footprint and open area must sit wholly inside the parcel; '
-        'every program mass must appear once with its recorded footprint area and use; '
-        'all visible text is English only. '
-        'STYLE is natural daylight cartography, exactly like a printed site plan: '
-        'the very first element is a full-canvas white rect (width 1600 height 900 fill #FFFFFF); '
-        'parcel = very light green-grey fill #EDF3E8 with navy #172B4D outline width 4 and '
-        'vertex dots; setback envelope = dashed #81939F width 2, no fill; masses = their '
-        'given pastel fill with navy outline width 3 and a centered navy label carrying name, '
-        'area in m2 and floor range; basement-only masses are drawn as a hatched zone, never '
-        'as a surface block; surface parking = light grey with drawn white stall lines and a '
-        'tree row; landscape = pale green with scattered tree circles; entries = color-coded '
-        'arrows (main red, residential blue, service orange) pointing into the site with navy '
-        'labels; streets = recorded name plus width on their edge, neighbors marked Neighbor; '
-        'all text and outlines dark navy on light fills — NEVER a dark or night background, '
-        'no black/navy canvas, no photorealism, no satellite imagery, no invented dimensions. '
-        'DESIGN MANDATE: compose a real layout — group related masses, wrap housing wings '
-        'around a central landscaped courtyard with pool and play areas where the program '
-        'lists them, place towers on the high-rise side, keep the front setback open for '
-        'surface parking and the main entry, fill leftovers with landscape. A drawing of '
-        'loose scattered rectangles is a failure. '
-        'Output ONLY the raw SVG markup — no markdown fences, no explanation, no surrounding text.')
+        'You are a specialist in designing real-estate site plans by writing SVG code. '
+        'You must comply with the component counts, footprint areas, coordinates and every '
+        'field below — they are recorded facts, not suggestions. Draw ONE standalone <svg> '
+        'element and output ONLY the raw SVG markup — no markdown fences, no explanation. '
+        'All visible text is English only. '
+        'FIXED COLOR IDENTITY — use exactly these fills, no substitutes: ' + (color_code or 'pastel fills') + '; '
+        'parcel #EDF3E8 with navy #172B4D outline width 4 and vertex dots; '
+        'setback envelope dashed #81939F width 2, no fill; '
+        'basement-only masses hatched, never surface blocks; '
+        'surface parking light grey with white stall lines and a tree row; '
+        'landscape pale green with scattered tree circles; '
+        'entries as color-coded arrows (main red, residential blue, service orange) with navy labels. '
+        'Daylight cartography on white — first element a full-canvas #FFFFFF rect; '
+        'NEVER a dark background, no photorealism, no invented dimensions. '
+        'Compose a real brochure layout, not scattered rectangles: group related masses, wrap '
+        'housing around a landscaped courtyard with the listed pool and play areas, towers on '
+        'the high-rise side, front setback open for surface parking and the main entry.')
+    fields = {
+        'project': {key: (contract or {}).get(key) for key in
+                    ('projectName', 'projectIdea') if isinstance(contract, dict)},
+        'parcel_pixels': payload.get('parcels'),
+        'setback_envelope_pixels': payload.get('setback_envelopes'),
+        'setbacks_m': payload.get('setbacks'),
+        'streets': payload.get('streets'),
+        'masses': payload.get('masses'),
+        'site_program': payload.get('site_program'),
+        'entries': payload.get('entries'),
+        'primary_frontage': payload.get('primary_frontage'),
+        'notes': (contract or {}).get('clientNotes') if isinstance(contract, dict) else '',
+        'land_brief': (contract or {}).get('landBrief') if isinstance(contract, dict) else '',
+        'regulatory_constraints': (contract or {}).get('regulatoryConstraints')
+        if isinstance(contract, dict) else '',
+    }
     user_prompt = (
-        'FIXED PARCEL FRAME (boundary and setback coordinates: reuse verbatim):\n'
-        + json.dumps({key: payload.get(key) for key in
-                       ('canvas', 'parcels', 'setback_envelopes', 'setbacks', 'primary_frontage')},
-                      ensure_ascii=False)
-        + '\nPROGRAM TO LAY OUT INSIDE IT (design the arrangement yourself):\n'
-        + json.dumps({key: payload.get(key) for key in
-                       ('masses', 'site_program', 'entries', 'streets')}, ensure_ascii=False)
-        + '\nPROJECT BRIEF (same facts as the permanent site-plan prompt):\n'
-        + (_svg_playground_brief(contract) or '—')
-        + '\nCANVAS (fixed): <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" '
-        'width="1600" height="900"> starting with '
-        '<rect width="1600" height="900" fill="#FFFFFF"/>; '
-        "title top-left 'CONCEPTUAL SITE PLAN' 30px navy #172B4D plus project name and city; "
-        "caption bottom-right 'ILLUSTRATIVE REFERENCE - NOT TO SCALE' 18px navy; "
-        "north arrow 'N' pointing up; bottom-left legend box 'SITE PLAN LEGEND & APPROVED PROGRAM' "
-        'with a color chip per use present plus Parcel Boundary and Setback Envelope keys.')
+        'PROJECT DATA FIELDS (reuse every parcel coordinate number EXACTLY as given; '
+        'every mass footprint stays wholly inside the parcel; every program mass appears '
+        'once with its recorded area and use):\n'
+        + json.dumps(fields, ensure_ascii=False)
+        + '\nREQUIRED OUTPUT: <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" '
+        'width="1600" height="900">; '
+        "top-left title 'CONCEPTUAL SITE PLAN' 30px navy plus project name and city; "
+        "bottom-right caption 'ILLUSTRATIVE REFERENCE - NOT TO SCALE'; "
+        "north arrow 'N' pointing up; "
+        "bottom-left legend 'SITE PLAN LEGEND & APPROVED PROGRAM' with one chip per use color above."
+    )
     return system_prompt, user_prompt
 
 
@@ -388,7 +391,8 @@ def _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx
         text = _get_chat_response_text(response)
         if _svg_playground_extract_svg(text):
             return {'model': model, '_svg': text,
-                    '_ms': int((time.perf_counter() - started) * 1000)}
+                    '_ms': int((time.perf_counter() - started) * 1000),
+                    'thinking': _svg_playground_thinking(response)}
         finish = _svg_playground_finish_reason(response)
         if finish in _SVG_PLAYGROUND_LENGTH_FINISH and attempt == 0:
             # Truncated mid-drawing, not a refusal — the cap is already at the
@@ -403,10 +407,11 @@ def _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx
         if received:
             detail += f' (وصل {received} حرفًا' + (f'، السبب: {finish}' if finish else '') + ')'
         return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
-                'chars': 0, 'score': 0.0, 'svg': '',
+                'chars': 0, 'score': 0.0, 'svg': '', 'thinking': _svg_playground_thinking(response),
                 'error': (detail or 'لا يوجد SVG صالح في رد الموديل') + ' — أعد التشغيل'}
     return {'model': model, 'ok': False, 'ms': int((time.perf_counter() - started) * 1000),
-            'chars': 0, 'score': 0.0, 'svg': '', 'error': 'لا يوجد SVG صالح في رد الموديل — أعد التشغيل'}
+            'chars': 0, 'score': 0.0, 'svg': '', 'thinking': '',
+            'error': 'لا يوجد SVG صالح في رد الموديل — أعد التشغيل'}
 
 
 def _svg_playground_finalize(raw, payload_texts, payload_numbers):
@@ -452,11 +457,14 @@ def _svg_playground_scene(data):
 
 
 def _svg_playground_execute(data, on_model=None):
-    """Build the SVG prompt from the sealed scene, then run the 4 models.
+    """Build the SVG prompt from the sealed scene, then run the 4 models in
+    parallel threads — sequential runs summed every model's wall time, which is
+    why a comparison took several minutes with nothing on screen.
 
-    `on_model` receives the finished results after each model, so a worker can
-    publish every model's exact wall time as soon as it lands instead of holding
-    all four until the slowest one returns.
+    `on_model` receives the finished results (in model order) after each model
+    lands, so a worker can publish every model's exact wall time as soon as it
+    arrives instead of holding all four until the slowest one returns. The
+    metering context is built once up front: worker threads have no Flask `g`.
     """
     try:
         scene, contract, program, created_scene = _svg_playground_scene(data)
@@ -468,15 +476,27 @@ def _svg_playground_execute(data, on_model=None):
                 'error_code': 'PLANS_DATA_INVALID'}, 400
     payload, required_texts, required_numbers = _svg_playground_geometry(scene, contract, program)
     system_prompt, user_prompt = _svg_playground_prompts(payload, contract)
-    results = []
-    for model in SVG_PLAYGROUND_MODELS:
-        raw = _svg_playground_run_model(model, system_prompt, user_prompt, data)
+    ctx = _usage_ctx('image', data)
+    slots = [None] * len(SVG_PLAYGROUND_MODELS)
+    lock = threading.Lock()
+
+    def run_index(index, model):
+        raw = _svg_playground_run_model(model, system_prompt, user_prompt, data, usage_ctx=ctx)
         if '_svg' in raw:
             raw = _svg_playground_finalize(raw, required_texts, required_numbers)
-        results.append(raw)
+        with lock:
+            slots[index] = raw
+            snapshot = [item for item in slots if item is not None]
         if on_model is not None:
-            on_model(list(results))
-    return {'success': True, 'results': results, 'models': list(SVG_PLAYGROUND_MODELS),
+            on_model(snapshot)
+
+    workers = [threading.Thread(target=run_index, args=(index, model), daemon=True)
+               for index, model in enumerate(SVG_PLAYGROUND_MODELS)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    return {'success': True, 'results': list(slots), 'models': list(SVG_PLAYGROUND_MODELS),
             'scene': created_scene}, 200
 
 
