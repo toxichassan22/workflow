@@ -271,8 +271,13 @@ def _svg_playground_scene(data):
     return scene, contract, created_scene
 
 
-def _svg_playground_execute(data):
-    """Build the SVG prompt from the sealed scene, then run the 4 models."""
+def _svg_playground_execute(data, on_model=None):
+    """Build the SVG prompt from the sealed scene, then run the 4 models.
+
+    `on_model` receives the finished results after each model, so a worker can
+    publish every model's exact wall time as soon as it lands instead of holding
+    all four until the slowest one returns.
+    """
     try:
         scene, contract, created_scene = _svg_playground_scene(data)
     except visual_plan_geometry.PlanGeometryError as error:
@@ -289,6 +294,8 @@ def _svg_playground_execute(data):
         if '_svg' in raw:
             raw = _svg_playground_finalize(raw, required_texts, required_numbers)
         results.append(raw)
+        if on_model is not None:
+            on_model(list(results))
     return {'success': True, 'results': results, 'models': list(SVG_PLAYGROUND_MODELS),
             'scene': created_scene}, 200
 
@@ -315,7 +322,15 @@ def _svg_playground_worker(flask_app, actor, data, job_id):
             else:
                 _write_job(_SVG_PLAYGROUND_NAMESPACE, tenant_id, job_id,
                            {'status': 'running', 'success': True, 'progress': 15})
-                result, status = _svg_playground_execute(data)
+
+                def report_finished(results):
+                    _write_job(_SVG_PLAYGROUND_NAMESPACE, tenant_id, job_id,
+                               {'status': 'running', 'success': True,
+                                'progress': 15 + int(80 * len(results) / len(SVG_PLAYGROUND_MODELS)),
+                                'partial': {'success': True, 'results': results,
+                                            'models': list(SVG_PLAYGROUND_MODELS)}})
+
+                result, status = _svg_playground_execute(data, on_model=report_finished)
             _write_job(_SVG_PLAYGROUND_NAMESPACE, tenant_id, job_id,
                        {'status': 'completed' if result.get('success') else 'failed',
                         'success': bool(result.get('success')), 'progress': 100,
@@ -377,4 +392,7 @@ def api_visual_concept_svg_playground_job(job_id):
                'result': {'success': False, 'error': 'انتهت مهلة مقارنة الموديلات.',
                           'error_code': 'PLANS_JOB_EXPIRED'}}
         _write_job(_SVG_PLAYGROUND_NAMESPACE, g.tenant_id, job_id, job)
-    return jsonify({key: job[key] for key in ('status', 'success', 'progress', 'result', 'httpStatus') if key in job})
+    # `partial` carries the models that already finished, so the client shows
+    # each one's time without waiting for the slower ones.
+    return jsonify({key: job[key] for key in ('status', 'success', 'progress', 'result',
+                                              'httpStatus', 'partial') if key in job})

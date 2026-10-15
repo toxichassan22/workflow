@@ -188,6 +188,48 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertEqual(body['scene']['token'], 'sealed-by-stage-4')
         image_call.assert_not_called()
 
+    def test_each_model_is_reported_the_moment_it_finishes(self):
+        """The worker publishes a model's exact wall time before the next starts,
+        so the client never waits for the slowest model to see the first one."""
+        module = self.application_module
+        project = _project()
+        seen = []
+        with patch.object(module, '_visual_plan_scene_from_request',
+                          return_value=(_scene(), {}, {}, {})), \
+                self._mock_chat(module):
+            result, status = module._svg_playground_execute(
+                {'projectData': project, 'plansWorkflow': _workflow(project)},
+                on_model=lambda results: seen.append([item['model'] for item in results]))
+        self.assertEqual(status, 200)
+        self.assertTrue(result['success'])
+        models = list(module.SVG_PLAYGROUND_MODELS)
+        self.assertEqual(seen, [models[:1], models[:2], models[:3], models])
+        # Each published slice carries the measured time of everything so far.
+        timings = []
+        with patch.object(module, '_visual_plan_scene_from_request',
+                          return_value=(_scene(), {}, {}, {})), \
+                self._mock_chat(module):
+            module._svg_playground_execute(
+                {'projectData': project, 'plansWorkflow': _workflow(project)},
+                on_model=lambda results: timings.append(
+                    [isinstance(item.get('ms'), int) for item in results]))
+        self.assertEqual(timings, [[True], [True, True], [True, True, True], [True, True, True, True]])
+
+    def test_the_job_carries_partial_results_while_it_runs(self):
+        backend = read_module_source('app.py')
+        self.assertIn("'partial': {'success': True, 'results': results,", backend)
+        self.assertIn("result, status = _svg_playground_execute(data, on_model=report_finished)", backend)
+        self.assertIn("'httpStatus', 'partial') if key in job", backend)
+
+    def test_the_client_shows_seconds_and_streams_finished_models(self):
+        source = read_frontend_text()
+        self.assertIn("function visualConceptPlansSvgCompareSeconds(ms)", source)
+        self.assertIn("WFT('plans.svg_compare_seconds', 'الوقت: {seconds} ثانية'", source)
+        self.assertIn("WFT('plans.svg_compare_running', 'جاري تشغيل المقارنة — اكتمل {n} — المنقضي: {seconds} ثانية'", source)
+        # A live clock repaints only the status line while the models run.
+        self.assertIn('visualConceptPlansSvgCompareTimer = setInterval(visualConceptPlansSvgCompareTick, 250);', source)
+        self.assertIn("if (job && job.partial && Array.isArray(job.partial.results) && typeof onPartial === 'function') {", source)
+
     def test_stage4_reuses_the_scene_the_generation_stage_already_sealed(self):
         module = self.application_module
         project = _project()

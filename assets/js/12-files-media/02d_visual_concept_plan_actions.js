@@ -522,15 +522,34 @@
     // Stage 4 of the plans workflow: the four-model SVG comparison. The result
     // is display-only, so it stays in this session instead of the draft — four
     // inline SVG bodies would bloat every later draft save.
-    const visualConceptPlansSvgCompareRun = { status: 'idle', results: [], error: '' };
+    const visualConceptPlansSvgCompareRun = { status: 'idle', results: [], error: '',
+      startedAt: 0, elapsedMs: 0 };
+    let visualConceptPlansSvgCompareTimer = null;
 
     function visualConceptPlansSvgCompareState() {
       return visualConceptPlansSvgCompareRun;
     }
 
+    function visualConceptPlansSvgCompareStopTimer() {
+      if (visualConceptPlansSvgCompareTimer) {
+        clearInterval(visualConceptPlansSvgCompareTimer);
+        visualConceptPlansSvgCompareTimer = null;
+      }
+    }
+
+    // The clock runs from the moment the run starts: every tick repaints only
+    // the status line, never the cards, so the four drawings stay put.
+    function visualConceptPlansSvgCompareTick() {
+      const state = visualConceptPlansSvgCompareState();
+      if (state.status !== 'running') { visualConceptPlansSvgCompareStopTimer(); return; }
+      state.elapsedMs = Date.now() - state.startedAt;
+      const host = document.querySelector('[data-plans-svg-compare-status]');
+      if (host) host.textContent = visualConceptPlansSvgCompareStatusText(state);
+    }
+
     // Same 202-then-poll shape as the other plans endpoints, against this
     // tool's own job namespace.
-    async function visualConceptPlansSvgCompareJobApi(payload) {
+    async function visualConceptPlansSvgCompareJobApi(payload, onPartial) {
       const initial = await api('POST', '/api/visual-concept/plans-svg-playground', payload);
       if (!initial || !initial.jobId) return initial;
       const deadline = Date.now() + 300000;
@@ -538,6 +557,11 @@
       while (job && (job.status === 'queued' || job.status === 'running') && Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 2000));
         job = await api('GET', '/api/visual-concept/plans-svg-playground/jobs/' + encodeURIComponent(initial.jobId));
+        // Every finished model is published by the worker before the next one
+        // runs — mirror it on screen right away.
+        if (job && job.partial && Array.isArray(job.partial.results) && typeof onPartial === 'function') {
+          onPartial(job.partial.results);
+        }
       }
       if (job && job.result && typeof job.result === 'object') return job.result;
       if (job && job.error) return { success: false, error: job.error, error_code: job.error_code };
@@ -554,14 +578,22 @@
       state.status = 'running';
       state.results = [];
       state.error = '';
+      state.startedAt = Date.now();
+      state.elapsedMs = 0;
+      visualConceptPlansSvgCompareStopTimer();
       renderVisualConceptPlansWorkflow();
+      visualConceptPlansSvgCompareTimer = setInterval(visualConceptPlansSvgCompareTick, 250);
       showLoader(WFT('plans.svg_compare_loading', 'جاري تشغيل المقارنة'),
         WFT('plans.svg_compare_loading_detail', 'يتم إرسال المشهد المختوم إلى الموديلات الأربعة...'), 45);
       try {
         // The comparison reads the current project data and workflow, exactly
         // like the generation stages it sits after.
         const payload = await collectVisualConceptPlansWorkflowPayload();
-        const response = await visualConceptPlansSvgCompareJobApi(payload);
+        const response = await visualConceptPlansSvgCompareJobApi(payload, partial => {
+          state.results = partial;
+          const host = document.querySelector('[data-plans-svg-compare-results]');
+          if (host) host.innerHTML = visualConceptPlansSvgCompareHtml(state);
+        });
         hideLoader();
         const results = Array.isArray(response?.results) ? response.results : [];
         if (!response?.success || !results.length) {
@@ -587,6 +619,8 @@
         state.results = [];
         state.error = String(error.message || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
       }
+      visualConceptPlansSvgCompareStopTimer();
+      state.elapsedMs = state.startedAt ? Date.now() - state.startedAt : 0;
       renderVisualConceptPlansWorkflow();
     }
     /* <<< TEMP_STAGE4 */

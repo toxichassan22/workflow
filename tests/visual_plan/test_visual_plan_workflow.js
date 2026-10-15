@@ -13,7 +13,7 @@ const plain = value => JSON.parse(JSON.stringify(value));
 
 function fixture() {
   const context = vm.createContext({
-    console, Intl, setTimeout, clearTimeout, window: {},
+    console, Intl, setTimeout, clearTimeout, setInterval, clearInterval, window: {},
     document: { addEventListener() {}, getElementById: () => null, querySelector: () => null,
       querySelectorAll: () => [] },
     tenantProjectData: {}, tenantCreativeImages: {}, tenantVisualConceptState: null,
@@ -258,7 +258,8 @@ test('stage 4 renders one card per model, failures included', () => {
   ] });
   assert.ok(html.includes('plans-svg-compare-grid'));
   assert.ok(html.includes('anthropic/claude-sonnet-5.5'));
-  assert.ok(html.includes('4200'));
+  // Exact server wall time, rendered in seconds.
+  assert.ok(html.includes('الوقت: 4.2 ثانية'));
   assert.ok(html.includes('91.5'));
   assert.ok(html.includes('data:image/svg+xml;charset=utf-8,'));
   // A failed model keeps its own card and error, and adds no drawing.
@@ -268,6 +269,66 @@ test('stage 4 renders one card per model, failures included', () => {
   // The code view escapes the markup instead of injecting it.
   assert.ok(html.includes('&lt;svg viewBox'));
   assert.ok(!html.includes('<svg viewBox'));
+});
+test('stage 4 streams each finished model and reports its seconds', async () => {
+  const context = fixture();
+  const resultsHost = { innerHTML: '' };
+  const statusHost = { textContent: '' };
+  const snapshots = [];
+  const ticks = [];
+  let cleared = 0;
+  const sonnet = { model: 'anthropic/claude-sonnet-5.5', ok: true, ms: 4200, chars: 900, score: 88,
+    svg: '<svg viewBox="0 0 1600 900"></svg>', error: '' };
+  const haiku = { model: 'anthropic/claude-haiku-5.5', ok: true, ms: 11000, chars: 700, score: 61,
+    svg: '<svg viewBox="0 0 1600 900"></svg>', error: '' };
+  context.hasPermission = () => true;
+  context.toast = () => {};
+  context.showLoader = () => {};
+  context.hideLoader = () => {};
+  context.markVisualConceptDirty = () => {};
+  context.renderVisualConceptPlansWorkflow = () => {};
+  context.collectVisualConceptPlansWorkflowPayload = async () => ({ projectData: {}, plansWorkflow: {} });
+  // The poll sleeps 2s between job reads; this test clock returns at once.
+  context.setTimeout = fn => { fn(); return 0; };
+  context.setInterval = fn => { ticks.push(fn); return 7; };
+  context.clearInterval = () => { cleared += 1; };
+  context.document.querySelector = sel => (sel === '[data-plans-svg-compare-results]' ? resultsHost
+    : (sel === '[data-plans-svg-compare-status]' ? statusHost : null));
+  const jobReads = [
+    { status: 'running', partial: { results: [sonnet] } },
+    { status: 'completed', result: { success: true, results: [sonnet, haiku] } },
+  ];
+  context.api = async (method, path) => {
+    if (method === 'POST') return { success: true, jobId: 'job-1', status: 'queued' };
+    assert.ok(path.endsWith('/api/visual-concept/plans-svg-playground/jobs/job-1'));
+    const next = jobReads.shift();
+    // Snapshot what the owner can see while the job is still running.
+    if (next.status === 'completed') snapshots.push(resultsHost.innerHTML);
+    return next;
+  };
+  context.tenantVisualConceptState = { slots: {}, plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+    verification: { approved: true },
+    boundary: { approved: true, points: [
+      { eastings: 0, northings: 0 }, { eastings: 10, northings: 0 }, { eastings: 10, northings: 10 }] },
+    distribution: { approved: true, rows: [{ id: 'row_1', building: 'A', component: 'res' }] },
+  }) };
+  await context.runVisualConceptPlansSvgCompare();
+  const state = context.visualConceptPlansSvgCompareState();
+  assert.equal(state.status, 'done');
+  assert.equal(state.results.length, 2);
+  // The first model was already on screen, in seconds, before the run ended.
+  assert.equal(snapshots.length, 1);
+  assert.ok(snapshots[0].includes('anthropic/claude-sonnet-5.5'));
+  assert.ok(snapshots[0].includes('الوقت: 4.2 ثانية'));
+  assert.ok(!snapshots[0].includes('anthropic/claude-haiku-5.5'));
+  // The live clock stops as soon as the comparison lands.
+  assert.ok(cleared >= 1, 'the elapsed clock must be cleared when the run ends');
+  state.status = 'running';
+  state.startedAt = Date.now() - 31400;
+  state.elapsedMs = 0;
+  ticks[0]();
+  assert.ok(statusHost.textContent.includes('المنقضي: 31.4 ثانية'), statusHost.textContent);
+  state.status = 'done';
 });
 // <<< TEMP_STAGE4
 

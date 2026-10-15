@@ -199,16 +199,31 @@
     // Stage 4 renders the four-model SVG comparison in place: the SVG bodies are
     // display-only and would bloat the saved draft, so they live in this session
     // (visualConceptPlansSvgCompareState) and never enter plansWorkflow.
-    function visualConceptPlansSvgCompareStatusText(compare, projectLabel) {
+    function visualConceptPlansSvgCompareProjectLabel() {
+      return String((typeof tenantProjectData === 'object' && tenantProjectData && tenantProjectData.project_name) || '').trim();
+    }
+
+    // The wall time the server measured for one model, shown in seconds.
+    function visualConceptPlansSvgCompareSeconds(ms) {
+      const seconds = Math.max(0, Number(ms) || 0) / 1000;
+      return (Math.round(seconds * 10) / 10).toFixed(1);
+    }
+
+    function visualConceptPlansSvgCompareStatusText(compare) {
       const count = Array.isArray(compare.results) ? compare.results.length : 0;
       let status = WFT('plans.svg_compare_idle', 'لم تُشغّل المقارنة بعد.');
-      if (compare.status === 'running') status = WFT('plans.svg_compare_loading', 'جاري تشغيل المقارنة');
-      else if (compare.status === 'failed') status = String(compare.error || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
+      if (compare.status === 'running') {
+        // Live clock: the timer repaints this line every tick while the models
+        // run, so the elapsed seconds always match the wall clock.
+        status = WFT('plans.svg_compare_running', 'جاري تشغيل المقارنة — اكتمل {n} — المنقضي: {seconds} ثانية',
+          { n: count, seconds: visualConceptPlansSvgCompareSeconds(compare.elapsedMs) });
+      } else if (compare.status === 'failed') status = String(compare.error || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
       else if (count) status = WFT('plans.svg_compare_done', 'اكتملت المقارنة — {n} موديلات.', { n: count });
-      const source = projectLabel
-        ? WFT('plans.svg_compare_source', 'من بيانات المشروع: {name}', { name: projectLabel })
+      const source = visualConceptPlansSvgCompareProjectLabel();
+      const prefix = source
+        ? WFT('plans.svg_compare_source', 'من بيانات المشروع: {name}', { name: source })
         : WFT('plans.svg_compare_source_empty', 'من بيانات المشروع الحالي');
-      return source + ' — ' + status;
+      return prefix + ' — ' + status;
     }
 
     function visualConceptPlansSvgCompareCard(item) {
@@ -219,7 +234,7 @@
           escapeHtml((item && item.error) || WFT('plans.svg_compare_model_failed', 'لم يُنتج الموديل رسمًا صالحًا')) +
           '</p></div>';
       }
-      html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_ms', 'الوقت: {n} مللي ثانية', { n: item.ms })) + '</p>';
+      html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_seconds', 'الوقت: {seconds} ثانية', { seconds: visualConceptPlansSvgCompareSeconds(item.ms) })) + '</p>';
       html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_size_score', 'الحجم: {chars} حرف — الدقة: {score}%', { chars: item.chars, score: item.score })) + '</p>';
       if (item.svg) {
         html += '<img alt="' + escapeHtml(model) + '" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(item.svg) + '">';
@@ -258,7 +273,6 @@
       // the permanent panels and step highlights stand down below.
       const tempStage4Active = workflow.viewStage === 'svgcompare' && boundaryApproved && distApproved;
       const svgCompare = visualConceptPlansSvgCompareState();
-      const projectLabel = String((typeof tenantProjectData === 'object' && tenantProjectData && tenantProjectData.project_name) || '').trim();
       /* <<< TEMP_STAGE4 */
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
       const conflicts = checks.filter(item => item.result === 'متعارض');
@@ -328,7 +342,7 @@
         '<section class="plans-workflow-panel" data-plans-workflow-stage="svgcompare" hidden>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.svg_compare_title', 'مقارنة موديلات رسم المخطط')) + '</h4>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="run-svg-compare"' + (svgCompare.status === 'running' ? ' disabled' : '') + '>' + escapeHtml(WFT('plans.svg_compare_run', 'تشغيل المقارنة')) + '</button></div>' +
-        '<p class="tenant-hint" data-plans-svg-compare-status>' + escapeHtml(visualConceptPlansSvgCompareStatusText(svgCompare, projectLabel)) + '</p>' +
+        '<p class="tenant-hint" data-plans-svg-compare-status>' + escapeHtml(visualConceptPlansSvgCompareStatusText(svgCompare)) + '</p>' +
         '<div data-plans-svg-compare-results>' + visualConceptPlansSvgCompareHtml(svgCompare) + '</div>' +
         '</section>' +
         /* <<< TEMP_STAGE4 */
