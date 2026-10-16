@@ -406,6 +406,7 @@ print(f"[CONFIG] Visual plan text model: {VISUAL_PLAN_TEXT_MODEL}")
 # adopted model is image-only and rejects /chat/completions.
 IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'openai/gpt-image-2.5-sunburst')
 VISUAL_CONCEPT_IMAGE_MODEL = os.environ.get('VISUAL_CONCEPT_IMAGE_MODEL', IMAGE_MODEL)
+PLAN_SITE_MODEL = os.environ.get('PLAN_SITE_MODEL', 'google/gemini-4-argon')
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '32000'))
 EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '65536'))

@@ -135,6 +135,7 @@ def _prepare_image_reference_for_model(reference, tenant_id=None):
         '.jpg': 'image/jpeg',
         '.jpeg': 'image/jpeg',
         '.webp': 'image/webp',
+        '.svg': 'image/svg+xml',
     }.get(os.path.splitext(image_path)[1].lower())
     if not mime_type:
         print(f'[IMAGE ERROR] Unsupported local reference format: {reference}')
@@ -163,8 +164,9 @@ def persist_generated_image(image, tenant_id):
         'image/jpeg': '.jpg',
         'image/jpg': '.jpg',
         'image/webp': '.webp',
+        'image/svg+xml': '.svg',
     }.get(mime)
-    if not extension or not re.fullmatch(r'\.(png|jpg|webp)', extension):
+    if not extension or not re.fullmatch(r'\.(png|jpg|webp|svg)', extension):
         return image
     try:
         raw = base64.b64decode(encoded, validate=True)

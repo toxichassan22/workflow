@@ -271,7 +271,8 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
 
 def _visual_concept_plan_site_body(context, model, regulations):
     parts = [
-        "DRAWING REQUESTED — 'CONCEPTUAL SITE PLAN': a simplified flat 2D site plan, top-down "
+        "DRAWING REQUESTED — 'CONCEPTUAL SITE PLAN': generate clean standalone SVG markup "
+        '(<svg viewBox="0 0 1600 900" width="1600" height="900" xmlns="http://www.w3.org/2000/svg">) for a simplified flat 2D site plan, top-down '
         'orthographic view on a white background, same pastel style and fixed color code. The '
         'attached reference image is the TRUE surveyed parcel outline — trace it exactly, same '
         'vertices and proportions, as a dark navy outline. Inside it draw the dashed setback '
@@ -339,7 +340,8 @@ def _visual_concept_plan_site_body(context, model, regulations):
         'North arrow pointing up. Bottom-left legend with the fixed color chips plus "Parcel '
         'Boundary" and "Setback Envelope" line keys. Top-left title "CONCEPTUAL SITE PLAN". Flat '
         'cartographic style, muted colors, no photorealism, no satellite imagery. Only verified '
-        'labels — no invented dimensions.')
+        'labels — no invented dimensions. Output ONLY valid standalone raw SVG code starting with <svg> '
+        'and ending with </svg> — no markdown fences, no explanation.')
     return ''.join(parts)
 
 

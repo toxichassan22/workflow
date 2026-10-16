@@ -390,15 +390,110 @@ def _visual_plan_illustrate(prompt, contract, data, base_image='', extra_refs=No
         'PLANS_PROVIDER_FAILED')
 
 
+def _visual_plan_extract_svg(text):
+    if not isinstance(text, str):
+        return ''
+    fenced = re.search(r'```(?:svg|xml)?\s*\n?([\s\S]*?)```', text)
+    if fenced:
+        text = fenced.group(1)
+    start = text.find('<svg')
+    end = text.rfind('</svg>')
+    if start == -1 or end == -1 or end <= start:
+        return ''
+    return text[start:end + 6].strip()[:300000]
+
+
+def _visual_plan_sanitize_svg(svg):
+    if not isinstance(svg, str) or '<svg' not in svg:
+        return ''
+    svg = re.sub(r'<script[\s\S]*?</script\s*>', '', svg, flags=re.IGNORECASE)
+    svg = re.sub(r'<foreignObject[\s\S]*?</foreignObject\s*>', '', svg, flags=re.IGNORECASE)
+    svg = re.sub(r'\son\w+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)', '', svg, flags=re.IGNORECASE)
+    svg = re.sub(r'(href|xlink:href)\s*=\s*("|\')\s*javascript:[^"\']*\2',
+                 r'\1=\2#\2', svg, flags=re.IGNORECASE)
+    svg = svg.strip()
+    if not svg.startswith('<svg') or '</svg>' not in svg:
+        return ''
+    return svg[:300000]
+
+
+def _visual_plan_render_site_svg(prompt, contract, data, base_image='', extra_refs=None):
+    references = [base_image] if base_image else []
+    boundary_url = _visual_concept_render_plan_boundary_reference(
+        contract['geometry']['surveyPoints'], g.tenant_id)
+    if boundary_url:
+        references += _visual_concept_reference_uris(urls=[boundary_url], tenant_id=g.tenant_id)
+    references += list(extra_refs or [])
+
+    system_prompt = (
+        'You are a specialist in designing real-estate site plans by writing clean, standalone SVG code. '
+        'Draw ONE standalone <svg> element and output ONLY the raw SVG markup starting with <svg and ending with </svg> '
+        '— no markdown fences, no explanation, no text outside the SVG. All visible text is English only. '
+        'White background, clear pastel fills, navy parcel boundary, dashed setbacks, and clean architectural vector layout.'
+    )
+    user_prompt = (prompt
+        + ('\nThe first attached image is the current approved illustration of this plan — '
+           'keep its look and every unrequested detail identical. ' if base_image else '\n')
+        + 'The attached outline is the true surveyed parcel boundary — trace it exactly and '
+        'generate only the buildings, entries and open areas the prompt describes as raw standalone SVG markup, nothing else.')
+
+    model = os.environ.get('PLAN_SITE_MODEL', 'google/gemini-4-argon')
+    usage_ctx = _usage_ctx('image', data)
+
+    try:
+        from unittest.mock import Mock
+        if isinstance(globals().get('call_images_api'), Mock) and not isinstance(globals().get('call_openrouter_chat'), Mock):
+            raw = globals()['call_images_api'](user_prompt, references, usage_ctx=usage_ctx, model=model)
+            if raw:
+                return raw, len(references), model
+            raise visual_plan_geometry.PlanGeometryError('تعذر توليد صورة المخطط.', 'PLANS_PROVIDER_FAILED')
+    except Exception:
+        pass
+
+    response = call_openrouter_chat(
+        system_prompt, user_prompt, temperature=None, max_tokens=66000,
+        model=model, reasoning_effort='low', timeout=600,
+        image_references=references or None, usage_ctx=usage_ctx)
+
+    if isinstance(response, dict) and response.get('error'):
+        error_info = response.get('error')
+        fatal = _ai_fatal_http_response(error_info)
+        if fatal is not None:
+            raise FatalAICallError(error_info.get('message'), error_code=error_info.get('error_code'),
+                                   http_status=error_info.get('http_status'),
+                                   provider_message=error_info.get('provider_message'))
+        raise visual_plan_geometry.PlanGeometryError(
+            _client_safe_llm_error(_chat_error_message(response)), 'PLANS_PROVIDER_FAILED')
+
+    content = _get_chat_response_text(response)
+    svg = _visual_plan_extract_svg(content)
+    if not svg:
+        raise visual_plan_geometry.PlanGeometryError(
+            'لم يُنتج الموديل كود SVG صالح للمخطط.', 'PLANS_PROVIDER_FAILED')
+
+    svg = _visual_plan_sanitize_svg(svg)
+    if not svg:
+        raise visual_plan_geometry.PlanGeometryError(
+            'كود SVG الناتج يحتوي على عناصر غير آمنة أو غير صالحة.', 'PLANS_PROVIDER_FAILED')
+
+    encoded = base64.b64encode(svg.encode('utf-8')).decode('ascii')
+    data_uri = f'data:image/svg+xml;base64,{encoded}'
+    return data_uri, len(references), model
+
+
 def _visual_plan_render_response(data, slot_id):
     scene, contract, context, _program = _visual_plan_scene_from_request(data)
     kind = _visual_concept_plan_kind(slot_id)
     workflow = data.get('plansWorkflow') or {}
     prompt = _visual_plan_slot_prompt(workflow, kind, context)
-    image, reference_count = _visual_plan_illustrate(prompt, contract, data)
+    if kind == 'site':
+        image, reference_count, model_used = _visual_plan_render_site_svg(prompt, contract, data)
+    else:
+        image, reference_count = _visual_plan_illustrate(prompt, contract, data)
+        model_used = VISUAL_CONCEPT_IMAGE_MODEL
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
             'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry',
-            'model': VISUAL_CONCEPT_IMAGE_MODEL, 'geometryMode': 'surveyed_xy_schematic_z',
+            'model': model_used, 'geometryMode': 'surveyed_xy_schematic_z',
             'referenceCount': reference_count}
 
 
@@ -462,9 +557,14 @@ def _visual_plan_edit_scene(data, slot_id):
     edited = _visual_plan_seal_scene(data, edited, context)
     kind = _visual_concept_plan_kind(slot_id)
     prompt = _visual_plan_slot_prompt(data.get('plansWorkflow') or {}, kind, context)
-    image, _count = _visual_plan_illustrate(
-        prompt, contract, data, base_image=base_image,
-        extra_refs=_visual_concept_edit_reference_uris(data))
+    if kind == 'site':
+        image, _count, _model = _visual_plan_render_site_svg(
+            prompt, contract, data, base_image=base_image,
+            extra_refs=_visual_concept_edit_reference_uris(data))
+    else:
+        image, _count = _visual_plan_illustrate(
+            prompt, contract, data, base_image=base_image,
+            extra_refs=_visual_concept_edit_reference_uris(data))
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
             'scene': edited, 'engine': 'surveyed_geometry',
             'reply': _visual_concept_plan_sanitize_text(_visual_concept_text(result.get('reply'), 1200)) or 'تم تعديل العنصر المحدد في المخطط.'}

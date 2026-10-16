@@ -328,7 +328,7 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
             render = client.post('/api/visual-concept/generate',
                 headers=self._headers(self.token_a),
-                json={'slotId': 'plan_site', 'projectData': project, 'plansWorkflow': workflow})
+                json={'slotId': 'plan_uses', 'projectData': project, 'plansWorkflow': workflow})
         self.assertEqual(render.status_code, 200, render.get_json())
         body = render.get_json()
         self.assertEqual(body['image'], '/uploads/creative/plan.png')
@@ -350,9 +350,52 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
             failed = client.post('/api/visual-concept/generate',
                 headers=self._headers(self.token_a),
-                json={'slotId': 'plan_site', 'projectData': project, 'plansWorkflow': workflow})
+                json={'slotId': 'plan_uses', 'projectData': project, 'plansWorkflow': workflow})
         self.assertEqual(failed.status_code, 503, failed.get_json())
         self.assertEqual(failed.get_json()['error_code'], 'PLANS_PROVIDER_FAILED')
+
+    def test_plan_site_render_generates_svg_with_argon4(self):
+        """Site plan generation uses argon4 (google/gemini-4-argon) and produces SVG output."""
+        module = self.application_module
+        project = self.project()
+        context = module._visual_concept_plan_context(project)
+        prompt = module._visual_concept_plan_drawing_prompt('site', context)
+        self.assertIn('SVG', prompt)
+        self.assertNotIn('png', prompt.lower())
+
+        client = self.app.test_client()
+        layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[5, 3], [15, 3], [15, 15], [5, 15]]}],
+            'entries': [], 'openAreas': []})
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': layout}}]
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            prepared = client.post('/api/visual-concept/plans-prompts',
+                headers=self._headers(self.token_a),
+                json={'projectData': project, 'plansWorkflow': self.workflow(project)})
+        self.assertEqual(prepared.status_code, 200, prepared.get_json())
+        scene = prepared.get_json()['scene']
+        workflow = {**self.workflow(project), 'scene': scene,
+                    'prompts': prepared.get_json()['prompts']}
+
+        raw_svg = '<svg viewBox="0 0 1600 900" width="1600" height="900" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#fff"/></svg>'
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': raw_svg}}]
+        }) as chat_call, \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/plan.svg') as persist_mock, \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            render = client.post('/api/visual-concept/generate',
+                headers=self._headers(self.token_a),
+                json={'slotId': 'plan_site', 'projectData': project, 'plansWorkflow': workflow})
+        self.assertEqual(render.status_code, 200, render.get_json())
+        body = render.get_json()
+        self.assertEqual(body['image'], '/uploads/creative/plan.svg')
+        self.assertEqual(body['model'], 'google/gemini-4-argon')
+        chat_call.assert_called_once()
+        self.assertEqual(chat_call.call_args.kwargs.get('model'), 'google/gemini-4-argon')
+        persisted_uri = persist_mock.call_args.args[0]
+        self.assertTrue(persisted_uri.startswith('data:image/svg+xml;base64,'))
 
     def test_fixed_geometry_plans_do_not_chain_image_approvals(self):
         module = self.application_module
