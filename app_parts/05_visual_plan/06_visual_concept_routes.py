@@ -150,14 +150,12 @@ def api_visual_concept_plans_boundary():
 
 
 def _visual_concept_plans_context_from_request(data):
-    """Shared context assembly for the plans workflow endpoints: boundary points
-    from the approved boundary stage (or the recorded survey), then the cached
-    planContext when the verify step already built it."""
+    """Shared context assembly for plans endpoints: recorded land geometry is
+    authoritative, with legacy workflow points retained only as a fallback."""
     project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
-    points = _visual_concept_plan_boundary_points(
-        boundary.get('points') or project_data.get('survey_coordinates'))
+    points = _visual_concept_plan_recorded_points(project_data, boundary.get('points'))
     context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
     context = context or _visual_concept_plan_context(project_data, points, workflow.get('verification'))
     context['boundary_points'] = points or context.get('boundary_points') or []
@@ -352,7 +350,7 @@ def api_visual_concept_plans_distribution_check():
 def api_visual_concept_plans_prompts():
     data = request.get_json(silent=True) or {}
     workflow_error = _visual_concept_plan_workflow_error(
-        data, 'plan_site', require_boundary=True, require_distribution=True)
+        data, 'plan_site', require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     _billing_guard = _require_billing_balance('visual_concept')
@@ -397,7 +395,7 @@ def api_visual_concept_prompt():
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
     workflow_error = _visual_concept_plan_workflow_error(
-        data, slot_id, require_boundary=True, require_distribution=True)
+        data, slot_id, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     if _visual_concept_plan_kind(slot_id):
@@ -474,7 +472,7 @@ def api_visual_concept_generate():
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
     workflow_error = _visual_concept_plan_workflow_error(
-        data, slot_id, require_boundary=True, require_distribution=True)
+        data, slot_id, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     if _visual_concept_plan_kind(slot_id):
@@ -537,7 +535,7 @@ def api_visual_concept_chat():
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
     workflow_error = _visual_concept_plan_workflow_error(
-        data, slot_id, require_boundary=True, require_distribution=True)
+        data, slot_id, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     if _visual_concept_plan_kind(slot_id):

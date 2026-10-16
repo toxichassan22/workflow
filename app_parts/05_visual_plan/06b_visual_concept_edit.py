@@ -134,7 +134,7 @@ def api_visual_concept_edit():
     if not slot_id:
         return jsonify({'success': False, 'error': 'نوع الصورة غير معروف', 'error_code': 'SLOT_INVALID'}), 400
     workflow_error = _visual_concept_plan_workflow_error(
-        data, slot_id, require_boundary=True, require_distribution=True)
+        data, slot_id, require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     if _visual_concept_plan_kind(slot_id):

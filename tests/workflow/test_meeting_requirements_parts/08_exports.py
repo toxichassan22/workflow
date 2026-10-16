@@ -593,7 +593,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('data-visual-plans-tab="generate"', index_source)
         self.assertIn('data-visual-plans-tab="upload"', index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-verify'", index_source)
-        self.assertIn("api('POST', '/api/visual-concept/plans-boundary'", index_source)
+        self.assertNotIn("api('POST', '/api/visual-concept/plans-boundary'", index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-distribution'", index_source)
         self.assertIn("api('POST', '/api/visual-concept/plans-distribution-check'", index_source)
         self.assertIn("visualConceptPlanJobApi('POST', '/api/visual-concept/plans-prompts'", index_source)
@@ -608,29 +608,31 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('plans-conflict-solution', index_source)
         self.assertIn("WFT('plans.proposed_solution', 'الحل المقترح:')", index_source)
         self.assertIn("const defaultStage = !verified ? 'verify'", index_source)
-        self.assertIn("const activeStage = requestedStage", index_source)
+        self.assertIn("const activeStage = (requestedStage === 'generate' || requestedStage === 'other') && !distApproved", index_source)
         self.assertIn("data-plans-workflow-tab=\"verify\"", index_source)
         self.assertIn("data-plans-workflow-tab=\"boundary\"", index_source)
         self.assertIn("data-plans-workflow-tab=\"generate\"", index_source)
-        # TEMP stage 4 — the model-comparison tab, gated on the same sealed scene
-        # the generation stage uses. Delete this block with the stage.
-        # >>> TEMP_STAGE4
-        self.assertIn("data-plans-workflow-tab=\"svgcompare\"", index_source)
-        self.assertIn("const tempStage4Active = visualConceptPlansSvgCompareStage4() && boundaryApproved && distApproved;", index_source)
-        # <<< TEMP_STAGE4
+        self.assertIn("data-plans-workflow-tab=\"other\"", index_source)
+        self.assertIn("data-plans-workflow-stage=\"generate\"", index_source)
+        self.assertIn("data-plans-workflow-stage=\"other\"", index_source)
+        self.assertIn("const otherPlans = VISUAL_CONCEPT_PLAN_KINDS.filter(item => item.kind !== 'site');", index_source)
+        self.assertNotIn("svgcompare", index_source)
         self.assertIn('<ol class="plans-workflow-steps">', index_source)
         self.assertNotIn('plans-workflow-stage-tabs', index_source)
         self.assertNotIn('visual-concept-mode-btn" data-plans-workflow-tab', index_source)
         self.assertNotIn("data-plans-workflow-action=\"back-verify\"", index_source)
         self.assertNotIn("data-plans-workflow-action=\"back-boundary\"", index_source)
-        self.assertIn("data-plans-workflow-action=\"open-land-data\"", index_source)
+        self.assertNotIn('data-plans-workflow-action="open-land-data"', index_source)
+        self.assertNotIn('data-plans-workflow-action="refresh-boundary"', index_source)
+        self.assertNotIn('data-plans-workflow-action="approve-boundary"', index_source)
+        self.assertNotIn('data-plans-boundary-preview', index_source)
         self.assertIn('data-plans-workflow-action="propose-distribution"', index_source)
         self.assertIn('data-plans-workflow-action="check-distribution"', index_source)
         self.assertIn('data-plans-workflow-action="approve-distribution"', index_source)
         self.assertIn('data-plans-workflow-action="add-distribution-row"', index_source)
         self.assertIn('data-dist-field="', index_source)
         self.assertIn('data-dist-remove="', index_source)
-        self.assertIn('رسم الحدود وتوزيع المكونات', index_source)
+        self.assertIn('توزيع المكونات</button>', index_source)
         self.assertNotIn('data-plan-boundary-field', index_source)
         self.assertNotIn('data-plans-boundary-rows', index_source)
         self.assertIn('plans-workflow-success', index_source)
@@ -732,11 +734,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             body.index('const workflow = visualConceptPlansWorkflowState()'))
         self.assertIn('workflow.promptsError', body)
         self.assertIn('visualConceptPlansPromptsPending', index_source)
-        boundary_start = index_source.index('async function refreshVisualConceptPlansBoundary()')
-        boundary_body = index_source[boundary_start:index_source.index('function approveVisualConceptPlansBoundary()', boundary_start)]
-        self.assertLess(
-            boundary_body.index("api('POST', '/api/visual-concept/plans-boundary'"),
-            boundary_body.index('const workflow = visualConceptPlansWorkflowState()'))
+        self.assertNotIn('function refreshVisualConceptPlansBoundary()', index_source)
+        self.assertNotIn('function approveVisualConceptPlansBoundary()', index_source)
         # The distribution check writes its findings onto the live workflow —
         # they reach the draft, and approval sees them.
         check_start = index_source.index('async function checkVisualConceptPlansDistribution(')

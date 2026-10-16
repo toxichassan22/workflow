@@ -46,8 +46,7 @@ class VisualPlanContractTests(MeetingRequirementsTests):
     def workflow(self, project):
         return {
             'verification': {'approved': True},
-            'boundary': {'approved': True, 'points': project['survey_coordinates'],
-                         'referenceUrl': '/uploads/creative/parcel.png'},
+            'boundary': {'approved': False, 'points': project['survey_coordinates']},
             'distribution': {'approved': True, 'rows': [{
                 'id': 'row_1', 'building': 'Main Building', 'floor_range': '1-3',
                 'component': 'Residential', 'units_per_floor': 4, 'floor_area_sqm': 120,
@@ -96,7 +95,7 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         def gate(wf):
             return module._visual_concept_plan_workflow_error(
                 {'projectData': project, 'plansWorkflow': copy.deepcopy(wf)},
-                'plan_site', require_boundary=True, require_distribution=True)
+                'plan_site', require_distribution=True)
 
         with module.app.test_request_context():
             module.g.tenant_id = self.tenant_a
@@ -436,9 +435,42 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         for kind in ('uses', 'massing'):
             with self.subTest(kind=kind):
                 error = module._visual_concept_plan_workflow_error(
-                    copy.deepcopy(data), 'plan_' + kind, require_boundary=True,
-                    require_distribution=True)
+                    copy.deepcopy(data), 'plan_' + kind, require_distribution=True)
                 self.assertIsNone(error)
+
+    def test_temporary_svg_model_comparison_route_is_retired(self):
+        module = self.application_module
+        routes = {rule.rule for rule in module.app.url_map.iter_rules()}
+        self.assertFalse(any(path.startswith('/api/visual-concept/plans-svg-playground')
+                             for path in routes))
+
+    def test_recorded_survey_geometry_needs_no_separate_boundary_approval(self):
+        module = self.application_module
+        project = self.project()
+        workflow = self.workflow(project)
+        workflow['boundary'] = {'approved': False, 'points': project['survey_coordinates']}
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            error = module._visual_concept_plan_workflow_error(
+                {'projectData': project, 'plansWorkflow': workflow},
+                'plan_site', require_distribution=True)
+        self.assertIsNone(error)
+
+    def test_live_land_geometry_wins_over_legacy_saved_boundary_points(self):
+        module = self.application_module
+        project = self.project()
+        legacy_points = [
+            {'point': 'old-1', 'eastings': 1, 'northings': 1},
+            {'point': 'old-2', 'eastings': 2, 'northings': 1},
+            {'point': 'old-3', 'eastings': 2, 'northings': 2},
+        ]
+        _project, _workflow, _boundary, points, context = \
+            module._visual_concept_plans_context_from_request({
+                'projectData': project,
+                'plansWorkflow': {'boundary': {'points': legacy_points}},
+            })
+        self.assertEqual(points, module._visual_concept_plan_boundary_points(project['survey_coordinates']))
+        self.assertEqual(context['boundary_points'], points)
 
 
 if __name__ == '__main__':

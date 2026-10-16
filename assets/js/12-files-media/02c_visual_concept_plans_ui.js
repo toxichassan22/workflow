@@ -22,53 +22,6 @@
       });
     }
 
-    function renderVisualConceptBoundarySvg(host, points) {
-      if (!host) return;
-      const rows = visualConceptBoundaryPoints(points);
-      if (rows.length < 3) {
-        host.innerHTML = '<p class="tenant-hint">لا توجد نقاط حدود مكتملة.</p>';
-        return;
-      }
-      const xs = rows.map(item => item.eastings), ys = rows.map(item => item.northings);
-      const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-      const scale = Math.min(800 / Math.max(maxX - minX, 1e-7), 500 / Math.max(maxY - minY, 1e-7));
-      const left = (1000 - (maxX - minX) * scale) / 2;
-      const bottom = (700 - (maxY - minY) * scale) / 2;
-      const toPoint = item => [Math.round(left + (item.eastings - minX) * scale),
-        Math.round(700 - bottom - (item.northings - minY) * scale)];
-      const parcels = new Map();
-      rows.forEach(row => {
-        const id = row.parcel_id || 'parcel_1';
-        if (!parcels.has(id)) parcels.set(id, []);
-        parcels.get(id).push(row);
-      });
-      // Per-point parcel ids are extraction noise — a fragment under three
-      // vertices can never be a polygon — so merge every row into one parcel.
-      if (!Array.from(parcels.values()).some(parcel => parcel.length >= 3)) {
-        const merged = [], seen = new Set();
-        rows.forEach(row => {
-          const key = row.eastings + ':' + row.northings;
-          if (seen.has(key)) return;
-          seen.add(key);
-          merged.push(row);
-        });
-        parcels.clear();
-        parcels.set('parcel_1', merged);
-      }
-      const polygons = Array.from(parcels.values()).map(parcel =>
-        '<polygon points="' + parcel.map(toPoint).map(point => point.join(',')).join(' ') +
-        '" fill="#e8f0e8" stroke="#172b4d" stroke-width="7"></polygon>').join('');
-      const circles = rows.map((item, index) => {
-        const [x, y] = toPoint(item);
-        return '<circle cx="' + x + '" cy="' + y + '" r="9" fill="#172b4d"><title>' + escapeHtml(item.point || String(index + 1)) + '</title></circle>';
-      }).join('');
-      host.innerHTML = '<svg viewBox="0 0 1000 700" role="img" aria-label="حدود الأرض" class="plans-boundary-svg">' +
-        polygons + circles +
-        '<line x1="90" y1="155" x2="90" y2="70" stroke="#172b4d" stroke-width="7"></line>' +
-        '<polygon points="90,50 76,78 104,78" fill="#172b4d"></polygon>' +
-        '<text x="82" y="185" fill="#172b4d" font-size="24">N</text></svg>';
-    }
-
     function visualConceptDistributionTotalsRowsHtml(distribution) {
       const totals = Array.isArray(distribution.totals) ? distribution.totals : [];
       if (!totals.length) return '';
@@ -195,140 +148,20 @@
         .concat(issues.filter(item => item.severity === 'high'));
     }
 
-    /* >>> TEMP_STAGE4 */
-    // Stage 4 renders the four-model SVG comparison in place: the SVG bodies are
-    // display-only and would bloat the saved draft, so they live in this session
-    // (visualConceptPlansSvgCompareState) and never enter plansWorkflow.
-    function visualConceptPlansSvgCompareProjectLabel() {
-      return String((typeof tenantProjectData === 'object' && tenantProjectData && tenantProjectData.project_name) || '').trim();
-    }
-
-    // The wall time the server measured for one model, shown in seconds.
-    function visualConceptPlansSvgCompareSeconds(ms) {
-      const seconds = Math.max(0, Number(ms) || 0) / 1000;
-      return (Math.round(seconds * 10) / 10).toFixed(1);
-    }
-
-    function visualConceptPlansSvgCompareStatusText(compare) {
-      const count = Array.isArray(compare.results) ? compare.results.length : 0;
-      let status = WFT('plans.svg_compare_idle', 'لم تُشغّل المقارنة بعد.');
-      if (compare.status === 'running') {
-        // Live clock: the timer repaints this line every tick while the models
-        // run, so the elapsed seconds always match the wall clock.
-        status = WFT('plans.svg_compare_running', 'جاري تشغيل المقارنة — اكتمل {n} — المنقضي: {seconds} ثانية',
-          { n: count, seconds: visualConceptPlansSvgCompareSeconds(compare.elapsedMs) });
-      } else if (compare.status === 'failed') status = String(compare.error || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
-      else if (count) status = WFT('plans.svg_compare_done', 'اكتملت المقارنة — {n} موديلات.', { n: count });
-      const source = visualConceptPlansSvgCompareProjectLabel();
-      const prefix = source
-        ? WFT('plans.svg_compare_source', 'من بيانات المشروع: {name}', { name: source })
-        : WFT('plans.svg_compare_source_empty', 'من بيانات المشروع الحالي');
-      return prefix + ' — ' + status;
-    }
-
-    function visualConceptPlansSvgCompareCard(item, index) {
-      const model = String(item && item.model ? item.model : '');
-      let html = '<div class="plans-svg-compare-card"><span class="plans-svg-compare-model">' + escapeHtml(model) + '</span>';
-      if (!item || !item.ok) {
-        return html + '<p class="plans-svg-compare-error">' +
-          escapeHtml((item && item.error) || WFT('plans.svg_compare_model_failed', 'لم يُنتج الموديل رسمًا صالحًا')) +
-          '</p></div>';
-      }
-      html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_seconds', 'الوقت: {seconds} ثانية', { seconds: visualConceptPlansSvgCompareSeconds(item.ms) })) + '</p>';
-      html += '<p class="tenant-hint">' + escapeHtml(WFT('plans.svg_compare_size_score', 'الحجم: {chars} حرف — الدقة: {score}%', { chars: item.chars, score: item.score })) + '</p>';
-      if (item.svg) {
-        html += '<button type="button" class="plans-svg-compare-preview" data-svg-compare-open="' + index + '" title="' + escapeHtml(model) + '">' +
-          '<img alt="' + escapeHtml(model) + '" src="data:image/svg+xml;charset=utf-8,' + encodeURIComponent(item.svg) + '"></button>';
-        html += '<div class="plans-svg-compare-actions">' +
-          '<button type="button" class="btn ghost small" data-svg-compare-open="' + index + '">' + escapeHtml(WFT('plans.svg_compare_open', 'فتح')) + '</button>' +
-          '<button type="button" class="btn ghost small" data-svg-compare-png="' + index + '">' + escapeHtml(WFT('plans.svg_compare_png', 'تحميل PNG')) + '</button></div>';
-      }
-      html += '<details><summary>' + escapeHtml(WFT('plans.svg_compare_code', 'عرض الكود')) +
-        '</summary><pre>' + escapeHtml(item.svg || '') + '</pre></details>';
-      return html + '</div>';
-    }
-
-    function visualConceptPlansSvgCompareByIndex(index) {
-      const compare = visualConceptPlansSvgCompareState();
-      const results = Array.isArray(compare && compare.results) ? compare.results : [];
-      return results[Number(index)] || null;
-    }
-
-    function openVisualConceptPlansSvgCompare(index) {
-      const item = visualConceptPlansSvgCompareByIndex(index);
-      if (!item || !item.svg) return;
-      const blob = new Blob([item.svg], { type: 'image/svg+xml;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const tab = window.open(url, '_blank');
-      if (!tab) {
-        const link = document.createElement('a');
-        link.href = url;
-        link.target = '_blank';
-        link.rel = 'noopener';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-      }
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    }
-
-    function downloadVisualConceptPlansSvgComparePng(index) {
-      const item = visualConceptPlansSvgCompareByIndex(index);
-      if (!item || !item.svg) return;
-      const svgUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(item.svg);
-      const image = new Image();
-      image.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = 1600;
-          canvas.height = 900;
-          const ctx = canvas.getContext('2d');
-          ctx.fillStyle = '#ffffff';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-          const link = document.createElement('a');
-          const slug = String(item.model || 'plan').replace(/[^a-zA-Z0-9]+/g, '_');
-          link.download = slug + '_site_plan.png';
-          link.href = canvas.toDataURL('image/png');
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-        } catch (error) { toast(String((error && error.message) || error)); }
-      };
-      image.onerror = () => toast(WFT('plans.svg_compare_png_failed', 'تعذر تصدير PNG'));
-      image.src = svgUrl;
-    }
-
-    function visualConceptPlansSvgCompareHtml(compare) {
-      const results = Array.isArray(compare && compare.results) ? compare.results : [];
-      if (!results.length) return '';
-      return '<div class="plans-svg-compare-grid">' + results.map(visualConceptPlansSvgCompareCard).join('') + '</div>';
-    }
-    /* <<< TEMP_STAGE4 */
-
     function renderVisualConceptPlansWorkflow() {
       const root = document.getElementById('visualConceptPlansWorkflow');
       if (!root) return;
       const workflow = visualConceptPlansWorkflowState();
       const verification = workflow.verification || {};
-      const boundary = workflow.boundary || {};
       const distribution = workflow.distribution || {};
       const verified = Boolean(verification.approved);
-      const boundaryApproved = Boolean(boundary.approved);
       const distApproved = Boolean(distribution.approved) && visualConceptPlanNotesCleared(workflow);
       const promptReady = Boolean(workflow.promptReady);
-      const defaultStage = !verified ? 'verify' : ((boundaryApproved && distApproved) ? 'generate' : 'boundary');
-      const requestedStage = ['verify', 'boundary', 'generate'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
-      const activeStage = requestedStage === 'generate' && !(boundaryApproved && distApproved)
+      const defaultStage = !verified ? 'verify' : (distApproved ? 'generate' : 'boundary');
+      const requestedStage = ['verify', 'boundary', 'generate', 'other'].includes(workflow.viewStage) ? workflow.viewStage : defaultStage;
+      const activeStage = (requestedStage === 'generate' || requestedStage === 'other') && !distApproved
         ? (verified ? 'boundary' : 'verify')
         : (requestedStage === 'boundary' && !verified ? 'verify' : requestedStage);
-      /* >>> TEMP_STAGE4 */
-      // Stage 4 (the model comparison) is gated exactly like generation, and the
-      // three-stage computation above stays untouched: while stage 4 is selected
-      // the permanent panels and step highlights stand down below.
-      const tempStage4Active = visualConceptPlansSvgCompareStage4() && boundaryApproved && distApproved;
-      const svgCompare = visualConceptPlansSvgCompareState();
-      /* <<< TEMP_STAGE4 */
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
       const conflicts = checks.filter(item => item.result === 'متعارض');
       // Conflicts keep the button live — approving through them routes via the
@@ -347,21 +180,25 @@
       const issueList = conflictPoints.length
         ? '<ul class="plans-issue-list plans-issue-summary">' + conflictPoints.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul>'
         : '';
-      const existingImages = VISUAL_CONCEPT_PLAN_KINDS.some(item => tenantVisualConceptState.slots[item.id]?.imageUrl);
-      const promptCards = promptReady || existingImages
-        ? '<div class="visual-concept-stack">' + VISUAL_CONCEPT_PLAN_KINDS.map(definition =>
+      const sitePlan = VISUAL_CONCEPT_PLAN_KINDS.find(item => item.kind === 'site');
+      const otherPlans = VISUAL_CONCEPT_PLAN_KINDS.filter(item => item.kind !== 'site');
+      const siteHasImage = Boolean(tenantVisualConceptState.slots[sitePlan.id]?.imageUrl);
+      const otherHasImage = otherPlans.some(item => tenantVisualConceptState.slots[item.id]?.imageUrl);
+      const sitePlanCard = promptReady || siteHasImage
+        ? renderVisualConceptSlot({ id: sitePlan.id, label: sitePlan.label, group: 'plans' }, visualConceptSlotLocked(sitePlan.id))
+        : '<p class="tenant-hint">مخطط الموقع العام غير جاهز للتوليد.</p>';
+      const otherPlanCards = promptReady || otherHasImage
+        ? '<div class="visual-concept-stack">' + otherPlans.map(definition =>
           renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, visualConceptSlotLocked(definition.id))
         ).join('') + '</div>'
-        : '<p class="tenant-hint">المخططات غير جاهزة للتوليد بعد.</p>';
+        : '<p class="tenant-hint">مخططا الاستخدامات والكتلة غير جاهزين للتوليد.</p>';
       root.innerHTML =
         '<div class="plans-workflow-card">' +
         '<ol class="plans-workflow-steps">' +
         '<li class="' + (activeStage === 'verify' ? 'is-active' : (verified ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="verify">التحقق من التضارب</button></li>' +
-        '<li class="' + (activeStage === 'boundary' ? 'is-active' : (boundaryApproved && distApproved ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="boundary" ' + (!verified ? 'disabled' : '') + '>رسم الحدود وتوزيع المكونات</button></li>' +
-        '<li class="' + (activeStage === 'generate' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="generate" ' + (!(boundaryApproved && distApproved) ? 'disabled' : '') + '>توليد المخططات</button></li>' +
-        /* >>> TEMP_STAGE4 */
-        '<li class="' + (tempStage4Active ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="svgcompare" ' + (!(boundaryApproved && distApproved) ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.svg_compare_tab', 'مقارنة الموديلات')) + '</button></li>' +
-        /* <<< TEMP_STAGE4 */
+        '<li class="' + (activeStage === 'boundary' ? 'is-active' : (distApproved ? 'is-complete' : '')) + '"><button type="button" data-plans-workflow-tab="boundary" ' + (!verified ? 'disabled' : '') + '>توزيع المكونات</button></li>' +
+        '<li class="' + (activeStage === 'generate' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="generate" ' + (!distApproved ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.stage_site', 'المخطط العام المبسط')) + '</button></li>' +
+        '<li class="' + (activeStage === 'other' ? 'is-active' : '') + '"><button type="button" data-plans-workflow-tab="other" ' + (!distApproved ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.stage_other', 'مخططا الاستخدامات والكتلة')) + '</button></li>' +
         '</ol>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="verify"' + (activeStage !== 'verify' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>التحقق من التضارب</h4><button type="button" class="btn primary small" data-plans-workflow-action="verify">تحقق</button></div>' +
@@ -371,9 +208,6 @@
         '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!canApprove ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="boundary"' + (activeStage !== 'boundary' ? ' hidden' : '') + '>' +
-        '<div class="plans-workflow-panel-head"><h4>رسم حدود الأرض</h4><div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="open-land-data">مراجعة بيانات الأرض والكروكي</button><button type="button" class="btn ghost small" data-plans-workflow-action="refresh-boundary">تحديث الرسم</button></div></div>' +
-        '<div class="plans-boundary-editor"><div class="plans-boundary-preview" data-plans-boundary-preview></div><div class="plans-boundary-meta"><p class="tenant-hint">حدود الرسم من إحداثيات التنظيم أو أطوال الحدود الموثقة في الأرض والكروكي.</p></div></div>' +
-        '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-boundary" ' + (boundary.points.length < 3 || !boundary.referenceUrl ? 'disabled' : '') + '>اعتماد حدود الأرض</button></div>' +
         '<div class="plans-workflow-panel-head"><h4>توزيع المكونات على الأدوار</h4><button type="button" class="btn primary small" data-plans-workflow-action="propose-distribution">اقتراح التوزيع</button></div>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.distribution_notes_title', 'ملاحظات التوزيع')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
         '<textarea rows="3" maxlength="1000000" data-plans-distribution-notes>' + escapeHtml(workflow.distributionNotes) + '</textarea>' +
@@ -389,32 +223,16 @@
         '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="check-notes" ' + (!workflow.clientNotes.trim() ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.notes_check', 'فحص الملاحظات')) + '</button></div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="generate"' + (activeStage !== 'generate' ? ' hidden' : '') + '>' +
-        '<div class="plans-workflow-panel-head"><h4>توليد المخططات</h4><button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">تجهيز توليد المخططات</button></div>' +
-        '<p class="tenant-hint">' + escapeHtml(promptReady ? 'المخططات جاهزة للتوليد.' : (workflow.promptsError ? 'تعذر تجهيز توليد المخططات: ' + workflow.promptsError : 'المخططات الثلاثة غير جاهزة للتوليد.')) + '</p>' +
-        '<div data-plans-workflow-prompts>' + promptCards + '</div>' +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.stage_site_title', 'المخطط العام المبسط بصيغة SVG')) + '</h4>' + (promptReady ? '' : '<button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_site_prepare', 'تجهيز المخطط')) + '</button>') + '</div>' +
+        '<p class="tenant-hint">' + escapeHtml(promptReady ? WFT('plans.stage_site_ready', 'مخطط الموقع جاهز للتوليد.') : (workflow.promptsError ? WFT('plans.stage_site_error', 'تعذر تجهيز المخطط: {error}', { error: workflow.promptsError }) : WFT('plans.stage_site_not_ready', 'مخطط الموقع غير جاهز للتوليد.'))) + '</p>' +
+        '<div data-plans-workflow-prompts>' + sitePlanCard + '</div>' +
         '</section>' +
-        /* >>> TEMP_STAGE4 */
-        '<section class="plans-workflow-panel" data-plans-workflow-stage="svgcompare" hidden>' +
-        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.svg_compare_title', 'مقارنة موديلات رسم المخطط')) + '</h4>' +
-        '<button type="button" class="btn primary small" data-plans-workflow-action="run-svg-compare"' + (svgCompare.status === 'running' ? ' disabled' : '') + '>' + escapeHtml(WFT('plans.svg_compare_run', 'تشغيل المقارنة')) + '</button></div>' +
-        '<p class="tenant-hint" data-plans-svg-compare-status>' + escapeHtml(visualConceptPlansSvgCompareStatusText(svgCompare)) + '</p>' +
-        '<div data-plans-svg-compare-results>' + visualConceptPlansSvgCompareHtml(svgCompare) + '</div>' +
+        '<section class="plans-workflow-panel" data-plans-workflow-stage="other"' + (activeStage !== 'other' ? ' hidden' : '') + '>' +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.stage_other_title', 'مخططا الاستخدامات والكتلة')) + '</h4>' + (promptReady ? '' : '<button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_other_prepare', 'تجهيز المخططات')) + '</button>') + '</div>' +
+        '<p class="tenant-hint">' + escapeHtml(promptReady ? WFT('plans.stage_other_ready', 'مخططا الاستخدامات والكتلة جاهزان للتوليد.') : (workflow.promptsError ? WFT('plans.stage_other_error', 'تعذر تجهيز المخططات: {error}', { error: workflow.promptsError }) : WFT('plans.stage_other_not_ready', 'مخططا الاستخدامات والكتلة غير جاهزين للتوليد.'))) + '</p>' +
+        '<div data-plans-workflow-prompts>' + otherPlanCards + '</div>' +
         '</section>' +
-        /* <<< TEMP_STAGE4 */
         '</div>';
-      /* >>> TEMP_STAGE4 */
-      if (tempStage4Active) {
-        root.querySelectorAll('[data-plans-workflow-stage]').forEach(panel => {
-          panel.hidden = panel.getAttribute('data-plans-workflow-stage') !== 'svgcompare';
-        });
-        root.querySelectorAll('.plans-workflow-steps li').forEach(item => {
-          const button = item.querySelector('[data-plans-workflow-tab]');
-          item.classList.toggle('is-active', Boolean(button) && button.getAttribute('data-plans-workflow-tab') === 'svgcompare');
-        });
-      }
-      /* <<< TEMP_STAGE4 */
-      const preview = root.querySelector('[data-plans-boundary-preview]');
-      renderVisualConceptBoundarySvg(preview, boundary.points);
       // Delegated binding, once: the distribution results container is re-rendered
       // in place after every re-check, so per-button listeners would die with it.
       if (!root.dataset.plansWorkflowBound) {
@@ -425,16 +243,8 @@
             const stage = tab.getAttribute('data-plans-workflow-tab');
             const state = visualConceptPlansWorkflowState();
             if (stage === 'boundary' && !state.verification.approved) return;
-            /* >>> TEMP_STAGE4 */
-            if (stage === 'svgcompare') {
-              if (!(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
-              setVisualConceptPlansSvgCompareStage4(true);
-              renderVisualConceptPage();
-              return;
-            }
-            setVisualConceptPlansSvgCompareStage4(false);
-            /* <<< TEMP_STAGE4 */
-            if (stage === 'generate' && !(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
+            if ((stage === 'generate' || stage === 'other')
+                && !(state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
             state.viewStage = stage;
             persistVisualConceptDraftState();
             renderVisualConceptPage();
@@ -459,22 +269,8 @@
           if (!actionBtn || actionBtn.disabled) return;
           const action = actionBtn.getAttribute('data-plans-workflow-action');
           const state = visualConceptPlansWorkflowState();
-          if (action === 'open-land-data') {
-            state.verification.approved = false;
-            state.boundary.approved = false;
-            state.distribution.approved = false;
-            state.distribution.aiReviewed = false;
-            state.distribution.checks = [];
-            state.distribution.issues = [];
-            invalidateVisualConceptPlanGeneration(state);
-            state.viewStage = 'verify';
-            state.status = 'idle';
-            markVisualConceptDirty();
-            if (typeof showSection === 'function') showSection('land_croquis');
-          } else if (action === 'verify') verifyVisualConceptPlans();
+          if (action === 'verify') verifyVisualConceptPlans();
           else if (action === 'approve-verification') approveVisualConceptPlansVerification();
-          else if (action === 'refresh-boundary') refreshVisualConceptPlansBoundary();
-          else if (action === 'approve-boundary') approveVisualConceptPlansBoundary();
           else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
           else if (action === 'revise-distribution') reviseVisualConceptPlansDistribution();
           else if (action === 'check-distribution') checkVisualConceptPlansDistribution('ai');
@@ -482,21 +278,6 @@
           else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
-          /* >>> TEMP_STAGE4 */
-          else if (action === 'run-svg-compare') runVisualConceptPlansSvgCompare();
-          /* <<< TEMP_STAGE4 */
-        });
-        root.addEventListener('click', event => {
-          const openBtn = event.target.closest('[data-svg-compare-open]');
-          if (openBtn) {
-            openVisualConceptPlansSvgCompare(openBtn.getAttribute('data-svg-compare-open'));
-            return;
-          }
-          const pngBtn = event.target.closest('[data-svg-compare-png]');
-          if (pngBtn) {
-            downloadVisualConceptPlansSvgComparePng(pngBtn.getAttribute('data-svg-compare-png'));
-            return;
-          }
         });
         root.addEventListener('input', event => {
           const revisionInput = event.target.closest('[data-plans-distribution-revision]');

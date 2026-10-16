@@ -440,13 +440,7 @@
         // the server grounds their prompts on the deterministic measurements and
         // feeds the three plan images as generation references.
         plansWorkflow: normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow),
-        planImages: visualConceptPlanImageMap(),
-        planBoundaryPoints: isVisualConceptWorkflowPlan(slotId)
-          ? normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow).boundary.points
-          : [],
-        planBoundaryReferenceUrl: isVisualConceptWorkflowPlan(slotId)
-          ? normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow).boundary.referenceUrl
-          : ''
+        planImages: visualConceptPlanImageMap()
       };
     }
 

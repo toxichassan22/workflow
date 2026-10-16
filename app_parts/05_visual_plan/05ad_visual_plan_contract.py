@@ -127,7 +127,8 @@ def _visual_plan_prompt_context(data):
     project = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
-    context = _visual_concept_plan_context(project, boundary.get('points'))
+    points = _visual_concept_plan_recorded_points(project, boundary.get('points'))
+    context = _visual_concept_plan_context(project, points)
     _financial_parking_refresh_context(context, project)
     if not (context.get('primary_frontage') or {}).get('direction'):
         hint = _visual_plan_frontage_hint(workflow)
@@ -140,9 +141,10 @@ def _visual_plan_contract(data, context=None):
     project = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
-    context = context or _visual_concept_plan_context(project, boundary.get('points'))
+    points = _visual_concept_plan_recorded_points(project, boundary.get('points'))
+    context = context or _visual_concept_plan_context(project, points)
     _financial_parking_refresh_context(context, project)
-    contract = visual_plan_context.croquis_contract(project, context, boundary.get('points'))
+    contract = visual_plan_context.croquis_contract(project, context, points)
     if not contract['primaryFrontage'].get('direction'):
         hint = _visual_plan_frontage_hint(workflow)
         if hint:

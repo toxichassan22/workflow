@@ -31,7 +31,8 @@
         status: 'idle',
         verification: { checks: [], issues: [], summary: '', canProceed: false, approved: false },
         boundary: { points: [], referenceUrl: '', approved: false },
-        distribution: { rows: [], totals: [], notes: [], checks: [], issues: [], approved: false, aiReviewed: false },
+        distribution: { rows: [], totals: [], notes: [], checks: [], issues: [], approved: false,
+          aiReviewed: false, canProceed: null },
         distributionNotes: '',
         distributionRevision: '',
         conflictChats: { verify: [], distribution: [] },
@@ -98,7 +99,8 @@
           checks: Array.isArray(distribution.checks) ? distribution.checks.slice(0, 40) : [],
           issues: Array.isArray(distribution.issues) ? distribution.issues.slice(0, 30) : [],
           approved: Boolean(distribution.approved),
-          aiReviewed: Boolean(distribution.aiReviewed)
+          aiReviewed: Boolean(distribution.aiReviewed),
+          canProceed: typeof distribution.canProceed === 'boolean' ? distribution.canProceed : null
         },
         distributionNotes: String(source.distributionNotes || '').slice(0, 1000000),
         distributionRevision: String(source.distributionRevision || '').slice(0, 4000),
@@ -122,7 +124,7 @@
           massing: String(prompts.massing || '').slice(0, 64000)
         },
         planContext: source.planContext && typeof source.planContext === 'object' ? source.planContext : null,
-        viewStage: ['verify', 'boundary', 'generate'].includes(source.viewStage) ? source.viewStage : 'verify',
+        viewStage: ['verify', 'boundary', 'generate', 'other'].includes(source.viewStage) ? source.viewStage : 'verify',
         promptReady: Boolean(scene && scene.token && (source.promptReady || (prompts.site && prompts.uses && prompts.massing))),
         promptsError: String(source.promptsError || '').slice(0, 400)
       };

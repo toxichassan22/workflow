@@ -43,34 +43,6 @@ test('plan notes and their review survive workflow normalization and JSON round 
   assert.equal(state.notesReview.verified, true);
 });
 
-test('the parcel preview uses one uniform scale for both surveyed axes', () => {
-  const context = fixture();
-  const host = { innerHTML: '' };
-  context.renderVisualConceptBoundarySvg(host, [
-    { point: '1', eastings: 500000, northings: 2000000 },
-    { point: '2', eastings: 500020, northings: 2000000 },
-    { point: '3', eastings: 500020, northings: 2000020 },
-    { point: '4', eastings: 500000, northings: 2000020 },
-  ]);
-  const points = host.innerHTML.match(/<polygon points="([^"]+)"/)[1]
-    .split(' ').map(point => point.split(',').map(Number));
-  assert.equal(Math.abs(points[1][0] - points[0][0]), Math.abs(points[2][1] - points[1][1]));
-});
-
-test('the preview merges per-point parcel ids into one drawn boundary', () => {
-  const context = fixture();
-  const host = { innerHTML: '' };
-  context.renderVisualConceptBoundarySvg(host, [
-    { point: '1', parcel_id: 'P-1', eastings: 500000, northings: 2000000 },
-    { point: '2', parcel_id: 'P-2', eastings: 500020, northings: 2000000 },
-    { point: '3', parcel_id: 'P-3', eastings: 500020, northings: 2000020 },
-    { point: '4', parcel_id: 'P-4', eastings: 500000, northings: 2000020 },
-  ]);
-  const parcel = host.innerHTML.match(/<polygon points="([^"]+)"/);
-  assert.ok(parcel);
-  assert.equal(parcel[1].split(' ').length, 4);
-});
-
 test('empty or boolean survey values cannot become invented zero coordinates', () => {
   const context = fixture();
   const result = plain(context.visualConceptBoundaryPoints([
@@ -182,6 +154,39 @@ test('distribution findings list conflicts only and approve no longer waits on n
   const button = html.match(/data-plans-workflow-action="approve-distribution"([^>]*)>/);
   assert.ok(button);
   assert.ok(!button[1].includes('disabled'));
+});
+
+test('a stage-two conflict review and its decision survive draft normalization', async () => {
+  const context = fixture();
+  context.tenantProjectData = {};
+  context.showLoader = () => {};
+  context.hideLoader = () => {};
+  context.collectVisualConceptPlansWorkflowPayload = async () => ({ projectData: {}, plansWorkflow: {} });
+  context.visualConceptPlanInputStamp = () => 'same-inputs';
+  context.api = async (method, path) => {
+    assert.equal(method, 'POST');
+    assert.equal(path, '/api/visual-concept/plans-distribution-check');
+    return {
+      success: true,
+      totals: [{ item: 'إجمالي المسطحات', value: 1200 }],
+      checks: [{ item: 'المسطحات تتجاوز المسموح', result: 'متعارض', detail: 'تجاوز موثق' }],
+      issues: [{ title: 'تعارض موثق', severity: 'high', points: ['يلزم تعديل المساحات'] }],
+      canProceed: false
+    };
+  };
+  context.tenantVisualConceptState = { slots: {}, plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+    verification: { approved: true },
+    distribution: { rows: [{ id: 'row_1', building: 'A', component: 'مكاتب' }] }
+  }) };
+
+  await context.checkVisualConceptPlansDistribution('ai');
+
+  const draftSnapshot = JSON.stringify(context.tenantVisualConceptState);
+  const reloaded = context.normalizeVisualConceptState(draftSnapshot).plansWorkflow.distribution;
+  assert.equal(reloaded.checks[0].result, 'متعارض');
+  assert.equal(reloaded.issues[0].title, 'تعارض موثق');
+  assert.equal(reloaded.aiReviewed, true);
+  assert.equal(reloaded.canProceed, false);
 });
 
 test('unchecked notes approve through the responsibility dialog with a signed ack', async () => {
@@ -325,44 +330,14 @@ test('a changed parking plan invalidates the saved conflict review and approvals
   assert.equal(workflow.distribution.approved, false);
 });
 
-// >>> TEMP_STAGE4
-// TEMP: remove this block together with the model-comparison stage.
-test('stage 4 renders one card per model, failures included', () => {
-  const context = fixture();
-  assert.equal(context.visualConceptPlansSvgCompareHtml({ status: 'idle', results: [] }), '');
-  const html = context.visualConceptPlansSvgCompareHtml({ status: 'done', results: [
-    { model: 'anthropic/claude-sonnet-5.5', ok: true, ms: 4200, chars: 1200, score: 91.5,
-      svg: '<svg viewBox="0 0 1600 900"><text>CONCEPTUAL SITE PLAN</text></svg>', error: '' },
-    { model: 'anthropic/claude-haiku-5.5', ok: false, ms: 900, chars: 0, score: 0,
-      svg: '', error: 'PROVIDER_DOWN' },
-  ] });
-  assert.ok(html.includes('plans-svg-compare-grid'));
-  assert.ok(html.includes('anthropic/claude-sonnet-5.5'));
-  // Exact server wall time, rendered in seconds.
-  assert.ok(html.includes('الوقت: 4.2 ثانية'));
-  assert.ok(html.includes('91.5'));
-  assert.ok(html.includes('data:image/svg+xml;charset=utf-8,'));
-  // A failed model keeps its own card and error, and adds no drawing.
-  assert.ok(html.includes('anthropic/claude-haiku-5.5'));
-  assert.ok(html.includes('PROVIDER_DOWN'));
-  assert.equal((html.match(/<img /g) || []).length, 1);
-  // The code view escapes the markup instead of injecting it.
-  assert.ok(html.includes('&lt;svg viewBox'));
-  assert.ok(!html.includes('<svg viewBox'));
-});
-// A root whose querySelectorAll rebuilds the panels from the rendered markup and
-// keeps them, so a second call sees the same objects the render mutated.
 function workflowRoot(context) {
   const root = {
-    innerHTML: '', dataset: {}, panels: [],
+    innerHTML: '', dataset: {}, panels: [], listeners: {},
     addEventListener(type, fn) { (root.listeners[type] ||= []).push(fn); },
-    listeners: {},
     querySelector() { return null; },
     querySelectorAll(selector) {
       if (selector !== '[data-plans-workflow-stage]') return [];
       if (!root.panels.length) {
-        // Panels start hidden exactly as the markup says, then the render's own
-        // post-pass flips the flag — the registry keeps those same objects.
         root.panels = Array.from(
           root.innerHTML.matchAll(/<section[^>]*data-plans-workflow-stage="([a-z0-9]+)"([^>]*)>/g))
           .map(match => ({ stage: match[1], hidden: /\bhidden\b/.test(match[2]),
@@ -375,20 +350,16 @@ function workflowRoot(context) {
   return root;
 }
 
-// The post-pass only reads the panels when stage 4 is selected, so the test
-// parses them on demand from the rendered markup.
 function panelsOf(root) {
   root.querySelectorAll('[data-plans-workflow-stage]');
   return root.panels;
 }
 
 function sealedWorkflowState(context) {
-  context.tenantVisualConceptState = { slots: {}, plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {
     verification: { approved: true },
-    boundary: { approved: true, referenceUrl: '/uploads/creative/parcel.png', points: [
-      { eastings: 0, northings: 0 }, { eastings: 10, northings: 0 }, { eastings: 10, northings: 10 }] },
     distribution: { approved: true, rows: [{ id: 'row_1', building: 'A', component: 'res' }] },
-  }) };
+  } });
   return context.tenantVisualConceptState.plansWorkflow;
 }
 
@@ -398,96 +369,39 @@ function clickWorkflowTab(context, root, stage) {
   (root.listeners.click || []).forEach(listener => listener(event));
 }
 
-test('selecting the comparison stage shows its own panel, not another stage\'s', () => {
+test('stage three renders only the simplified SVG site plan and stage four renders the other two plans', () => {
   const context = fixture();
-  sealedWorkflowState(context);
+  context.trDynamicI18n = value => value;
+  context.isSessionOnlyImageUrl = () => false;
+  context.visualConceptSlotLabel = id => id;
   context.markVisualConceptDirty = () => {};
+  context.persistVisualConceptDraftState = () => {};
+  const workflow = sealedWorkflowState(context);
+  workflow.viewStage = 'generate';
+  workflow.scene = { version: 1, token: 'sealed-scene' };
+  workflow.prompts = { site: 'site prompt', uses: 'uses prompt', massing: 'massing prompt' };
+  workflow.promptReady = true;
+  context.tenantVisualConceptState = context.normalizeVisualConceptState(context.tenantVisualConceptState);
+  context.renderVisualConceptPage = () => context.renderVisualConceptPlansWorkflow();
   const root = workflowRoot(context);
-  context.renderVisualConceptPlansWorkflow();
-  // Approved stages 1+2 unlock both later stages.
-  const svgTab = root.innerHTML.match(/data-plans-workflow-tab="svgcompare"([^>]*)>/);
-  assert.ok(svgTab, 'the rail must draw the comparison tab');
-  assert.ok(!svgTab[1].includes('disabled'), 'approved stages 1+2 must unlock it');
-  // Nothing is selected yet: only the pending permanent stage is on screen.
-  assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['verify']);
-  root.panels = [];
-  clickWorkflowTab(context, root, 'svgcompare');
-  assert.equal(context.visualConceptPlansSvgCompareStage4(), true);
-  context.renderVisualConceptPlansWorkflow();
-  // The comparison panel is the only one on screen — the exact behaviour that
-  // was broken while the stage was kept in workflow.viewStage, which the
-  // normalizer rewrites back to 'verify'.
-  assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage),
-    ['svgcompare'], 'stage 4 must own the panel');
-  // Going back to a permanent stage hands the panel back.
-  root.panels = [];
-  clickWorkflowTab(context, root, 'generate');
-  assert.equal(context.visualConceptPlansSvgCompareStage4(), false);
-  context.renderVisualConceptPlansWorkflow();
-  assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['generate']);
-});
 
-test('stage 4 streams each finished model and reports its seconds', async () => {
-  const context = fixture();
-  const resultsHost = { innerHTML: '' };
-  const statusHost = { textContent: '' };
-  const snapshots = [];
-  const ticks = [];
-  let cleared = 0;
-  const sonnet = { model: 'anthropic/claude-sonnet-5.5', ok: true, ms: 4200, chars: 900, score: 88,
-    svg: '<svg viewBox="0 0 1600 900"></svg>', error: '' };
-  const haiku = { model: 'anthropic/claude-haiku-5.5', ok: true, ms: 11000, chars: 700, score: 61,
-    svg: '<svg viewBox="0 0 1600 900"></svg>', error: '' };
-  context.hasPermission = () => true;
-  context.toast = () => {};
-  context.showLoader = () => {};
-  context.hideLoader = () => {};
-  context.markVisualConceptDirty = () => {};
-  context.renderVisualConceptPlansWorkflow = () => {};
-  context.collectVisualConceptPlansWorkflowPayload = async () => ({ projectData: {}, plansWorkflow: {} });
-  // The poll sleeps 2s between job reads; this test clock returns at once.
-  context.setTimeout = fn => { fn(); return 0; };
-  context.setInterval = fn => { ticks.push(fn); return 7; };
-  context.clearInterval = () => { cleared += 1; };
-  context.document.querySelector = sel => (sel === '[data-plans-svg-compare-results]' ? resultsHost
-    : (sel === '[data-plans-svg-compare-status]' ? statusHost : null));
-  const jobReads = [
-    { status: 'running', partial: { results: [sonnet] } },
-    { status: 'completed', result: { success: true, results: [sonnet, haiku] } },
-  ];
-  context.api = async (method, path) => {
-    if (method === 'POST') return { success: true, jobId: 'job-1', status: 'queued' };
-    assert.ok(path.endsWith('/api/visual-concept/plans-svg-playground/jobs/job-1'));
-    const next = jobReads.shift();
-    // Snapshot what the owner can see while the job is still running.
-    if (next.status === 'completed') snapshots.push(resultsHost.innerHTML);
-    return next;
-  };
-  context.tenantVisualConceptState = { slots: {}, plansWorkflow: context.normalizeVisualConceptPlansWorkflow({
-    verification: { approved: true },
-    boundary: { approved: true, points: [
-      { eastings: 0, northings: 0 }, { eastings: 10, northings: 0 }, { eastings: 10, northings: 10 }] },
-    distribution: { approved: true, rows: [{ id: 'row_1', building: 'A', component: 'res' }] },
-  }) };
-  await context.runVisualConceptPlansSvgCompare();
-  const state = context.visualConceptPlansSvgCompareState();
-  assert.equal(state.status, 'done');
-  assert.equal(state.results.length, 2);
-  // The first model was already on screen, in seconds, before the run ended.
-  assert.equal(snapshots.length, 1);
-  assert.ok(snapshots[0].includes('anthropic/claude-sonnet-5.5'));
-  assert.ok(snapshots[0].includes('الوقت: 4.2 ثانية'));
-  assert.ok(!snapshots[0].includes('anthropic/claude-haiku-5.5'));
-  // The live clock stops as soon as the comparison lands.
-  assert.ok(cleared >= 1, 'the elapsed clock must be cleared when the run ends');
-  state.status = 'running';
-  state.startedAt = Date.now() - 31400;
-  state.elapsedMs = 0;
-  ticks[0]();
-  assert.ok(statusHost.textContent.includes('المنقضي: 31.4 ثانية'), statusHost.textContent);
-  state.status = 'done';
+  context.renderVisualConceptPlansWorkflow();
+  const stageThree = root.innerHTML.match(/<section class="plans-workflow-panel" data-plans-workflow-stage="generate"[^>]*>([\s\S]*?)<\/section>/)[1];
+  assert.ok(stageThree.includes('المخطط العام المبسط بصيغة SVG'));
+  assert.ok(stageThree.includes('data-visual-slot="plan_site"'));
+  assert.ok(!stageThree.includes('data-visual-slot="plan_uses"'));
+  assert.ok(!stageThree.includes('data-visual-slot="plan_massing"'));
+  assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['generate']);
+
+  root.panels = [];
+  clickWorkflowTab(context, root, 'other');
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.viewStage, 'other');
+  const stageFour = root.innerHTML.match(/<section class="plans-workflow-panel" data-plans-workflow-stage="other"[^>]*>([\s\S]*?)<\/section>/)[1];
+  assert.ok(stageFour.includes('data-visual-slot="plan_uses"'));
+  assert.ok(stageFour.includes('data-visual-slot="plan_massing"'));
+  assert.ok(!stageFour.includes('data-visual-slot="plan_site"'));
+  assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['other']);
 });
-// <<< TEMP_STAGE4
 
 test('a clean verification still approves without opening the dialog', () => {
   const context = fixture();

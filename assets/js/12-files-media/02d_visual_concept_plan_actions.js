@@ -60,7 +60,6 @@
         workflow.planContext = response.planContext || workflow.planContext || null;
         workflow.status = 'verified';
         workflow.viewStage = 'verify';
-        workflow.boundary.approved = false;
         workflow.distribution.approved = false;
         workflow.distribution.aiReviewed = false;
         workflow.distribution.checks = [];
@@ -99,49 +98,6 @@
         const seeded = visualConceptBoundaryPoints(tenantProjectData.survey_coordinates);
         workflow.boundary.points = seeded.length ? seeded : surveyBoundaryPointsFromDimensions(tenantProjectData);
       }
-      markVisualConceptDirty();
-      renderVisualConceptPage();
-    }
-
-    async function refreshVisualConceptPlansBoundary() {
-      if (!visualConceptPlanActionBusy('refresh-boundary', true)) return;
-      try {
-        const payload = await collectVisualConceptPlansWorkflowPayload();
-        const seedWorkflow = visualConceptPlansWorkflowState();
-        let sourcePoints = visualConceptBoundaryPoints(payload.projectData?.survey_coordinates);
-        if (sourcePoints.length < 3) sourcePoints = surveyBoundaryPointsFromDimensions(payload.projectData || {});
-        if (sourcePoints.length >= 3) seedWorkflow.boundary.points = sourcePoints;
-        payload.points = seedWorkflow.boundary.points;
-        payload.mode = 'manual';
-        const stamp = visualConceptPlanInputStamp();
-        showLoader(WFT('plans.boundary_loading', 'جاري تجهيز رسم حدود الأرض'), WFT('plans.boundary_loading_detail', 'يتم بناء الرسم من الإحداثيات المحفوظة...'), 35);
-        const response = await api('POST', '/api/visual-concept/plans-boundary', payload);
-        hideLoader();
-        if (stamp !== visualConceptPlanInputStamp()) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
-        if (!response?.success) { toast(response?.error || WFT('plans.boundary_failed', 'تعذر تجهيز رسم الحدود')); return; }
-        const workflow = visualConceptPlansWorkflowState();
-        workflow.boundary.points = visualConceptBoundaryPoints(response.points);
-        workflow.boundary.referenceUrl = response.referenceUrl || '';
-        workflow.boundary.approved = false;
-        workflow.distribution.approved = false;
-        invalidateVisualConceptPlanGeneration(workflow);
-        markVisualConceptDirty();
-        renderVisualConceptPage();
-      } catch (error) {
-        hideLoader();
-        toast(error.message || WFT('plans.boundary_failed', 'تعذر تجهيز رسم الحدود'));
-      } finally {
-        visualConceptPlanActionBusy('refresh-boundary', false);
-      }
-    }
-
-    function approveVisualConceptPlansBoundary() {
-      const workflow = visualConceptPlansWorkflowState();
-      if (workflow.boundary.points.length < 3 || !workflow.boundary.referenceUrl) return;
-      workflow.boundary.approved = true;
-      workflow.status = 'boundary';
-      workflow.viewStage = workflow.distribution.approved ? 'generate' : 'boundary';
-      invalidateVisualConceptPlanGeneration(workflow);
       markVisualConceptDirty();
       renderVisualConceptPage();
     }
@@ -331,7 +287,7 @@
     function applyVisualConceptPlansDistributionApproval(workflow) {
       workflow.distribution.approved = true;
       invalidateVisualConceptPlanGeneration(workflow, false);
-      workflow.viewStage = workflow.boundary.approved ? 'generate' : 'boundary';
+      workflow.viewStage = 'generate';
       markVisualConceptDirty();
       renderVisualConceptPage();
     }
@@ -464,7 +420,7 @@
 
     async function prepareVisualConceptPlansPrompts() {
       const initialWorkflow = visualConceptPlansWorkflowState();
-      if (!initialWorkflow.verification.approved || !initialWorkflow.boundary.approved || !initialWorkflow.distribution.approved || !visualConceptPlanNotesCleared(initialWorkflow)) return;
+      if (!initialWorkflow.verification.approved || !initialWorkflow.distribution.approved || !visualConceptPlanNotesCleared(initialWorkflow)) return;
       if (visualConceptPlansPromptsPending) return;
       visualConceptPlansPromptsPending = true;
       visualConceptPlanScenePending = true;
@@ -490,7 +446,7 @@
         workflow.sourceStamp = stamp;
         workflow.promptReady = VISUAL_CONCEPT_PLAN_KINDS.every(item => Boolean(workflow.prompts[item.kind])) && Boolean(response.scene.token);
         workflow.promptsError = workflow.promptReady ? '' : WFT('plans.prompts_incomplete', 'تجهيز المخططات الثلاثة غير مكتمل');
-        workflow.status = workflow.promptReady ? 'ready' : 'boundary';
+        workflow.status = workflow.promptReady ? 'ready' : 'verified';
         VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
           const slot = tenantVisualConceptState.slots[definition.id] || (tenantVisualConceptState.slots[definition.id] = emptyVisualConceptSlot(definition.id));
           slot.label = definition.label;
@@ -517,127 +473,6 @@
         renderVisualConceptPage();
       }
     }
-
-    /* >>> TEMP_STAGE4 */
-    // Stage 4 of the plans workflow: the four-model SVG comparison. The result
-    // is display-only, so it stays in this session instead of the draft — four
-    // inline SVG bodies would bloat every later draft save.
-    const visualConceptPlansSvgCompareRun = { status: 'idle', results: [], error: '',
-      startedAt: 0, elapsedMs: 0, stage: false };
-    let visualConceptPlansSvgCompareTimer = null;
-
-    function visualConceptPlansSvgCompareState() {
-      return visualConceptPlansSvgCompareRun;
-    }
-
-    // Which stage the rail shows lives here, NOT in workflow.viewStage: the
-    // workflow normalizer only accepts the three permanent stage names and would
-    // rewrite 'svgcompare' to 'verify' on the very next read, which is what made
-    // the tab look dead. Nothing is persisted — this is a session view.
-    function visualConceptPlansSvgCompareStage4() {
-      return Boolean(visualConceptPlansSvgCompareRun.stage);
-    }
-
-    function setVisualConceptPlansSvgCompareStage4(active) {
-      visualConceptPlansSvgCompareRun.stage = Boolean(active);
-    }
-
-    function visualConceptPlansSvgCompareStopTimer() {
-      if (visualConceptPlansSvgCompareTimer) {
-        clearInterval(visualConceptPlansSvgCompareTimer);
-        visualConceptPlansSvgCompareTimer = null;
-      }
-    }
-
-    // The clock runs from the moment the run starts: every tick repaints only
-    // the status line, never the cards, so the four drawings stay put.
-    function visualConceptPlansSvgCompareTick() {
-      const state = visualConceptPlansSvgCompareState();
-      if (state.status !== 'running') { visualConceptPlansSvgCompareStopTimer(); return; }
-      state.elapsedMs = Date.now() - state.startedAt;
-      const host = document.querySelector('[data-plans-svg-compare-status]');
-      if (host) host.textContent = visualConceptPlansSvgCompareStatusText(state);
-    }
-
-    // Same 202-then-poll shape as the other plans endpoints, against this
-    // tool's own job namespace.
-    async function visualConceptPlansSvgCompareJobApi(payload, onPartial) {
-      const initial = await api('POST', '/api/visual-concept/plans-svg-playground', payload);
-      if (!initial || !initial.jobId) return initial;
-      // Max-effort models can take several minutes each — keep polling up to
-      // 15 minutes while partial results stream in per finished model.
-      const deadline = Date.now() + 900000;
-      let job = initial;
-      while (job && (job.status === 'queued' || job.status === 'running') && Date.now() < deadline) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        job = await api('GET', '/api/visual-concept/plans-svg-playground/jobs/' + encodeURIComponent(initial.jobId));
-        // Every finished model is published by the worker before the next one
-        // runs — mirror it on screen right away.
-        if (job && job.partial && Array.isArray(job.partial.results) && typeof onPartial === 'function') {
-          onPartial(job.partial.results);
-        }
-      }
-      if (job && job.result && typeof job.result === 'object') return job.result;
-      if (job && job.error) return { success: false, error: job.error, error_code: job.error_code };
-      return { success: false, error: WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة') };
-    }
-
-    async function runVisualConceptPlansSvgCompare() {
-      const state = visualConceptPlansSvgCompareState();
-      if (state.status === 'running') return;
-      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
-      const workflow = visualConceptPlansWorkflowState();
-      if (!workflow.boundary.approved || !workflow.distribution.approved
-        || !visualConceptPlanNotesCleared(workflow)) return;
-      state.status = 'running';
-      state.results = [];
-      state.error = '';
-      state.startedAt = Date.now();
-      state.elapsedMs = 0;
-      visualConceptPlansSvgCompareStopTimer();
-      renderVisualConceptPlansWorkflow();
-      visualConceptPlansSvgCompareTimer = setInterval(visualConceptPlansSvgCompareTick, 250);
-      showLoader(WFT('plans.svg_compare_loading', 'جاري تشغيل المقارنة'),
-        WFT('plans.svg_compare_loading_detail', 'يتم إرسال المشهد المختوم إلى الموديلات الأربعة...'), 45);
-      try {
-        // The comparison reads the current project data and workflow, exactly
-        // like the generation stages it sits after.
-        const payload = await collectVisualConceptPlansWorkflowPayload();
-        const response = await visualConceptPlansSvgCompareJobApi(payload, partial => {
-          state.results = partial;
-          const host = document.querySelector('[data-plans-svg-compare-results]');
-          if (host) host.innerHTML = visualConceptPlansSvgCompareHtml(state);
-        });
-        hideLoader();
-        const results = Array.isArray(response?.results) ? response.results : [];
-        if (!response?.success || !results.length) {
-          state.status = 'failed';
-          state.results = [];
-          state.error = String(response?.error || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
-        } else {
-          state.status = 'done';
-          state.results = results;
-          // The comparison seals the scene itself when the generation stage has
-          // not run yet — keep it, so the generation stage reuses this exact
-          // scene instead of paying for the same layout twice.
-          if (response.scene && typeof response.scene === 'object') {
-            const workflow = visualConceptPlansWorkflowState();
-            workflow.scene = response.scene;
-            workflow.sourceStamp = visualConceptPlanInputStamp();
-            markVisualConceptDirty();
-          }
-        }
-      } catch (error) {
-        hideLoader();
-        state.status = 'failed';
-        state.results = [];
-        state.error = String(error.message || WFT('plans.svg_compare_failed', 'تعذر تشغيل المقارنة'));
-      }
-      visualConceptPlansSvgCompareStopTimer();
-      state.elapsedMs = state.startedAt ? Date.now() - state.startedAt : 0;
-      renderVisualConceptPlansWorkflow();
-    }
-    /* <<< TEMP_STAGE4 */
 
     function addVisualConceptPlan() {
       if (visualConceptPlans().length >= VISUAL_CONCEPT_MAX_PLANS) {

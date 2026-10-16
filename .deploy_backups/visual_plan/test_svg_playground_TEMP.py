@@ -264,14 +264,14 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         backend = read_module_source('app.py')
         self.assertIn(
             "workflow_error = _visual_concept_plan_workflow_error(\n"
-            "        data, 'plan_site', require_boundary=True, require_distribution=True)",
+            "        data, 'plan_site', require_distribution=True)",
             backend)
         self.assertIn('_svg_playground_scene(data)', backend)
         self.assertIn("_SVG_PLAYGROUND_RESEAL_CODES = ('PLANS_SCENE_REQUIRED', 'PLANS_SCENE_INVALID',", backend)
         source = read_frontend_text()
         self.assertIn('workflow.scene = response.scene;', source)
 
-    def test_playground_refuses_unsealed_inputs_like_render(self):
+    def test_playground_accepts_recorded_geometry_without_boundary_approval(self):
         module = self.application_module
         project = _project()
         workflow = _workflow(project)
@@ -281,7 +281,7 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
                 '/api/visual-concept/plans-svg-playground',
                 headers=self._headers(self.token_a),
                 json={'projectData': project, 'plansWorkflow': workflow})
-        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.status_code, 200, response.get_json())
 
     def test_playground_is_the_fourth_stage_of_the_plans_workflow(self):
         """The tool is not a hidden page any more: it is the 4th plans step."""
@@ -290,12 +290,12 @@ class SvgPlaygroundTempTests(MeetingRequirementsTests):
         self.assertIn('data-plans-workflow-stage="svgcompare"', source)
         self.assertIn('data-plans-workflow-action="run-svg-compare"', source)
         self.assertIn("'plans.svg_compare_tab', 'مقارنة الموديلات'", source)
-        # The tab unlocks on stages 1 and 2 — verification, boundary and an
-        # approved distribution — and never on the generation stage, so it can
+        # The tab unlocks on stages 1 and 2 — verification and an approved
+        # distribution — and never on the generation stage, so it can
         # not lead to an endpoint that would refuse the request.
         self.assertIn("if (stage === 'svgcompare') {", source)
         self.assertIn(
-            "if (!(state.boundary.approved && state.distribution.approved && visualConceptPlanNotesCleared(state))) return;",
+            "if (!(state.distribution.approved && visualConceptPlanNotesCleared(state))) return;",
             source)
         self.assertIn('setVisualConceptPlansSvgCompareStage4(true);', source)
         # The selection is NOT kept in workflow.viewStage: the workflow normalizer

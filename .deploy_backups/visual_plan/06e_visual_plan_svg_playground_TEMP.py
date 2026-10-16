@@ -682,7 +682,7 @@ def api_visual_concept_svg_playground():
     # TEMPORARY playground endpoint (revert with this file's commit).
     data = request.get_json(silent=True) or {}
     workflow_error = _visual_concept_plan_workflow_error(
-        data, 'plan_site', require_boundary=True, require_distribution=True)
+        data, 'plan_site', require_distribution=True)
     if workflow_error:
         return jsonify(workflow_error), 400
     _billing_guard = _require_billing_balance('visual_concept')

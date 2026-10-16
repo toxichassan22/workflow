@@ -56,6 +56,16 @@ def _visual_concept_plan_boundary_points(value):
     return points if len(points) >= 3 else []
 
 
+def _visual_concept_plan_recorded_points(project_data, fallback_points=None):
+    source = project_data if isinstance(project_data, dict) else {}
+    for value in (source.get('survey_coordinates'), source.get('regulation_coordinates'),
+                  plot_shape.dimension_survey_rows(source)):
+        points = _visual_concept_plan_boundary_points(value)
+        if points:
+            return points
+    return _visual_concept_plan_boundary_points(fallback_points)
+
+
 _VISUAL_PLAN_FACT_LABELS = {
     'plot_number_croquis': 'رقم القطعة', 'plan_number': 'رقم المخطط',
     'croquis_land_area': 'مساحة الأرض', 'boundary_lengths': 'أطوال الحدود',
@@ -229,9 +239,7 @@ def _visual_concept_plan_volatile_fields(source):
 
 def _visual_concept_plan_context(project_data, boundary_points=None, verification=None):
     source = project_data if isinstance(project_data, dict) else {}
-    points = _visual_concept_plan_boundary_points(
-        boundary_points or source.get('survey_coordinates') or source.get('regulation_coordinates')
-        or plot_shape.dimension_survey_rows(source))
+    points = _visual_concept_plan_recorded_points(source, boundary_points)
     directions = _visual_concept_directions(source)
     components = _visual_concept_components(source)
     context = {
@@ -876,17 +884,14 @@ def _visual_concept_plan_regulation_input(project_data, context):
     }
 
 
-def _visual_concept_plan_workflow_error(data, slot_id, require_boundary=False, require_distribution=False):
+def _visual_concept_plan_workflow_error(data, slot_id, require_distribution=False):
     if _visual_concept_plan_kind(slot_id) not in VISUAL_CONCEPT_PLAN_KIND_BY_ID.values():
         return None
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     verification = workflow.get('verification') if isinstance(workflow.get('verification'), dict) else {}
-    boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
     distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
     if not verification.get('approved'):
         return {'success': False, 'error': 'اعتماد نتيجة التحقق مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_VERIFICATION_REQUIRED'}
-    if require_boundary and not boundary.get('approved'):
-        return {'success': False, 'error': 'اعتماد حدود الأرض مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_BOUNDARY_REQUIRED'}
     if require_distribution and not distribution.get('approved'):
         return {'success': False, 'error': 'اعتماد توزيع المكونات مطلوب قبل متابعة المخططات', 'error_code': 'PLANS_DISTRIBUTION_REQUIRED'}
     # Shared surveyed geometry drives every diagram independently; previous

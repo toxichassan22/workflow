@@ -97,8 +97,8 @@ def _visual_concept_request_bundle(data, slot_id):
     if is_plan or slot_id in VISUAL_CONCEPT_EXTERNAL_SLOTS:
         workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
         boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
-        boundary_points = _visual_concept_plan_boundary_points(
-            boundary.get('points') or data.get('planBoundaryPoints') or project_data.get('survey_coordinates'))
+        boundary_points = _visual_concept_plan_recorded_points(
+            project_data, boundary.get('points') or data.get('planBoundaryPoints'))
         context = workflow.get('planContext') if isinstance(workflow.get('planContext'), dict) else None
         context = context or _visual_concept_plan_context(project_data, boundary_points, workflow.get('verification'))
         context['boundary_points'] = boundary_points or context.get('boundary_points') or []
