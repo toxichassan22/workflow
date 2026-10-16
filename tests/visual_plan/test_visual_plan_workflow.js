@@ -269,6 +269,62 @@ test('approving stages one and two survives a saved draft and a reload', () => {
   assert.equal(context.visualConceptPlanNotesCleared(reloaded), true);
 });
 
+test('a saved conflict review survives financial calculations rebuilt on draft reload', () => {
+  const context = fixture();
+  const before = { financial_study_model: {
+    inputs: { basementArea: 800, landArea: 2500 },
+    dynamicRows: { components: [{ id: 'component_1', name: 'مكاتب', units: 20 }] },
+    parkingPlan: { id: 'parking_1', approved: true, requiredSpaces: 20 },
+    projection: { totalCosts: 1000000 },
+  } };
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({
+    slots: {},
+    plansWorkflow: { verification: { approved: true, canProceed: false,
+      summary: 'تعارض واحد', checks: [{ item: 'الارتداد', result: 'متعارض' }] },
+      boundary: { approved: true, points: [
+        { eastings: 1, northings: 1 }, { eastings: 2, northings: 1 }, { eastings: 2, northings: 2 }] },
+      distribution: { approved: true, aiReviewed: true, rows: [{ id: 'row_1', component: 'مكاتب' }] },
+      notesReview: { verified: true, canProceed: true, inputSignature: 'notes-signature' } }
+  });
+  context.tenantVisualConceptState.plansWorkflow.sourceStamp = context.visualConceptPlanInputStamp(before);
+
+  // Draft loading recalculates projections and can add unrelated financial data.
+  const after = { financial_study_model: { ...before.financial_study_model,
+    projection: { totalCosts: 1000000, netIncome: 450000 },
+    financialCalcData: { summary: 'recomputed' } } };
+  const savedDraft = JSON.stringify(context.tenantVisualConceptState);
+  context.tenantVisualConceptState = context.normalizeVisualConceptState(savedDraft);
+  context.syncVisualConceptPlanInputs(after);
+
+  const workflow = context.tenantVisualConceptState.plansWorkflow;
+  assert.equal(workflow.verification.approved, true);
+  assert.equal(workflow.verification.checks[0].item, 'الارتداد');
+  assert.equal(workflow.boundary.approved, true);
+  assert.equal(workflow.distribution.approved, true);
+  assert.equal(workflow.notesReview.verified, true);
+});
+
+test('a changed parking plan invalidates the saved conflict review and approvals', () => {
+  const context = fixture();
+  const before = { financial_study_model: { inputs: { basementArea: 800 },
+    dynamicRows: { components: [{ id: 'parking_row', parkingPlanId: 'parking_1', units: 20 }] },
+    parkingPlan: { id: 'parking_1', approved: true, requiredSpaces: 20 } } };
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {},
+    plansWorkflow: { verification: { approved: true, canProceed: false, checks: [{ item: 'الارتداد', result: 'متعارض' }] },
+      boundary: { approved: true }, distribution: { approved: true, aiReviewed: true },
+      notesReview: { verified: true, canProceed: true } } });
+  context.tenantVisualConceptState.plansWorkflow.sourceStamp = context.visualConceptPlanInputStamp(before);
+
+  context.syncVisualConceptPlanInputs({ financial_study_model: { ...before.financial_study_model,
+    parkingPlan: { ...before.financial_study_model.parkingPlan, requiredSpaces: 24 } } });
+
+  const workflow = context.tenantVisualConceptState.plansWorkflow;
+  assert.equal(workflow.verification.approved, false);
+  assert.equal(workflow.verification.checks.length, 0);
+  assert.equal(workflow.boundary.approved, true);
+  assert.equal(workflow.distribution.approved, false);
+});
+
 // >>> TEMP_STAGE4
 // TEMP: remove this block together with the model-comparison stage.
 test('stage 4 renders one card per model, failures included', () => {
@@ -299,7 +355,7 @@ test('stage 4 renders one card per model, failures included', () => {
 function workflowRoot(context) {
   const root = {
     innerHTML: '', dataset: {}, panels: [],
-    addEventListener(type, fn) { root.listeners[type] = fn; },
+    addEventListener(type, fn) { (root.listeners[type] ||= []).push(fn); },
     listeners: {},
     querySelector() { return null; },
     querySelectorAll(selector) {
@@ -338,7 +394,8 @@ function sealedWorkflowState(context) {
 
 function clickWorkflowTab(context, root, stage) {
   const tab = { disabled: false, getAttribute: () => stage };
-  root.listeners.click({ target: { closest: sel => (sel === '[data-plans-workflow-tab]' ? tab : null) } });
+  const event = { target: { closest: sel => (sel === '[data-plans-workflow-tab]' ? tab : null) } };
+  (root.listeners.click || []).forEach(listener => listener(event));
 }
 
 test('selecting the comparison stage shows its own panel, not another stage\'s', () => {

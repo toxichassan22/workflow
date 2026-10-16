@@ -152,10 +152,11 @@
         'approved_floor_area_ratio', 'approved_typical_floor_coverage', 'land_and_building_summary', 'regulatory_constraints',
         'north_direction', 'surrounding_streets', 'setbacks', 'building_ratio_setbacks',
         'directions_table', 'survey_coordinates', 'regulation_coordinates', 'facades_directions',
-        'boundary_lengths',
-        'land_documents_analysis', 'project_components_data', 'financial_study_model'];
+        'boundary_lengths', 'land_documents_analysis', 'project_components_data'];
       const fields = Object.fromEntries(keys.map(key => [key, projectData?.[key] ?? '']));
-      const data = JSON.stringify({ fields, boundary: workflow.boundary.points,
+      const data = JSON.stringify({ fields,
+        financialParking: visualConceptPlanFinancialInput(projectData?.financial_study_model),
+        boundary: workflow.boundary.points,
         distribution: workflow.distribution.rows, distributionNotes: workflow.distributionNotes,
         clientNotes: workflow.clientNotes });
       let first = 2166136261, second = 5381;
@@ -164,6 +165,31 @@
         second = Math.imul(second, 33) ^ data.charCodeAt(index);
       }
       return (first >>> 0).toString(16) + ':' + (second >>> 0).toString(16) + ':' + data.length;
+    }
+
+    function visualConceptPlanFinancialInput(value) {
+      let model = value;
+      if (typeof model === 'string') {
+        try { model = JSON.parse(model); } catch (error) { model = null; }
+      }
+      model = model && typeof model === 'object' && !Array.isArray(model) ? model : {};
+      const inputs = model.inputs && typeof model.inputs === 'object' ? model.inputs : {};
+      const dynamicRows = model.dynamicRows && typeof model.dynamicRows === 'object' ? model.dynamicRows : {};
+      const components = Array.isArray(dynamicRows.components) ? dynamicRows.components
+        .filter(row => row && typeof row === 'object' && !Array.isArray(row))
+        .slice().sort((left, right) => String(left.id || '').localeCompare(String(right.id || ''))) : [];
+      const parkingPlan = model.parkingPlan && typeof model.parkingPlan === 'object'
+        && !Array.isArray(model.parkingPlan) ? model.parkingPlan : {};
+      const stable = item => {
+        if (Array.isArray(item)) return item.map(stable);
+        if (item && typeof item === 'object') {
+          return Object.fromEntries(Object.keys(item).sort().map(key => [key, stable(item[key])]));
+        }
+        return item;
+      };
+      // Calculated projections and report tables are rebuilt on draft load. Only
+      // the parking inputs and plan affect visual-plan context and its checks.
+      return stable({ basementArea: inputs.basementArea ?? '', components, parkingPlan });
     }
 
     function invalidateVisualConceptPlanGeneration(workflow, review = true) {
@@ -198,7 +224,7 @@
       if (!workflow.sourceStamp || workflow.sourceStamp === visualConceptPlanInputStamp(projectData)) return;
       workflow.distribution.approved = false;
       workflow.distribution.aiReviewed = false;
-      workflow.verification.approved = false;
+      workflow.verification = emptyVisualConceptPlansWorkflow().verification;
       workflow.viewStage = 'verify';
       workflow.planContext = null;
       invalidateVisualConceptPlanGeneration(workflow);
