@@ -414,7 +414,35 @@ def _visual_plan_sanitize_svg(svg):
     svg = svg.strip()
     if not svg.startswith('<svg') or '</svg>' not in svg:
         return ''
-    return svg[:300000]
+    svg = svg[:300000]
+    # The model sometimes leaves a bare ampersand in labels or misses a closing
+    # tag. Browsers reject those files as images, so recover the XML before
+    # storing it instead of returning a URL that renders as a broken image.
+    svg = re.sub(r'&(?!#\d+;|#x[0-9a-fA-F]+;|amp;|lt;|gt;|quot;|apos;)', '&amp;', svg)
+    try:
+        from lxml import etree
+        parser = etree.XMLParser(recover=True, resolve_entities=False,
+                                 load_dtd=False, no_network=True, huge_tree=False)
+        root = etree.fromstring(svg.encode('utf-8'), parser)
+        if root is None or etree.QName(root).localname.lower() != 'svg':
+            return ''
+        if etree.QName(root).namespace != 'http://www.w3.org/2000/svg':
+            root.set('xmlns', 'http://www.w3.org/2000/svg')
+        if not root.get('viewBox'):
+            root.set('viewBox', '0 0 1600 900')
+        if not root.get('width'):
+            root.set('width', '1600')
+        if not root.get('height'):
+            root.set('height', '900')
+        repaired = etree.tostring(root, encoding='unicode', xml_declaration=False)
+        # Recovery must still produce strict, self-contained XML. This final
+        # parse keeps malformed provider output from reaching image storage.
+        strict_parser = etree.XMLParser(resolve_entities=False, load_dtd=False,
+                                        no_network=True, huge_tree=False)
+        etree.fromstring(repaired.encode('utf-8'), strict_parser)
+        return repaired[:300000]
+    except Exception:
+        return ''
 
 
 def _visual_plan_render_site_svg(prompt, contract, data, base_image='', extra_refs=None):

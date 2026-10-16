@@ -3,6 +3,7 @@ flask>=3.0.0
 openai>=1.12.0
 replicate>=0.25.0
 python-pptx==0.6.23
+lxml>=4.9.0
 python-dotenv>=1.0.0
 Pillow>=10.0.0
 numpy>=1.26.0

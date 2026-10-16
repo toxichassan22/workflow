@@ -1,6 +1,10 @@
 import copy
+import base64
 import json
+import tempfile
 import unittest
+import xml.etree.ElementTree as ElementTree
+from pathlib import Path
 from unittest.mock import patch
 
 from tests.workflow.test_meeting_requirements import MeetingRequirementsTests
@@ -379,23 +383,51 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         workflow = {**self.workflow(project), 'scene': scene,
                     'prompts': prepared.get_json()['prompts']}
 
-        raw_svg = '<svg viewBox="0 0 1600 900" width="1600" height="900" xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#fff"/></svg>'
-        with patch.object(module, 'call_openrouter_chat', return_value={
-            'choices': [{'message': {'content': raw_svg}}]
-        }) as chat_call, \
-                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/plan.svg') as persist_mock, \
-                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
-            render = client.post('/api/visual-concept/generate',
-                headers=self._headers(self.token_a),
-                json={'slotId': 'plan_site', 'projectData': project, 'plansWorkflow': workflow})
+        raw_svg = ('<svg viewBox="0 0 1600 900" width="1600" height="900">'
+                   '<g><rect width="100%" height="100%" fill="#fff"/>'
+                   '<text>Housing & retail</text></svg>')
+        with tempfile.TemporaryDirectory() as upload_dir:
+            with patch.object(module, 'UPLOADS_DIR', upload_dir), \
+                    patch.object(module, 'call_openrouter_chat', return_value={
+                        'choices': [{'message': {'content': raw_svg}}]
+                    }) as chat_call, \
+                    patch.object(module, 'persist_generated_image',
+                                 wraps=module.persist_generated_image) as persist_mock, \
+                    patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+                render = client.post('/api/visual-concept/generate',
+                    headers=self._headers(self.token_a),
+                    json={'slotId': 'plan_site', 'projectData': project, 'plansWorkflow': workflow})
+                self.assertEqual(render.status_code, 200, render.get_json())
+                body = render.get_json()
+                self.assertTrue(body['image'].startswith('/uploads/creative/' + self.tenant_a + '/'))
+                self.assertIn('.svg?', body['image'])
+                image_path = body['image'].split('?', 1)[0]
+                filename = image_path.rsplit('/', 1)[-1]
+                self.assertTrue((Path(upload_dir) / 'creative' / self.tenant_a / filename).is_file())
+                endpoint, route_values = module.app.url_map.bind('localhost').match(image_path)
+                self.assertEqual(endpoint, 'static_creative_upload', (endpoint, route_values))
+                with module.app.test_request_context(body['image']):
+                    self.assertTrue(module._media_request_authorized(module.request.path))
+                preview = client.get(body['image'])
+                try:
+                    self.assertEqual(preview.status_code, 200,
+                                     f"{preview.get_data(as_text=True)} URL={body['image']}")
+                    self.assertEqual(preview.mimetype, 'image/svg+xml')
+                    svg_root = ElementTree.fromstring(preview.data)
+                    svg_namespace = '{http://www.w3.org/2000/svg}'
+                    self.assertEqual(svg_root.tag, svg_namespace + 'svg')
+                    self.assertEqual(svg_root.find('.//' + svg_namespace + 'text').text, 'Housing & retail')
+                finally:
+                    preview.close()
         self.assertEqual(render.status_code, 200, render.get_json())
         body = render.get_json()
-        self.assertEqual(body['image'], '/uploads/creative/plan.svg')
         self.assertEqual(body['model'], 'google/gemini-4-argon')
         chat_call.assert_called_once()
         self.assertEqual(chat_call.call_args.kwargs.get('model'), 'google/gemini-4-argon')
         persisted_uri = persist_mock.call_args.args[0]
         self.assertTrue(persisted_uri.startswith('data:image/svg+xml;base64,'))
+        persisted_svg = base64.b64decode(persisted_uri.split(',', 1)[1])
+        ElementTree.fromstring(persisted_svg)
 
     def test_fixed_geometry_plans_do_not_chain_image_approvals(self):
         module = self.application_module
