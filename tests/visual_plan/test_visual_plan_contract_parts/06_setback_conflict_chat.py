@@ -173,3 +173,55 @@ class VisualPlanContractTestsPart06(VisualPlanContractBase):
         self.assertIn('أعدت محاولة التوزيع آليًا', result['reply'])
         self.assertTrue(any('مراجعة مساحات بصمات المباني' in choice for choice in result['choices']))
         self.assertTrue(any('مراجعة الارتدادات المسجلة' in choice for choice in result['choices']))
+
+    def test_setback_conflict_background_job_completes_with_interactive_chat(self):
+        module = self.application_module
+        contract = {
+            'landArea': 1000,
+            'coverageRatio': 40,
+            'setbacks': {'north': 3.0, 'south': 3.0, 'east': 5.0, 'west': 3.0},
+            'geometry': {'parcels': [{'polygon': [[0, 0], [40, 0], [40, 25], [0, 25]]}]},
+            'distribution': {'rows': []},
+        }
+        context = {'components': []}
+        program = {'buildings': [{'id': 'b1', 'name': 'Tower A', 'footprintArea': 450, 'basementOnly': False}], 'siteItems': []}
+        error_msg = 'تم رفض التصميم لأن بصمة أحد المباني تتجاوز حدود الارتداد المسجلة.'
+        error = module.visual_plan_geometry.PlanGeometryError(error_msg, 'PLANS_SETBACK_CONFLICT')
+        data = {'message': '', 'plansWorkflow': {'siteAssistant': {}}}
+        actor = {'tenant_id': self.tenant_a, 'user_role': 'admin',
+                 'token_payload': {'exp': module.time.time() + 3600}}
+        job_id = 'test-setback-job-1'
+        initial_job = {'status': 'queued', 'createdAt': module.time.time()}
+
+        written_jobs = {}
+        def mock_write_job(namespace, tenant_id, jid, job_dict):
+            written_jobs[jid] = dict(job_dict)
+
+        def mock_read_job(namespace, tenant_id, jid):
+            return dict(written_jobs.get(jid, initial_job))
+
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            with patch.object(module, '_write_job', side_effect=mock_write_job), \
+                    patch.object(module, '_read_job', side_effect=mock_read_job), \
+                    patch.object(module, '_visual_plan_site_packet', side_effect=error), \
+                    patch.object(module, '_visual_plan_contract', return_value=(contract, context)), \
+                    patch.object(module, '_visual_plan_program', return_value=program), \
+                    patch.object(module, '_visual_plan_input_signature', return_value='sig-1'), \
+                    patch.object(module, '_landloom_can', return_value=True), \
+                    patch.object(module.db, 'get_tenant_by_id', return_value={'id': self.tenant_a, 'is_active': True}), \
+                    patch.object(module.auth, '_load_token_user', return_value=({'id': 'u1', 'role': 'admin'}, None)), \
+                    patch.object(module.auth, '_session_state_error', return_value=None), \
+                    patch.object(module.db, 'get_user_permissions', return_value={'generate_images': True}):
+                module._visual_plan_job_worker(module.app, actor, data, 'site_chat', 'plan_site', job_id)
+
+        final_job = written_jobs.get(job_id)
+        self.assertIsNotNone(final_job)
+        self.assertEqual(final_job['status'], 'completed')
+        self.assertTrue(final_job['success'])
+        self.assertEqual(final_job['httpStatus'], 200)
+        self.assertTrue(final_job['result']['success'])
+        self.assertTrue(final_job['result']['needsClarification'])
+        self.assertEqual(final_job['result']['choices'],
+                         ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة'])
+
