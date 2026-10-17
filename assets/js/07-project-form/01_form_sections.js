@@ -123,6 +123,10 @@
       // Marked last on purpose: if anything above throws, the form stays unfilled and a save keeps
       // the stored values instead of writing this form's blanks over them.
       markTenantProjectFormFilled();
+      // Re-check parking only after every restored field and mirror has settled.
+      // Earlier calculateAll() calls during hydration can see a temporary stale
+      // parking snapshot and must not revoke saved visual-plan approvals.
+      if (typeof renderFinancialParking === 'function') renderFinancialParking();
     }
 
     function recoverTenantSlidePlan(projectData, slidesData) {

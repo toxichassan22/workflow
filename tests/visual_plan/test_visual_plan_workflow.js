@@ -11,6 +11,8 @@ const source = fs.readdirSync(dir).filter(file => /^02.*\.js$/.test(file)).sort(
   .map(file => fs.readFileSync(path.join(dir, file), 'utf8')).join('\n');
 const visualPageSource = fs.readFileSync(path.resolve(__dirname,
   '../../assets/js/13-visual/01_visual_concept_page.js'), 'utf8');
+const financialParkingSource = fs.readFileSync(path.resolve(__dirname,
+  '../../assets/js/09-financial/03_parking_planning.js'), 'utf8');
 const formSectionsSource = fs.readFileSync(path.resolve(__dirname,
   '../../assets/js/07-project-form/01_form_sections.js'), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -271,6 +273,27 @@ test('a legacy saved distribution review remains approvable after reload without
 
   context.approveVisualConceptPlansDistribution();
   assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.approved, true);
+});
+
+test('financial parking hydration cannot revoke a saved distribution review mid-load', () => {
+  const context = fixture();
+  vm.runInContext(financialParkingSource, context);
+  context.tenantProjectFormIsFilled = () => false;
+  context.persistVisualConceptDraftState = () => {};
+  context.tenantProjectData = {};
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {
+    distribution: { rows: [{ id: 'row_1', component: 'مكاتب' }], aiReviewed: true,
+      approved: true, reviewSignature: 'saved-review' }
+  } });
+
+  assert.equal(context.financialParkingInvalidateVisuals(), false);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.aiReviewed, true);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.approved, true);
+
+  context.tenantProjectFormIsFilled = () => true;
+  assert.equal(context.financialParkingInvalidateVisuals(), true);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.aiReviewed, false);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.approved, false);
 });
 
 test('unchecked notes approve through the responsibility dialog with a signed ack', async () => {

@@ -129,6 +129,10 @@
     }
 
     function financialParkingInvalidateVisuals() {
+      // Draft hydration recalculates the financial study before all mirrored
+      // land and timeline inputs have settled. A transient stale snapshot must
+      // not revoke a saved visual-plan review during that pass.
+      if (typeof tenantProjectFormIsFilled === 'function' && !tenantProjectFormIsFilled()) return false;
       const concept = typeof tenantVisualConceptState !== 'undefined' && tenantVisualConceptState
         ? tenantVisualConceptState : financialParkingObject(tenantProjectData.visual_concept);
       if (!concept || !Object.keys(concept).length) return;
@@ -145,6 +149,7 @@
       });
       tenantProjectData.visual_concept = concept;
       if (typeof persistVisualConceptDraftState === 'function') persistVisualConceptDraftState();
+      return true;
     }
 
     function renderFinancialParking() {
