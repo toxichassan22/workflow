@@ -15,6 +15,13 @@
         else if (action === 'delete-interior-field') deleteVisualConceptInteriorField(slotId);
         else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
         else if (action === 'chat') sendVisualConceptChat(slotId);
+        else if (action === 'start-site-chat') {
+          const input = document.querySelector('[data-visual-chat="plan_site"]');
+          if (input && !input.disabled) {
+            input.value = 'ابدأ مراجعة متطلبات المخطط واسألني عن أي نقطة غير واضحة.';
+            sendVisualConceptChat('plan_site');
+          }
+        }
         else if (action === 'chat-choice') {
           const input = document.querySelector('[data-visual-chat="' + slotId + '"]');
           if (input) {

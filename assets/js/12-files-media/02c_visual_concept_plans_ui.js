@@ -178,7 +178,8 @@
       const locked = visualConceptSlotLocked('plan_site');
       const status = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد'
         : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
-      const chat = (slot.chat || []).map(item => {
+      const chatMessages = slot.chat || [];
+      const chat = chatMessages.map(item => {
         const isUser = item.role === 'user';
         const choices = !isUser && Array.isArray(item.choices) && item.choices.length
           ? '<div class="visual-plan-site-choices">' + item.choices.map(choice =>
@@ -187,7 +188,9 @@
           : '';
         return '<article class="visual-plan-site-message ' + (isUser ? 'is-user' : 'is-assistant') + '">' +
           '<div class="visual-plan-site-message-text">' + escapeHtml(item.text || '') + '</div>' + choices + '</article>';
-      }).join('') || '<p class="tenant-hint visual-plan-site-empty-chat">لا توجد رسائل بعد.</p>';
+      }).join('') || '<div class="tenant-hint visual-plan-site-empty-chat"><p>لا توجد رسائل بعد.</p>' +
+        '<button type="button" class="btn primary small" data-visual-action="start-site-chat" data-visual-slot="plan_site" ' +
+        (locked ? 'disabled' : '') + '>بدء المحادثة</button></div>';
       const preview = image
         ? '<div class="visual-plan-site-preview" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '"><img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '"><button type="button" class="visual-concept-zoom-btn" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">تكبير</button></div>'
         : '<div class="visual-plan-site-preview-empty">لا توجد معاينة بعد.</div>';

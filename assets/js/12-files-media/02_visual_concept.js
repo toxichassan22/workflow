@@ -494,12 +494,13 @@
     }
 
     function visualConceptSlotLocked(slotId) {
-      // The plan diagrams render the same fixed scene — no diagram depends on
-      // approval of another image. A missing scene or an in-flight edit keeps
-      // the shared render input unavailable.
+      // Stage three starts the scene through its first chat turn, so the site
+      // plan composer must remain available before a scene token exists.
+      // Other workflow diagrams still require that shared scene first.
       if (isVisualConceptPlanSlot(slotId)) {
-        return isVisualConceptWorkflowPlan(slotId) && (Boolean(visualConceptPlanScenePending)
-          || !tenantVisualConceptState?.plansWorkflow?.scene?.token);
+        if (!isVisualConceptWorkflowPlan(slotId)) return false;
+        if (Boolean(visualConceptPlanScenePending)) return true;
+        return slotId !== 'plan_site' && !tenantVisualConceptState?.plansWorkflow?.scene?.token;
       }
       if (isVisualConceptInteriorSlot(slotId)) {
         // Interior renders consume the approved hero as their building

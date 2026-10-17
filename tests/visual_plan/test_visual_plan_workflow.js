@@ -549,6 +549,18 @@ test('stage three renders only the simplified SVG site plan and stage four rende
   assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['other']);
 });
 
+test('the site plan chat can start before a scene exists and offers an explicit start button', () => {
+  const context = fixture();
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {} });
+
+  assert.equal(context.visualConceptSlotLocked('plan_site'), false);
+  assert.equal(context.visualConceptSlotLocked('plan_uses'), true);
+
+  const card = context.renderVisualConceptSitePlanCard();
+  assert.match(card, /data-visual-action="start-site-chat"[^>]*>بدء المحادثة/);
+  assert.match(card, /<textarea data-visual-chat="plan_site"[^>]*placeholder="رسالة جديدة"\s*>/);
+});
+
 test('visual plan job polling allows the requested two-hour generation window', () => {
   const actions = fs.readFileSync(path.join(dir, '02d_visual_concept_plan_actions.js'), 'utf8');
   assert.match(actions, /Date\.now\(\) \+ 7200000/);
