@@ -568,7 +568,7 @@
           btn.className = 'fin-tab';
           btn.dataset.finTab = index;
           btn.setAttribute('role', 'tab');
-          btn.setAttribute('data-section-lock-ignore', '');
+          btn.setAttribute('data-section-lock-ignore', '1');
           btn.textContent = block.querySelector('h3')?.textContent.trim() || '';
           btn.addEventListener('click', () => activateFinancialTab(root, index));
           bar.appendChild(btn);

@@ -670,6 +670,10 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn("control.dataset.sectionLockWasDisabled = control.disabled ? '1' : '0';", index_source)
         self.assertIn("control.disabled = control.dataset.sectionLockWasDisabled === '1';", index_source)
 
+        # Financial tabs are view controls: their lock-ignore marker must match the lock
+        # handler's exact value check so an approved study remains readable across tabs.
+        self.assertIn("btn.setAttribute('data-section-lock-ignore', '1');", index_source)
+
         # Components have no dedicated lock — approving the parking plan or the best-use
         # distribution only replaces rows, it never locks the section; the lock comes from
         # approving «الدراسة المالية والمؤشرات» itself.
