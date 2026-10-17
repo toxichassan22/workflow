@@ -230,3 +230,46 @@
         padding: 4px 8px 4px 4px;
       }
     }
+.visual-plan-job-todos {
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 10px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--soft);
+}
+
+.visual-plan-job-todos li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--txt);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.visual-plan-job-todos li strong {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.visual-plan-job-todos li.is-active strong,
+.visual-plan-job-todos li.is-done strong {
+  color: var(--teal-dark);
+}
+
+.visual-plan-job-todos li.is-failed strong {
+  color: var(--p);
+}
+
+.visual-concept-chat-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}

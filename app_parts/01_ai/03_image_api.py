@@ -186,8 +186,8 @@ def persist_generated_image(image, tenant_id):
 
 VISUAL_CONCEPT_MAX_REFERENCE_IMAGES = 5
 VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 4
-VISUAL_CONCEPT_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'interior')
-VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')
+VISUAL_CONCEPT_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'main_facade', 'interior')
+VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'main_facade')
 VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')
 VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior'
 VISUAL_CONCEPT_PLAN_PREFIX = 'plan'
@@ -213,6 +213,7 @@ VISUAL_CONCEPT_SLOT_LABELS = {
     'left': 'شمال',
     'top': 'فوق',
     'back': 'خلف',
+    'main_facade': 'الواجهة الرئيسية',
     'interior': 'التصميم الداخلي',
 }
 VISUAL_CONCEPT_REQUIRED_FIELDS = (
@@ -515,6 +516,7 @@ def _visual_concept_normalize_slot(slot_id):
         'west': 'left', 'west_facade': 'left', 'شمال': 'left',
         'aerial': 'top', 'above': 'top', 'فوق': 'top',
         'rear': 'back', 'behind': 'back', 'خلف': 'back',
+        'front_facade': 'main_facade', 'facade_main': 'main_facade',
         'inside': 'interior', 'internal': 'interior',
     }
     return aliases.get(folded)
@@ -560,6 +562,15 @@ def _visual_concept_slot_instruction(slot_id, facts):
             'Use the attached site/map image as the actual ground and plot background when it is included. Place the building on that plot. '
             + style_note +
             'The composition is a cinematic exterior establishing shot, 16:9.'
+        )
+    if slot_id == 'main_facade':
+        return (
+            f'Render a clear, straight-on primary street-facing architectural elevation of {name}. '
+            + ('The approved planning diagrams define the exact building massing, height, and use bands; preserve them. '
+               if facts.get('plan_image_urls') else '')
+            + 'Show the complete main facade as the hero subject, with a calm, realistic street-level camera and daylight. '
+            'Keep the architecture consistent with the approved project image and style references. '
+            'Do not make an aerial, side, rear, interior, or generic hero view.'
         )
     if slot_id in VISUAL_CONCEPT_MOODBOARD_SLOTS:
         view_name = _visual_concept_slot_label(slot_id, facts)

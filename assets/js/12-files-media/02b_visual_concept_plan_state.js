@@ -45,7 +45,13 @@
         planContext: null,
         viewStage: 'verify',
         promptReady: false,
-        promptsError: ''
+        promptsError: '',
+        jobTodos: [],
+        siteAssistant: {
+          inputSignature: '', summary: '', turns: [], answers: [], pendingQuestion: '',
+          readyForGeneration: false, designSpec: null, checkpoints: {},
+          promptTokens: 0, compactionCount: 0, status: 'idle'
+        }
       };
     }
 
@@ -69,6 +75,17 @@
         .filter(item => item.text);
       const prompts = source.prompts && typeof source.prompts === 'object' ? source.prompts : {};
       const scene = source.scene && typeof source.scene === 'object' && source.scene.version === 1 ? source.scene : null;
+      const assistant = source.siteAssistant && typeof source.siteAssistant === 'object' ? source.siteAssistant : {};
+      const assistantTurns = (Array.isArray(assistant.turns) ? assistant.turns : []).slice(-12).map(item => ({
+        role: item?.role === 'assistant' ? 'assistant' : 'user',
+        text: String(item?.text || '').slice(0, 4000),
+        choices: Array.isArray(item?.choices) ? item.choices.slice(0, 6).map(choice => String(choice).slice(0, 240)) : []
+      })).filter(item => item.text);
+      const assistantAnswers = (Array.isArray(assistant.answers) ? assistant.answers : []).slice(-100).map(item => ({
+        question: String(item?.question || '').slice(0, 800),
+        answer: String(item?.answer || '').slice(0, 2000)
+      })).filter(item => item.question && item.answer);
+      const assistantCheckpoints = assistant.checkpoints && typeof assistant.checkpoints === 'object' ? assistant.checkpoints : {};
       return {
         ...empty,
         status: ['idle', 'verified', 'boundary', 'ready'].includes(source.status) ? source.status : 'idle',
@@ -126,7 +143,28 @@
         planContext: source.planContext && typeof source.planContext === 'object' ? source.planContext : null,
         viewStage: ['verify', 'boundary', 'generate', 'other'].includes(source.viewStage) ? source.viewStage : 'verify',
         promptReady: Boolean(scene && scene.token && (source.promptReady || (prompts.site && prompts.uses && prompts.massing))),
-        promptsError: String(source.promptsError || '').slice(0, 400)
+        promptsError: String(source.promptsError || '').slice(0, 400),
+        jobTodos: (Array.isArray(source.jobTodos) ? source.jobTodos : []).slice(0, 8).map((item, index) => ({
+          id: String(item?.id || index + 1).slice(0, 24),
+          label: String(item?.label || '').slice(0, 160),
+          status: ['pending', 'active', 'done', 'failed'].includes(item?.status) ? item.status : 'pending'
+        })).filter(item => item.label),
+        siteAssistant: {
+          inputSignature: String(assistant.inputSignature || '').slice(0, 80),
+          summary: String(assistant.summary || '').slice(0, 40000),
+          turns: assistantTurns,
+          answers: assistantAnswers,
+          pendingQuestion: String(assistant.pendingQuestion || '').slice(0, 800),
+          readyForGeneration: Boolean(assistant.readyForGeneration),
+          designSpec: assistant.designSpec && typeof assistant.designSpec === 'object' ? assistant.designSpec : null,
+          checkpoints: Object.fromEntries(['coordinates', 'colors', 'components', 'access', 'landscape', 'legend']
+            .filter(name => typeof assistantCheckpoints[name] === 'string')
+            .map(name => [name, assistantCheckpoints[name].slice(0, 60000)])),
+          promptTokens: Math.max(0, Number(assistant.promptTokens) || 0),
+          compactionCount: Math.max(0, Number(assistant.compactionCount) || 0),
+          status: ['idle', 'questioning', 'ready', 'generating', 'editing', 'review'].includes(assistant.status)
+            ? assistant.status : 'idle'
+        }
       };
     }
 
@@ -134,7 +172,7 @@
       const prompt = workflow?.prompts?.[definition.kind] || '';
       return {
         mode: 'ai', label: definition.label, caption: definition.label, prompt,
-        imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [],
+        imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], svgCode: '',
         styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: ''
       };
     }

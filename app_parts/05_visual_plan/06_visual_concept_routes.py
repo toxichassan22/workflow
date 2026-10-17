@@ -476,6 +476,9 @@ def api_visual_concept_generate():
     if workflow_error:
         return jsonify(workflow_error), 400
     if _visual_concept_plan_kind(slot_id):
+        if slot_id == 'plan_site':
+            data['planAssistantAction'] = 'generate'
+            return _visual_plan_dispatch('site_generate', data, slot_id)
         return _visual_plan_dispatch('render', data, slot_id)
     _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
     if missing:
@@ -539,6 +542,9 @@ def api_visual_concept_chat():
     if workflow_error:
         return jsonify(workflow_error), 400
     if _visual_concept_plan_kind(slot_id):
+        if slot_id == 'plan_site':
+            action = 'site_edit' if data.get('siteSvgCode') else 'site_chat'
+            return _visual_plan_dispatch(action, data, slot_id)
         return _visual_plan_dispatch('edit', data, slot_id)
     instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
     if not instruction:

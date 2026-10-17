@@ -1,5 +1,57 @@
     const visualConceptPlanRequests = new Set();
 
+    function visualConceptPlanTodoMarkup(todos) {
+      const statusText = { pending: 'بانتظار', active: 'قيد التنفيذ', done: 'مكتمل', failed: 'تعذر' };
+      const rows = Array.isArray(todos) ? todos : [];
+      if (!rows.length) return '';
+      return '<ol class="visual-plan-job-todos">' + rows.map(item =>
+        '<li class="is-' + escapeHtml(item.status) + '"><span>' + escapeHtml(item.label) + '</span>' +
+        '<strong>' + escapeHtml(statusText[item.status] || statusText.pending) + '</strong></li>'
+      ).join('') + '</ol>';
+    }
+
+    function updateVisualConceptPlanJobUi(job) {
+      if (!job) return;
+      const workflow = visualConceptPlansWorkflowState();
+      let changed = false;
+      if (Array.isArray(job.todos) && JSON.stringify(workflow.jobTodos) !== JSON.stringify(job.todos)) {
+        workflow.jobTodos = job.todos;
+        changed = true;
+      }
+      const sections = job.checkpoint?.svgSections;
+      if (sections && typeof sections === 'object') {
+        workflow.siteAssistant.checkpoints = workflow.siteAssistant.checkpoints || {};
+        Object.entries(sections).forEach(([name, code]) => {
+          if (typeof code === 'string' && workflow.siteAssistant.checkpoints[name] !== code) {
+            workflow.siteAssistant.checkpoints[name] = code;
+            changed = true;
+          }
+        });
+      }
+      if (changed && typeof markVisualConceptDirty === 'function') markVisualConceptDirty();
+      if (!Array.isArray(job.todos)) return;
+      const markup = visualConceptPlanTodoMarkup(workflow.jobTodos);
+      const panel = document.querySelector('[data-plans-workflow-todos]');
+      if (panel) panel.innerHTML = markup;
+      const loader = document.getElementById('globalLoader');
+      const card = loader?.querySelector('.global-loader-card');
+      if (card) {
+        let list = card.querySelector('.visual-plan-job-todos');
+        if (!list && markup && document.createElement) {
+          const host = document.createElement('div');
+          host.innerHTML = markup;
+          list = host.firstElementChild;
+          if (list) card.appendChild(list);
+        } else if (list) {
+          list.outerHTML = markup || '';
+        }
+      }
+      const active = workflow.jobTodos.find(item => item.status === 'active');
+      if (active && job.status === 'running' && typeof updateLoaderProgress === 'function') {
+        updateLoaderProgress(Number(job.progress || 20), active.label);
+      }
+    }
+
     function visualConceptPlanActionBusy(action, busy) {
       if (busy) {
         if (visualConceptPlanRequests.has(action)) return false;
@@ -18,11 +70,13 @@
     async function visualConceptPlanJobApi(method, path, body) {
       const initial = await api(method, path, body);
       if (!initial || !initial.jobId) return initial;
-      const deadline = Date.now() + 240000;
+      const deadline = Date.now() + 7200000;
       let job = initial;
+      updateVisualConceptPlanJobUi(job);
       while (job && (job.status === 'queued' || job.status === 'running') && Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 1500));
         job = await api('GET', '/api/visual-concept/plans-jobs/' + encodeURIComponent(initial.jobId));
+        updateVisualConceptPlanJobUi(job);
       }
       if (job && job.result && typeof job.result === 'object') return job.result;
       if (job && job.error) return { success: false, error: job.error, error_code: job.error_code };

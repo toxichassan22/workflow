@@ -15,6 +15,13 @@
         else if (action === 'delete-interior-field') deleteVisualConceptInteriorField(slotId);
         else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
         else if (action === 'chat') sendVisualConceptChat(slotId);
+        else if (action === 'chat-choice') {
+          const input = document.querySelector('[data-visual-chat="' + slotId + '"]');
+          if (input) {
+            input.value = button.getAttribute('data-choice') || '';
+            sendVisualConceptChat(slotId);
+          }
+        }
         else if (action === 'add-interior') addVisualConceptInteriorView();
         else if (action === 'section-approve') approveVisualConceptSection(button.getAttribute('data-visual-section'));
         else if (action === 'section-unapprove') unapproveVisualConceptSection(button.getAttribute('data-visual-section'));
@@ -57,14 +64,16 @@
       const externalLocked = visualConceptSectionLocked('external');
       const coverApproved = Boolean(tenantVisualConceptState.slots.cover.approvedImageUrl);
       const coverHtml = renderVisualConceptSlot(VISUAL_CONCEPT_SLOTS[0], externalLocked);
-      const angleHtml = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map(item => renderVisualConceptSlot(item, externalLocked || !coverApproved)).join('');
+      const mainFacade = VISUAL_CONCEPT_EXTERNAL_SLOTS.find(item => item.id === 'main_facade');
+      const mainFacadeHtml = mainFacade ? renderVisualConceptSlot(mainFacade, externalLocked || !coverApproved) : '';
+      const angleHtml = VISUAL_CONCEPT_ANGLE_SLOTS.map(item => renderVisualConceptSlot(item, externalLocked || !coverApproved)).join('');
       const lockHint = externalLocked
         ? '<p class="tenant-hint visual-concept-lock-hint">التصورات الخارجية مقفلة حتى اعتماد قسم المخططات.</p>'
         : (coverApproved ? '' : '<p class="tenant-hint visual-concept-lock-hint">زوايا التصور الخارجي مقفلة حتى اعتماد الصورة الرئيسية.</p>');
       host.innerHTML = coverHtml +
         '<div class="visual-concept-stack">' +
         lockHint +
-        angleHtml + '</div>';
+        mainFacadeHtml + angleHtml + '</div>';
       renderVisualConceptInteriorWorkspace();
       renderVisualConceptPlans();
       renderVisualConceptSketches();
@@ -292,6 +301,39 @@
       }
     }
 
+    function applyVisualConceptSiteAssistantResponse(response) {
+      const workflow = visualConceptPlansWorkflowState();
+      const slot = tenantVisualConceptState?.slots?.plan_site;
+      if (!slot || !response) return;
+      if (response.contextChanged) {
+        slot.svgCode = '';
+        slot.imageUrl = '';
+        slot.approvedImageUrl = '';
+        slot.status = 'pending';
+        slot.chat = [];
+      }
+      if (response.assistantState && typeof response.assistantState === 'object') {
+        workflow.siteAssistant = normalizeVisualConceptPlansWorkflow({ siteAssistant: response.assistantState }).siteAssistant;
+        slot.chat = workflow.siteAssistant.turns.slice(-30).map(turn => ({
+          role: turn.role, text: turn.text, choices: turn.choices || [], attachments: []
+        }));
+      }
+      if (response.question && !slot.chat.some(item => item.role === 'assistant' && item.text === response.question)) {
+        slot.chat.push({ role: 'assistant', text: response.question, choices: response.choices || [] });
+      }
+      if (response.reply && response.image && !slot.chat.some(item => item.role === 'assistant' && item.text === response.reply)) {
+        slot.chat.push({ role: 'assistant', text: response.reply, choices: [] });
+      }
+      if (response.svgCode) {
+        slot.svgCode = String(response.svgCode).slice(0, 300000);
+        slot.imageUrl = visualConceptImageUrl(response.image || slot.imageUrl);
+        slot.approvedImageUrl = '';
+        slot.status = 'review';
+        workflow.siteAssistant.checkpoints = response.assistantState?.checkpoints || workflow.siteAssistant.checkpoints;
+      }
+      markVisualConceptDirty();
+    }
+
     async function generateVisualConceptImage(slotId) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       // Never hold a slot reference across an await or a render: renderVisualConceptPage
@@ -299,13 +341,14 @@
       // captured slot is detached and the generated image was written to a dead object.
       const liveSlot = () => tenantVisualConceptState.slots[slotId];
       if (!liveSlot() || liveSlot().status === 'generating') return;
+      const sitePlan = slotId === 'plan_site' && isVisualConceptWorkflowPlan(slotId);
       if (visualConceptSlotLocked(slotId)) {
         showVisualConceptLockNotice(visualConceptLockMessage(slotId));
         return;
       }
-      if (!liveSlot().prompt) {
+      if (!sitePlan && !liveSlot().prompt) {
         await generateVisualConceptPrompt(slotId);
-      } else if (slotId === 'cover' && visualConceptCoverStyleRefStale()) {
+      } else if (!sitePlan && slotId === 'cover' && visualConceptCoverStyleRefStale()) {
         // The hidden prompt predates the ref names — the prompt writer edits
         // just the reference assignments in place, so the new mapping is
         // written in proper prompt language without touching anything else.
@@ -313,15 +356,28 @@
           slotId,
           'الصور المرجعية للتصميم اتغيّرت — حدّث تعيينها في الوصف فقط: اربط كل صورة مرجعية مسمّاة بالعنصر الذي يصفه اسمها كما ورد في بيانات المشروع، واحذف تعيين أي صورة لم تعد موجودة، ولا تغيّر أي تفاصيل أخرى.');
       }
-      if (!liveSlot() || !liveSlot().prompt) return;
+      if (!liveSlot() || (!sitePlan && !liveSlot().prompt)) return;
       const previousImage = liveSlot().imageUrl || liveSlot().approvedImageUrl;
       liveSlot().status = 'generating';
       renderVisualConceptPage();
       showLoader('جاري توليد التصور البصري', WFT('vc.generating_slot', 'يتم توليد {slot}...', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
       try {
-        const payload = await collectVisualConceptPayload(slotId);
-        const response = await apiWithTimeout('POST', '/api/visual-concept/generate', payload, 180000, 'انتهت مهلة توليد الصورة؛ أعد المحاولة.');
+        const payload = sitePlan ? await collectVisualConceptPlansWorkflowPayload() : await collectVisualConceptPayload(slotId);
+        if (sitePlan) {
+          payload.planAssistantAction = 'generate';
+          payload.siteSvgCode = liveSlot().svgCode || '';
+        }
+        const response = sitePlan
+          ? await visualConceptPlanJobApi('POST', '/api/visual-concept/site-plan-assistant', payload)
+          : (isVisualConceptWorkflowPlan(slotId)
+            ? await visualConceptPlanJobApi('POST', '/api/visual-concept/generate', payload)
+            : await apiWithTimeout('POST', '/api/visual-concept/generate', payload, 180000, 'انتهت مهلة توليد الصورة؛ أعد المحاولة.'));
         hideLoader();
+        if (sitePlan && response?.success && !response.image) {
+          applyVisualConceptSiteAssistantResponse(response);
+          renderVisualConceptPage();
+          return;
+        }
         if (!response?.success || !response.image) {
           liveSlot().status = previousImage ? 'review' : 'pending';
           renderVisualConceptPage();
@@ -335,6 +391,7 @@
           receiveVisualConceptPlanScene(response.scene, slotId);
           if (response.scene?.token) liveSlot().sceneToken = response.scene.token;
         }
+        if (sitePlan) applyVisualConceptSiteAssistantResponse(response);
         liveSlot().prompt = response.prompt || liveSlot().prompt;
         liveSlot().imageUrl = visualConceptImageUrl(response.image);
         liveSlot().approvedImageUrl = '';
@@ -410,8 +467,12 @@
         tenantCreativeImages.cover = '';
         tenantCreativeImages.cover_preview = '';
       }
-      if ((slotId === 'right' || slotId === 'left' || slotId === 'top' || slotId === 'back') && tenantCreativeImages?.moodboard) {
-        delete tenantCreativeImages.moodboard[slotId];
+      if (slotId === 'main_facade' && tenantCreativeImages) {
+        tenantCreativeImages.main_facade = '';
+      }
+      const moodboardIndex = VISUAL_CONCEPT_ANGLE_SLOTS.findIndex(item => item.id === slotId);
+      if (moodboardIndex >= 0 && Array.isArray(tenantCreativeImages?.moodboard)) {
+        tenantCreativeImages.moodboard[moodboardIndex] = '';
       }
       markVisualConceptDirty();
       renderVisualConceptPage();
@@ -482,29 +543,44 @@
       // server's fixed surgical-edit contract. Before the first image exists the
       // same box steers the hidden prompt instead — there is nothing to edit yet.
       const planWorkflowSlot = isVisualConceptWorkflowPlan(slotId);
+      const sitePlan = slotId === 'plan_site' && planWorkflowSlot;
       const baseImage = durableImageUrl(liveSlot().imageUrl || liveSlot().approvedImageUrl);
       // Workflow plans edit the shared geometric scene rather than pixels: even
       // before the first render the same box applies a surgical scene edit and
       // the server re-renders the diagram from the validated result.
-      const editImage = planWorkflowSlot || Boolean(baseImage);
+      const editImage = sitePlan ? Boolean(liveSlot().svgCode) : (planWorkflowSlot || Boolean(baseImage));
       const refs = (visualConceptChatRefs[slotId] || []).slice(0, 5);
       liveSlot().chat.push({ role: 'user', text: message, attachments: refs.map(file => file.name) });
       markVisualConceptDirty();
       showLoader(
-        editImage ? WFT('vc.edit_running', 'جاري تعديل الصورة') : 'جاري تعديل وصف الصورة',
-        editImage ? WFT('vc.edit_running_detail', 'يتم تطبيق التعديل على نفس الصورة دون تغيير باقي تفاصيلها...') : 'يتم تطبيق ملاحظاتك على نفس المشروع...');
+        sitePlan ? 'جاري مراجعة المخطط' : (editImage ? WFT('vc.edit_running', 'جاري تعديل الصورة') : 'جاري تعديل وصف الصورة'),
+        sitePlan ? 'يتم مراجعة بيانات الموقع والإجابات السابقة...' :
+          (editImage ? WFT('vc.edit_running_detail', 'يتم تطبيق التعديل على نفس الصورة دون تغيير باقي تفاصيلها...') : 'يتم تطبيق ملاحظاتك على نفس المشروع...'));
       try {
-        const payload = await collectVisualConceptPayload(slotId);
+        const payload = sitePlan ? await collectVisualConceptPlansWorkflowPayload() : await collectVisualConceptPayload(slotId);
         payload.message = message;
         if (editImage) payload.image = baseImage;
         if (refs.length) payload.editReferenceFileIds = refs.map(file => file.id);
-        if (planWorkflowSlot) visualConceptPlanScenePending = true;
-        const response = planWorkflowSlot
-          ? await visualConceptPlanJobApi('POST', '/api/visual-concept/edit', payload)
+        if (sitePlan) {
+          payload.planAssistantAction = editImage ? 'edit' : 'chat';
+          payload.siteSvgCode = liveSlot().svgCode || '';
+        }
+        if (planWorkflowSlot && !sitePlan) visualConceptPlanScenePending = true;
+        const response = sitePlan
+          ? await visualConceptPlanJobApi('POST', '/api/visual-concept/site-plan-assistant', payload)
+          : (planWorkflowSlot
+            ? await visualConceptPlanJobApi('POST', '/api/visual-concept/edit', payload)
           : (editImage
             ? await apiWithTimeout('POST', '/api/visual-concept/edit', payload, 180000, WFT('vc.edit_timeout', 'انتهت مهلة تعديل الصورة؛ أعد المحاولة.'))
-            : await api('POST', '/api/visual-concept/chat', payload));
+            : await api('POST', '/api/visual-concept/chat', payload)));
         hideLoader();
+        if (sitePlan && response?.success) {
+          applyVisualConceptSiteAssistantResponse(response);
+          if (input) input.value = '';
+          renderVisualConceptPage();
+          if (response.image) toast('تم تعديل المخطط.');
+          return;
+        }
         if (editImage && response?.needsClarification) {
           showVisualConceptMissing('');
           liveSlot().chat.push({

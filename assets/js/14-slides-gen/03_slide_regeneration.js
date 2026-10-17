@@ -379,7 +379,11 @@
     }
 
     function buildPresentationGenerationImages() {
-      const externalSlots = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1);
+      const mainFacadeSlot = VISUAL_CONCEPT_EXTERNAL_SLOTS.find(item => item.id === 'main_facade');
+      const mainFacadeImage = mainFacadeSlot
+        ? (tenantVisualConceptState?.slots?.[mainFacadeSlot.id]?.approvedImageUrl
+          || tenantVisualConceptState?.slots?.[mainFacadeSlot.id]?.imageUrl || '') : '';
+      const externalSlots = mainFacadeImage ? [...VISUAL_CONCEPT_ANGLE_SLOTS, mainFacadeSlot] : VISUAL_CONCEPT_ANGLE_SLOTS;
       const visualMoodboard = externalSlots.map(item => tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl || tenantVisualConceptState?.slots?.[item.id]?.imageUrl || '');
       const fallbackMoodboard = Array.isArray(tenantCreativeImages?.moodboard) ? tenantCreativeImages.moodboard : [];
       const moodboard = visualMoodboard.some(Boolean)

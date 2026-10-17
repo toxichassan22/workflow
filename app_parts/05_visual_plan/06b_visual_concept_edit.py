@@ -138,6 +138,8 @@ def api_visual_concept_edit():
     if workflow_error:
         return jsonify(workflow_error), 400
     if _visual_concept_plan_kind(slot_id):
+        if slot_id == 'plan_site':
+            return _visual_plan_dispatch('site_edit', data, slot_id)
         return _visual_plan_dispatch('edit', data, slot_id)
     instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
     if not instruction:

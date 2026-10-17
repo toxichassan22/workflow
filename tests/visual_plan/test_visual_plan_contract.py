@@ -64,6 +64,62 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                 self.assertIn('FULL_CONSTRAINT_MARKER', prompt)
                 self.assertIn('500040', prompt)
 
+    def test_main_facade_is_a_gated_external_slot_with_a_front_view_prompt(self):
+        module = self.application_module
+        self.assertIn('main_facade', module.VISUAL_CONCEPT_SLOTS)
+        self.assertIn('main_facade', module.VISUAL_CONCEPT_EXTERNAL_SLOTS)
+        self.assertEqual(module._visual_concept_section_requirement('main_facade'), 'plans2d')
+        instruction = module._visual_concept_slot_instruction('main_facade', {
+            'project_name': 'Fixed Parcel', 'slot_label': 'الواجهة الرئيسية',
+            'plan_image_urls': ['/site.svg', '/uses.svg', '/massing.svg'],
+        })
+        self.assertIn('straight-on primary street-facing', instruction)
+        self.assertIn('approved planning diagrams', instruction)
+        self.assertIn('Do not make an aerial', instruction)
+
+    def test_site_plan_interview_keeps_choices_answers_and_compacts_at_input_threshold(self):
+        module = self.application_module
+        first_data = {'message': 'Review the site plan.', 'plansWorkflow': {
+            'siteAssistant': {'inputSignature': 'same-input'}
+        }}
+        first_reply = {'ready': False, 'question': 'Which side is the main vehicle entry?',
+                       'choices': ['West street', 'South street'], 'memory': 'Entries remain on recorded streets.'}
+        next_reply = {'ready': True, 'reply': 'The requirements are clear.',
+                      'memory': 'The main vehicle entry is on the west street.'}
+        with patch.object(module, '_visual_plan_site_packet',
+                          return_value=({}, {}, {}, 'same-input')), \
+                patch.object(module, '_visual_plan_site_call',
+                             side_effect=[(first_reply, 900000), (next_reply, 10)]) as model_call:
+            question = module._visual_plan_site_interview(first_data)
+            self.assertEqual(question['choices'], ['West street', 'South street'])
+            self.assertEqual(question['assistantState']['compactionCount'], 1)
+            self.assertEqual(question['assistantState']['turns'][-1]['choices'], question['choices'])
+            answer_data = {'message': 'West street', 'plansWorkflow': {
+                'siteAssistant': question['assistantState']
+            }}
+            ready = module._visual_plan_site_interview(answer_data)
+        self.assertTrue(ready['readyForGeneration'])
+        self.assertEqual(ready['assistantState']['answers'], [{
+            'question': first_reply['question'], 'answer': 'West street'
+        }])
+        self.assertEqual(ready['assistantState']['compactionCount'], 1)
+        second_packet = json.loads(model_call.call_args_list[1].args[1])
+        self.assertEqual(second_packet['resolvedAnswers'][0]['answer'], 'West street')
+
+    def test_site_plan_context_compaction_keeps_recent_answers_and_repeats_at_each_threshold(self):
+        module = self.application_module
+        state = {'promptTokens': 899990, 'compactedAtTokens': 0, 'compactionCount': 0,
+                 'turns': [{'text': str(index)} for index in range(10)],
+                 'answers': [{'question': str(index), 'answer': str(index)} for index in range(20)]}
+        module._visual_plan_site_record_tokens(state, 10)
+        self.assertEqual(state['compactionCount'], 1)
+        self.assertEqual(len(state['turns']), 4)
+        self.assertEqual([item['question'] for item in state['answers']],
+                         [str(index) for index in range(8, 20)])
+        module._visual_plan_site_record_tokens(state, 900000)
+        self.assertEqual(state['compactionCount'], 2)
+        self.assertEqual(state['compactedAtTokens'], 1800000)
+
     def test_notes_cannot_bypass_server_review_with_posted_boolean_flags(self):
         module = self.application_module
         project = self.project()
@@ -202,26 +258,29 @@ class VisualPlanContractTests(MeetingRequirementsTests):
             'entries': [], 'openAreas': []})
         with patch.object(module, 'call_openrouter_chat', return_value={
             'choices': [{'message': {'content': layout}}]
-        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+        }) as prepare_call, patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
             prepared = client.post('/api/visual-concept/plans-prompts',
                 headers=self._headers(self.token_a),
                 json={'projectData': project, 'plansWorkflow': self.workflow(project)})
         self.assertEqual(prepared.status_code, 200, prepared.get_json())
+        self.assertEqual(prepare_call.call_args.kwargs.get('model'), 'google/gemini-4-argon')
+        self.assertEqual(prepare_call.call_args.kwargs.get('reasoning_effort'), 'high')
         scene = prepared.get_json()['scene']
         workflow = {**self.workflow(project), 'scene': scene}
 
         # The signature covers every input the scene depends on — a relabeled
         # draftId changes nothing it should care about.
         relabeled = dict(project, draftId='reloaded-draft-id')
-        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
-                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
-            render = client.post('/api/visual-concept/generate',
+        with patch.object(module, '_visual_plan_site_call', return_value=(
+                {'ready': True, 'reply': 'The requirements are clear.'}, 100)):
+            render = client.post('/api/visual-concept/site-plan-assistant',
                 headers=self._headers(self.token_a),
-                json={'slotId': 'plan_site', 'prompt': 'PROMPT',
+                json={'slotId': 'plan_site', 'planAssistantAction': 'chat',
+                      'message': 'Check the current site inputs.',
                       'projectData': relabeled, 'plansWorkflow': workflow})
         self.assertEqual(render.status_code, 200, render.get_json())
-        self.assertEqual(render.get_json()['image'], '/uploads/creative/out.png')
+        self.assertTrue(render.get_json()['readyForGeneration'])
 
         # Scenes sealed by the first-run draft-bound formula still verify as
         # long as the current draftId matches the one they were sealed under.
@@ -233,11 +292,12 @@ class VisualPlanContractTests(MeetingRequirementsTests):
             posted = {key: value for key, value in scene.items() if key != 'token'}
             legacy_scene = dict(scene, token=module._visual_plan_token(
                 'scene', data, signature, posted, legacy=True))
-        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
-                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
-            render = client.post('/api/visual-concept/generate',
+        with patch.object(module, '_visual_plan_site_call', return_value=(
+                {'ready': True, 'reply': 'The requirements are clear.'}, 100)):
+            render = client.post('/api/visual-concept/site-plan-assistant',
                 headers=self._headers(self.token_a),
-                json={'slotId': 'plan_site', 'prompt': 'PROMPT',
+                json={'slotId': 'plan_site', 'planAssistantAction': 'chat',
+                      'message': 'Check the current site inputs.',
                       'projectData': dict(project, draftId='draft-at-seal'),
                       'plansWorkflow': {**self.workflow(project), 'scene': legacy_scene}})
         self.assertEqual(render.status_code, 200, render.get_json())
@@ -382,20 +442,35 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         workflow = {**self.workflow(project), 'scene': scene,
                     'prompts': prepared.get_json()['prompts']}
 
-        raw_svg = ('<svg viewBox="0 0 1600 900" width="1600" height="900">'
-                   '<g><rect width="100%" height="100%" fill="#fff"/>'
-                   '<text>Housing & retail</text></svg>')
+        section_ids = ('coordinates', 'colors', 'components', 'access', 'landscape', 'legend')
+        section_replies = []
+        for section in section_ids:
+            if section == 'colors':
+                fragment = '<defs id="ll-section-colors"><style>.parcel{stroke:#18324A}</style></defs>'
+            else:
+                fragment = (f'<g id="ll-section-{section}"><text>{section.title()}</text>'
+                            f'<path d="M 1 1 L 2 2" class="parcel"/></g>')
+            section_replies.append({'choices': [{'message': {'content': json.dumps({'code': fragment})}}],
+                                    'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}})
+        model_replies = [{'choices': [{'message': {'content': json.dumps(
+            {'ready': True, 'reply': 'Requirements are clear.', 'memory': 'Preserve the approved layout.'})}}],
+                          'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}}] + section_replies
+        model_replies.append({'choices': [{'message': {'content': json.dumps({
+            'clear': True, 'targetSection': 'components',
+            'code': '<g id="ll-section-components"><text>Residential</text></g>',
+            'reply': 'Updated the component label.'})}}],
+            'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}})
         with tempfile.TemporaryDirectory() as upload_dir:
-            with patch.object(module, 'UPLOADS_DIR', upload_dir), \
-                    patch.object(module, 'call_openrouter_chat', return_value={
-                        'choices': [{'message': {'content': raw_svg}}]
-                    }) as chat_call, \
+            with patch.dict('os.environ', {'PLAN_SITE_MODEL': 'another/provider-model'}, clear=False), \
+                    patch.object(module, 'UPLOADS_DIR', upload_dir), \
+                    patch.object(module, 'call_openrouter_chat', side_effect=model_replies) as chat_call, \
                     patch.object(module, 'persist_generated_image',
                                  wraps=module.persist_generated_image) as persist_mock, \
                     patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
-                render = client.post('/api/visual-concept/generate',
+                render = client.post('/api/visual-concept/site-plan-assistant',
                     headers=self._headers(self.token_a),
-                    json={'slotId': 'plan_site', 'projectData': project, 'plansWorkflow': workflow})
+                    json={'slotId': 'plan_site', 'planAssistantAction': 'generate',
+                          'projectData': project, 'plansWorkflow': workflow})
                 self.assertEqual(render.status_code, 200, render.get_json())
                 body = render.get_json()
                 self.assertTrue(body['image'].startswith('/uploads/creative/' + self.tenant_a + '/'))
@@ -415,14 +490,50 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                     svg_root = ElementTree.fromstring(preview.data)
                     svg_namespace = '{http://www.w3.org/2000/svg}'
                     self.assertEqual(svg_root.tag, svg_namespace + 'svg')
-                    self.assertEqual(svg_root.find('.//' + svg_namespace + 'text').text, 'Housing & retail')
+                    self.assertEqual(svg_root.find('.//' + svg_namespace + 'text').text, 'Coordinates')
+                    found_ids = {element.attrib.get('id') for element in svg_root.iter()}
+                    for section in section_ids:
+                        self.assertIn('ll-section-' + section, found_ids)
                 finally:
                     preview.close()
+                before_root = ElementTree.fromstring(body['svgCode'])
+                before_sections = {
+                    section: ''.join(next(element for element in before_root.iter()
+                                          if element.attrib.get('id') == 'll-section-' + section).itertext())
+                    for section in section_ids
+                }
+                edit_workflow = copy.deepcopy(workflow)
+                edit_workflow['siteAssistant'] = body['assistantState']
+                edited = client.post('/api/visual-concept/site-plan-assistant',
+                    headers=self._headers(self.token_a), json={
+                        'slotId': 'plan_site', 'planAssistantAction': 'edit',
+                        'message': 'Rename the component label.', 'siteSvgCode': body['svgCode'],
+                        'projectData': project, 'plansWorkflow': edit_workflow,
+                    })
+                self.assertEqual(edited.status_code, 200, edited.get_json())
+                edited_body = edited.get_json()
+                self.assertEqual(edited_body['targetSection'], 'components')
+                after_root = ElementTree.fromstring(edited_body['svgCode'])
+                after_sections = {
+                    section: ''.join(next(element for element in after_root.iter()
+                                          if element.attrib.get('id') == 'll-section-' + section).itertext())
+                    for section in section_ids
+                }
+                self.assertEqual(after_sections['components'], 'Residential')
+                for section in set(section_ids) - {'components'}:
+                    self.assertEqual(after_sections[section], before_sections[section])
         self.assertEqual(render.status_code, 200, render.get_json())
         body = render.get_json()
         self.assertEqual(body['model'], 'google/gemini-4-argon')
-        chat_call.assert_called_once()
-        self.assertEqual(chat_call.call_args.kwargs.get('model'), 'google/gemini-4-argon')
+        self.assertEqual(chat_call.call_count, 8)
+        self.assertTrue(all(call.kwargs.get('model') == 'google/gemini-4-argon'
+                            for call in chat_call.call_args_list))
+        self.assertTrue(all(call.kwargs.get('reasoning_effort') == 'high'
+                            for call in chat_call.call_args_list))
+        self.assertEqual(chat_call.call_args_list[0].kwargs.get('max_tokens'), 12000)
+        self.assertTrue(all(call.kwargs.get('max_tokens') == 32000
+                            for call in chat_call.call_args_list[1:7]))
+        self.assertEqual(chat_call.call_args_list[7].kwargs.get('max_tokens'), 24000)
         persisted_uri = persist_mock.call_args.args[0]
         self.assertTrue(persisted_uri.startswith('data:image/svg+xml;base64,'))
         persisted_svg = base64.b64decode(persisted_uri.split(',', 1)[1])
@@ -437,6 +548,20 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                 error = module._visual_concept_plan_workflow_error(
                     copy.deepcopy(data), 'plan_' + kind, require_distribution=True)
                 self.assertIsNone(error)
+
+    def test_visual_plan_jobs_can_run_for_two_hours(self):
+        module = self.application_module
+        self.assertEqual(module._VISUAL_PLAN_JOB_TIMEOUT_SECONDS, 7200)
+        client = self.app.test_client()
+        running = {'status': 'running', 'success': True,
+                   'updatedAt': module.time.time() - 300, 'progress': 45,
+                   'todos': module._visual_plan_job_todos('render')}
+        with patch.object(module, '_read_job', return_value=running):
+            response = client.get('/api/visual-concept/plans-jobs/long-job',
+                                  headers=self._headers(self.token_a))
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['status'], 'running')
+        self.assertEqual(response.get_json()['todos'][1]['status'], 'active')
 
     def test_temporary_svg_model_comparison_route_is_retired(self):
         module = self.application_module

@@ -1,4 +1,32 @@
 _VISUAL_PLAN_JOB_NAMESPACE = '.visual_plan_jobs'
+_VISUAL_PLAN_JOB_TIMEOUT_SECONDS = 7200
+
+
+def _visual_plan_job_todos(kind, state='running'):
+    """Small real-work checklist exposed while a visual-plan job is active."""
+    labels = {
+        'prepare': ['قراءة بيانات الموقع والتوزيع', 'تكوين المشهد الهندسي', 'تجهيز بيانات المخطط'],
+        'render': ['تجميع بيانات الأرض والاشتراطات', 'كتابة كود المخطط', 'فحص SVG وتجهيز المعاينة'],
+        'edit': ['قراءة طلب التعديل والمخطط الحالي', 'تعديل الجزء المحدد', 'فحص SVG وتجهيز المعاينة'],
+        'prompt': ['قراءة بيانات المخطط', 'تجهيز وصف التوليد'],
+        'notes': ['مراجعة ملاحظات التوليد', 'تجهيز نتيجة الفحص'],
+        'site_chat': ['تحميل بيانات الأرض والتوزيع', 'مراجعة الإجابات السابقة', 'تحديد السؤال التالي'],
+        'site_generate': ['تأكيد اكتمال المتطلبات', 'كتابة أقسام كود SVG', 'فحص المخطط وتجهيز المعاينة'],
+        'site_edit': ['قراءة كود SVG والطلب', 'تعديل القسم المستهدف', 'فحص المخطط وتجهيز المعاينة'],
+    }.get(kind, ['معالجة المخطط'])
+    active = {'prepare': 0, 'render': 1, 'edit': 1, 'prompt': 1, 'notes': 0}.get(kind, 0)
+    rows = []
+    for index, label in enumerate(labels):
+        if state == 'completed' or state == 'running' and index < active:
+            status = 'done'
+        elif state == 'failed' and index == active:
+            status = 'failed'
+        elif state == 'running' and index == active:
+            status = 'active'
+        else:
+            status = 'pending'
+        rows.append({'id': str(index + 1), 'label': label, 'status': status})
+    return rows
 
 
 def _visual_plan_execute(kind, data, slot_id=''):
@@ -41,6 +69,9 @@ def _visual_plan_execute(kind, data, slot_id=''):
             result = _visual_plan_edit_scene(data, slot_id)
         elif kind == 'render':
             result = _visual_plan_render_response(data, slot_id)
+        elif kind in ('site_chat', 'site_generate', 'site_edit'):
+            result, status = _visual_plan_site_assistant_execute(data, kind.removeprefix('site_'))
+            return result, status
         else:
             return {'success': False, 'error_code': 'PLANS_OPERATION_INVALID'}, 400
         return result, 200
@@ -64,6 +95,20 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
     with flask_app.test_request_context('/api/visual-concept/plans-jobs/' + job_id, method='POST', json=data):
         for key, value in actor.items():
             setattr(g, key, value)
+        g.visual_plan_job_deadline = time.time() + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
+        def report_progress(progress, todos=None, checkpoint=None):
+            try:
+                current = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+            except Exception:
+                current = {}
+            current.update({'status': 'running', 'success': True,
+                            'progress': max(5, min(99, int(progress)))})
+            if todos is not None:
+                current['todos'] = todos
+            if checkpoint is not None:
+                current['checkpoint'] = checkpoint
+            _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, current)
+        g.visual_plan_job_progress = report_progress
         try:
             tenant = db.get_tenant_by_id(tenant_id)
             payload = actor.get('token_payload') or {}
@@ -79,24 +124,29 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                                   'error_code': 'PLANS_PERMISSION_REQUIRED'}, 403
             else:
                 _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id,
-                           {'status': 'running', 'success': True, 'progress': 20})
+                           {'status': 'running', 'success': True, 'progress': 20,
+                            'todos': _visual_plan_job_todos(kind)})
                 result, status = _visual_plan_execute(kind, data, slot_id)
-            _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id,
-                       {'status': 'completed' if result.get('success') else 'failed',
-                        'success': bool(result.get('success')), 'progress': 100,
-                        'result': result, 'httpStatus': status})
+            final_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+            final_job.update({'status': 'completed' if result.get('success') else 'failed',
+                              'success': bool(result.get('success')), 'progress': 100,
+                              'todos': _visual_plan_job_todos(kind, 'completed' if result.get('success') else 'failed'),
+                              'result': result, 'httpStatus': status})
+            _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, final_job)
             if not flask_app.config.get('TESTING'):
                 _bill_tenant_unbilled_usage_async(tenant_id)
         except Exception as error:
             app.logger.warning('Visual plan worker failed: %s', type(error).__name__)
-            _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id,
-                       {'status': 'failed', 'success': False, 'progress': 100, 'httpStatus': 503,
-                        'result': {'success': False, 'error': 'تعذرت معالجة المخطط الهندسي.',
-                                   'error_code': 'PLANS_PROVIDER_FAILED'}})
+            failed_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+            failed_job.update({'status': 'failed', 'success': False, 'progress': 100,
+                               'todos': _visual_plan_job_todos(kind, 'failed'), 'httpStatus': 503,
+                               'result': {'success': False, 'error': 'تعذرت معالجة المخطط الهندسي.',
+                                          'error_code': 'PLANS_PROVIDER_FAILED'}})
+            _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, failed_job)
 
 
 def _visual_plan_dispatch(kind, data, slot_id=''):
-    if kind == 'render' or current_app.config.get('TESTING') and data.get('background') is not True:
+    if current_app.config.get('TESTING') and data.get('background') is not True:
         result, status = _visual_plan_execute(kind, data, slot_id)
         return jsonify(result), status
     job_id = _uuid.uuid4().hex
@@ -104,6 +154,7 @@ def _visual_plan_dispatch(kind, data, slot_id=''):
              ('tenant_id', 'user_id', 'user_name', 'user_role', 'is_admin', 'token_payload')}
     _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id,
                {'status': 'queued', 'success': True, 'progress': 5, 'actor': actor,
+                'todos': _visual_plan_job_todos(kind, 'queued'),
                 'payload': {'data': data, 'kind': kind, 'slotId': slot_id}})
     threading.Thread(target=_visual_plan_job_worker,
                      args=(current_app._get_current_object(), actor, data, kind, slot_id, job_id),
@@ -154,9 +205,12 @@ def api_visual_concept_plan_job(job_id):
         job = None
     if not job:
         return jsonify({'success': False, 'error': 'مهمة المخططات غير موجودة.', 'error_code': 'JOB_NOT_FOUND'}), 404
-    if job.get('status') in ('queued', 'running') and time.time() - job.get('updatedAt', 0) > 240:
+    if job.get('status') in ('queued', 'running') and time.time() - job.get('updatedAt', 0) > _VISUAL_PLAN_JOB_TIMEOUT_SECONDS:
+        kind = ((job.get('payload') or {}).get('kind') or 'render')
         job = {'status': 'failed', 'success': False, 'progress': 100, 'httpStatus': 503,
+               'todos': _visual_plan_job_todos(kind, 'failed'),
                'result': {'success': False, 'error': 'انتهت مهلة معالجة المشهد الهندسي.',
                           'error_code': 'PLANS_JOB_EXPIRED'}}
         _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id, job)
-    return jsonify({key: job[key] for key in ('status', 'success', 'progress', 'result', 'httpStatus') if key in job})
+    return jsonify({key: job[key] for key in
+                    ('status', 'success', 'progress', 'todos', 'checkpoint', 'result', 'httpStatus') if key in job})

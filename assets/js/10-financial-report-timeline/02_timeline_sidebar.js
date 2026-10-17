@@ -230,18 +230,21 @@
               approved: !!tenantCreativeImages.cover
             },
             moodboard: {
-              prompts: Array.isArray(tenantCreativeImages.moodboard_prompts) ? [...tenantCreativeImages.moodboard_prompts] : [],
+              prompts: [
+                ...(Array.isArray(tenantCreativeImages.moodboard_prompts) ? tenantCreativeImages.moodboard_prompts : []),
+                tenantCreativeImages.main_facade_prompt || ''
+              ],
               images: VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).reduce((acc, item, index) => {
                 acc[index] = tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl
                   || tenantVisualConceptState?.slots?.[item.id]?.imageUrl
-                  || tenantCreativeImages.moodboard?.[index]
+                  || (item.id === 'main_facade' ? tenantCreativeImages.main_facade : tenantCreativeImages.moodboard?.[index])
                   || tempMoodboardImages[index]
                   || '';
                 return acc;
               }, { ...tempMoodboardImages }),
-              approved: Array.isArray(tenantCreativeImages.moodboard)
-                ? tenantCreativeImages.moodboard.map(image => !!image)
-                : []
+              approved: VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map((item, index) => item.id === 'main_facade'
+                ? !!(tenantVisualConceptState?.slots?.[item.id]?.approvedImageUrl)
+                : !!tenantCreativeImages.moodboard?.[index])
             },
             // tenantSlidesData already rides at the top level of this payload; the copy that
             // used to live here doubled every draft's stored and transferred size.

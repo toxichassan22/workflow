@@ -8,9 +8,11 @@
       { id: 'left', label: 'شمال', group: 'external' },
       { id: 'top', label: 'فوق', group: 'external' },
       { id: 'back', label: 'خلف', group: 'external' },
+      { id: 'main_facade', label: 'الواجهة الرئيسية', group: 'external' },
       { id: 'interior', label: 'التصميم الداخلي', group: 'internal' }
     ];
     const VISUAL_CONCEPT_EXTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'external');
+    const VISUAL_CONCEPT_ANGLE_SLOTS = VISUAL_CONCEPT_EXTERNAL_SLOTS.filter(item => item.id !== 'cover' && item.id !== 'main_facade');
     const VISUAL_CONCEPT_INTERNAL_SLOTS = VISUAL_CONCEPT_SLOTS.filter(item => item.group === 'internal');
     const VISUAL_CONCEPT_INTERNAL_PREFIX = 'interior';
     const VISUAL_CONCEPT_MAX_INTERIOR_IMAGES = 30;
@@ -26,11 +28,12 @@
       left: ['left', 'west', 'west_facade'],
       top: ['top', 'aerial', 'above'],
       back: ['back', 'rear', 'behind'],
+      main_facade: ['main_facade', 'front_facade', 'facade_main'],
       interior: ['interior', 'inside', 'internal']
     };
 
     function emptyVisualConceptSlot(id) {
-      return { id, mode: 'ai', label: visualConceptDefaultSlotLabel(id), caption: '', prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '', sketch: emptyVisualConceptSketch() };
+      return { id, mode: 'ai', label: visualConceptDefaultSlotLabel(id), caption: '', prompt: '', imageUrl: '', approvedImageUrl: '', status: 'pending', chat: [], svgCode: '', styleReferenceFileIds: [], styleReferenceNames: [], sourceFileId: '', sourceFileName: '', sketch: emptyVisualConceptSketch() };
     }
 
     function visualConceptDefaultSlotLabel(slotId) {
@@ -40,7 +43,7 @@
     }
 
     function visualConceptCanRenameSlot(slotId) {
-      return VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).some(item => item.id === slotId)
+      return VISUAL_CONCEPT_ANGLE_SLOTS.some(item => item.id === slotId)
         || (isVisualConceptPlanSlot(slotId) && !isVisualConceptWorkflowPlan(slotId));
     }
 
@@ -257,6 +260,7 @@
         const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
           role: entry.role === 'assistant' ? 'assistant' : 'user',
           text: String(entry.text).slice(0, 4000),
+          choices: Array.isArray(entry.choices) ? entry.choices.slice(0, 6).map(choice => String(choice).slice(0, 240)) : [],
           attachments: (Array.isArray(entry.attachments) ? entry.attachments : [])
             .map(name => String(name).slice(0, 120)).slice(0, 5)
         })) : [];
@@ -282,6 +286,7 @@
           approvedImageUrl: approved,
           status: safeStatus,
           chat,
+          svgCode: String(slot.svgCode || '').slice(0, 300000),
           styleReferenceFileIds: visualConceptReferenceList(slot.styleReferenceFileIds).slice(0, 5),
           styleReferenceNames: visualConceptReferenceList(slot.styleReferenceNames).slice(0, 5),
           sourceFileId: String(slot.sourceFileId || ''),
@@ -301,7 +306,7 @@
       }
       const moodboardImages = Array.isArray(tenantCreativeImages.moodboard) ? tenantCreativeImages.moodboard : [];
       const moodboardPrompts = Array.isArray(tenantCreativeImages.moodboard_prompts) ? tenantCreativeImages.moodboard_prompts : [];
-      VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).forEach((item, index) => {
+      VISUAL_CONCEPT_ANGLE_SLOTS.forEach((item, index) => {
         const slot = slots[item.id];
         if (!stated[item.id] && moodboardImages[index]) {
           slot.approvedImageUrl = moodboardImages[index];
@@ -310,6 +315,13 @@
         }
         if (!slot.prompt && moodboardPrompts[index]) slot.prompt = String(moodboardPrompts[index] || '').slice(0, 12000);
       });
+      const mainFacade = slots.main_facade;
+      if (!stated.main_facade && tenantCreativeImages.main_facade) {
+        mainFacade.approvedImageUrl = tenantCreativeImages.main_facade;
+        mainFacade.imageUrl = mainFacade.imageUrl || tenantCreativeImages.main_facade;
+        mainFacade.status = 'approved';
+        mainFacade.prompt = mainFacade.prompt || tenantCreativeImages.main_facade_prompt || '';
+      }
       const rawSectionApprovals = source.sectionApprovals && typeof source.sectionApprovals === 'object'
         ? source.sectionApprovals
         : (source.section_approvals && typeof source.section_approvals === 'object' ? source.section_approvals : {});
@@ -375,14 +387,17 @@
       // dropped here: it would arrive on the server as an image that can never be read.
       tenantCreativeImages.cover = durableImageUrl(cover.approvedImageUrl) || durableImageUrl(tenantCreativeImages.cover);
       tenantCreativeImages.cover_prompt = cover.prompt || tenantCreativeImages.cover_prompt || '';
-      tenantCreativeImages.moodboard = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map((item, index) => {
+      tenantCreativeImages.moodboard = VISUAL_CONCEPT_ANGLE_SLOTS.map((item, index) => {
         const slot = tenantVisualConceptState.slots[item.id] || {};
         return durableImageUrl(slot.approvedImageUrl) || durableImageUrl(slot.imageUrl) || durableImageUrl(previousMoodboard[index]);
       });
-      tenantCreativeImages.moodboard_prompts = VISUAL_CONCEPT_EXTERNAL_SLOTS.slice(1).map((item, index) => {
+      tenantCreativeImages.moodboard_prompts = VISUAL_CONCEPT_ANGLE_SLOTS.map((item, index) => {
         const slot = tenantVisualConceptState.slots[item.id] || {};
         return slot.prompt || previousPrompts[index] || '';
       });
+      const mainFacade = tenantVisualConceptState.slots.main_facade || {};
+      tenantCreativeImages.main_facade = durableImageUrl(mainFacade.approvedImageUrl) || durableImageUrl(mainFacade.imageUrl) || '';
+      tenantCreativeImages.main_facade_prompt = mainFacade.prompt || '';
       tenantProjectData.tenantCreativeImages = tenantCreativeImages;
       // Section approvals cannot outlive the items they certify — reconcile
       // before every serialization so a revoked/unapproved item always drops
@@ -600,7 +615,11 @@
       const statusLabel = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد' : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chat = (slot.chat || []).map(item => (
         '<div class="visual-concept-chat-message"><strong>' + (item.role === 'assistant' ? trDynamicI18n('النظام:') + ' ' : trDynamicI18n('أنت:') + ' ') + '</strong>' + escapeHtml(item.text) +
-        (item.attachments && item.attachments.length ? ' <em class="visual-concept-chat-attached">(' + escapeHtml(item.attachments.join('، ')) + ')</em>' : '') + '</div>'
+        (item.attachments && item.attachments.length ? ' <em class="visual-concept-chat-attached">(' + escapeHtml(item.attachments.join('، ')) + ')</em>' : '') +
+        (item.role === 'assistant' && item.choices?.length
+          ? '<div class="visual-concept-chat-choices">' + item.choices.map(choice =>
+            '<button type="button" class="btn ghost small" data-visual-action="chat-choice" data-visual-slot="' + slotDef.id + '" data-choice="' + escapeHtml(choice) + '">' + escapeHtml(choice) + '</button>'
+          ).join('') + '</div>' : '') + '</div>'
       )).join('') || '<div class="tenant-hint">' + trDynamicI18n('لا توجد تعديلات بعد.') + '</div>';
       const title = visualConceptSlotLabel(slotDef.id);
       const preview = image
@@ -649,7 +668,7 @@
           ? '<label>وصف المخطط</label><textarea data-visual-caption="' + slotDef.id + '" rows="2" ' + (frozen ? 'disabled' : '') + '>' + escapeHtml(slot.caption || '') + '</textarea>'
           : '') +
           '<div class="visual-concept-actions">' +
-          '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateBtnDisabled ? 'disabled' : '') + '>توليد الصورة</button>' +
+          '<button type="button" class="btn primary small" data-visual-action="generate" data-visual-slot="' + slotDef.id + '" ' + (generateBtnDisabled ? 'disabled' : '') + '>' + (slotDef.id === 'plan_site' ? 'مراجعة المتطلبات والتوليد' : 'توليد الصورة') + '</button>' +
           '<button type="button" class="btn ' + (approved ? 'ghost' : 'primary') + ' small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="' + slotDef.id + '" ' + ((!image && !approved) ? 'disabled' : '') + '>' + (approved ? 'الغاء الاعتماد' : 'اعتماد') + '</button>' +
           deleteBtn + deleteFieldBtn +
           '</div>' +
@@ -661,11 +680,11 @@
               escapeHtml(WFT('vc.regen_prompt_hint', 'يُحدَّث بعد إضافة أو تعديل الصور المرجعية')) + '</span>' +
               '</div>'
             : '') +
-          '<div class="visual-concept-chat">' + chat + '</div>' +
+          '<div class="visual-concept-chat">' + (slotDef.id === 'plan_site' ? '<h4>محادثة المخطط</h4>' : '') + chat + '</div>' +
           '<div class="visual-concept-chat-row">' +
           '<textarea data-visual-chat="' + slotDef.id + '" rows="2" ' + (generateDisabled ? 'disabled' : '') + '></textarea>' +
           '<button type="button" class="btn ghost small" data-visual-action="chat-attach" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>' + escapeHtml(WFT('vc.chat_attach', 'إرفاق صورة')) + '</button>' +
-          '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>إرسال التعديل</button>' +
+          '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="' + slotDef.id + '" ' + (generateDisabled ? 'disabled' : '') + '>' + (slotDef.id === 'plan_site' ? 'إرسال الرسالة' : 'إرسال التعديل') + '</button>' +
           '<input type="file" accept="' + uploadAccept + '" multiple hidden data-visual-chat-upload="' + slotDef.id + '">' +
           '</div>' +
           '<div class="visual-concept-chat-refs" data-visual-chat-refs="' + slotDef.id + '"></div>';

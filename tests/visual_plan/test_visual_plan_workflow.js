@@ -490,6 +490,39 @@ test('stage three renders only the simplified SVG site plan and stage four rende
   assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['other']);
 });
 
+test('visual plan job polling allows the requested two-hour generation window', () => {
+  const actions = fs.readFileSync(path.join(dir, '02d_visual_concept_plan_actions.js'), 'utf8');
+  assert.match(actions, /Date\.now\(\) \+ 7200000/);
+});
+
+test('the AI primary facade has its own external slot while legacy moodboard angles keep their order', () => {
+  const context = fixture();
+  const state = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {} });
+  assert.equal(state.slots.main_facade.label, 'الواجهة الرئيسية');
+  const angles = JSON.parse(JSON.stringify(vm.runInContext(
+    'VISUAL_CONCEPT_ANGLE_SLOTS.map(item => item.id)', context)));
+  const external = JSON.parse(JSON.stringify(vm.runInContext(
+    'VISUAL_CONCEPT_EXTERNAL_SLOTS.map(item => item.id)', context)));
+  assert.deepEqual(angles, ['right', 'left', 'top', 'back']);
+  assert.ok(external.includes('main_facade'));
+  const timeline = fs.readFileSync(path.resolve(__dirname,
+    '../../assets/js/10-financial-report-timeline/02_timeline_sidebar.js'), 'utf8');
+  assert.match(timeline, /tenantCreativeImages\.main_facade_prompt/);
+  assert.match(timeline, /item\.id === 'main_facade' \? tenantCreativeImages\.main_facade/);
+});
+
+test('site plan chat choices, surgical SVG source, and saved checkpoints are connected to the new assistant route', () => {
+  const page = fs.readFileSync(path.resolve(__dirname,
+    '../../assets/js/13-visual/01_visual_concept_page.js'), 'utf8');
+  const actions = fs.readFileSync(path.join(dir, '02d_visual_concept_plan_actions.js'), 'utf8');
+  const renderer = fs.readFileSync(path.join(dir, '02_visual_concept.js'), 'utf8');
+  assert.match(page, /\/api\/visual-concept\/site-plan-assistant/);
+  assert.match(page, /payload\.siteSvgCode = liveSlot\(\)\.svgCode/);
+  assert.match(page, /action === 'chat-choice'/);
+  assert.match(actions, /job\.checkpoint\?\.svgSections/);
+  assert.match(renderer, /data-visual-action="chat-choice"/);
+});
+
 test('a clean verification still approves without opening the dialog', () => {
   const context = fixture();
   let created = false;

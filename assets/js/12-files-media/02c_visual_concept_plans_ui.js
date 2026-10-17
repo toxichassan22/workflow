@@ -264,6 +264,7 @@
         '<section class="plans-workflow-panel" data-plans-workflow-stage="generate"' + (activeStage !== 'generate' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.stage_site_title', 'المخطط العام المبسط بصيغة SVG')) + '</h4>' + (promptReady ? '' : '<button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_site_prepare', 'تجهيز المخطط')) + '</button>') + '</div>' +
         '<p class="tenant-hint">' + escapeHtml(promptReady ? WFT('plans.stage_site_ready', 'مخطط الموقع جاهز للتوليد.') : (workflow.promptsError ? WFT('plans.stage_site_error', 'تعذر تجهيز المخطط: {error}', { error: workflow.promptsError }) : WFT('plans.stage_site_not_ready', 'مخطط الموقع غير جاهز للتوليد.'))) + '</p>' +
+        '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(workflow.jobTodos) : '') + '</div>' +
         '<div data-plans-workflow-prompts>' + sitePlanCard + '</div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="other"' + (activeStage !== 'other' ? ' hidden' : '') + '>' +
