@@ -204,9 +204,24 @@ def _visual_plan_scene_from_request(data):
     try:
         visual_plan_scene.validate_scene(scene, contract, program)
     except visual_plan_geometry.PlanGeometryError as error:
-        if error.code != 'PLANS_CONTEXT_CHANGED':
+        if error.code == 'PLANS_CONTEXT_CHANGED':
+            try:
+                scene = visual_plan_scene.rebase_scene_context(scene, contract, program)
+            except visual_plan_geometry.PlanGeometryError as refresh_error:
+                if refresh_error.code != 'PLANS_PROGRAM_CHANGED':
+                    raise
+                scene = visual_plan_scene.fallback_scene(
+                    contract, program, VISUAL_PLAN_SCENE_VERSION)
+        elif error.code == 'PLANS_PROGRAM_CHANGED':
+            # A signed scene can outlive a code change that expands a grouped
+            # component (for example, one villa row) into its physical units.
+            # Its input signature is still valid, but its building IDs are not.
+            # Rebuild placements deterministically; fallback_scene enforces
+            # every current area, boundary, setback, overlap, and coverage rule.
+            scene = visual_plan_scene.fallback_scene(
+                contract, program, VISUAL_PLAN_SCENE_VERSION)
+        else:
             raise
-        scene = visual_plan_scene.rebase_scene_context(scene, contract, program)
         scene = _visual_plan_seal_scene(data, scene, context)
         workflow = dict(workflow)
         workflow['scene'] = scene

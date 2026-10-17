@@ -485,6 +485,41 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(data['plansWorkflow']['scene']['token'], refreshed['token'])
         self.assertEqual(refreshed['inputSignature'], original['inputSignature'])
 
+    def test_stale_signed_scene_rebuilds_when_villa_program_expands_to_units(self):
+        module = self.application_module
+        project = self.project()
+        layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[5, 3], [15, 3], [15, 15], [5, 15]]}],
+            'entries': [], 'openAreas': []})
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': layout}}]
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'), \
+                module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            data = {'projectData': project, 'plansWorkflow': self.workflow(project)}
+            original, _context, _reference = module._visual_plan_create_scene(data)
+            data['plansWorkflow'] = {**self.workflow(project), 'scene': original}
+            contract, context = module._visual_plan_contract(data)
+            current_program = module._visual_plan_program(contract, context)
+            villa_program = {
+                'siteItems': current_program['siteItems'],
+                'buildings': [{
+                    'id': f'unit_1_{index:03d}', 'name': 'Residential Villas',
+                    'label': 'Villas', 'footprintArea': 60, 'bands': [],
+                    'basementOnly': False, 'levels': 1,
+                } for index in (1, 2)],
+            }
+
+            with patch.object(module, '_visual_plan_program', return_value=villa_program):
+                refreshed, _contract, _context, _program = module._visual_plan_scene_from_request(data)
+
+        self.assertEqual({item['id'] for item in refreshed['buildings']},
+                         {'unit_1_001', 'unit_1_002'})
+        self.assertNotEqual(refreshed['token'], original['token'])
+        self.assertEqual(data['plansWorkflow']['scene']['token'], refreshed['token'])
+        module.visual_plan_scene.validate_scene(refreshed, contract, villa_program)
+
     def test_plan_render_illustrates_the_sealed_scene_with_the_image_model(self):
         """The shipped plan artwork comes from the image model drawing the
         validated scene spec in the prompt — the PIL scene renderer never
