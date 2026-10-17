@@ -927,6 +927,33 @@ test('site plan status follows the active backend progress step', () => {
   assert.equal(status.textContent, 'المرحلة الحالية: تحليل المتطلبات وتحديد السؤال');
 });
 
+test('a rebased site scene clears its approval and returns dependent plans to review', () => {
+  const context = fixture(true);
+  const oldScene = { version: 1, token: 'old-scene' };
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({
+    slots: {
+      plan_site: { imageUrl: '/site.png', approvedImageUrl: '/site.png', status: 'approved' },
+      plan_uses: { imageUrl: '/uses.png', approvedImageUrl: '/uses.png', status: 'approved',
+        sceneToken: 'old-scene' },
+    },
+    plansWorkflow: { scene: oldScene, siteAssistant: { turns: [] } },
+  });
+  context.visualConceptPlanInputStamp = () => 'current-input';
+  context.markVisualConceptDirty = () => {};
+
+  context.applyVisualConceptSiteAssistantResponse({
+    contextChanged: true,
+    scene: { version: 1, token: 'new-scene' },
+    assistantState: { turns: [{ role: 'assistant', text: 'What is the main entry?' }] },
+  });
+
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.scene.token, 'new-scene');
+  assert.equal(context.tenantVisualConceptState.slots.plan_site.approvedImageUrl, '');
+  assert.equal(context.tenantVisualConceptState.slots.plan_uses.approvedImageUrl, '');
+  assert.equal(context.tenantVisualConceptState.slots.plan_uses.imageUrl, '/uses.png');
+  assert.equal(context.tenantVisualConceptState.slots.plan_uses.status, 'review');
+});
+
 test('stage three ignores a second chat send while its current request is active', async () => {
   const context = fixture(true);
   let apiCalls = 0;

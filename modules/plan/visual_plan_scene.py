@@ -153,6 +153,24 @@ def validate_scene(scene, contract, program):
     return scene
 
 
+def rebase_scene_context(scene, contract, program):
+    """Refresh only derived contract fields on an authenticated scene.
+
+    The caller must verify the scene token and input signature before using
+    this helper. Revalidate the full scene after replacing the derived fields
+    so a changed frontage, setback, direction, or site program can still refuse
+    geometry that no longer fits.
+    """
+    refreshed = copy.deepcopy(scene)
+    refreshed.update({
+        'primaryFrontage': copy.deepcopy(contract['primaryFrontage']),
+        'setbacks': copy.deepcopy(contract['setbacks']),
+        'directions': copy.deepcopy(contract['directions']),
+        'siteItems': copy.deepcopy(program['siteItems']),
+    })
+    return validate_scene(refreshed, contract, program)
+
+
 def _rect_search(regions, area, blocked=(), angle=0):
     """Grid search for an exact-area rectangle aligned with the parcel axis."""
     wanted = finite_number(area)

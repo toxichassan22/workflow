@@ -201,7 +201,16 @@ def _visual_plan_scene_from_request(data):
     if not _visual_plan_token_matches('scene', data, signature, posted, scene['token']):
         raise visual_plan_geometry.PlanGeometryError('تغيرت بيانات المشهد خارج مسار التعديل.', 'PLANS_SCENE_INVALID')
     program = _visual_plan_program(contract, context)
-    visual_plan_scene.validate_scene(scene, contract, program)
+    try:
+        visual_plan_scene.validate_scene(scene, contract, program)
+    except visual_plan_geometry.PlanGeometryError as error:
+        if error.code != 'PLANS_CONTEXT_CHANGED':
+            raise
+        scene = visual_plan_scene.rebase_scene_context(scene, contract, program)
+        scene = _visual_plan_seal_scene(data, scene, context)
+        workflow = dict(workflow)
+        workflow['scene'] = scene
+        data['plansWorkflow'] = workflow
     return scene, contract, context, program
 
 

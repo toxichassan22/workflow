@@ -335,7 +335,7 @@
         }));
       }
       if (response.scene && typeof response.scene === 'object') {
-        workflow.scene = response.scene;
+        receiveVisualConceptPlanScene(response.scene, 'plan_site');
         workflow.sourceStamp = visualConceptPlanInputStamp();
       }
       if (response.question && !slot.chat.some(item => item.role === 'assistant' && item.text === response.question)) {

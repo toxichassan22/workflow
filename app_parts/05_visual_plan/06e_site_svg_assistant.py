@@ -246,8 +246,18 @@ def _visual_plan_site_call(system_prompt, user_prompt, data=None, max_tokens=120
 
 def _visual_plan_site_interview(data, action='chat'):
     interview_started = time.perf_counter()
+    workflow_before = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    scene_before = workflow_before.get('scene') if isinstance(workflow_before.get('scene'), dict) else {}
+    scene_token_before = scene_before.get('token')
     packet, _contract, _context, signature = _visual_plan_site_packet(data)
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    scene_after = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else {}
+    scene_rebased = bool(scene_token_before and scene_after.get('token')
+                         and scene_token_before != scene_after.get('token'))
+    if scene_rebased:
+        workflow = dict(workflow)
+        workflow['siteAssistant'] = {}
+        data['plansWorkflow'] = workflow
     state = _visual_plan_site_state(data, signature)
     message = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
     if message:
@@ -334,7 +344,8 @@ def _visual_plan_site_interview(data, action='chat'):
             'question': question, 'choices': choices, 'reply': reply,
             'assistantState': state, 'scene': workflow.get('scene'),
             'contextChanged': bool(previous_assistant.get('inputSignature')
-                                                            and previous_assistant.get('inputSignature') != signature)}
+                                                            and previous_assistant.get('inputSignature') != signature)
+            or scene_rebased}
 
 
 def _visual_plan_site_strip_non_english_text(element):

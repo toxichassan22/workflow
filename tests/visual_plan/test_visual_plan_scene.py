@@ -3,7 +3,7 @@ import math
 
 from visual_plan_geometry import (PlanGeometryError, boundary_geometry, polygons_overlap,
                                   signed_area, validate_footprint)
-from visual_plan_scene import buildable_envelopes, fallback_scene
+from visual_plan_scene import buildable_envelopes, fallback_scene, rebase_scene_context
 
 
 SETBACKS = {'west': 5, 'east': 3, 'north': 3, 'south': 3}
@@ -111,6 +111,19 @@ class VisualPlanSceneTests(unittest.TestCase):
             fallback_scene(contract, _program(_building(1, 800), _building(2, 200)))
         self.assertEqual(caught.exception.code, 'PLANS_SETBACK_CONFLICT')
         self.assertIn('لا تتسع', str(caught.exception))
+
+    def test_context_rebase_revalidates_geometry_against_new_setbacks(self):
+        program = _program(_building(1, 200))
+        original_contract = _contract(setbacks={})
+        scene = fallback_scene(original_contract, program)
+        changed_contract = _contract(setbacks={
+            'west': 19, 'east': 19, 'north': 14, 'south': 14,
+        })
+
+        with self.assertRaises(PlanGeometryError) as caught:
+            rebase_scene_context(scene, changed_contract, program)
+
+        self.assertEqual(caught.exception.code, 'PLANS_SETBACK_CONFLICT')
 
 
 if __name__ == '__main__':

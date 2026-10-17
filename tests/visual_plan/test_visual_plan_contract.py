@@ -437,6 +437,54 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                 module._visual_plan_scene_from_request({'projectData': project, 'plansWorkflow': workflow})
             self.assertEqual(raised.exception.code, 'PLANS_SCENE_INVALID')
 
+    def test_stale_derived_site_context_is_rebased_and_resealed(self):
+        module = self.application_module
+        project = self.project()
+        layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[5, 3], [15, 3], [15, 15], [5, 15]]}],
+            'entries': [], 'openAreas': []})
+        with patch.object(module, 'call_openrouter_chat', return_value={
+            'choices': [{'message': {'content': layout}}]
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'), \
+                module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            data = {'projectData': project, 'plansWorkflow': self.workflow(project)}
+            original, _context, _reference = module._visual_plan_create_scene(data)
+            stale_assistant = {
+                'inputSignature': original['inputSignature'],
+                'summary': 'Old summary that no longer matches the derived site program.',
+                'pendingQuestion': 'Old question',
+                'answers': [{'question': 'Old question', 'answer': 'Old answer'}],
+                'turns': [{'role': 'assistant', 'text': 'Old question'}],
+            }
+            data['plansWorkflow'] = {**self.workflow(project), 'scene': original,
+                                     'siteAssistant': stale_assistant}
+            contract, current_context = module._visual_plan_contract(data)
+            current_program = module._visual_plan_program(contract, current_context)
+            changed_program = {**current_program, 'siteItems': [{
+                'id': 'new-landscape', 'name': 'Landscape', 'label': 'Landscape',
+                'category': 'landscape', 'kind': 'landscape', 'area': 0,
+            }]}
+
+            with patch.object(module, '_visual_plan_program', return_value=changed_program), \
+                    patch.object(module, '_visual_plan_site_call', return_value=(
+                        {'ready': False, 'question': 'Where should the garden be?',
+                         'memory': 'Fresh context'}, 5)) as interview_call:
+                response = module._visual_plan_site_interview(data)
+                interview_packet = json.loads(interview_call.call_args.args[1])
+
+        refreshed = response['scene']
+        self.assertTrue(response['contextChanged'])
+        self.assertFalse(interview_packet['continuation'])
+        self.assertIsNotNone(interview_packet['validatedProjectData'])
+        self.assertEqual(response['assistantState']['answers'], [])
+        self.assertEqual(response['assistantState']['summary'], 'Fresh context')
+        self.assertEqual(refreshed['siteItems'], changed_program['siteItems'])
+        self.assertNotEqual(refreshed['token'], original['token'])
+        self.assertEqual(data['plansWorkflow']['scene']['token'], refreshed['token'])
+        self.assertEqual(refreshed['inputSignature'], original['inputSignature'])
+
     def test_plan_render_illustrates_the_sealed_scene_with_the_image_model(self):
         """The shipped plan artwork comes from the image model drawing the
         validated scene spec in the prompt — the PIL scene renderer never

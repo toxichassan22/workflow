@@ -197,6 +197,3 @@ def frontend_i18n_bundle():
 @app.route('/assets/app.bundle.css')
 def frontend_css_bundle():
     return _serve_frontend_bundle('css')
-
-
-\r\n

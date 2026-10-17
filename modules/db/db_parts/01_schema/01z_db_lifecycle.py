@@ -74,6 +74,3 @@ def init_db():
         print(f"[DB] Initialized at {DB_PATH}")
     except Exception as exc:
         print(f"[DB INIT NOTICE] Database initialization notice: {exc}")
-
-
-\r\n
