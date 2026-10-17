@@ -40,6 +40,11 @@ def load_app_parts(root, application):
 
 
 class StagingDeploymentRegressionTests(unittest.TestCase):
+    def test_gunicorn_preloads_the_app_before_starting_workers(self):
+        for name in ('start_server-staging.sh', 'start_server.sh'):
+            source = (ROOT / name).read_text(encoding='utf-8')
+            self.assertIn('--preload', source, name)
+
     def test_old_flat_copy_does_not_register_the_endpoint_again(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

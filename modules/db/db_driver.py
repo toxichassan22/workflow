@@ -13,6 +13,7 @@ psycopg2 is used.  Otherwise a normal SQLite file is opened.
 
 import os
 import re
+import threading
 import sqlite3 as _sqlite3
 
 # Keep the original Row class so db.py can set conn.row_factory = sqlite3.Row
@@ -34,6 +35,37 @@ if PSYCOPG2_AVAILABLE:
     IntegrityError = (_sqlite3.IntegrityError, psycopg2.IntegrityError)
 else:
     IntegrityError = _sqlite3.IntegrityError
+
+
+_SQLITE_WAL_LOCK = threading.Lock()
+_SQLITE_WAL_DATABASES = set()
+
+
+def _sqlite_wal_database_key(database):
+    path = os.fsdecode(os.fspath(database))
+    if path == ':memory:' or path.startswith('file::memory:') or 'mode=memory' in path:
+        return None
+    if path.startswith('file:'):
+        return path
+    return os.path.abspath(path)
+
+
+def _enable_sqlite_wal_once(connection, database):
+    """Set persistent WAL mode once per file per process, outside request churn."""
+    key = _sqlite_wal_database_key(database)
+    if key is None:
+        return
+    with _SQLITE_WAL_LOCK:
+        if key in _SQLITE_WAL_DATABASES:
+            return
+        try:
+            connection.execute('PRAGMA journal_mode = WAL;')
+        except Exception:
+            # Preserve the previous best-effort behavior. Avoid repeating a
+            # potentially blocking mode change on every connection if the
+            # filesystem or current database state refuses it.
+            pass
+        _SQLITE_WAL_DATABASES.add(key)
 
 
 _POSTGRES_NOW = "to_char(now(), 'YYYY-MM-DD\"T\"HH24:MI:SS.US')"
@@ -78,7 +110,7 @@ class SQLiteConnection:
                 self._conn.row_factory = _sqlite3.Row
                 try:
                     self._conn.execute('PRAGMA busy_timeout = 10000;')
-                    self._conn.execute('PRAGMA journal_mode = WAL;')
+                    _enable_sqlite_wal_once(self._conn, database)
                 except Exception:
                     pass
                 break

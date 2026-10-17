@@ -148,6 +148,7 @@ cd "$APP_DIR"
 # Otherwise a healthy daemon could prevent every later deployment.
 setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --pid "$APP_DIR/.staging-gunicorn-$SELECTED_PORT.pid" \
+  --preload \
   --workers 2 \
   --threads 4 \
   --timeout 300 \

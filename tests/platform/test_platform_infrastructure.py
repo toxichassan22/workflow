@@ -22,6 +22,7 @@ from flask import Flask
 
 import auth
 import db
+import db_driver
 
 
 class Mission5DbTests(unittest.TestCase):
@@ -56,6 +57,30 @@ class Mission5DbTests(unittest.TestCase):
         self.context.pop()
         db.DB_PATH = self.original_db_path
         self.temp_dir.cleanup()
+
+    def test_sqlite_wal_mode_is_set_once_per_database_path(self):
+        database = os.path.abspath(db.DB_PATH)
+        key = db_driver._sqlite_wal_database_key(database)
+        with db_driver._SQLITE_WAL_LOCK:
+            db_driver._SQLITE_WAL_DATABASES.discard(key)
+
+        class ConnectionRecorder:
+            def __init__(self):
+                self.statements = []
+
+            def execute(self, statement):
+                self.statements.append(statement)
+
+        first = ConnectionRecorder()
+        second = ConnectionRecorder()
+        try:
+            db_driver._enable_sqlite_wal_once(first, database)
+            db_driver._enable_sqlite_wal_once(second, database)
+            self.assertEqual(first.statements, ['PRAGMA journal_mode = WAL;'])
+            self.assertEqual(second.statements, [])
+        finally:
+            with db_driver._SQLITE_WAL_LOCK:
+                db_driver._SQLITE_WAL_DATABASES.discard(key)
 
     # ── t60: graph model tables and uniqueness ────────────────────────────
 
