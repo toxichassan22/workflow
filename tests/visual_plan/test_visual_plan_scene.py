@@ -202,6 +202,33 @@ class VisualPlanSceneTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, 'PLANS_SETBACK_CONFLICT')
         self.assertIn('لا تتسع', str(caught.exception))
 
+    def test_fallback_scene_places_footprints_that_fit_in_total_area_in_some_order(self):
+        # 50x40 parcel, west and north setbacks 5 m: envelope 1575 m2, footprints total 1472 m2.
+        # Greedy placement in the first order fails, but a different order fits.
+        contract = _contract(setbacks={'west': 5, 'east': 0, 'north': 5, 'south': 0})
+        contract['geometry'] = boundary_geometry([
+            {'eastings': x, 'northings': y} for x, y in ((0, 0), (50, 0), (50, 40), (0, 40))])
+        contract['landArea'] = '2000'
+        areas = (212, 389, 106, 193, 325, 247)
+        program = _program(*(_building(index, area) for index, area in enumerate(areas, 1)))
+
+        scene = fallback_scene(contract, program)
+
+        self.assertEqual(len(scene['buildings']), len(areas))
+        for building in scene['buildings']:
+            validate_footprint(building['footprint'], contract['geometry'], contract['setbacks'])
+        for index, building in enumerate(scene['buildings']):
+            for other in scene['buildings'][index + 1:]:
+                self.assertFalse(polygons_overlap(building['footprint'], other['footprint']))
+
+    def test_fallback_scene_names_the_building_that_does_not_fit(self):
+        contract = _contract()
+        with self.assertRaises(PlanGeometryError) as caught:
+            fallback_scene(contract, _program(_building(1, 800), _building(2, 200)))
+        message = str(caught.exception)
+        self.assertIn('Building 1', message)
+        self.assertNotIn('1000', message)
+
     def test_context_rebase_revalidates_geometry_against_new_setbacks(self):
         program = _program(_building(1, 200))
         original_contract = _contract(setbacks={})

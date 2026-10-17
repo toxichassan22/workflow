@@ -1,4 +1,5 @@
 import copy
+import itertools
 import math
 import re
 
@@ -204,6 +205,18 @@ def rebase_scene_context(scene, contract, program):
     return validate_scene(refreshed, contract, program)
 
 
+def _polygon_box(polygon):
+    xs = [point[0] for point in polygon]
+    ys = [point[1] for point in polygon]
+    return (min(xs), min(ys), max(xs), max(ys))
+
+
+def _boxes_apart(first, second, tolerance=1e-6):
+    """True when two bounding boxes are separated, so their polygons cannot overlap."""
+    return (first[2] < second[0] - tolerance or second[2] < first[0] - tolerance
+            or first[3] < second[1] - tolerance or second[3] < first[1] - tolerance)
+
+
 def _rect_search(regions, area, blocked=(), angle=0):
     """Grid search for an exact-area rectangle aligned with the parcel axis."""
     wanted = finite_number(area)
@@ -211,6 +224,7 @@ def _rect_search(regions, area, blocked=(), angle=0):
         return None
     radians = math.radians(angle)
     cosine, sine = math.cos(radians), math.sin(radians)
+    blocked_boxes = [(_polygon_box(item), item) for item in blocked]
     for region in sorted((r for r in regions if len(r) >= 3),
                          key=lambda item: -abs(signed_area(item))):
         min_x = min(point[0] for point in region)
@@ -234,8 +248,10 @@ def _rect_search(regions, area, blocked=(), angle=0):
                                            (width / 2, -height / 2),
                                            (width / 2, height / 2),
                                            (-width / 2, height / 2))]
+                    rect_box = _polygon_box(rect)
                     if polygon_inside(rect, region) and not any(
-                            polygons_overlap(rect, item) for item in blocked):
+                            not _boxes_apart(rect_box, box) and polygons_overlap(rect, item)
+                            for box, item in blocked_boxes):
                         return rect
     return None
 
@@ -561,7 +577,9 @@ def fallback_scene(contract, program, version=1):
          + [('building', item) for item in buildings if (finite_number(item['footprintArea']) or 0) < 500]),
     )
     failures = []
-    for strategy in strategies:
+    attempts = ([(strategy, False) for strategy in strategies]
+                + [(strategy, True) for strategy in _retry_placement_orders(strategies[0])])
+    for strategy, quick in attempts:
         placed, open_areas, occupied = {}, [], []
         free_spaces = _packing_empty_spaces(parcels, cosine, sine)
         failure = None
@@ -574,14 +592,15 @@ def fallback_scene(contract, program, version=1):
             polygon = packed[2] if packed else None
             regions = envelopes if kind == 'building' else parcels
             is_surface_parking = kind == 'site' and _site_area_kind(item) == 'surface_parking'
-            if polygon is None and not is_surface_parking and len(occupied) < 24:
+            # Reordering retries use only the fast packer; the grid searches are costly.
+            can_grid_search = not quick and not is_surface_parking and len(occupied) < 24
+            if polygon is None and can_grid_search:
                 polygon = _rect_grid_search(regions, area, occupied, parcel_axis)
-            if polygon is None and not is_surface_parking and len(occupied) < 24:
+            if polygon is None and can_grid_search:
                 polygon = _rect_search(regions, area, occupied, parcel_axis)
-            if polygon is None and not is_surface_parking and len(occupied) < 24 and abs(parcel_axis) > 0.01:
+            if polygon is None and can_grid_search and abs(parcel_axis) > 0.01:
                 polygon = _rect_grid_search(regions, area, occupied)
-            if (polygon is None and not is_surface_parking and len(occupied) < 24
-                    and abs(parcel_axis) > 0.01):
+            if polygon is None and can_grid_search and abs(parcel_axis) > 0.01:
                 polygon = _rect_search(regions, area, occupied)
             if (polygon is None and kind == 'site'
                     and _site_area_kind(item) == 'surface_parking'):
@@ -597,11 +616,13 @@ def fallback_scene(contract, program, version=1):
                     continue
             if polygon is None:
                 if kind == 'building':
-                    required = sum(finite_number(row['footprintArea']) or 0 for row in buildings)
-                    available = sum(abs(signed_area(envelope)) for envelope in envelopes)
+                    largest_free = max(((right - left) * (top - bottom)
+                                        for _index, left, bottom, right, top in free_spaces), default=0)
+                    label = item.get('label') or item.get('name') or item['id']
                     failure = PlanGeometryError(
-                        f'بصمات المباني المطلوبة {required:g} م² لا تتسع داخل منطقة البناء بعد الارتدادات المسجلة '
-                        f'(~{available:g} م² متاحة).', 'PLANS_SETBACK_CONFLICT')
+                        f'المبنى «{label}» ({area:g} م²) لا تتسع داخل أي جزء متبقٍ من منطقة البناء '
+                        f'بعد الارتدادات المسجلة (أكبر جزء متبقٍ ~{largest_free:g} م²).',
+                        'PLANS_SETBACK_CONFLICT')
                 else:
                     label = item.get('label') or item.get('name') or item['id']
                     failure = PlanGeometryError(
@@ -637,6 +658,21 @@ def fallback_scene(contract, program, version=1):
     if failures:
         raise failures[0]
     raise PlanGeometryError('تعذر إنشاء توزيع هندسي صالح للمخططات.', 'PLANS_LAYOUT_INVALID')
+
+
+def _retry_placement_orders(first_order, limit=720, max_items=7):
+    """Yield bounded reorderings of the first placement order.
+
+    The greedy packer is order-sensitive: a footprint placed early can split the
+    free space so a later one no longer fits, even when the total area fits. Only
+    small programs are reordered, so large layouts keep their single attempt.
+    """
+    if len(first_order) > max_items:
+        return
+    for count, order in enumerate(itertools.permutations(first_order)):
+        if count >= limit:
+            return
+        yield list(order)
 
 
 def make_scene(contract, program, layout, version=1):
