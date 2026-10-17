@@ -773,6 +773,7 @@ def _visual_plan_site_edit(data):
 
 
 def _visual_plan_site_assistant_execute(data, action):
+    automatic_placement_retry = False
     try:
         if action == 'edit':
             return _visual_plan_site_edit(data), 200
@@ -789,11 +790,23 @@ def _visual_plan_site_assistant_execute(data, action):
             return interview, 200
         if action != 'generate' and not interview.get('generateRequested'):
             return interview, 200
+        automatic_placement_retry = action != 'generate' and bool(interview.get('generateRequested'))
         return _visual_plan_site_generate(data, interview), 200
     except visual_plan_geometry.PlanGeometryError as error:
         if error.code not in ('PLANS_COVERAGE_CONFLICT', 'PLANS_SITE_AREA_CONFLICT'):
             raise
-        return _visual_plan_site_conflict_interview(data, error), 200
+        interview = _visual_plan_site_conflict_interview(
+            data, error, auto_retry_failed=automatic_placement_retry)
+        if (action != 'generate' and not automatic_placement_retry
+                and interview.get('generateRequested')):
+            try:
+                return _visual_plan_site_generate(data, interview), 200
+            except visual_plan_geometry.PlanGeometryError as retry_error:
+                if retry_error.code not in ('PLANS_COVERAGE_CONFLICT', 'PLANS_SITE_AREA_CONFLICT'):
+                    raise
+                return _visual_plan_site_conflict_interview(
+                    data, retry_error, auto_retry_failed=True), 200
+        return interview, 200
 
 
 @app.route('/api/visual-concept/site-plan-assistant', methods=['POST'])

@@ -1,5 +1,6 @@
 import unittest
 import math
+from unittest.mock import patch
 
 from visual_plan_geometry import (PlanGeometryError, boundary_geometry, polygons_overlap,
                                   signed_area, validate_footprint)
@@ -119,6 +120,31 @@ class VisualPlanSceneTests(unittest.TestCase):
         self.assertEqual(scene['openAreas'][0]['componentId'], 'pool_1')
         self.assertEqual(scene['openAreas'][0]['kind'], 'site_facility')
         self.assertAlmostEqual(abs(signed_area(scene['openAreas'][0]['polygon'])), 120, places=4)
+
+    def test_fallback_retries_with_site_areas_first_when_building_first_blocks_parking(self):
+        contract = _contract(setbacks={})
+        program = _program(_building(1, 200))
+        program['siteItems'] = [{
+            'id': 'parking', 'name': 'Parking', 'label': 'Parking',
+            'category': 'parking', 'siteType': 'parking', 'area': 400,
+        }]
+        parking_polygon = [[0, 0], [20, 0], [20, 20], [0, 20]]
+        building_polygon = [[20, 0], [30, 0], [30, 20], [20, 20]]
+
+        def first_fit(_regions, area, blocked=(), _angle=0):
+            if area == 400 and not blocked:
+                return parking_polygon
+            if area == 200 and (not blocked or blocked == [parking_polygon]):
+                return building_polygon
+            return None
+
+        with patch('visual_plan_scene._rect_grid_search', side_effect=first_fit), \
+                patch('visual_plan_scene._rect_search', side_effect=first_fit):
+            scene = fallback_scene(contract, program)
+
+        self.assertEqual(scene['openAreas'][0]['componentId'], 'parking')
+        self.assertFalse(polygons_overlap(scene['buildings'][0]['footprint'],
+                                          scene['openAreas'][0]['polygon']))
 
     def test_scene_rejects_an_omitted_recorded_site_area(self):
         contract = _contract(setbacks={})

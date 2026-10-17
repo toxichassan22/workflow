@@ -32,6 +32,17 @@ def _visual_plan_site_footprint_source_question(message):
     return asks_source and mentions_area
 
 
+def _visual_plan_site_placement_retry_request(message):
+    text = str(message or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').lower()
+    asks_to_place = any(term in text for term in (
+        'مناقشه توزيع', 'اعاده توزيع', 'توزيع parking', 'وزع parking',
+        'توزيع المواضع', 'توزيع المساحات', 'يوزعها على الارض',
+        'النظام يوزع', 'وزعها على الارض', 'رتب الموقع',
+    ))
+    return asks_to_place
+
+
 def _visual_plan_site_conflict_summary(facts):
     if facts.get('code') == 'PLANS_SITE_AREA_CONFLICT':
         failed_item = facts.get('failingSiteItem') or {}
@@ -48,9 +59,9 @@ def _visual_plan_site_conflict_summary(facts):
                 f'مقابل {_visual_plan_site_area_text(failed_area)} م² لـ«{failed_label}»، '
                 f'أي فائض {_visual_plan_site_area_text(surplus)} م².')
             parts.append(
-                'إذًا لا يظهر عجز في مجموع المساحات. مسار التوزيع الاحتياطي يضع المباني أولًا ثم يبحث '
-                'عن أشكال مستطيلة محدودة للمساحات؛ لا يعيد ترتيب المباني ولا يختبر كل الترتيبات الممكنة، '
-                'لذلك فشل البحث لا يثبت استحالة وجود توزيع صالح.')
+                'إذًا لا يظهر عجز في مجموع المساحات. مسار التوزيع الاحتياطي يختبر أكثر من ترتيب للمباني '
+                'وعناصر الموقع، لكنه لا يستكشف كل الأشكال والمواضع الهندسية الممكنة؛ لذلك فشل البحث لا '
+                'يثبت استحالة وجود توزيع صالح.')
         else:
             if failed_area is not None:
                 parts.append(f'مساحة «{failed_label}» المسجلة {_visual_plan_site_area_text(failed_area)} م².')
@@ -118,7 +129,7 @@ def _visual_plan_site_conflict_summary(facts):
     return ' '.join(parts)
 
 
-def _visual_plan_site_conflict_interview(data, error):
+def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
     is_site_area_conflict = getattr(error, 'code', '') == 'PLANS_SITE_AREA_CONFLICT'
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     previous = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
@@ -287,14 +298,18 @@ def _visual_plan_site_conflict_interview(data, error):
     if is_site_area_conflict:
         system_prompt = (
             'You are the site-planning assistant continuing a client conversation in Arabic. '
-            'The deterministic fallback did not find a placement for the approved site area. It places '
-            'buildings first and tests a limited set of rectangular placements; it does not rearrange '
-            'buildings or exhaustively search every possible geometry. Use only the supplied facts and '
+            'The automatic placement search did not find a placement for the approved site area. '
+            'The client supplies the approved building and site-area program; the system is responsible '
+            'for placing those items on the land. Never ask the client to arrange or position buildings, '
+            'parking, or other site elements. Only the approved areas, surveyed parcel, setbacks and '
+            'project requirements may be used. Use only the supplied facts and '
             'conversation history. If aggregateAreaSufficient is true, explicitly say that the total area '
             'arithmetic is sufficient by the supplied surplus and that this search failure does not prove '
             'a valid arrangement is impossible. Do not claim the remaining spaces are fragmented unless '
-            'the supplied scene geometry proves it. Answer the latest client message and ask one focused '
-            'question about keeping the recorded areas while reconsidering placement. Do not change or '
+            'the supplied scene geometry proves it. If the client asks the system to distribute the items, '
+            'request an automatic retry with all inputs fixed; do not ask where anything should go. '
+            'When totals are insufficient or the retry still fails, ask only whether a recorded area or '
+            'project input needs review. Do not change or '
             'approve any project input, survey geometry, or approved distribution. Never repeat a generic '
             'coverage-limit explanation. Do not claim the conflict is resolved, do not set ready, and do not '
             'generate a drawing. Always return ready=false and generateRequested=false. Return JSON only: '
@@ -336,15 +351,37 @@ def _visual_plan_site_conflict_interview(data, error):
     prompt_tokens = 0
     source_question = _visual_plan_site_footprint_source_question(message)
     measurement_dispute = _visual_plan_site_measurement_dispute(message)
+    placement_retry_request = (_visual_plan_site_placement_retry_request(message)
+                               and facts.get('aggregateAreaSufficient') and not auto_retry_failed)
     prior_conflict_conversation = bool(previous.get('turns') or previous.get('answers')
                                        or previous.get('pendingQuestion'))
-    if is_site_area_conflict and not prior_conflict_conversation:
+    if placement_retry_request:
+        model_reply = (
+            'سأعيد إنشاء المخطط آليًا مع تثبيت المساحات والأعداد وحدود الأرض والارتدادات؛ '
+            'توزيع المواضع مسؤولية النظام.'
+        )
+        parsed = {'ready': True, 'generateRequested': True, 'reply': model_reply,
+                  'question': '', 'choices': []}
+    elif auto_retry_failed and is_site_area_conflict:
+        model_reply = (
+            'أعدت التوزيع آليًا مع تثبيت المدخلات، لكن المحاولات لم تنتج مشهدًا يجتاز فحوص حدود الأرض '
+            'والارتدادات والتداخل. كفاية مجموع المساحات لا تثبت وحدها إمكان ترتيب كل الأشكال هندسيًا. '
+            'النظام مسؤول عن تحديد المواضع؛ لا يلزمك اقتراحها.'
+        )
+        model_question = 'هل توجد مساحة معتمدة أو معلومة في المشروع تريد مراجعتها؟'
+        parsed = {'reply': model_reply, 'question': model_question,
+                  'choices': ['مراجعة مساحات العناصر المعتمدة']}
+    elif is_site_area_conflict and not prior_conflict_conversation:
         failed_item = failing_site_item or {}
         failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
         if facts.get('aggregateAreaSufficient'):
-            model_reply = 'مجموع المساحات المسجل يكفي حسابيًا؛ نتيجة البحث الحالي تعني أن التوزيع لم يجد موضعًا، '
-            model_question = ('هل نعيد ترتيب المباني وعناصر الموقع مع تثبيت مساحة Parking وبقية القيم المعتمدة؟')
-            choices = ['إعادة توزيع المواضع مع تثبيت المساحات', 'مراجعة شكل حدود الأرض']
+            model_reply = (
+                'مجموع المساحات المسجل يكفي حسابيًا، لكن محاولات النظام لم تجد موضعًا صالحًا يجتاز '
+                'فحوص الكروكي والارتدادات وعدم التداخل. هذا لا يثبت استحالة التوزيع. '
+                'النظام مسؤول عن توزيع المباني والعناصر على الأرض.'
+            )
+            model_question = 'هل توجد مساحة معتمدة أو معلومة في المشروع تريد مراجعتها؟'
+            choices = ['مراجعة مساحات العناصر المعتمدة']
         else:
             model_reply = 'سأبقي القيم المعتمدة كما هي حتى تحدد الجزء الذي تريد مراجعته.'
             model_question = (f'ما الذي نراجعه أولًا: مساحة «{failed_item_label}»، بصمات المباني، أم طريقة توزيع المساحة؟')
@@ -373,8 +410,8 @@ def _visual_plan_site_conflict_interview(data, error):
                 f'ومساحة الحدود المحسوبة {_visual_plan_site_area_text(parcel_area)} م²؛ '
                 f'الفرق {_visual_plan_site_area_text(abs(parcel_area - land_area))} م².'
             )
-        model_question = 'هل نعيد ترتيب مواضع المباني وعناصر الموقع مع إبقاء المساحات المسجلة؟'
-        choices = ['إعادة توزيع المواضع مع تثبيت المساحات', 'مراجعة مساحة Parking']
+        model_question = 'هل توجد مساحة معتمدة تريد مراجعتها؟'
+        choices = ['مراجعة مساحة Parking']
         parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
     elif (is_site_area_conflict and facts.get('aggregateAreaSufficient')
           and any(term in message for term in ('مناقشة توزيع', 'توزيع parking', 'إعادة ترتيب', 'اعادة ترتيب'))):
@@ -383,11 +420,11 @@ def _visual_plan_site_conflict_interview(data, error):
         model_reply = (
             f'الأرقام لا تُظهر عجزًا في المساحة: يتبقى حسابيًا {_visual_plan_site_area_text(available)} م² '
             f'مقابل المساحة المعتمدة، مع فائض {_visual_plan_site_area_text(surplus)} م². '
-            'الرفض حصل لأن البحث الاحتياطي وضع المباني أولًا ولم يجرّب إعادة ترتيبها؛ لذلك لا يصح اعتباره '
-            'دليلًا على استحالة توزيع المواقف.'
+            'محاولات النظام لم تجد ترتيبًا يجتاز الفحوص الهندسية، لكن ذلك لا يثبت استحالة توزيع المواقف. '
+            'النظام مسؤول عن تحديد المواضع مع إبقاء المساحات المسجلة.'
         )
-        model_question = ('هل نبدأ بإعادة توزيع مواضع الأبراج والفلل مع تثبيت المساحات المعتمدة؟')
-        choices = ['إعادة التوزيع مع تثبيت القيم', 'مراجعة حدود الأرض']
+        model_question = 'هل توجد مساحة معتمدة تريد مراجعتها؟'
+        choices = []
         parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
     elif is_site_area_conflict and source_question:
         failed_item = failing_site_item or {}
@@ -490,7 +527,8 @@ def _visual_plan_site_conflict_interview(data, error):
     choices = [str(item).strip()[:240] for item in
                (parsed.get('choices') if isinstance(parsed.get('choices'), list) else [])[:6]
                if str(item).strip()]
-    if not model_question:
+    retry_requested = bool(parsed.get('generateRequested') and placement_retry_request)
+    if not model_question and not retry_requested:
         if is_site_area_conflict:
             failed_item = failing_site_item or {}
             failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
@@ -508,17 +546,19 @@ def _visual_plan_site_conflict_interview(data, error):
         reply_parts.append(model_reply)
     reply_parts.append(model_question)
     reply = ' '.join(reply_parts)
-    state['pendingQuestion'] = reply
-    state['readyForGeneration'] = False
-    state['generateRequested'] = False
-    state['status'] = 'questioning'
+    state['pendingQuestion'] = '' if retry_requested else reply
+    state['readyForGeneration'] = retry_requested
+    state['generateRequested'] = retry_requested
+    state['status'] = 'generating' if retry_requested else 'questioning'
     if parsed.get('memory'):
         state['summary'] = str(parsed['memory'])[:40000]
     _visual_plan_site_record_tokens(state, prompt_tokens)
     state['turns'].append({'role': 'assistant', 'text': reply, 'choices': choices})
     return {
-        'success': True, 'readyForGeneration': False, 'generateRequested': False,
-        'needsClarification': True, 'question': reply, 'choices': choices,
+        'success': True, 'readyForGeneration': retry_requested,
+        'generateRequested': retry_requested,
+        'needsClarification': not retry_requested, 'question': '' if retry_requested else reply,
+        'choices': choices,
         'reply': reply, 'assistantState': state, conflict_key: facts,
         'contextChanged': bool(previous.get('inputSignature')
                                and previous.get('inputSignature') != signature),

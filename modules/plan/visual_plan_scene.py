@@ -317,57 +317,76 @@ def _parcel_long_axis_angle(regions):
 
 
 def fallback_scene(contract, program, version=1):
-    """Deterministic last-resort layout — exact-area rects placed inside the
-    setback envelopes — tried only when the layout model fails, so prepare
-    still seals a valid scene or refuses with the precise capacity reason."""
+    """Deterministic last-resort layout with bounded placement-order retries.
+
+    Areas and geometry stay fixed. Reordering which approved footprints are
+    placed first lets the system recover from a greedy placement that blocks a
+    later large site area, while ``make_scene`` still enforces the full scene
+    contract before anything is sealed.
+    """
     envelopes = [item['polygon'] for item in buildable_envelopes(contract)]
+    parcels = [parcel['polygon'] for parcel in contract['geometry']['parcels']]
     parcel_axis = _parcel_long_axis_angle(envelopes)
-    placed = {}
-    for building in sorted(program['buildings'],
-                           key=lambda item: -(finite_number(item['footprintArea']) or 0)):
-        if building.get('basementOnly'):
+    buildings = sorted(
+        (item for item in program['buildings'] if not item.get('basementOnly')),
+        key=lambda item: -(finite_number(item['footprintArea']) or 0))
+    site_items = sorted(
+        (item for item in program.get('siteItems') or []
+         if (finite_number(item.get('area')) or 0) > 0),
+        key=lambda item: -(finite_number(item.get('area')) or 0))
+    placement_rows = ([('building', item) for item in buildings]
+                      + [('site', item) for item in site_items])
+    strategies = (
+        placement_rows,
+        [('site', item) for item in site_items] + [('building', item) for item in buildings],
+        sorted(placement_rows, key=lambda row: -(
+            finite_number(row[1].get('footprintArea' if row[0] == 'building' else 'area')) or 0)),
+    )
+    failures = []
+    for strategy in strategies:
+        placed, open_areas, occupied = {}, [], []
+        failure = None
+        for kind, item in strategy:
+            area = finite_number(item.get('footprintArea' if kind == 'building' else 'area'))
+            regions = envelopes if kind == 'building' else parcels
+            polygon = _rect_grid_search(regions, area, occupied, parcel_axis)
+            if polygon is None:
+                polygon = _rect_search(regions, area, occupied, parcel_axis)
+            if polygon is None and abs(parcel_axis) > 0.01:
+                polygon = _rect_grid_search(regions, area, occupied)
+            if polygon is None and abs(parcel_axis) > 0.01:
+                polygon = _rect_search(regions, area, occupied)
+            if polygon is None:
+                if kind == 'building':
+                    required = sum(finite_number(row['footprintArea']) or 0 for row in buildings)
+                    available = sum(abs(signed_area(envelope)) for envelope in envelopes)
+                    failure = PlanGeometryError(
+                        f'بصمات المباني المطلوبة {required:g} م² لا تتسع داخل منطقة البناء بعد الارتدادات المسجلة '
+                        f'(~{available:g} م² متاحة).', 'PLANS_SETBACK_CONFLICT')
+                else:
+                    label = item.get('label') or item.get('name') or item['id']
+                    failure = PlanGeometryError(
+                        f'المساحة المعتمدة «{label}» لا تتسع داخل حدود الأرض مع البصمات المسجلة.',
+                        'PLANS_SITE_AREA_CONFLICT')
+                break
+            occupied.append(polygon)
+            if kind == 'building':
+                placed[item['id']] = polygon
+            else:
+                open_areas.append({'id': 'site_' + str(item['id']), 'componentId': item['id'],
+                                   'kind': _site_area_kind(item), 'polygon': polygon})
+        if failure:
+            failures.append(failure)
             continue
-        footprint = _rect_grid_search(envelopes, building['footprintArea'], list(placed.values()), parcel_axis)
-        if footprint is None:
-            footprint = _rect_search(envelopes, building['footprintArea'], list(placed.values()), parcel_axis)
-        if footprint is None and abs(parcel_axis) > 0.01:
-            footprint = _rect_grid_search(envelopes, building['footprintArea'], list(placed.values()))
-        if footprint is None and abs(parcel_axis) > 0.01:
-            footprint = _rect_search(envelopes, building['footprintArea'], list(placed.values()))
-        if footprint is None:
-            required = sum(finite_number(item['footprintArea']) or 0
-                           for item in program['buildings'] if not item.get('basementOnly'))
-            available = sum(abs(signed_area(item)) for item in envelopes)
-            raise PlanGeometryError(
-                f'بصمات المباني المطلوبة {required:g} م² لا تتسع داخل منطقة البناء بعد الارتدادات المسجلة '
-                f'(~{available:g} م² متاحة).',
-                'PLANS_SETBACK_CONFLICT')
-        placed[building['id']] = footprint
-    layout = [{'id': building['id'], 'footprint': placed[building['id']]}
-              for building in program['buildings'] if building['id'] in placed]
-    open_areas = []
-    occupied = [placed[item['id']] for item in program['buildings']
-                if item['id'] in placed and not item.get('basementOnly')]
-    for item in sorted(program.get('siteItems') or [],
-                       key=lambda source: -(finite_number(source.get('area')) or 0)):
-        area = finite_number(item.get('area'))
-        if area is None or area <= 0:
-            continue
-        polygon = _rect_grid_search(
-            [parcel['polygon'] for parcel in contract['geometry']['parcels']], area,
-            occupied, parcel_axis)
-        if polygon is None:
-            polygon = _rect_search(
-                [parcel['polygon'] for parcel in contract['geometry']['parcels']], area,
-                occupied, parcel_axis)
-        if polygon is None:
-            raise PlanGeometryError(
-                f'المساحة المعتمدة «{item.get("label") or item.get("name") or item["id"]}» '
-                'لا تتسع داخل حدود الأرض مع البصمات المسجلة.', 'PLANS_SITE_AREA_CONFLICT')
-        occupied.append(polygon)
-        open_areas.append({'id': 'site_' + str(item['id']), 'componentId': item['id'],
-                           'kind': _site_area_kind(item), 'polygon': polygon})
-    return make_scene(contract, program, {'buildings': layout, 'openAreas': open_areas}, version)
+        layout = [{'id': item['id'], 'footprint': placed[item['id']]}
+                  for item in program['buildings'] if item['id'] in placed]
+        try:
+            return make_scene(contract, program, {'buildings': layout, 'openAreas': open_areas}, version)
+        except PlanGeometryError as error:
+            failures.append(error)
+    if failures:
+        raise failures[0]
+    raise PlanGeometryError('تعذر إنشاء توزيع هندسي صالح للمخططات.', 'PLANS_LAYOUT_INVALID')
 
 
 def make_scene(contract, program, layout, version=1):

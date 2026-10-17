@@ -123,7 +123,7 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
         self.assertIn('500 م²', result['reply'])
         self.assertIn('هل قيمة «Parking» صحيحة', result['question'])
 
-    def test_area_sufficient_parking_failure_is_explained_as_a_search_limit(self):
+    def test_area_sufficient_placement_request_retries_without_asking_client_to_layout(self):
         module = self.application_module
         contract = {
             'landArea': 24906.43, 'distribution': {'rows': []},
@@ -161,7 +161,8 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
                     patch.object(module, '_visual_plan_program', return_value=program), \
                     patch.object(module, '_visual_plan_input_signature', return_value='same-site-input'), \
                     patch.object(module, '_visual_plan_site_call', side_effect=AssertionError(
-                        'The area arithmetic and search limitation should be stated deterministically')):
+                        'The area arithmetic and system-owned placement should be deterministic')), \
+                    patch.object(module, '_visual_plan_site_generate', side_effect=error) as generate:
                 first, first_status = module._visual_plan_site_assistant_execute(first_data, 'generate')
                 followup_data = {
                     'message': 'مناقشة توزيع Parking داخل الأرض',
@@ -177,6 +178,13 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
         self.assertTrue(first['siteAreaConflict']['aggregateAreaSufficient'])
         self.assertIn('لا يظهر عجز في مجموع المساحات', first['reply'])
         self.assertIn('لا يثبت استحالة وجود توزيع صالح', first['reply'])
-        self.assertIn('فائض 125.65 م²', followup['reply'])
-        self.assertIn('لم يجرّب إعادة ترتيبها', followup['reply'])
+        generate.assert_called_once()
+        retry_interview = generate.call_args.args[1]
+        self.assertTrue(retry_interview['readyForGeneration'])
+        self.assertTrue(retry_interview['generateRequested'])
+        self.assertFalse(retry_interview['needsClarification'])
+        self.assertIn('أعدت التوزيع آليًا', followup['reply'])
+        self.assertIn('النظام مسؤول عن تحديد المواضع', followup['reply'])
+        self.assertNotIn('أين تفضل', followup['reply'])
+        self.assertNotIn('إعادة توزيع مواضع الأبراج والفلل', followup['reply'])
         self.assertNotIn('الفراغات المتبقية مجزأة', followup['reply'])
