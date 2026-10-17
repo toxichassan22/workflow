@@ -206,8 +206,6 @@ def _visual_plan_site_interview(data, action='chat'):
             state['answers'].append({'question': state['pendingQuestion'], 'answer': message})
             state['answers'] = state['answers'][-100:]
         state['turns'].append({'role': 'user', 'text': message})
-    elif action == 'chat' and not state['turns']:
-        state['turns'].append({'role': 'user', 'text': 'ابدأ مراجعة بيانات المخطط وحدد إن كانت هناك أسئلة لازمة قبل التوليد.'})
     system_prompt = (
         'You are Google Gemini 4 Argon and the only assistant for this site-plan session. '
         'You receive the complete approved land, croquis, regulations, financial components, distribution, '
@@ -223,9 +221,14 @@ def _visual_plan_site_interview(data, action='chat'):
         '"memory":"","designSpec":{"palette":{},"layoutNotes":""}}. The drawing itself must use English.'
     )
     compact_mode = state['promptTokens'] >= _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT
+    if action == 'generate':
+        task = 'confirm readiness for generation; ask a blocking question if needed'
+    elif not state['turns'] and not message:
+        task = 'review all available approved site-plan inputs and begin the client interview; ask only a blocking design question if needed'
+    else:
+        task = 'continue the site-plan interview'
     user_packet = {
-        'task': ('confirm readiness for generation; ask a blocking question if needed' if action == 'generate'
-                 else 'continue the site-plan interview'),
+        'task': task,
         'validatedProjectData': packet,
         'resolvedAnswers': state['answers'],
         'sessionMemory': state['summary'],

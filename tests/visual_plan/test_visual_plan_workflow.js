@@ -558,7 +558,72 @@ test('the site plan chat can start before a scene exists and offers an explicit 
 
   const card = context.renderVisualConceptSitePlanCard();
   assert.match(card, /data-visual-action="start-site-chat"[^>]*>بدء المحادثة/);
-  assert.match(card, /<textarea data-visual-chat="plan_site"[^>]*placeholder="رسالة جديدة"\s*>/);
+  assert.match(card, /<textarea data-visual-chat="plan_site"[^>]*placeholder="رسالة جديدة" disabled>/);
+  assert.match(card, /data-visual-action="chat"[^>]*disabled>إرسال/);
+
+  context.tenantVisualConceptState.plansWorkflow.siteAssistant.turns = [
+    { role: 'assistant', text: 'ما جهة المدخل الرئيسي؟', choices: ['الغرب', 'الجنوب'] },
+  ];
+  context.tenantVisualConceptState.slots.plan_site.chat = [
+    { role: 'assistant', text: 'ما جهة المدخل الرئيسي؟', choices: ['الغرب', 'الجنوب'] },
+  ];
+  const activeCard = context.renderVisualConceptSitePlanCard();
+  assert.match(activeCard, /<textarea data-visual-chat="plan_site"[^>]*placeholder="رسالة جديدة"\s*>/);
+  assert.match(activeCard, /data-visual-action="chat-choice"[^>]*>الغرب/);
+});
+
+test('site plan chat input, send action, and choices stay locked while the assistant is processing', () => {
+  const context = fixture(true);
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {
+    plan_site: { chat: [{ role: 'assistant', text: 'ما جهة المدخل الرئيسي؟', choices: ['الغرب'] }] },
+  }, plansWorkflow: { siteAssistant: {
+    turns: [{ role: 'assistant', text: 'ما جهة المدخل الرئيسي؟', choices: ['الغرب'] }],
+  } } });
+  vm.runInContext('visualConceptSiteAssistantBusy = true', context);
+
+  const card = context.renderVisualConceptSitePlanCard();
+  assert.match(card, /data-visual-chat="plan_site"[^>]*disabled/);
+  assert.match(card, /data-visual-action="chat"[^>]*disabled>إرسال/);
+  assert.match(card, /data-visual-action="chat-choice"[^>]*disabled>الغرب/);
+  assert.match(card, /جاري مراجعة بيانات المخطط/);
+});
+
+test('starting the site plan chat submits analysis without a message from the client', async () => {
+  const context = fixture(true);
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {} });
+  context.hasPermission = () => true;
+  context.visualConceptSlotLocked = () => false;
+  context.visualConceptPlanInputStamp = () => 'same-input';
+  context.collectVisualConceptPlansWorkflowPayload = async () => ({
+    projectData: {}, plansWorkflow: {},
+  });
+  context.markVisualConceptDirty = () => {};
+  context.renderVisualConceptPage = () => {};
+  context.applyVisualConceptSiteAssistantResponse = () => {};
+  let request;
+  context.visualConceptPlanJobApi = async (method, path, payload) => {
+    request = { method, path, payload };
+    assert.equal(vm.runInContext('visualConceptSiteAssistantBusy', context), true);
+    return { success: true, assistantState: { turns: [] } };
+  };
+
+  await context.startVisualConceptSiteChat();
+
+  assert.equal(request.method, 'POST');
+  assert.equal(request.path, '/api/visual-concept/site-plan-assistant');
+  assert.equal(request.payload.planAssistantAction, 'chat');
+  assert.equal(Object.hasOwn(request.payload, 'message'), false);
+  assert.equal(vm.runInContext('visualConceptSiteAssistantBusy', context), false);
+});
+
+test('stage three ignores a second chat send while its current request is active', async () => {
+  const context = fixture(true);
+  let apiCalls = 0;
+  context.api = async () => { apiCalls += 1; return { success: true }; };
+  vm.runInContext('visualConceptSiteAssistantBusy = true', context);
+
+  await context.sendVisualConceptChat('plan_site');
+  assert.equal(apiCalls, 0);
 });
 
 test('visual plan job polling allows the requested two-hour generation window', () => {

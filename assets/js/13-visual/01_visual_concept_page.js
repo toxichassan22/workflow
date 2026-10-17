@@ -1,5 +1,7 @@
 /* 13-visual.js - index.html lines 21642-23155, shared global scope, classic scripts in order */
 
+    let visualConceptSiteAssistantBusy = false;
+
     // Card actions and the zoom lightbox are delegated once on the document:
     // every render replaces innerHTML, so listeners bound per-element died
     // silently whenever a subtree re-rendered after the binding pass.
@@ -15,13 +17,7 @@
         else if (action === 'delete-interior-field') deleteVisualConceptInteriorField(slotId);
         else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
         else if (action === 'chat') sendVisualConceptChat(slotId);
-        else if (action === 'start-site-chat') {
-          const input = document.querySelector('[data-visual-chat="plan_site"]');
-          if (input && !input.disabled) {
-            input.value = 'ابدأ مراجعة متطلبات المخطط واسألني عن أي نقطة غير واضحة.';
-            sendVisualConceptChat('plan_site');
-          }
-        }
+        else if (action === 'start-site-chat') startVisualConceptSiteChat();
         else if (action === 'chat-choice') {
           const input = document.querySelector('[data-visual-chat="' + slotId + '"]');
           if (input) {
@@ -357,6 +353,52 @@
       markVisualConceptDirty();
     }
 
+    async function startVisualConceptSiteChat() {
+      if (visualConceptSiteAssistantBusy) return;
+      if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
+      if (visualConceptSlotLocked('plan_site')) {
+        showVisualConceptLockNotice(visualConceptLockMessage('plan_site'));
+        return;
+      }
+      const slot = tenantVisualConceptState?.slots?.plan_site;
+      const assistant = visualConceptPlansWorkflowState().siteAssistant || {};
+      if (!slot || (assistant.turns || []).length || (slot.chat || []).length || slot.svgCode) return;
+
+      visualConceptSiteAssistantBusy = true;
+      const workflow = visualConceptPlansWorkflowState();
+      workflow.jobTodos = [
+        { id: '1', label: 'قراءة بيانات الأرض والتوزيع', status: 'active' },
+        { id: '2', label: 'تحليل متطلبات المخطط', status: 'pending' },
+        { id: '3', label: 'تحديد نقطة التوضيح التالية', status: 'pending' },
+      ];
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      try {
+        const current = visualConceptPlansWorkflowState();
+        const currentStamp = visualConceptPlanInputStamp();
+        const reviewCurrent = !current.clientNotes.trim()
+          || (current.sourceStamp === currentStamp && visualConceptPlanNotesCleared(current));
+        if (!reviewCurrent) {
+          const notesCleared = await checkVisualConceptPlanNotes({ silent: true });
+          if (!notesCleared) return;
+        }
+        const payload = await collectVisualConceptPlansWorkflowPayload();
+        payload.planAssistantAction = 'chat';
+        const response = await visualConceptPlanJobApi(
+          'POST', '/api/visual-concept/site-plan-assistant', payload);
+        if (!response?.success) {
+          toast(response?.error || 'تعذر مراجعة بيانات المخطط');
+          return;
+        }
+        applyVisualConceptSiteAssistantResponse(response);
+      } catch (error) {
+        toast(error.message || 'تعذر مراجعة بيانات المخطط');
+      } finally {
+        visualConceptSiteAssistantBusy = false;
+        renderVisualConceptPage();
+      }
+    }
+
     async function generateVisualConceptImage(slotId) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       // Never hold a slot reference across an await or a render: renderVisualConceptPage
@@ -365,6 +407,7 @@
       const liveSlot = () => tenantVisualConceptState.slots[slotId];
       if (!liveSlot() || liveSlot().status === 'generating') return;
       const sitePlan = slotId === 'plan_site' && isVisualConceptWorkflowPlan(slotId);
+      if (sitePlan && visualConceptSiteAssistantBusy) return;
       if (visualConceptSlotLocked(slotId)) {
         showVisualConceptLockNotice(visualConceptLockMessage(slotId));
         return;
@@ -381,6 +424,7 @@
       }
       if (!liveSlot() || (!sitePlan && !liveSlot().prompt)) return;
       const previousImage = liveSlot().imageUrl || liveSlot().approvedImageUrl;
+      if (sitePlan) visualConceptSiteAssistantBusy = true;
       liveSlot().status = 'generating';
       renderVisualConceptPage();
       showLoader('جاري توليد التصور البصري', WFT('vc.generating_slot', 'يتم توليد {slot}...', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
@@ -427,6 +471,11 @@
         liveSlot().status = previousImage ? 'review' : 'pending';
         renderVisualConceptPage();
         toast(error.message || 'تعذر توليد الصورة');
+      } finally {
+        if (sitePlan) {
+          visualConceptSiteAssistantBusy = false;
+          renderVisualConceptPage();
+        }
       }
     }
 
@@ -550,6 +599,7 @@
     }
 
     async function sendVisualConceptChat(slotId) {
+      if (slotId === 'plan_site' && visualConceptSiteAssistantBusy) return;
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
         showVisualConceptLockNotice(visualConceptLockMessage(slotId));
@@ -567,6 +617,13 @@
       // same box steers the hidden prompt instead — there is nothing to edit yet.
       const planWorkflowSlot = isVisualConceptWorkflowPlan(slotId);
       const sitePlan = slotId === 'plan_site' && planWorkflowSlot;
+      if (sitePlan) {
+        const assistant = visualConceptPlansWorkflowState().siteAssistant || {};
+        if (!(assistant.turns || []).length && !(liveSlot().chat || []).length && !liveSlot().svgCode) {
+          return;
+        }
+        visualConceptSiteAssistantBusy = true;
+      }
       const baseImage = durableImageUrl(liveSlot().imageUrl || liveSlot().approvedImageUrl);
       // Workflow plans edit the shared geometric scene rather than pixels: even
       // before the first render the same box applies a surgical scene edit and
@@ -595,8 +652,8 @@
         if (sitePlan) {
           const workflow = visualConceptPlansWorkflowState();
           const currentStamp = visualConceptPlanInputStamp();
-          const reviewCurrent = workflow.notesReview.verified && workflow.notesReview.token
-            && workflow.sourceStamp === currentStamp;
+          const reviewCurrent = !workflow.clientNotes.trim()
+            || (workflow.sourceStamp === currentStamp && visualConceptPlanNotesCleared(workflow));
           if (!reviewCurrent) {
             const notesCleared = await checkVisualConceptPlanNotes({ silent: true });
             if (!notesCleared) {
@@ -675,6 +732,7 @@
         if (!sitePlan) hideLoader();
         toast(error.message || WFT('vc.edit_failed', 'تعذر تعديل الصورة'));
       } finally {
+        if (sitePlan) visualConceptSiteAssistantBusy = false;
         if (planWorkflowSlot) {
           visualConceptPlanScenePending = false;
           renderVisualConceptPage();

@@ -179,18 +179,27 @@
       const status = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد'
         : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chatMessages = slot.chat || [];
+      const assistant = visualConceptPlansWorkflowState().siteAssistant || {};
+      const assistantBusy = typeof visualConceptSiteAssistantBusy !== 'undefined'
+        && visualConceptSiteAssistantBusy;
+      const conversationStarted = Boolean((assistant.turns || []).length || chatMessages.length || slot.svgCode);
+      const canCompose = conversationStarted && !assistantBusy && !locked;
       const chat = chatMessages.map(item => {
         const isUser = item.role === 'user';
         const choices = !isUser && Array.isArray(item.choices) && item.choices.length
           ? '<div class="visual-plan-site-choices">' + item.choices.map(choice =>
-            '<button type="button" class="btn ghost small" data-visual-action="chat-choice" data-visual-slot="plan_site" data-choice="' + escapeHtml(choice) + '">' + escapeHtml(choice) + '</button>'
-          ).join('') + '<button type="button" class="btn ghost small" data-visual-action="chat-choice" data-visual-slot="plan_site" data-choice-other="true">أخرى</button></div>'
+            '<button type="button" class="btn ghost small" data-visual-action="chat-choice" data-visual-slot="plan_site" data-choice="' + escapeHtml(choice) + '"' + (assistantBusy ? ' disabled' : '') + '>' + escapeHtml(choice) + '</button>'
+          ).join('') + '<button type="button" class="btn ghost small" data-visual-action="chat-choice" data-visual-slot="plan_site" data-choice-other="true"' + (assistantBusy ? ' disabled' : '') + '>أخرى</button></div>'
           : '';
         return '<article class="visual-plan-site-message ' + (isUser ? 'is-user' : 'is-assistant') + '">' +
           '<div class="visual-plan-site-message-text">' + escapeHtml(item.text || '') + '</div>' + choices + '</article>';
-      }).join('') || '<div class="tenant-hint visual-plan-site-empty-chat"><p>لا توجد رسائل بعد.</p>' +
-        '<button type="button" class="btn primary small" data-visual-action="start-site-chat" data-visual-slot="plan_site" ' +
-        (locked ? 'disabled' : '') + '>بدء المحادثة</button></div>';
+      }).join('') || (assistantBusy
+        ? '<div class="tenant-hint visual-plan-site-assistant-status">جاري مراجعة بيانات المخطط...</div>'
+        : '<div class="tenant-hint visual-plan-site-empty-chat"><p>لا توجد رسائل بعد.</p>' +
+          (!conversationStarted ? '<button type="button" class="btn primary small" data-visual-action="start-site-chat" data-visual-slot="plan_site" ' +
+            (locked ? 'disabled' : '') + '>بدء المحادثة</button>' : '') + '</div>');
+      const assistantStatus = assistantBusy
+        ? (chatMessages.length ? '<div class="tenant-hint visual-plan-site-assistant-status">جاري مراجعة بيانات المخطط...</div>' : '') : '';
       const preview = image
         ? '<div class="visual-plan-site-preview" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '"><img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '"><button type="button" class="visual-concept-zoom-btn" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">تكبير</button></div>'
         : '<div class="visual-plan-site-preview-empty">لا توجد معاينة بعد.</div>';
@@ -204,10 +213,10 @@
         '<div class="visual-concept-head"><h3>' + escapeHtml(title) + '</h3><span class="visual-concept-status ' + escapeHtml(slot.status || 'pending') + '">' + escapeHtml(status) + '</span></div>' +
         '<div class="visual-plan-site-layout">' +
         '<section class="visual-plan-site-chat-panel" aria-label="محادثة المخطط">' +
-        '<div class="visual-plan-site-messages" role="log" aria-live="polite">' + chat + '</div>' +
+        '<div class="visual-plan-site-messages" role="log" aria-live="polite">' + chat + assistantStatus + '</div>' +
         '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(visualConceptPlansWorkflowState().jobTodos) : '') + '</div>' +
-        '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="رسالة جديدة" ' + (locked ? 'disabled' : '') + '></textarea>' +
-        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="plan_site" ' + (locked ? 'disabled' : '') + '>إرسال</button></div>' +
+        '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="رسالة جديدة" ' + (!canCompose ? 'disabled' : '') + '></textarea>' +
+        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="plan_site" ' + (!canCompose ? 'disabled' : '') + '>إرسال</button></div>' +
         '</section>' +
         '<aside class="visual-plan-site-preview-panel"><h4>معاينة المخطط</h4>' + preview +
         '<div class="visual-concept-actions">' + approve + remove + '</div></aside>' +

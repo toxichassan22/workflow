@@ -106,6 +106,24 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         second_packet = json.loads(model_call.call_args_list[1].args[1])
         self.assertEqual(second_packet['resolvedAnswers'][0]['answer'], 'West street')
 
+    def test_starting_site_plan_chat_analyzes_inputs_without_fabricating_a_user_message(self):
+        module = self.application_module
+        data = {'plansWorkflow': {'siteAssistant': {}}}
+        reply = {'ready': False, 'question': 'ما جهة المدخل الرئيسي؟',
+                 'choices': ['الغرب', 'الجنوب'], 'memory': 'لم يحدد المدخل الرئيسي.'}
+        with patch.object(module, '_visual_plan_site_packet',
+                          return_value=({'project': {'name': 'Fixed Parcel'}}, {}, {}, 'same-input')), \
+                patch.object(module, '_visual_plan_site_call', return_value=(reply, 1200)) as model_call:
+            result = module._visual_plan_site_interview(data)
+
+        packet = json.loads(model_call.call_args.args[1])
+        self.assertEqual(packet['latestClientMessage'], '')
+        self.assertIn('begin the client interview', packet['task'])
+        self.assertEqual(packet['recentTurns'], [])
+        self.assertEqual(result['assistantState']['turns'], [{
+            'role': 'assistant', 'text': 'ما جهة المدخل الرئيسي؟', 'choices': ['الغرب', 'الجنوب']
+        }])
+
     def test_generate_request_waits_for_answer_then_generates_without_a_second_request(self):
         module = self.application_module
         first_data = {'message': 'Generate the plan.', 'plansWorkflow': {'siteAssistant': {}}}
