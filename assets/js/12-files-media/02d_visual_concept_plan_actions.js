@@ -431,17 +431,21 @@
       if (typeof a11yModalDidClose === 'function') a11yModalDidClose();
     }
 
-    async function checkVisualConceptPlanNotes() {
+    async function checkVisualConceptPlanNotes(options) {
+      const silent = Boolean(options && options.silent);
       if (!hasPermission('generate_images') || !visualConceptPlanActionBusy('check-notes', true)) return false;
-      showLoader(WFT('plans.notes_loading', 'جاري فحص الملاحظات'), WFT('plans.notes_loading_detail', 'يتم فحص الملاحظات مقابل الكروكي والتوزيع والقيود...'), 35);
+      if (!silent) showLoader(WFT('plans.notes_loading', 'جاري فحص الملاحظات'), WFT('plans.notes_loading_detail', 'يتم فحص الملاحظات مقابل الكروكي والتوزيع والقيود...'), 35);
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         const stamp = visualConceptPlanInputStamp();
         const response = await visualConceptPlanJobApi('POST', '/api/visual-concept/plans-notes-check', payload);
-        hideLoader();
-        if (stamp !== visualConceptPlanInputStamp()) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return false; }
+        if (!silent) hideLoader();
+        if (stamp !== visualConceptPlanInputStamp()) {
+          if (!silent) toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.'));
+          return false;
+        }
         if (!response?.success || !response.notesReview) {
-          toast(response?.error || WFT('plans.notes_failed', 'تعذر فحص الملاحظات'));
+          if (!silent) toast(response?.error || WFT('plans.notes_failed', 'تعذر فحص الملاحظات'));
           return false;
         }
         const workflow = visualConceptPlansWorkflowState();
@@ -459,11 +463,13 @@
         }
         workflow.sourceStamp = stamp;
         markVisualConceptDirty();
-        renderVisualConceptPage();
+        if (!silent) renderVisualConceptPage();
         return visualConceptPlanNotesValid(workflow);
       } catch (error) {
-        hideLoader();
-        toast(error.message || WFT('plans.notes_failed', 'تعذر فحص الملاحظات'));
+        if (!silent) {
+          hideLoader();
+          toast(error.message || WFT('plans.notes_failed', 'تعذر فحص الملاحظات'));
+        }
         return false;
       } finally {
         visualConceptPlanActionBusy('check-notes', false);

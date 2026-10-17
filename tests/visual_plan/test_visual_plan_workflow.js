@@ -20,6 +20,9 @@ function fixture() {
       querySelectorAll: () => [] },
     tenantProjectData: {}, tenantCreativeImages: {}, tenantVisualConceptState: null,
     durableImageUrl: value => String(value || ''),
+    isSessionOnlyImageUrl: () => false,
+    visualConceptSlotLabel: id => id,
+    visualConceptSlotLocked: () => false,
     escapeHtml: value => String(value).replace(/[&<>"']/g, ch => ({
       '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
     }[ch])),
@@ -461,6 +464,7 @@ test('stage three renders only the simplified SVG site plan and stage four rende
   context.trDynamicI18n = value => value;
   context.isSessionOnlyImageUrl = () => false;
   context.visualConceptSlotLabel = id => id;
+  context.visualConceptSlotLocked = () => false;
   context.markVisualConceptDirty = () => {};
   context.persistVisualConceptDraftState = () => {};
   const workflow = sealedWorkflowState(context);
@@ -470,12 +474,25 @@ test('stage three renders only the simplified SVG site plan and stage four rende
   workflow.promptReady = true;
   context.tenantVisualConceptState = context.normalizeVisualConceptState(context.tenantVisualConceptState);
   context.renderVisualConceptPage = () => context.renderVisualConceptPlansWorkflow();
+  context.tenantVisualConceptState.slots.plan_site.chat = [
+    { role: 'user', text: 'Generate the site plan.' },
+    { role: 'assistant', text: 'Which entrance should be primary?', choices: ['West', 'South'] },
+  ];
   const root = workflowRoot(context);
 
   context.renderVisualConceptPlansWorkflow();
   const stageThree = root.innerHTML.match(/<section class="plans-workflow-panel" data-plans-workflow-stage="generate"[^>]*>([\s\S]*?)<\/section>/)[1];
   assert.ok(stageThree.includes('المخطط العام المبسط بصيغة SVG'));
   assert.ok(stageThree.includes('data-visual-slot="plan_site"'));
+  assert.ok(stageThree.includes('data-choice-other="true"'));
+  assert.ok(stageThree.includes('data-visual-chat="plan_site"'));
+  assert.ok(!stageThree.includes('data-visual-chat-upload'));
+  assert.ok(!stageThree.includes('data-visual-action="chat-attach"'));
+  assert.ok(!stageThree.includes('data-plans-workflow-action="check-notes"'));
+  assert.ok(!stageThree.includes('data-plans-workflow-action="prepare-prompts"'));
+  assert.ok(!stageThree.includes('وصف المخطط'));
+  assert.ok(!stageThree.includes('تجهيز المخطط'));
+  assert.ok(!stageThree.includes('data-visual-action="generate"'));
   assert.ok(!stageThree.includes('data-visual-slot="plan_uses"'));
   assert.ok(!stageThree.includes('data-visual-slot="plan_massing"'));
   assert.deepEqual(panelsOf(root).filter(panel => !panel.hidden).map(panel => panel.stage), ['generate']);
@@ -519,8 +536,15 @@ test('site plan chat choices, surgical SVG source, and saved checkpoints are con
   assert.match(page, /\/api\/visual-concept\/site-plan-assistant/);
   assert.match(page, /payload\.siteSvgCode = liveSlot\(\)\.svgCode/);
   assert.match(page, /action === 'chat-choice'/);
+  assert.match(page, /data-choice-other/);
+  assert.match(page, /checkVisualConceptPlanNotes\(\{ silent: true \}\)/);
+  assert.match(page, /event\.key !== 'Enter' \|\| event\.shiftKey/);
   assert.match(actions, /job\.checkpoint\?\.svgSections/);
   assert.match(renderer, /data-visual-action="chat-choice"/);
+  const shell = fs.readFileSync(path.resolve(__dirname,
+    '../../assets/css/base/08_shell_chrome.css'), 'utf8');
+  assert.match(shell, /\.visual-plan-site-message\.is-user\s*\{[^}]*align-self:\s*flex-start/s);
+  assert.match(shell, /\.visual-plan-site-preview img\s*\{[^}]*max-height:\s*350px/s);
 });
 
 test('a clean verification still approves without opening the dialog', () => {

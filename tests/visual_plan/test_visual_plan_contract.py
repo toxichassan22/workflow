@@ -106,6 +106,33 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         second_packet = json.loads(model_call.call_args_list[1].args[1])
         self.assertEqual(second_packet['resolvedAnswers'][0]['answer'], 'West street')
 
+    def test_generate_request_waits_for_answer_then_generates_without_a_second_request(self):
+        module = self.application_module
+        first_data = {'message': 'Generate the plan.', 'plansWorkflow': {'siteAssistant': {}}}
+        followup = {'ready': False, 'generateRequested': True,
+                    'question': 'Which side should be the main entrance?',
+                    'choices': ['West', 'South'], 'memory': 'The client requested generation.'}
+        resolved = {'ready': True, 'generateRequested': False,
+                    'reply': 'The requirements are clear.',
+                    'memory': 'The main entrance is on the west.'}
+        generated = {'success': True, 'image': '/plan.svg', 'svgCode': '<svg/>'}
+        with patch.object(module, '_visual_plan_site_packet', return_value=({}, {}, {}, 'same-input')), \
+                patch.object(module, '_visual_plan_site_call', side_effect=[(followup, 10), (resolved, 10)]), \
+                patch.object(module, '_visual_plan_site_generate', return_value=generated) as generate:
+            first, first_status = module._visual_plan_site_assistant_execute(first_data, 'chat')
+            self.assertEqual(first_status, 200)
+            self.assertTrue(first['needsClarification'])
+            self.assertTrue(first['generateRequested'])
+            generate.assert_not_called()
+
+            second_data = {'message': 'West', 'plansWorkflow': {'siteAssistant': first['assistantState']}}
+            second, second_status = module._visual_plan_site_assistant_execute(second_data, 'chat')
+
+        self.assertEqual(second_status, 200)
+        self.assertEqual(second, generated)
+        generate.assert_called_once()
+        self.assertTrue(generate.call_args.args[1]['assistantState']['generateRequested'])
+
     def test_site_plan_context_compaction_keeps_recent_answers_and_repeats_at_each_threshold(self):
         module = self.application_module
         state = {'promptTokens': 899990, 'compactedAtTokens': 0, 'compactionCount': 0,

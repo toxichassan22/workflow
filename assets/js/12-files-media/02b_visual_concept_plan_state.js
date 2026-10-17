@@ -156,6 +156,7 @@
           answers: assistantAnswers,
           pendingQuestion: String(assistant.pendingQuestion || '').slice(0, 800),
           readyForGeneration: Boolean(assistant.readyForGeneration),
+          generateRequested: Boolean(assistant.generateRequested),
           designSpec: assistant.designSpec && typeof assistant.designSpec === 'object' ? assistant.designSpec : null,
           checkpoints: Object.fromEntries(['coordinates', 'colors', 'components', 'access', 'landscape', 'legend']
             .filter(name => typeof assistantCheckpoints[name] === 'string')

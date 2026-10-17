@@ -18,6 +18,11 @@
         else if (action === 'chat-choice') {
           const input = document.querySelector('[data-visual-chat="' + slotId + '"]');
           if (input) {
+            if (button.getAttribute('data-choice-other') === 'true') {
+              input.placeholder = 'إجابة أخرى';
+              input.focus();
+              return;
+            }
             input.value = button.getAttribute('data-choice') || '';
             sendVisualConceptChat(slotId);
           }
@@ -52,6 +57,13 @@
         const url = zoom.getAttribute('data-visual-zoom');
         if (url) openVisualConceptLightbox(url, zoom.getAttribute('data-visual-title'));
       }
+    });
+
+    document.addEventListener('keydown', event => {
+      const input = event.target.closest?.('[data-visual-chat="plan_site"]');
+      if (!input || event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+      event.preventDefault();
+      sendVisualConceptChat('plan_site');
     });
 
     function renderVisualConceptPage() {
@@ -318,6 +330,10 @@
           role: turn.role, text: turn.text, choices: turn.choices || [], attachments: []
         }));
       }
+      if (response.scene && typeof response.scene === 'object') {
+        workflow.scene = response.scene;
+        workflow.sourceStamp = visualConceptPlanInputStamp();
+      }
       if (response.question && !slot.chat.some(item => item.role === 'assistant' && item.text === response.question)) {
         slot.chat.push({ role: 'assistant', text: response.question, choices: response.choices || [] });
       }
@@ -549,14 +565,41 @@
       // before the first render the same box applies a surgical scene edit and
       // the server re-renders the diagram from the validated result.
       const editImage = sitePlan ? Boolean(liveSlot().svgCode) : (planWorkflowSlot || Boolean(baseImage));
-      const refs = (visualConceptChatRefs[slotId] || []).slice(0, 5);
+      const refs = sitePlan ? [] : (visualConceptChatRefs[slotId] || []).slice(0, 5);
       liveSlot().chat.push({ role: 'user', text: message, attachments: refs.map(file => file.name) });
       markVisualConceptDirty();
-      showLoader(
-        sitePlan ? 'جاري مراجعة المخطط' : (editImage ? WFT('vc.edit_running', 'جاري تعديل الصورة') : 'جاري تعديل وصف الصورة'),
-        sitePlan ? 'يتم مراجعة بيانات الموقع والإجابات السابقة...' :
-          (editImage ? WFT('vc.edit_running_detail', 'يتم تطبيق التعديل على نفس الصورة دون تغيير باقي تفاصيلها...') : 'يتم تطبيق ملاحظاتك على نفس المشروع...'));
+      if (sitePlan) {
+        const workflow = visualConceptPlansWorkflowState();
+        workflow.jobTodos = [
+          { id: '1', label: 'مراجعة متطلبات التوليد', status: 'active' },
+          { id: '2', label: 'مراجعة بيانات الموقع والإجابات', status: 'pending' },
+          { id: '3', label: 'تجهيز السؤال أو المخطط', status: 'pending' },
+        ];
+        const todos = document.querySelector('[data-plans-workflow-todos]');
+        if (todos) todos.innerHTML = visualConceptPlanTodoMarkup(workflow.jobTodos);
+        markVisualConceptDirty();
+        renderVisualConceptPage();
+      } else {
+        showLoader(
+          editImage ? WFT('vc.edit_running', 'جاري تعديل الصورة') : WFT('vc.edit_running', 'جاري تعديل وصف الصورة'),
+          editImage ? WFT('vc.edit_running_detail', 'يتم تطبيق التعديل على نفس الصورة دون تغيير باقي تفاصيلها...') : 'يتم تطبيق ملاحظاتك على نفس المشروع...');
+      }
       try {
+        if (sitePlan) {
+          const workflow = visualConceptPlansWorkflowState();
+          const currentStamp = visualConceptPlanInputStamp();
+          const reviewCurrent = workflow.notesReview.verified && workflow.notesReview.token
+            && workflow.sourceStamp === currentStamp;
+          if (!reviewCurrent) {
+            const notesCleared = await checkVisualConceptPlanNotes({ silent: true });
+            if (!notesCleared) {
+              liveSlot().chat.push({ role: 'assistant', text: 'تعذر إكمال مراجعة متطلبات التوليد.' });
+              markVisualConceptDirty();
+              renderVisualConceptPage();
+              return;
+            }
+          }
+        }
         const payload = sitePlan ? await collectVisualConceptPlansWorkflowPayload() : await collectVisualConceptPayload(slotId);
         payload.message = message;
         if (editImage) payload.image = baseImage;
@@ -573,7 +616,7 @@
           : (editImage
             ? await apiWithTimeout('POST', '/api/visual-concept/edit', payload, 180000, WFT('vc.edit_timeout', 'انتهت مهلة تعديل الصورة؛ أعد المحاولة.'))
             : await api('POST', '/api/visual-concept/chat', payload)));
-        hideLoader();
+        if (!sitePlan) hideLoader();
         if (sitePlan && response?.success) {
           applyVisualConceptSiteAssistantResponse(response);
           if (input) input.value = '';
@@ -622,7 +665,7 @@
           toast('تم تحديث الوصف. اضغط توليد الصورة لتطبيق التعديل.');
         }
       } catch (error) {
-        hideLoader();
+        if (!sitePlan) hideLoader();
         toast(error.message || WFT('vc.edit_failed', 'تعذر تعديل الصورة'));
       } finally {
         if (planWorkflowSlot) {

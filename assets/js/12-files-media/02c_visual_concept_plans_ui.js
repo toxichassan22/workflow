@@ -169,6 +169,48 @@
         .concat(issues.filter(item => item.severity === 'high'));
     }
 
+    function renderVisualConceptSitePlanCard() {
+      const slot = tenantVisualConceptState.slots.plan_site || emptyVisualConceptSlot('plan_site');
+      const rawImage = slot.approvedImageUrl || slot.imageUrl || '';
+      const image = isSessionOnlyImageUrl(rawImage) ? '' : rawImage;
+      const title = visualConceptSlotLabel('plan_site');
+      const approved = slot.status === 'approved';
+      const locked = visualConceptSlotLocked('plan_site');
+      const status = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد'
+        : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
+      const chat = (slot.chat || []).map(item => {
+        const isUser = item.role === 'user';
+        const choices = !isUser && Array.isArray(item.choices) && item.choices.length
+          ? '<div class="visual-plan-site-choices">' + item.choices.map(choice =>
+            '<button type="button" class="btn ghost small" data-visual-action="chat-choice" data-visual-slot="plan_site" data-choice="' + escapeHtml(choice) + '">' + escapeHtml(choice) + '</button>'
+          ).join('') + '<button type="button" class="btn ghost small" data-visual-action="chat-choice" data-visual-slot="plan_site" data-choice-other="true">أخرى</button></div>'
+          : '';
+        return '<article class="visual-plan-site-message ' + (isUser ? 'is-user' : 'is-assistant') + '">' +
+          '<div class="visual-plan-site-message-text">' + escapeHtml(item.text || '') + '</div>' + choices + '</article>';
+      }).join('') || '<p class="tenant-hint visual-plan-site-empty-chat">لا توجد رسائل بعد.</p>';
+      const preview = image
+        ? '<div class="visual-plan-site-preview" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '"><img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '"><button type="button" class="visual-concept-zoom-btn" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">تكبير</button></div>'
+        : '<div class="visual-plan-site-preview-empty">لا توجد معاينة بعد.</div>';
+      const approve = image || approved
+        ? '<button type="button" class="btn primary small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="plan_site" ' + (locked ? 'disabled' : '') + '>' + (approved ? 'إلغاء الاعتماد' : 'اعتماد') + '</button>'
+        : '';
+      const remove = image && !approved
+        ? '<button type="button" class="btn danger small" data-visual-action="delete-image" data-visual-slot="plan_site">حذف الصورة</button>'
+        : '';
+      return '<article class="visual-concept-card visual-plan-site-card" data-visual-slot="plan_site">' +
+        '<div class="visual-concept-head"><h3>' + escapeHtml(title) + '</h3><span class="visual-concept-status ' + escapeHtml(slot.status || 'pending') + '">' + escapeHtml(status) + '</span></div>' +
+        '<div class="visual-plan-site-layout">' +
+        '<section class="visual-plan-site-chat-panel" aria-label="محادثة المخطط">' +
+        '<div class="visual-plan-site-messages" role="log" aria-live="polite">' + chat + '</div>' +
+        '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(visualConceptPlansWorkflowState().jobTodos) : '') + '</div>' +
+        '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="رسالة جديدة" ' + (locked ? 'disabled' : '') + '></textarea>' +
+        '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="plan_site" ' + (locked ? 'disabled' : '') + '>إرسال</button></div>' +
+        '</section>' +
+        '<aside class="visual-plan-site-preview-panel"><h4>معاينة المخطط</h4>' + preview +
+        '<div class="visual-concept-actions">' + approve + remove + '</div></aside>' +
+        '</div></article>';
+    }
+
     function renderVisualConceptPlansWorkflow() {
       const root = document.getElementById('visualConceptPlansWorkflow');
       if (!root) return;
@@ -218,13 +260,9 @@
             : WFT('plans.verification_not_run', 'لم يتم فحص التعارضات بعد.')));
       const verificationMessageClass = conflicts.length || checkFindings.length || verificationIssues.length || !hasVerificationResult
         ? 'tenant-hint' : 'plans-workflow-success';
-      const sitePlan = VISUAL_CONCEPT_PLAN_KINDS.find(item => item.kind === 'site');
       const otherPlans = VISUAL_CONCEPT_PLAN_KINDS.filter(item => item.kind !== 'site');
-      const siteHasImage = Boolean(tenantVisualConceptState.slots[sitePlan.id]?.imageUrl);
       const otherHasImage = otherPlans.some(item => tenantVisualConceptState.slots[item.id]?.imageUrl);
-      const sitePlanCard = promptReady || siteHasImage
-        ? renderVisualConceptSlot({ id: sitePlan.id, label: sitePlan.label, group: 'plans' }, visualConceptSlotLocked(sitePlan.id))
-        : '<p class="tenant-hint">مخطط الموقع العام غير جاهز للتوليد.</p>';
+      const sitePlanCard = renderVisualConceptSitePlanCard();
       const otherPlanCards = promptReady || otherHasImage
         ? '<div class="visual-concept-stack">' + otherPlans.map(definition =>
           renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, visualConceptSlotLocked(definition.id))
@@ -262,9 +300,7 @@
         '<div class="visual-concept-actions"><button type="button" class="btn ghost small" data-plans-workflow-action="check-notes" ' + (!workflow.clientNotes.trim() ? 'disabled' : '') + '>' + escapeHtml(WFT('plans.notes_check', 'فحص الملاحظات')) + '</button></div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="generate"' + (activeStage !== 'generate' ? ' hidden' : '') + '>' +
-        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.stage_site_title', 'المخطط العام المبسط بصيغة SVG')) + '</h4>' + (promptReady ? '' : '<button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_site_prepare', 'تجهيز المخطط')) + '</button>') + '</div>' +
-        '<p class="tenant-hint">' + escapeHtml(promptReady ? WFT('plans.stage_site_ready', 'مخطط الموقع جاهز للتوليد.') : (workflow.promptsError ? WFT('plans.stage_site_error', 'تعذر تجهيز المخطط: {error}', { error: workflow.promptsError }) : WFT('plans.stage_site_not_ready', 'مخطط الموقع غير جاهز للتوليد.'))) + '</p>' +
-        '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(workflow.jobTodos) : '') + '</div>' +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.stage_site_title', 'المخطط العام المبسط بصيغة SVG')) + '</h4></div>' +
         '<div data-plans-workflow-prompts>' + sitePlanCard + '</div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="other"' + (activeStage !== 'other' ? ' hidden' : '') + '>' +
@@ -273,6 +309,8 @@
         '<div data-plans-workflow-prompts>' + otherPlanCards + '</div>' +
         '</section>' +
         '</div>';
+      const siteMessages = root.querySelector('.visual-plan-site-messages');
+      if (siteMessages) siteMessages.scrollTop = siteMessages.scrollHeight;
       // Delegated binding, once: the distribution results container is re-rendered
       // in place after every re-check, so per-button listeners would die with it.
       if (!root.dataset.plansWorkflowBound) {

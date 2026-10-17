@@ -59,6 +59,7 @@ def _visual_plan_site_state(data, signature):
         'answers': answers,
         'pendingQuestion': str(source.get('pendingQuestion') or '')[:800],
         'readyForGeneration': bool(source.get('readyForGeneration')),
+        'generateRequested': bool(source.get('generateRequested')),
         'designSpec': source.get('designSpec') if isinstance(source.get('designSpec'), dict) else None,
         'checkpoints': {name: str(checkpoints[name])[:60000]
                         for name in _VISUAL_PLAN_SITE_SECTION_IDS
@@ -149,6 +150,12 @@ def _visual_plan_site_projected_layout(scene, contract, program):
 
 
 def _visual_plan_site_packet(data):
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    if 'scene' not in workflow or workflow.get('scene') is None:
+        scene, _context, _reference_url = _visual_plan_create_scene(data)
+        workflow = dict(workflow)
+        workflow['scene'] = scene
+        data['plansWorkflow'] = workflow
     scene, contract, context, program = _visual_plan_scene_from_request(data)
     signature = _visual_plan_input_signature(data, context)
     clean_scene = {key: value for key, value in scene.items() if key not in ('token', 'inputSignature')}
@@ -209,8 +216,10 @@ def _visual_plan_site_interview(data, action='chat'):
         'important design decision is genuinely unresolved. Ask one concise Arabic question at a time, '
         'and offer 2-5 short choices when the answer can be chosen. Otherwise return ready=true. '
         'Memory must preserve every resolved design choice and constraint so older turns and answers can be compacted safely. '
-        'Never generate code in this interview response. '
-        'Return JSON only: {"ready":true|false,"question":"","choices":[],"reply":"",'
+        'When the client asks to generate or draw the plan, set generateRequested=true and keep that intent '
+        'across clarification turns. If ready=true, the server will generate the drawing. Otherwise ask the '
+        'blocking question first. Never generate code in this interview response. '
+        'Return JSON only: {"ready":true|false,"generateRequested":true|false,"question":"","choices":[],"reply":"",'
         '"memory":"","designSpec":{"palette":{},"layoutNotes":""}}. The drawing itself must use English.'
     )
     compact_mode = state['promptTokens'] >= _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT
@@ -230,15 +239,18 @@ def _visual_plan_site_interview(data, action='chat'):
     raw_choices = parsed.get('choices') if isinstance(parsed.get('choices'), list) else []
     choices = [str(item).strip()[:240] for item in raw_choices[:6] if str(item).strip()]
     ready = bool(parsed.get('ready')) and not question
+    generate_requested = bool(parsed.get('generateRequested')) or state['generateRequested'] or action == 'generate'
     reply = _visual_concept_text(parsed.get('reply'), 1200)
     if question:
         reply = question
         state['pendingQuestion'] = question
         state['readyForGeneration'] = False
+        state['generateRequested'] = generate_requested
         state['status'] = 'questioning'
     else:
         state['pendingQuestion'] = ''
         state['readyForGeneration'] = ready
+        state['generateRequested'] = generate_requested
         state['status'] = 'ready' if ready else 'questioning'
     state['summary'] = str(parsed.get('memory') or state['summary'])[:40000]
     if isinstance(parsed.get('designSpec'), dict):
@@ -248,9 +260,11 @@ def _visual_plan_site_interview(data, action='chat'):
                            'text': reply or ('جاهز للتوليد.' if ready else 'أحتاج توضيحًا قبل التوليد.'),
                            'choices': choices if question else []})
     previous_assistant = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
-    return {'success': True, 'readyForGeneration': ready, 'needsClarification': bool(question),
+    return {'success': True, 'readyForGeneration': ready, 'generateRequested': generate_requested,
+            'needsClarification': bool(question),
             'question': question, 'choices': choices, 'reply': reply,
-            'assistantState': state, 'contextChanged': bool(previous_assistant.get('inputSignature')
+            'assistantState': state, 'scene': workflow.get('scene'),
+            'contextChanged': bool(previous_assistant.get('inputSignature')
                                                             and previous_assistant.get('inputSignature') != signature)}
 
 
@@ -345,7 +359,8 @@ def _visual_plan_site_generate(data, interview):
         raise visual_plan_geometry.PlanGeometryError('تعذر تركيب أقسام SVG في مخطط صالح.', 'PLANS_SVG_INVALID')
     encoded = base64.b64encode(svg.encode('utf-8')).decode('ascii')
     image = persist_generated_image('data:image/svg+xml;base64,' + encoded, g.tenant_id)
-    state.update({'status': 'review', 'readyForGeneration': True, 'checkpoints': checkpoints})
+    state.update({'status': 'review', 'readyForGeneration': True,
+                  'generateRequested': False, 'checkpoints': checkpoints})
     _visual_plan_site_report_progress(
         98, [{'id': str(i + 1), 'label': label, 'status': 'done'}
             for i, (_name, label) in enumerate(_VISUAL_PLAN_SITE_SECTIONS)], checkpoints)
@@ -432,7 +447,9 @@ def _visual_plan_site_assistant_execute(data, action):
                          'needsClarification': False, 'assistantState': state}
     if interview is None:
         interview = _visual_plan_site_interview(data, 'generate' if action == 'generate' else 'chat')
-    if action != 'generate' or interview.get('needsClarification'):
+    if interview.get('needsClarification'):
+        return interview, 200
+    if action != 'generate' and not interview.get('generateRequested'):
         return interview, 200
     return _visual_plan_site_generate(data, interview), 200
 
