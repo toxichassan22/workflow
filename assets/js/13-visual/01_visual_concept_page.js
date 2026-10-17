@@ -18,6 +18,7 @@
         else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
         else if (action === 'chat') sendVisualConceptChat(slotId);
         else if (action === 'start-site-chat') startVisualConceptSiteChat();
+        else if (action === 'restart-site-plan') restartVisualConceptSitePlan();
         else if (action === 'chat-choice') {
           const input = document.querySelector('[data-visual-chat="' + slotId + '"]');
           if (input) {
@@ -351,6 +352,60 @@
         workflow.siteAssistant.checkpoints = response.assistantState?.checkpoints || workflow.siteAssistant.checkpoints;
       }
       markVisualConceptDirty();
+    }
+
+    function visualConceptPlansResetBusy() {
+      const generatingPlan = VISUAL_CONCEPT_PLAN_KINDS.some(item =>
+        tenantVisualConceptState?.slots?.[item.id]?.status === 'generating');
+      const workflowRequestBusy = typeof visualConceptPlanRequests !== 'undefined'
+        && visualConceptPlanRequests.size > 0;
+      return Boolean(visualConceptSiteAssistantBusy || visualConceptPlanScenePending
+        || generatingPlan || workflowRequestBusy);
+    }
+
+    function restartVisualConceptSitePlan() {
+      if (!hasPermission('generate_images')) {
+        toast('لا تملك صلاحية توليد المخططات');
+        return false;
+      }
+      if (visualConceptPlansResetBusy()) {
+        toast('معالجة المخطط ما زالت قيد التنفيذ.');
+        return false;
+      }
+      if (visualConceptSlotLocked('plan_site')) {
+        showVisualConceptLockNotice(visualConceptLockMessage('plan_site'));
+        return false;
+      }
+      if (typeof confirm !== 'function' || !confirm(
+        'سيتم مسح محادثة المخطط ونتائج الفحص والتوزيع والاعتمادات والمخططات الحالية. ستبقى بيانات المشروع ونقاط حدود الأرض كما هي. هل تريد البدء من جديد؟')) {
+        return false;
+      }
+
+      tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
+      const workflow = visualConceptPlansWorkflowState();
+      const boundary = workflow.boundary || {};
+      const freshWorkflow = emptyVisualConceptPlansWorkflow();
+      freshWorkflow.boundary = {
+        points: Array.isArray(boundary.points) ? boundary.points : [],
+        referenceUrl: String(boundary.referenceUrl || ''),
+        approved: false
+      };
+      tenantVisualConceptState.plansWorkflow = freshWorkflow;
+      VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
+        const slot = tenantVisualConceptState.slots[definition.id]
+          || (tenantVisualConceptState.slots[definition.id] = emptyVisualConceptSlot(definition.id));
+        slot.prompt = '';
+        slot.imageUrl = '';
+        slot.approvedImageUrl = '';
+        slot.status = 'pending';
+        slot.chat = [];
+        slot.sceneToken = '';
+        if (definition.id === 'plan_site') slot.svgCode = '';
+      });
+      markVisualConceptDirty();
+      renderVisualConceptPage();
+      toast('تمت إعادة ضبط المخطط.');
+      return true;
     }
 
     async function startVisualConceptSiteChat() {

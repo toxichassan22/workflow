@@ -300,6 +300,12 @@
   padding: 12px;
 }
 
+.visual-plan-site-controls {
+  display: flex;
+  justify-content: flex-start;
+  padding-bottom: 8px;
+}
+
 .visual-plan-site-messages {
   display: flex;
   flex: 1 1 auto;

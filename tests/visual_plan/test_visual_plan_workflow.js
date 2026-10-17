@@ -778,6 +778,78 @@ test('the site plan chat can start before a scene exists and offers an explicit 
   const activeCard = context.renderVisualConceptSitePlanCard();
   assert.match(activeCard, /<textarea data-visual-chat="plan_site"[^>]*placeholder="رسالة جديدة"\s*>/);
   assert.match(activeCard, /data-visual-action="chat-choice"[^>]*>الغرب/);
+  assert.match(activeCard, /data-visual-action="restart-site-plan"[^>]*>البدء من جديد/);
+});
+
+test('starting the site plan over clears analyses, approvals, assistant memory, and generated plans but preserves project facts and boundary points', () => {
+  const context = fixture(true);
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {
+    plan_site: { imageUrl: 'site.svg', approvedImageUrl: 'site.svg', svgCode: '<svg/>', chat: [{ role: 'user', text: 'old turn' }] },
+    plan_uses: { imageUrl: 'uses.png', approvedImageUrl: 'uses.png', prompt: 'old prompt' },
+    plan_massing: { imageUrl: 'massing.png', prompt: 'old prompt' },
+  }, plansWorkflow: {
+    verification: { checks: [{ item: 'Old check' }], approved: true },
+    boundary: { points: [{ eastings: 10, northings: 20 }], referenceUrl: '/parcel.svg', approved: true },
+    distribution: { rows: [{ id: 'old-row', component: 'Old component' }], approved: true },
+    clientNotes: 'Old instruction', distributionNotes: 'Old review',
+    scene: { version: 1, token: 'old-scene' }, promptReady: true,
+    siteAssistant: { turns: [{ role: 'assistant', text: 'old analysis' }],
+      answers: [{ question: 'Old question', answer: 'Old answer' }], summary: 'Old summary',
+      checkpoints: { components: '<g/>' } },
+  } });
+  context.tenantProjectData = { land_area: 5000, financial_study_model: { components: [{ name: 'Villa' }] } };
+  context.hasPermission = () => true;
+  context.confirm = () => true;
+  let dirty = 0;
+  let rendered = 0;
+  context.markVisualConceptDirty = () => { dirty += 1; };
+  context.renderVisualConceptPage = () => { rendered += 1; };
+  context.toast = () => {};
+
+  assert.equal(context.restartVisualConceptSitePlan(), true);
+  const workflow = context.tenantVisualConceptState.plansWorkflow;
+  assert.equal(workflow.verification.approved, false);
+  assert.deepEqual(plain(workflow.verification.checks), []);
+  assert.equal(workflow.boundary.approved, false);
+  assert.deepEqual(plain(workflow.boundary.points), [{ parcel_id: '', point: '1', eastings: 10, northings: 20, source: '' }]);
+  assert.deepEqual(plain(workflow.distribution.rows), []);
+  assert.equal(workflow.clientNotes, '');
+  assert.equal(workflow.scene, null);
+  assert.equal(workflow.siteAssistant.turns.length, 0);
+  assert.equal(workflow.siteAssistant.answers.length, 0);
+  for (const id of ['plan_site', 'plan_uses', 'plan_massing']) {
+    assert.equal(context.tenantVisualConceptState.slots[id].imageUrl, '');
+    assert.equal(context.tenantVisualConceptState.slots[id].approvedImageUrl, '');
+    assert.equal(context.tenantVisualConceptState.slots[id].status, 'pending');
+  }
+  assert.equal(context.tenantVisualConceptState.slots.plan_site.svgCode, '');
+  assert.deepEqual(plain(context.tenantProjectData), { land_area: 5000, financial_study_model: { components: [{ name: 'Villa' }] } });
+  assert.equal(dirty, 1);
+  assert.equal(rendered, 1);
+});
+
+test('site plan reset leaves the workflow unchanged when the client cancels', () => {
+  const context = fixture(true);
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {
+    siteAssistant: { turns: [{ role: 'assistant', text: 'keep this' }] },
+  } });
+  context.hasPermission = () => true;
+  context.confirm = () => false;
+  context.markVisualConceptDirty = () => assert.fail('cancel must not save a reset');
+  assert.equal(context.restartVisualConceptSitePlan(), false);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.siteAssistant.turns[0].text, 'keep this');
+});
+
+test('site plan reset refuses to run while a plan job is active', () => {
+  const context = fixture(true);
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {
+  }, plansWorkflow: {} });
+  context.tenantVisualConceptState.slots.plan_site.status = 'generating';
+  context.hasPermission = () => true;
+  context.confirm = () => assert.fail('an active job must block the reset before confirmation');
+  context.toast = () => {};
+  assert.equal(context.restartVisualConceptSitePlan(), false);
+  assert.equal(context.tenantVisualConceptState.slots.plan_site.status, 'generating');
 });
 
 test('site plan chat input, send action, and choices stay locked while the assistant is processing', () => {
@@ -795,6 +867,7 @@ test('site plan chat input, send action, and choices stay locked while the assis
   assert.match(card, /data-visual-chat="plan_site"[^>]*disabled/);
   assert.match(card, /data-visual-action="chat"[^>]*disabled>إرسال/);
   assert.match(card, /data-visual-action="chat-choice"[^>]*disabled>الغرب/);
+  assert.match(card, /data-visual-action="restart-site-plan"[^>]*disabled/);
   assert.match(card, /المرحلة الحالية: تجهيز المشهد الهندسي/);
 });
 

@@ -188,6 +188,25 @@
       const assistantBusy = typeof visualConceptSiteAssistantBusy !== 'undefined'
         && visualConceptSiteAssistantBusy;
       const conversationStarted = Boolean((assistant.turns || []).length || chatMessages.length || slot.svgCode);
+      const hasPlanWork = Boolean(
+        conversationStarted || (assistant.answers || []).length || assistant.summary || assistant.pendingQuestion
+        || Object.keys(assistant.checkpoints || {}).length || workflow.verification?.approved
+        || (workflow.verification?.checks || []).length || (workflow.verification?.issues || []).length
+        || (workflow.boundary?.points || []).length || workflow.boundary?.approved
+        || (workflow.distribution?.rows || []).length || workflow.distribution?.approved
+        || workflow.clientNotes || workflow.distributionNotes || workflow.notesReview?.verified
+        || workflow.scene || workflow.promptReady || (workflow.jobTodos || []).length
+        || VISUAL_CONCEPT_PLAN_KINDS.some(item => {
+          const planSlot = tenantVisualConceptState.slots[item.id] || {};
+          return Boolean(planSlot.imageUrl || planSlot.approvedImageUrl || planSlot.prompt);
+        })
+      );
+      const resetBusy = typeof visualConceptPlansResetBusy === 'function'
+        && visualConceptPlansResetBusy();
+      const restart = hasPlanWork
+        ? '<div class="visual-plan-site-controls"><button type="button" class="btn ghost small" data-visual-action="restart-site-plan" data-visual-slot="plan_site" ' +
+          (assistantBusy || resetBusy || locked ? 'disabled' : '') + '>البدء من جديد</button></div>'
+        : '';
       const canCompose = conversationStarted && !assistantBusy && !locked;
       const chat = chatMessages.map(item => {
         const isUser = item.role === 'user';
@@ -218,6 +237,7 @@
         '<div class="visual-concept-head"><h3>' + escapeHtml(title) + '</h3><span class="visual-concept-status ' + escapeHtml(slot.status || 'pending') + '">' + escapeHtml(status) + '</span></div>' +
         '<div class="visual-plan-site-layout">' +
         '<section class="visual-plan-site-chat-panel" aria-label="محادثة المخطط">' +
+        restart +
         '<div class="visual-plan-site-messages" role="log" aria-live="polite">' + chat + assistantStatus + '</div>' +
         '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(visualConceptPlansWorkflowState().jobTodos) : '') + '</div>' +
         '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="رسالة جديدة" ' + (!canCompose ? 'disabled' : '') + '></textarea>' +
