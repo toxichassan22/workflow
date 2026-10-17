@@ -239,7 +239,7 @@
 
     async function refreshVisualConceptPreflight() {
       try {
-        const payload = await collectVisualConceptPayload('cover');
+        const payload = await collectVisualConceptPayload('cover', { syncPlanInputs: false });
         const response = await api('POST', '/api/visual-concept/preflight', payload);
         if (!response?.success) showVisualConceptMissing(visualConceptMissingMessage(response));
         else showVisualConceptMissing('');

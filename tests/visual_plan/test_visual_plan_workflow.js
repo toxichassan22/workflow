@@ -9,11 +9,13 @@ const { test } = require('node:test');
 const dir = path.resolve(__dirname, '../../assets/js/12-files-media');
 const source = fs.readdirSync(dir).filter(file => /^02.*\.js$/.test(file)).sort()
   .map(file => fs.readFileSync(path.join(dir, file), 'utf8')).join('\n');
+const visualPageSource = fs.readFileSync(path.resolve(__dirname,
+  '../../assets/js/13-visual/01_visual_concept_page.js'), 'utf8');
 const formSectionsSource = fs.readFileSync(path.resolve(__dirname,
   '../../assets/js/07-project-form/01_form_sections.js'), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
 
-function fixture() {
+function fixture(includeVisualPage = false) {
   const context = vm.createContext({
     console, Intl, setTimeout, clearTimeout, setInterval, clearInterval, window: {},
     document: { addEventListener() {}, getElementById: () => null, querySelector: () => null,
@@ -33,6 +35,7 @@ function fixture() {
     visualConceptReferenceNameSeed: value => value,
   });
   vm.runInContext(source, context);
+  if (includeVisualPage) vm.runInContext(visualPageSource, context);
   return context;
 }
 
@@ -369,6 +372,45 @@ test('a changed parking plan invalidates the saved conflict review and approvals
   assert.equal(workflow.verification.checks.length, 0);
   assert.equal(workflow.boundary.approved, true);
   assert.equal(workflow.distribution.approved, false);
+});
+
+test('page preflight and image deletion keep the approved plan workflow on stage three', async () => {
+  const context = fixture(true);
+  const project = {};
+  context.tenantProjectData = project;
+  context.tenantCreativeImages = {};
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({
+    slots: { plan_site: { imageUrl: '/uploads/creative/old-site-plan.png', status: 'review' } },
+    plansWorkflow: {
+      verification: { approved: true, canProceed: true,
+        checks: [{ item: 'الارتداد', result: 'مطابق' }] },
+      boundary: { approved: true },
+      distribution: { approved: true, aiReviewed: true, rows: [{ id: 'row_1', component: 'مكاتب' }] },
+      sourceStamp: 'stamp-from-a-previous-input-set',
+      viewStage: 'generate',
+    }
+  });
+  context.tenantVisualConceptState.plansWorkflow.sourceStamp = 'stamp-from-a-previous-input-set';
+  context.visualConceptSyncSectionApprovals = () => {};
+  context.renderVisualConceptPage = () => {};
+  context.showVisualConceptMissing = () => {};
+  context.visualConceptMissingMessage = () => '';
+  context.toast = () => {};
+  context.api = async () => ({ success: true });
+
+  await context.refreshVisualConceptPreflight();
+  context.deleteVisualConceptSlotImage('plan_site');
+
+  const workflow = context.tenantVisualConceptState.plansWorkflow;
+  assert.equal(context.tenantVisualConceptState.slots.plan_site.imageUrl, '');
+  assert.equal(workflow.verification.approved, true);
+  assert.equal(workflow.distribution.approved, true);
+  assert.equal(workflow.distribution.aiReviewed, true);
+  assert.equal(workflow.viewStage, 'generate');
+  const root = workflowRoot(context);
+  context.renderVisualConceptPlansWorkflow();
+  assert.equal(panelsOf(root).find(panel => panel.stage === 'generate').hidden, false);
+  assert.equal(panelsOf(root).find(panel => panel.stage === 'boundary').hidden, true);
 });
 
 function workflowRoot(context) {

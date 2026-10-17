@@ -418,7 +418,7 @@
       return WFT('vc.complete_missing', 'أكمل الحقول الناقصة: {fields}', { fields: missing.map(item => item.label || item.key).join('، ') });
     }
 
-    async function collectVisualConceptPayload(slotId) {
+    async function collectVisualConceptPayload(slotId, options = {}) {
       if (typeof persistClassificationDraftState === 'function') persistClassificationDraftState();
       if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) persistMarketStudyFromDom();
       if (typeof persistExecutiveContentFromDom === 'function' && document.getElementById('executiveContentData')) persistExecutiveContentFromDom();
@@ -431,7 +431,9 @@
         projectData.financial_study_model = collectFinancialStudyModel();
       }
       tenantProjectData = projectData;
-      syncVisualConceptPlanInputs(projectData);
+      // A page-open preflight only checks field completeness; it must not
+      // invalidate approvals as a side effect of refreshing the page.
+      if (options.syncPlanInputs !== false) syncVisualConceptPlanInputs(projectData);
       return {
         slotId,
         projectData,
