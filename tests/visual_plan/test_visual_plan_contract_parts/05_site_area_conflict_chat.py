@@ -45,6 +45,7 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
         self.assertIn('إجمالي بصمات المباني المسجلة 550 م²', first['reply'])
         self.assertTrue(any('مراجعة مساحة Parking' in choice for choice in first['choices']))
         self.assertTrue(any('بصمات المباني' in choice for choice in first['choices']))
+        self.assertFalse(any('توزيع' in choice for choice in first['choices']))
         self.assertFalse(first['assistantState']['generateRequested'])
 
     def test_parking_area_dispute_turn_asks_for_the_replacement_value(self):

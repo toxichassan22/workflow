@@ -383,10 +383,12 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
             model_question = 'هل توجد مساحة معتمدة أو معلومة في المشروع تريد مراجعتها؟'
             choices = ['مراجعة مساحات العناصر المعتمدة']
         else:
-            model_reply = 'سأبقي القيم المعتمدة كما هي حتى تحدد الجزء الذي تريد مراجعته.'
-            model_question = (f'ما الذي نراجعه أولًا: مساحة «{failed_item_label}»، بصمات المباني، أم طريقة توزيع المساحة؟')
-            choices = [f'مراجعة مساحة {failed_item_label}', 'مراجعة بصمات المباني',
-                       f'مناقشة توزيع {failed_item_label} داخل الأرض']
+            model_reply = (
+                'الحساب الإجمالي للمساحات يحتاج مراجعة قيمة أو أكثر قبل أن يحدد النظام توزيعًا صالحًا. '
+                'تحديد مواضع المباني والعناصر مسؤولية النظام.'
+            )
+            model_question = 'أي مساحة معتمدة تريد مراجعتها؟'
+            choices = [f'مراجعة مساحة {failed_item_label}', 'مراجعة بصمات المباني']
         parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
     elif (is_site_area_conflict and facts.get('aggregateAreaSufficient')
           and any(term in message for term in ('المتبقي', 'المساحة المتبقية', 'قد اي', 'كم يتبقى', 'كم المساحة'))):
@@ -532,9 +534,9 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         if is_site_area_conflict:
             failed_item = failing_site_item or {}
             failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
-            model_question = (f'أي قيمة تريد مراجعتها: مساحة «{failed_item_label}» أم بصمات المباني؟'
+            model_question = (f'أي مساحة تريد مراجعتها: «{failed_item_label}» أم بصمات المباني؟'
                               if message else
-                              f'ما الذي تريد مراجعته: مساحة «{failed_item_label}»، بصمات المباني، أم طريقة التوزيع؟')
+                              f'أي مساحة معتمدة تريد مراجعتها: «{failed_item_label}» أم بصمات المباني؟')
         else:
             model_question = ('ما الرقم الذي ترى أنه غير دقيق؟' if message else
                               'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟')
