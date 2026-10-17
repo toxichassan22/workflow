@@ -224,17 +224,17 @@ def _visual_plan_scene_from_request(data):
                 if refresh_error.code not in ('PLANS_PROGRAM_CHANGED', 'PLANS_SITE_ITEMS_MISSING',
                                                'PLANS_SITE_ITEMS_DUPLICATED'):
                     raise
-                scene = visual_plan_scene.fallback_scene(
-                    contract, program, VISUAL_PLAN_SCENE_VERSION)
+                raise visual_plan_geometry.PlanGeometryError(
+                    'تغيّر البرنامج المعتمد بعد توليد المخطط؛ أعد توليد التوزيع.',
+                    'PLANS_SCENE_REGENERATE')
         elif error.code in ('PLANS_PROGRAM_CHANGED', 'PLANS_SITE_ITEMS_MISSING',
                             'PLANS_SITE_ITEMS_DUPLICATED'):
             # A signed scene can outlive a code change that expands a grouped
             # component (for example, one villa row) into its physical units.
-            # Its input signature is still valid, but its building IDs are not.
-            # Rebuild placements deterministically; fallback_scene enforces
-            # every current area, boundary, setback, overlap, and coverage rule.
-            scene = visual_plan_scene.fallback_scene(
-                contract, program, VISUAL_PLAN_SCENE_VERSION)
+            # The model must redraw those placements; code never does.
+            raise visual_plan_geometry.PlanGeometryError(
+                'تغيّر البرنامج المعتمد بعد توليد المخطط؛ أعد توليد التوزيع.',
+                'PLANS_SCENE_REGENERATE')
         else:
             raise
         scene = _visual_plan_seal_scene(data, scene, context)
@@ -351,6 +351,51 @@ def _visual_plan_normalize_layout(proposed):
                 cleaned_rows.append(item)
             layout[key] = cleaned_rows
     return layout
+
+
+def _visual_plan_explain_layout_failure(error, contract, program, data, model_keys=()):
+    """Ask the layout model for the Arabic reason its drawn layout was refused.
+
+    The validator only reports which check failed; the model explains which item
+    conflicts and what to change. If the explanation itself cannot be obtained the
+    refusal still stands, with a neutral message instead of a placement guess."""
+    facts = {
+        'validatorCode': error.code,
+        'validatorNote': str(error),
+        'modelKeys': sorted(str(key) for key in model_keys)[:12],
+        'landArea': contract.get('landArea'),
+        'setbacks': contract.get('setbacks'),
+        'buildings': [{'id': item.get('id'), 'label': item.get('label') or item.get('name'),
+                       'footprintArea': item.get('footprintArea')}
+                      for item in program.get('buildings') or []],
+        'siteItems': [{'id': item.get('id'), 'label': item.get('label') or item.get('name'),
+                       'area': item.get('area')}
+                      for item in program.get('siteItems') or []],
+    }
+    system_prompt = (
+        'You explain why a conceptual architectural layout was refused. Reply in Arabic, in at most '
+        'four short sentences: name the building or site item that conflicts, the rule it breaks '
+        '(footprint area, setback, parcel boundary, overlap, or a missing site area), and what the '
+        'client should change. Use only the facts provided and never invent numbers. '
+        'Return JSON only: {"reply":"..."}.'
+    )
+    response = call_openrouter_chat(
+        system_prompt, json.dumps(facts, ensure_ascii=False), temperature=None, max_tokens=2000,
+        model=GEMINI_TEXT_MODEL, reasoning_effort='low',
+        timeout=_visual_plan_job_call_timeout(180),
+        response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+    fatal = _ai_fatal_error_dict(response)
+    if fatal is not None:
+        raise FatalAICallError(fatal.get('message'), error_code=fatal.get('error_code'),
+                               http_status=fatal.get('http_status'),
+                               provider_message=fatal.get('provider_message'))
+    explained = ''
+    if isinstance(response, dict) and not response.get('error'):
+        parsed = parse_json_object(_get_chat_response_text(response))
+        if isinstance(parsed, dict) and isinstance(parsed.get('reply'), str):
+            explained = parsed['reply'].strip()[:1200]
+    return visual_plan_geometry.PlanGeometryError(
+        explained or 'تعذّر على النموذج شرح سبب رفض التوزيع؛ أعد المحاولة.', error.code)
 
 
 def _visual_plan_create_scene(data, context=None):
@@ -544,27 +589,14 @@ def _visual_plan_create_scene(data, context=None):
                         + '\nCorrect only the proposed scene; the fixed contract remains unchanged.'
                         + ' Keep every footprint inside the provided buildable envelope polygons.'
                         + orientation_rule)
-    fallback_error = None
-    try:
-        scene = visual_plan_scene.fallback_scene(contract, program, VISUAL_PLAN_SCENE_VERSION)
-        app.logger.info('Visual plan layout sealed by deterministic placement after model failures')
-        return _visual_plan_seal_scene(data, scene, context), context, reference_url
-    except visual_plan_geometry.PlanGeometryError as failure:
-        fallback_error = failure
-        app.logger.warning('Deterministic plan fallback failed (code=%s): %s',
-                           getattr(failure, 'code', 'PLANS_LAYOUT_INVALID'), failure)
-        # If deterministic placement cannot honor the recorded areas or
-        # setbacks, return that actionable constraint even when the model's
-        # last response also failed. The model transport error hides the
-        # actual reason no valid scene could be sealed.
-        error = fallback_error
     if error is None:
         error = visual_plan_geometry.PlanGeometryError(
             'تعذر إنشاء توزيع هندسي صالح للمخططات.', 'PLANS_LAYOUT_INVALID')
-    if raw_keys and error is not fallback_error:
-        error = visual_plan_geometry.PlanGeometryError(
-            str(error) + ' — المفاتيح الواصلة: ' + '، '.join(raw_keys[:12]), error.code)
-    raise error
+    if error.code == 'PLANS_PROVIDER_FAILED':
+        raise error
+    # No deterministic layout is sealed. The model drew the layout, so the model
+        # also explains in Arabic why the drawn layout was refused.
+    raise _visual_plan_explain_layout_failure(error, contract, program, data, raw_keys)
 
 
 def _visual_plan_slot_prompt(workflow, kind, context):

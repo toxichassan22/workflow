@@ -18,9 +18,16 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         })
         client = self.app.test_client()
 
-        with patch.object(module, 'call_openrouter_chat', return_value={
-                'choices': [{'message': {'content': rejected_layout}}]
-        }) as model_call, \
+        complete_layout = json.dumps({
+            'buildings': [{'id': 'b1', 'footprint': [[5, 3], [15, 3], [15, 15], [5, 15]]}],
+            'entries': [],
+            'openAreas': [{'id': 'pool_area', 'componentId': 'pool_row', 'kind': 'site_facility',
+                           'polygon': [[20, 18], [28, 18], [28, 23], [20, 23]]}],
+        })
+        with patch.object(module, 'call_openrouter_chat', side_effect=[
+                {'choices': [{'message': {'content': rejected_layout}}]},
+                {'choices': [{'message': {'content': complete_layout}}]},
+        ]) as model_call, \
                 patch.object(module, 'persist_generated_image',
                              return_value='/uploads/creative/reference.png'), \
                 patch.object(module, '_prepare_image_reference_for_model',

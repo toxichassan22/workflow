@@ -270,38 +270,35 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertEqual(missing_notes.status_code, 400)
         self.assertEqual(missing_notes.get_json()['error_code'], 'PLANS_NOTES_INVALID')
 
-    def test_prepare_seals_a_deterministic_scene_when_the_model_breaks_setbacks(self):
+    def test_prepare_refuses_with_the_model_explanation_when_the_layout_breaks_setbacks(self):
         """The layout model answered twice with a footprint parked on the west
-        boundary — inside the recorded 5 m setback — which used to surface as
-        'PLANS_SETBACK_CONFLICT' after both retries. Prepare now falls back to
-        deterministic placement inside the setback envelope and still seals a
-        valid scene."""
+        boundary, inside the recorded 5 m setback. No deterministic layout is
+        sealed: the model writes the Arabic reason the drawn layout was refused."""
         module = self.application_module
         project = self.project()
         bad_layout = json.dumps({'buildings': [{'id': 'b1',
             'footprint': [[0, 0], [10, 0], [10, 10], [0, 10]]}],
             'entries': [], 'openAreas': []})
-        response_body = {'choices': [{'message': {'content': bad_layout}}]}
-        with patch.object(module, 'call_openrouter_chat', return_value=response_body) as chat, \
+        bad_body = {'choices': [{'message': {'content': bad_layout}}]}
+        reply = 'المبنى b1 يلامس حد الأرض الغربي داخل الارتداد 5 م؛ انقله إلى داخل منطقة البناء.'
+        explain_body = {'choices': [{'message': {'content': json.dumps({'reply': reply})}}]}
+        with patch.object(module, 'call_openrouter_chat',
+                          side_effect=[bad_body, bad_body, explain_body]) as chat, \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
             response = self.app.test_client().post('/api/visual-concept/plans-prompts',
                 headers=self._headers(self.token_a),
                 json={'projectData': project, 'plansWorkflow': self.workflow(project)})
-        self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertEqual(chat.call_count, 2)
-        scene = response.get_json()['scene']
-        self.assertEqual(len(scene['buildings']), 1)
-        footprint = scene['buildings'][0]['footprint']
-        self.assertAlmostEqual(abs(sum(a[0] * b[1] - b[0] * a[1]
-                                       for a, b in zip(footprint, footprint[1:] + footprint[:1])) / 2),
-                               120, places=4)
-        self.assertGreaterEqual(min(point[0] for point in footprint), 5)
-        self.assertGreaterEqual(min(point[1] for point in footprint), 3)
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(chat.call_count, 3)
+        self.assertEqual(chat.call_args_list[2].kwargs.get('model'), 'google/gemini-4-argon')
+        self.assertEqual(response.get_json()['error_code'], 'PLANS_SETBACK_CONFLICT')
+        self.assertEqual(response.get_json()['error'], reply)
+        self.assertNotIn('scene', response.get_json())
 
     def test_prepare_still_refuses_when_nothing_can_fit_the_setbacks(self):
-        """A program whose footprints cannot fit inside the setback envelope
-        fails with the capacity explanation instead of the model's rejection."""
+        """A program whose footprints cannot fit inside the setback envelope is
+        refused with the model's own explanation, never a placed fallback."""
         module = self.application_module
         project = self.project()
         project['approved_coverage_ratio'] = 90
@@ -309,16 +306,19 @@ class VisualPlanContractTests(VisualPlanContractBase):
         workflow['distribution']['rows'][0]['floor_area_sqm'] = 900
         bad_layout = json.dumps({'buildings': [{'id': 'b1',
             'footprint': [[0, 0], [10, 0], [10, 10], [0, 10]]}]})
-        response_body = {'choices': [{'message': {'content': bad_layout}}]}
-        with patch.object(module, 'call_openrouter_chat', return_value=response_body), \
+        bad_body = {'choices': [{'message': {'content': bad_layout}}]}
+        reply = 'مساحة المبنى المطلوبة لا تتسع داخل منطقة البناء بعد الارتدادات؛ قلّل المساحة المعتمدة.'
+        explain_body = {'choices': [{'message': {'content': json.dumps({'reply': reply})}}]}
+        with patch.object(module, 'call_openrouter_chat',
+                          side_effect=[bad_body, bad_body, explain_body]), \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
             response = self.app.test_client().post('/api/visual-concept/plans-prompts',
                 headers=self._headers(self.token_a),
                 json={'projectData': project, 'plansWorkflow': workflow})
         self.assertEqual(response.status_code, 400, response.get_json())
-        self.assertEqual(response.get_json()['error_code'], 'PLANS_SETBACK_CONFLICT')
-        self.assertIn('لا تتسع', response.get_json()['error'])
+        self.assertEqual(response.get_json()['error'], reply)
+        self.assertNotIn('scene', response.get_json())
 
     def test_sealed_scene_survives_a_draft_relabel(self):
         """The scene token used to bind the client-minted draftId — a draft
@@ -488,7 +488,9 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertEqual(data['plansWorkflow']['scene']['token'], refreshed['token'])
         self.assertEqual(refreshed['inputSignature'], original['inputSignature'])
 
-    def test_stale_signed_scene_rebuilds_when_villa_program_expands_to_units(self):
+    def test_stale_signed_scene_requires_regeneration_when_villa_program_expands_to_units(self):
+        """A signed scene whose building IDs no longer match the program is not
+        rebuilt by code; the client must regenerate the layout through the model."""
         module = self.application_module
         project = self.project()
         layout = json.dumps({'buildings': [{'id': 'b1',
@@ -515,13 +517,11 @@ class VisualPlanContractTests(VisualPlanContractBase):
             }
 
             with patch.object(module, '_visual_plan_program', return_value=villa_program):
-                refreshed, _contract, _context, _program = module._visual_plan_scene_from_request(data)
+                with self.assertRaises(module.visual_plan_geometry.PlanGeometryError) as raised:
+                    module._visual_plan_scene_from_request(data)
 
-        self.assertEqual({item['id'] for item in refreshed['buildings']},
-                         {'unit_1_001', 'unit_1_002'})
-        self.assertNotEqual(refreshed['token'], original['token'])
-        self.assertEqual(data['plansWorkflow']['scene']['token'], refreshed['token'])
-        module.visual_plan_scene.validate_scene(refreshed, contract, villa_program)
+        self.assertEqual(raised.exception.code, 'PLANS_SCENE_REGENERATE')
+        self.assertEqual(data['plansWorkflow']['scene']['token'], original['token'])
 
     def test_plan_render_illustrates_the_sealed_scene_with_the_image_model(self):
         """The shipped plan artwork comes from the image model drawing the

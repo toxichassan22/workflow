@@ -1,5 +1,5 @@
 class VisualPlanContractTestsPart04(VisualPlanContractBase):
-    def test_provider_failure_returns_the_geometry_reason_when_fallback_cannot_fit(self):
+    def test_provider_failure_is_reported_without_a_deterministic_layout(self):
         module = self.application_module
         project = self.project()
         project['approved_coverage_ratio'] = 90
@@ -18,8 +18,8 @@ class VisualPlanContractTestsPart04(VisualPlanContractBase):
                 headers=self._headers(self.token_a),
                 json={'projectData': project, 'plansWorkflow': workflow})
 
-        self.assertEqual(response.status_code, 400, response.get_json())
-        self.assertEqual(response.get_json()['error_code'], 'PLANS_SETBACK_CONFLICT')
-        self.assertIn('لا تتسع', response.get_json()['error'])
+        self.assertNotEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['error_code'], 'PLANS_PROVIDER_FAILED')
+        self.assertNotIn('scene', response.get_json())
         self.assertNotIn('راجع', response.get_json()['error'])
         self.assertNotIn('قلّل', response.get_json()['error'])
