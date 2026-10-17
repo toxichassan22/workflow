@@ -18,6 +18,7 @@ _SUMMARY_CHAT_SOURCES_MAX = 8
 # One chat turn's research is a targeted native-search follow-up — a short
 # forced Google search, far below the full summary sweep.
 _SUMMARY_CHAT_MAX_STEPS = 8
+_SUMMARY_CHAT_RESEARCH_MAX_OUTPUT_TOKENS = 66000
 
 # The research phase gets its own short wall-clock budget — a chat reply
 # cannot sit on a multi-minute sweep the way the full summary job can.
@@ -257,7 +258,8 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
             evidence_pool=chat_pool,
             deadline=time.time() + _SUMMARY_CHAT_JOB_TIME_BUDGET,
             local_tools=True, search_provider='searxng', search_budget=3,
-            max_steps=_SUMMARY_CHAT_MAX_STEPS, max_tokens=8000,
+            max_steps=_SUMMARY_CHAT_MAX_STEPS,
+            max_tokens=_SUMMARY_CHAT_RESEARCH_MAX_OUTPUT_TOKENS,
             reasoning_effort='low',
             on_event=_market_agent_progress(report, 46, 68,
                                             'بحث الويب عن المحور'))

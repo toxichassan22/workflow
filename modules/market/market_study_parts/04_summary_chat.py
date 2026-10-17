@@ -526,7 +526,7 @@ def _summary_chat_context_block(payload, axis, message, history, state):
         summary if isinstance(summary, dict) else {},
         None if axis == SUMMARY_CHAT_AXIS_GENERAL else axis)
     return (
-        f'تاريخ اليوم / تاريخ الوصول للمصادر: {date.today().isoformat()}\n'
+        f'تاريخ إصدار الدراسة: {date.today().isoformat()}\n'
         'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
         f'محور السياق المعروض: {current_label} — key: {axis}\n'
@@ -591,7 +591,9 @@ def build_summary_chat_system(offer_lang=None):
         '- إن احتاج الرد بيانات ليست في الحالة المعروضة — رقم جديد، مصدر أحدث، تحقق '
         'من معلومة — اضبط needs_research=true واكتب queries دقيقة بدل التخمين، ولا '
         'تفبرك أرقامًا أبدًا.\n'
-        f'- إن تعذرت المعلومة اكتب: {MISSING_VALUE_PHRASE}.\n'
+        '- عند غياب معلومة فرعية احذفها من النص ولا تذكر أنها غير متاحة؛ وإذا احتاج الرد رقمًا غير موجود في الحالة فاطلب بحثًا بدل التخمين.\n'
+        '- استخدم صياغة استشارية رسمية، واعرض القيم المالية بالريال السعودي بعد تحويل موثوق؛ لا تذكر تاريخ الوصول في نص الملخص.\n'
+        '- لا تكتب كلمة «وسيط» في أي قيمة ظاهرة؛ استخدم «متوسطًا حسابيًا» فقط للمعدل الحسابي الحقيقي.\n'
         '- الدراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.\n'
     )
     if en:
@@ -687,9 +689,8 @@ def build_summary_consolidate_prompt(state, stale_keys, offer_lang=None):
     shape_lines = []
     if 'one_block' in wanted:
         tasks.append(
-            f'- one_block_summary: أعد كتابة {SUMMARY_TITLE} فقرةً واحدة متماسكة '
-            f'في حدود {SUMMARY_WORD_TARGET} كلمة (لا تقل عن {SUMMARY_MIN_WORDS} ولا '
-            'تتجاوز 400)، تغطي المحاور النهائية بلا عناوين ولا ترقيم ولا نقاط، '
+            f'- one_block_summary: أعد كتابة {SUMMARY_TITLE} فقرةً تنفيذية واحدة متماسكة '
+            'كاملة بلا حد للكلمات، تغطي المحاور النهائية بلا عناوين ولا ترقيم ولا نقاط، '
             'وبلا ذكر مصادر ولا SWOT.')
         shape_lines.append('"one_block_summary": "الفقرة المعاد توليدها"')
     if 'decision' in wanted:

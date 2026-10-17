@@ -657,7 +657,7 @@ class SummaryChatApiTests(unittest.TestCase):
         self.assertNotIn('server_tools', browse_kwargs[0])
         self.assertNotIn('tool_choice', browse_kwargs[0])
         self.assertEqual(browse_kwargs[0].get('max_steps'), 8)
-        self.assertEqual(browse_kwargs[0].get('max_tokens'), 8000)
+        self.assertEqual(browse_kwargs[0].get('max_tokens'), 66000)
         self.assertTrue(result.get('searchPerformed'))
         self.assertIn(research_url, result.get('citations') or [])
         self.assertTrue(citations_spy.called)

@@ -56,12 +56,11 @@ _SUMMARY_RESEARCH_GROUPS = (
 _SUMMARY_RESEARCH_MAX_WORKERS = 100
 _SUMMARY_RESEARCH_MAX_STEPS = 100
 _SUMMARY_RESEARCH_SEARCH_BUDGET = 16
-# Source researchers do bounded evidence extraction; the Argon aggregator
-# handles the full synthesis after research. Keep each researcher request
-# small so OpenRouter does not reserve an unnecessarily large completion.
+# Source researchers return the complete evidence they opened. The aggregator
+# handles synthesis separately; do not truncate source findings at a small cap.
 _SUMMARY_RESEARCHER_MODEL = 'anthropic/claude-haiku-5.5'
-_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS = 8000
-_SUMMARY_AGGREGATOR_MAX_OUTPUT_TOKENS = 64000
+_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS = 66000
+_SUMMARY_AGGREGATOR_MAX_OUTPUT_TOKENS = 66000
 _SUMMARY_RESEARCH_REQUIRED_URLS = {
     'rei.rega.gov.sa': [
         'https://rei.rega.gov.sa',
@@ -225,8 +224,9 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                 'metric and category and record the exact city/district, requested and actual period, record '
                 'count, and whether the source exposed all matching records or only a paginated/sample view. '
                 'Never calculate a city-wide total from a partial page, and never substitute asking listings '
-                'for completed transactions. If a breakdown is not exposed or is behind Nafath, identify the '
-                'specific missing fields and access barrier in coverage and coverage_gaps.\n')
+                'for completed transactions. Record missing fields and access barriers only in coverage and '
+                'coverage_gaps for internal evidence tracking; omit those absent categories from the final '
+                'user-facing analysis.\n')
         else:
             bedroom_axis = (
                 ' وعدد غرف نوم الشقة (استوديو، غرفة، غرفتان، 3، 4، و5 فأكثر)'
@@ -239,7 +239,8 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                 'مقياس وفئة، وسجّل المدينة/الحي والفترة المطلوبة والفعلية وعدد السجلات، وهل أتاح المصدر جميع '
                 'السجلات المطابقة أم صفحة أو عينة فقط. لا تحسب إجماليًا للمدينة من صفحة جزئية، ولا تستبدل '
                 'الإعلانات بطلبات البيع محل الصفقات المنفذة. إذا لم يعرض المصدر التقسيم أو كان خلف نفاذ، '
-                'فاذكر الحقول التي تعذر الوصول إليها وحاجز الوصول في التغطية وفجواتها.\n')
+                'سجّل الحقول غير المنشورة وحاجز الوصول في coverage وcoverage_gaps للتتبع الداخلي فقط؛ '
+                'واحذف الفئات الغائبة من التحليل النهائي الموجه للمستخدم.\n')
     listing_urls = []
     activity_profile = market_study.summary_activity_profile(payload)
     if any(market_study._registrable_host(host) == 'aqar.fm' for host in hosts):
@@ -302,7 +303,7 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         if offer_lang == 'en':
             booking_price_rules = (
                 'Use Booking.com only as a fallback when official hotel-rate reports are unavailable or gated. '
-                'This is a live asking-price snapshot, not official operating data. Search the exact same stay '
+                'These are current advertised rates, not official operating data. Search the exact same stay '
                 f'for every property: check-in {check_in.isoformat()}, check-out {check_out.isoformat()}, one room, '
                 'two adults, no children, and SAR display currency. Target five hotels in this assigned city or '
                 'district; calculate an arithmetic mean only from at least three comparable available properties '
@@ -310,7 +311,9 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                 'meal/cancellation terms comparable; prefer a standard double/twin room and do not mix suites, '
                 'serviced apartments, or family rooms into that sample. Capture property name, exact booking URL, displayed total, '
                 'nights, normalized SAR per room per night (divide the observed two-night total by two), taxes and '
-                'included services, star class, and access date. Do not mix dates, currencies, star classes, room '
+                'included services, star class, and the source publication/data date when available. If the page '
+                'shows a non-SAR price, convert it to SAR using a verified rate for the source data date; keep the '
+                'original amount and conversion rate in internal evidence fields only. Do not mix dates, currencies, star classes, room '
                 'types, or materially different terms. If fewer than three comparable rates are visible, report the '
                 'individual observations and sample size without an average. Call a computed result the approximate '
                 'average advertised room rate for this Booking.com sample and exact stay dates; never call it ADR, '
@@ -318,24 +321,35 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         else:
             booking_price_rules = (
                 'استخدم Booking.com كبديل فقط عندما تكون تقارير أسعار الفنادق الرسمية غير متاحة أو محجوبة؛ '
-                'فهذه لقطة لأسعار طلب معروضة حاليًا وليست بيانات تشغيل رسمية. ابحث عن الإقامة نفسها لكل فندق: '
+                'فهذه أسعار طلب معروضة حاليًا وليست بيانات تشغيل رسمية. ابحث عن الإقامة نفسها لكل فندق: '
                 f'الدخول {check_in.isoformat()} والخروج {check_out.isoformat()}، غرفة واحدة، بالغان، دون أطفال، '
-                'والعملة المعروضة ريال سعودي. استهدف خمسة فنادق داخل المدينة أو الحي المكلّف، ولا تحسب متوسطًا '
+                'والعملة المطلوبة ريال سعودي. إذا عرض الموقع السعر بعملة أخرى فحوّله إلى الريال بسعر صرف موثق '
+                'لتاريخ البيانات، واحتفظ بالعملة الأصلية وسعر التحويل في حقول الدليل الداخلية فقط. استهدف خمسة '
+                'فنادق داخل المدينة أو الحي المكلّف، ولا تحسب متوسطًا '
                 'حسابيًا إلا من ثلاث منشآت متاحة قابلة للمقارنة على الأقل ضمن النطاق الجغرافي نفسه، ومن فئة النجوم '
                 'نفسها متى ظهرت. اعتمد غرفة قياسية مزدوجة/توأم، ولا تخلط الأجنحة أو الشقق المخدومة أو الغرف '
                 'العائلية في العينة. وحّد شروط الوجبات والإلغاء الظاهرة قدر الإمكان. سجّل اسم الفندق ورابط '
                 'الحجز المحدد والإجمالي المعروض وعدد الليالي وسعر الغرفة للّيلة بعد قسمة إجمالي الليلتين المرصود '
-                'على اثنتين والضرائب والخدمات المشمولة وفئة النجوم وتاريخ الوصول. لا تخلط التواريخ أو العملات أو '
+                'على اثنتين والضرائب والخدمات المشمولة وفئة النجوم وتاريخ نشر أو بيانات المصدر إن توفر. لا تخلط التواريخ أو العملات أو '
                 'فئات النجوم أو أنواع الغرف أو الشروط المختلفة جوهريًا. إذا قلّت الأسعار القابلة للمقارنة عن ثلاثة، '
                 'اعرض الأسعار الفردية وحجم العينة دون متوسط. سمِّ الناتج «متوسطًا حسابيًا تقريبيًا لأسعار الغرف المعروضة '
                 'في عينة Booking.com لتواريخ الإقامة المحددة»؛ لا تسمّه ADR أو متوسطًا سنويًا أو تاريخيًا أو سعرًا '
-                'معياريًا للسوق، ولا تستخدم «وسيط» بمعنى average؛ فالوسيط الإحصائي مقياس مختلف ولا يقال إلا '
-                'إذا حُسب median فعلًا.\n')
+                'معياريًا للسوق. لا تكتب كلمة «وسيط» في أي نص ظاهر للمستخدم؛ استخدم «متوسطًا حسابيًا» فقط '
+                'عندما يكون المقياس متوسطًا حسابيًا فعلًا، وأسقط أي قيمة منشورة بمقياس مختلف بدل تسميتها متوسطًا.\n')
     return (
         f"أنت باحث متخصص في {group['label']} ضمن دراسة سوق سعودية مهنية. هذا بحث منفصل عن بقية الباحثين؛ "
         'قدّم أدلة خامًا دقيقة ومهيكلة، ولا تكتب دراسة سوق عامة.\n'
         + market_study._summary_activity_scope_block(payload, offer_lang)
         + f'النطاق الجغرافي الموكّل لهذا البحث فقط: {place}. لا تبحث في مدينة أو حي آخر.\n'
+        + ('جميع القيم المالية في المخرجات تكون بالريال السعودي. إذا عرض المصدر مبلغًا بعملة أخرى، '
+           'حوّله إلى SAR بمعدل صرف موثوق ومرتبط بتاريخ البيانات، وأضف original_value و'
+           'original_currency وfx_rate_sar_per_unit إلى سجل الدليل الداخلي. إذا تعذر توثيق المعدل، '
+           'لا تُخرج المبلغ. لا تكتب عملة أجنبية في أي قيمة معدّة للملخص.\n'
+           if offer_lang != 'en' else
+           'All monetary findings must be in Saudi riyals (SAR). Convert any source amount in another '
+           'currency using a verified rate tied to the source data date, and add original_value, '
+           'original_currency, and fx_rate_sar_per_unit to the internal finding. If the rate cannot be '
+           'verified, omit the amount. Do not put a foreign currency in any summary-ready value.\n')
         + period_rules + transaction_detail_rules
         + 'نطاق المهمة: ' + group['focus'] + '\n'
         + scoped_population_rules + scoped_aviation_rules + booking_price_rules
@@ -355,7 +369,7 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         'في كل محرك بحث قيّد الاستعلام بواحد من هذه النطاقات: ' + site_queries + '. لا تدّعِ '
         'استخراج نتائج من لوحة لم تعرضها الصفحة فعلًا. ابدأ بالصفحات الحكومية والمصدر الأصلي، واستخدم مصدرًا '
         'مهنيًا أو إعلانًا فقط لقياس النوع الذي يتيحه.\n'
-        + 'لكل دليل أعد: القيمة كما ظهرت، الوحدة، المدينة والحي أو المستوى الجغرافي، الفترة، تاريخ البيانات، '
+        + 'لكل دليل أعد: القيمة بعد تحويلها إلى الريال عند الحاجة، الوحدة، المدينة والحي أو المستوى الجغرافي، الفترة، تاريخ البيانات، '
         'اسم المصدر، رابط الصفحة المفتوحة المحددة، مستوى الموثوقية، وملاحظة المنهج/القيود. افصل الصفقة المنفذة '
         'عن سعر الطلب والإيجار المعلن، ولا تستنتج متوسطًا من عينة صغيرة. لا تستخدم معلومات من الذاكرة. إذا كانت '
         'صفحة تتطلب نفاذ أو لا تعرض نتائج أو بيانات حديثة، سجّل فجوة التغطية بوضوح.\n'
@@ -363,7 +377,8 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         '"interaction_steps":[],"datasets_opened":[],"records_or_pages_seen":"",'
         '"completeness":"complete|partial|unavailable","gaps":""}],"findings":[{"metric":"","value":"",'
         '"unit":"","property_type":"","bedroom_count":"","sample_size":"",'
-        '"city":"","district":"","period":"","data_date":"","source_name":"",'
+        '"city":"","district":"","period":"","data_date":"","original_value":"",'
+        '"original_currency":"","fx_rate_sar_per_unit":"","source_name":"",'
         '"source_url":"","reliability":"","limitations":""}],"sources":[{"name":"","url":"",'
         '"data_date":"","reliability":"","note":""}],"coverage_gaps":[]}\n'
         + ("Write the JSON text values in English. Search around " + place + '.\n'

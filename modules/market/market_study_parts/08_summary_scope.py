@@ -145,16 +145,16 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'When selected residential or commercial activities have retrieved completed-sale data broken '
             'down by property type or apartment bedroom count, preserve each available category in '
             'sector_performance with its transaction count, arithmetic mean, highest observed price, exact '
-            'geography and period. Do not collapse supplied bedroom buckets into one overall average. If the '
-            'official source does not expose the breakdown, state that specific coverage gap; do not replace '
-            'it with advertised prices.\n'
+            'geography and period. Do not collapse supplied bedroom buckets into one overall average. If a '
+            'category is absent from the evidence, omit it from the user-facing analysis; do not describe the '
+            'missing category or replace it with advertised prices.\n'
             if activity_kinds.intersection({'residential', 'commercial'}) else '')
     else:
         transaction_detail_rules = (
             'إذا وفر الدليل صفقات بيع منفذة للنشاط السكني أو التجاري المختار ومقسمة حسب نوع العقار أو عدد '
             'غرف نوم الشقق، فأبقِ كل فئة متاحة في sector_performance مع عدد الصفقات والمتوسط الحسابي وأعلى '
-            'سعر مرصود والنطاق الجغرافي والفترة. لا تدمج فئات غرف النوم في متوسط واحد. إذا لم يعرض المصدر '
-            'الرسمي هذا التقسيم، فاذكر فجوة التغطية المحددة؛ ولا تستبدله بأسعار الإعلانات.\n'
+            'سعر مرصود والنطاق الجغرافي والفترة. لا تدمج فئات غرف النوم في متوسط واحد. اعرض كل فئة موجودة '
+            'في الأدلة فقط؛ واحذف الفئات الغائبة دون ذكر غيابها، ولا تستبدلها بأسعار الإعلانات.\n'
             if activity_kinds.intersection({'residential', 'commercial'}) else '')
     if en:
         scope_line = _summary_scope_block(payload, offer_lang)
@@ -188,17 +188,18 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'is a selected activity. Use airport passenger and flight-movement figures only when a selected '
             'hospitality/tourism activity or another selected activity is materially served by them; keep them '
             'at city/airport level, with airport and period, and never call them ticket bookings or allocate them '
-            'to districts; never allocate airport traffic to districts. State specific source or coverage gaps for relevant assigned indicators. Do not omit '
-            'returned evidence that supports a selected activity. For hotel rates, prefer official data. In Arabic, '
-            'call an arithmetic mean «المتوسط الحسابي» and never «وسيط»; reserve «الوسيط الإحصائي» for an actual '
-            'median calculation. Use '
+            'to districts; never allocate airport traffic to districts. Keep source or coverage gaps in internal reasoning only; omit missing indicators from the final user-facing summary. Do not omit '
+            'returned evidence that supports a selected activity. For hotel rates, prefer official data. '
+            'Never write the Arabic word «وسيط» in any user-facing value. Use «متوسط حسابي» only for a true '
+            'arithmetic mean; omit a reported median rather than relabeling it as an average. Use '
             'Booking.com as a fallback only when a hospitality activity is selected and official reports are '
             'unavailable or gated; if Booking.com observations were retrieved, calculate an arithmetic average '
             'only from at least three comparable properties in the same city/district, with identical stay dates '
             'and currency, comparable room and guest counts, and the same star class when available. Normalize '
             'each observed stay total by its number of nights and keep materially different meal/cancellation '
             'terms separate. Label it an approximate average of advertised room rates in the Booking.com sample; '
-            'state exact stay dates, access date, sample size, currency, and tax/inclusion basis. Keep it separate '
+            'state exact stay dates, source publication/data date when available, sample size, SAR currency, and tax/inclusion basis. '
+            'Convert every foreign-currency amount to SAR using a verified rate for its data date; omit the amount if no rate can be verified. Keep it separate '
             'from official ADR. With fewer than three comparable observations, report the sample without an '
             'average. Never call this a historical or annual ADR, or a city-wide market standard.\n')
         local_data_rules = (
@@ -207,14 +208,18 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'These records are limited to the districts, categories, and dates present in the files and do not '
             'identify named competitor projects.\n')
         narrative_rules = (
-            'Write each axis as connected analytical prose with evidence, interpretation, limits, and practical '
-            'implication. Avoid empty bullet lists and repeated generic statements. Keep source names out of '
+            'Write each axis in formal, professional advisory language. Organize it with short labeled lines and '
+            'separate each selected activity, property type, and available unit category on its own line. Give '
+            'apartments, villas, hotels, and every other selected activity comparable analytical depth when the '
+            'evidence supports it; do not compress any available category into a one-line mention. Preserve every '
+            'useful statistic and its interpretation, with no fixed word limit. Keep source names out of '
             'axis prose; put citations only in sources. The competition axis may use the supplied competitor '
             'table; every other axis analyzes only selected project activities and components in the binding '
             'activity scope. Include another sector only as brief context when it materially supports a '
             'selected activity. '
             'For project_evaluation, state where project inputs are insufficient; do not invent a financial case. '
-            'Write a sequenced one_block_summary of about 250 words (150–400), without headings or lists.\n')
+            'The one_block_summary is a separate, cohesive executive paragraph with no fixed word limit; keep the '
+            'detailed axis analysis clearly divided into lines.\n')
         decision = 'Allowed decision values: ' + ', '.join(DECISION_OPTIONS) + '.\n'
         current = (
             'Previous draft, sources, and SWOT are context only; verify every retained claim against current evidence.\n'
@@ -247,21 +252,23 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
         local_indicator_rules = (
             'استخدم أرقام تعداد السعودية 2022 للسكان والأسر فقط إذا كانت تخدم نشاطًا محددًا في المشروع، مع ذكر '
             'سنة التعداد والنطاق الجغرافي الدقيق. إذا كان المؤشر يخدم النشاط المختار، أدرج عدد سكان المدينة والأسر '
-            'في city_position، واذكر كل حي مدخل منفصلًا عندما ينشر المصدر بياناته على مستوى الحي؛ وإلا فصرّح '
-            'بمستوى التفصيل الجغرافي الذي تعذر الوصول إليه. '
+            'في city_position، واذكر كل حي مدخل منفصلًا عندما ينشر المصدر بياناته على مستوى الحي؛ واحذف '
+            'تفاصيل الحي غير المنشورة دون ذكر تعذر الوصول إليها. '
             'لا تنشئ تحليلًا منفصلًا للسوق السكني ما لم يكن النشاط السكني ضمن الاختيارات. استخدم أعداد المسافرين '
             'وحركة الرحلات الرسمية للمطار فقط إذا كان نشاط فندقي/سياحي مختار أو كان نشاط مختار آخر يخدمه هذا '
             'المؤشر بوضوح، وعلى مستوى المدينة/المطار مع اسم المطار والفترة؛ لا توزع حركة المطار على الأحياء ولا تسمِّ '
-            'المسافرين حجوزات تذاكر. اذكر فجوة المصدر أو الفترة للمؤشرات ذات الصلة التي تعذرت. لا تسقط دليلًا '
-            'يدعم نشاطًا مختارًا. استخدم المصطلح «المتوسط الحسابي» عند حساب arithmetic mean، ولا تستخدم '
-            '«وسيط» لهذا المعنى؛ فـ«الوسيط الإحصائي» هو median ولا يقال إلا عند حسابه فعلًا. بالنسبة لأسعار '
+            'المسافرين حجوزات تذاكر. احتفظ بفجوات المصدر أو الفترة للتتبع الداخلي فقط، واحذف المؤشر غير المتاح من '
+            'النص النهائي. لا تسقط دليلًا يدعم نشاطًا مختارًا. لا تكتب كلمة «وسيط» في أي نص ظاهر للمستخدم. '
+            'استخدم «متوسطًا حسابيًا» فقط للمقياس الذي يمثل متوسطًا حسابيًا فعلًا، وأسقط قيمة المقياس الآخر بدل '
+            'إعادة تسميتها متوسطًا. بالنسبة لأسعار '
             'الفنادق، فضّل البيانات الرسمية. لا تستخدم أسعار Booking.com إلا كبديل للنشاط الفندقي المختار، '
             'وفقط إذا تعذرت التقارير الرسمية أو حُجبت؛ وإذا توفرت أسعار منها فاحسب المتوسط الحسابي فقط من ثلاث منشآت '
             'قابلة للمقارنة على الأقل في المدينة/الحي '
             'نفسه وبتواريخ إقامة وعملة واحدة وعدد غرف ونزلاء ونوع غرفة متقارب، ومن فئة النجوم نفسها عند توفرها. '
             'وحّد السعر بقسمة إجمالي الإقامة المرصود على عدد الليالي، وافصل شروط الوجبات أو الإلغاء المختلفة جوهريًا. '
-            'سمّه «متوسطًا حسابيًا تقريبيًا لأسعار الغرف المعروضة في عينة Booking.com»، واذكر تواريخ الإقامة وتاريخ الوصول '
-            'وحجم العينة والعملة وأساس احتساب الضرائب والخدمات. اعرضه منفصلًا عن ADR الرسمي. إذا قلّت العينة عن '
+            'سمّه «متوسطًا حسابيًا تقريبيًا لأسعار الغرف المعروضة في عينة Booking.com»، واذكر تواريخ الإقامة وتاريخ '
+            'نشر أو بيانات المصدر إن توفر وحجم العينة والعملة بالريال السعودي وأساس احتساب الضرائب والخدمات. '
+            'حوّل كل مبلغ أجنبي إلى الريال بسعر صرف موثق لتاريخ بياناته؛ واحذف المبلغ إن تعذر توثيق السعر. اعرضه منفصلًا عن ADR الرسمي. إذا قلّت العينة عن '
             'ثلاث أسعار قابلة للمقارنة، اعرض المشاهدات دون متوسط. لا تسمّه ADR تاريخيًا أو سنويًا أو معيارًا للسوق '
             'كله.\n')
         local_data_rules = (
@@ -269,20 +276,40 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'فسمّها «صفقات وزارة العدل». هذه سجلات مرجعية محدودة بالأحياء والفئات والتواريخ الموجودة في الملفات، '
             'ولا تحدد أسماء مشاريع منافسة.\n')
         narrative_rules = (
-            'اكتب كل محور كنص تحليلي مترابط يوضح الدليل ثم دلالته وحدوده وأثره العملي. تجنب قوائم النقاط الجافة '
-            'والعبارات العامة المتكررة. لا تذكر أسماء المصادر داخل نص المحاور؛ اجمعها في sources فقط. يجوز أن يستفيد '
+            'اكتب كل محور بلغة استشارية رسمية ومهنية، ونظّمه في أسطر قصيرة ذات عناوين وصفية واضحة. افصل كل '
+            'نشاط ونوع عقار وفئة وحدات متاحة في سطر مستقل؛ وامنح الشقق والفلل والفنادق وكل نشاط مختار عمقًا '
+            'تحليليًا متقاربًا بحسب الأدلة، مع كل الأرقام المتاحة دون حد للكلمات أو اختصار مخل. اشرح دلالة الدليل '
+            'وأثره العملي دون تكرار إنشائي. لا تذكر أسماء المصادر داخل نص المحاور؛ اجمعها في sources فقط. يجوز أن يستفيد '
             'محور المنافسة من جدول المنافسين المرفق؛ أما بقية المحاور فتحلل الأنشطة والمكونات المحددة في نطاق المشروع '
             'الملزم فقط. اذكر قطاعًا آخر كسياق موجز فقط إذا كان يخدم نشاطًا مختارًا بوضوح. '
-            'في project_evaluation وضح المدخلات التي لا تكفي للحكم ولا تخترع حالة مالية. اكتب one_block_summary '
-            'كتحليل متسلسل في نحو 250 كلمة (150 إلى 400)، بلا عناوين أو قوائم.\n')
+            'في project_evaluation وضح المدخلات التي لا تكفي للحكم ولا تخترع حالة مالية. اجعل one_block_summary '
+            'فقرة تنفيذية متماسكة كاملة بلا حد للكلمات؛ وتبقى محاور التحليل التفصيلية منظمة في أسطر مستقلة.\n')
         decision = 'قيم القرار المسموحة: ' + '، '.join(DECISION_OPTIONS) + '.\n'
         current = (
             'الملخص والمصادر وSWOT السابقة للسياق فقط؛ تحقق من كل معلومة ستبقيها على الدليل الحالي.\n'
             + json.dumps({'summary': current_summary, 'sources': current_sources,
                           'swot': current_swot}, ensure_ascii=False, default=str) + '\n')
 
+    if en:
+        final_output_rules = (
+            '\nFinal output rules override any earlier conflicting instruction. Use a formal real-estate advisory tone. '
+            'Keep the detailed axes in short labeled lines, with every selected activity, property type, and available unit category separated. '
+            'Give every evidence-supported category comparable depth and include all useful figures; impose no word limit. '
+            'Omit unavailable subcategories without saying they were missing, inaccessible, or unavailable; use an empty string for an axis with no evidence. '
+            'All monetary values in the study and source notes must be SAR. Convert other currencies using a verified exchange rate for the data date; omit an amount when the rate cannot be verified. '
+            'Never mention the access date in narrative or source notes. State the study issue date and source publication/data date when available; accessed_at is metadata only.\n')
+    else:
+        final_output_rules = (
+            '\nقواعد الإخراج النهائية تتقدم على أي تعليمات سابقة تتعارض معها. استخدم صياغة استشارية عقارية رسمية. '
+            'نظّم محاور التحليل التفصيلية في أسطر قصيرة ذات عناوين وصفية، وافصل كل نشاط مختار ونوع عقار وفئة وحدات متاحة. '
+            'امنح كل فئة تدعمها الأدلة عمقًا متقاربًا، وأدرج الأرقام المفيدة كاملة دون حد للكلمات. '
+            'احذف الفئات الفرعية غير المتاحة دون القول إنها مفقودة أو متعذرة أو غير متاحة؛ وأعد قيمة فارغة للمحور الذي لا يسنده دليل. '
+            'كل القيم المالية في الدراسة وملاحظات المصادر بالريال السعودي. حوّل العملات الأخرى بسعر صرف موثق لتاريخ البيانات؛ واحذف المبلغ إذا تعذر التحقق من السعر. '
+            'لا تذكر تاريخ الوصول داخل النص أو ملاحظات المصادر. اذكر تاريخ إصدار الدراسة وتاريخ نشر/بيانات المصدر عند توفره؛ حقل accessed_at للتوثيق فقط. '
+            'لا تكتب كلمة «وسيط» في أي نص ظاهر للمستخدم. استخدم «متوسط حسابي» فقط للمعدل الحسابي الحقيقي، واحذف قيمة أي مقياس آخر بدل تسميته متوسطًا.\n')
+
     return (
-        f'تاريخ الوصول: {today}\n'
+        f'تاريخ إصدار الدراسة: {today}\n'
         + research_rules + local_indicator_rules + transaction_detail_rules
         + activity_scope_line + scope_line
         + 'المهام المحورية: ' + ', '.join(keys) + '. حللها كلها بعمق وبلا إسقاط لأي محور.\n'
@@ -297,8 +324,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
         + json.dumps(competitors or [], ensure_ascii=False, indent=2, default=str) + '\n\n'
         + current + '\nأرجع JSON فقط بهذا الشكل، مع كل المفاتيح وعدم إضافة نص خارجه:\n'
         + output + '\n'
-        + 'لكل رقم أو ادعاء في sources: ضع اسم المصدر ورابط الصفحة المفتوحة المحددة وتاريخ البيانات وتاريخ الوصول '
-        + 'ومستوى الموثوقية وملاحظة تشرح التغطية والوحدة. لا تخترع رقمًا ولا مصدرًا.\n')
+        + 'لكل رقم أو ادعاء في sources: ضع اسم المصدر ورابط الصفحة المفتوحة المحددة وتاريخ البيانات ومستوى الموثوقية وملاحظة المنهج والوحدة.\n'
+        + final_output_rules)
 
 
 # Keep chat research on the same browser/search path and the same city/district rules.
@@ -317,13 +344,14 @@ def build_summary_chat_system(offer_lang=None):
         prompt += ('Analyze this project’s selected activities and components only. Follow the city and optional '
                    'district scope; city_position always covers the full city, while sector_performance, supply, '
                    'and demand give a concise city overview plus detailed listed districts. No nearby substitute. '
-                   'In Arabic output, use «المتوسط الحسابي» for arithmetic mean; use «الوسيط الإحصائي» only for a '
-                   'median that was actually calculated.\n')
+                   'Use a formal advisory tone. Omit unavailable subcategories without saying they are missing. '
+                   'Show all monetary values in SAR after verified conversion; never mention access dates in narrative.\n')
     else:
         prompt += ('حلل الأنشطة والمكونات المختارة في هذا المشروع فقط. التزم بالمدينة والأحياء الاختيارية؛ city_position '
                    'يغطي المدينة كاملة دائمًا، وsector_performance وsupply وdemand تعرض قراءة موجزة للمدينة ثم '
-                   'تفصيل الأحياء المدخلة. لا تستخدم حيًا بديلًا قريبًا. عند حساب المتوسط الحسابي لا تستخدم كلمة '
-                   '«وسيط»؛ فالوسيط الإحصائي مقياس مختلف ولا يقال إلا إذا حُسب فعلًا.\n')
+                   'تفصيل الأحياء المدخلة. لا تستخدم حيًا بديلًا قريبًا. استخدم صياغة استشارية رسمية. احذف الفئات '
+                   'الفرعية غير المتاحة دون ذكر غيابها. اعرض كل مبلغ بالريال السعودي بعد تحويل موثوق، ولا تذكر تاريخ '
+                   'الوصول في النص. لا تكتب كلمة «وسيط»؛ استخدم «متوسطًا حسابيًا» فقط عند حسابه فعلًا.\n')
     return prompt
 
 
@@ -347,7 +375,7 @@ def build_summary_chat_research_prompt(payload, axis, message, history, state, q
             'browser search providers if it fails. Open relevant result pages and interact with '
             'site controls when data requires city, district, date, or category selection: inspect the page, '
             'use type_text to enter values, click_element to apply/search, and scroll_page to read results. Do not answer from '
-            'snippets alone or memory. Return only evidence-backed claims; report inaccessible data as a gap. '
+            'snippets alone or memory. Return only evidence-backed claims; omit inaccessible details from the user-facing reply. '
             'Each source row needs a specific opened URL, data date, geography, and reliability. Cover the selected '
             'project activities only; other-sector facts are brief context only when they support a selected activity.\n')
     else:
@@ -356,7 +384,7 @@ def build_summary_chat_research_prompt(payload, axis, message, history, state, q
             'افتح صفحات النتائج وتفاعل مع عناصر الموقع عندما '
             'تتطلب البيانات اختيار مدينة أو حي أو تاريخ أو فئة: افحص الصفحة، واكتب القيم عبر type_text، واضغط '
             'عبر click_element، ومرر الصفحة عبر scroll_page لقراءة النتائج. لا تجب من مقتطفات البحث وحدها أو من الذاكرة. '
-            'أعد ادعاءات مسندة فقط، واذكر تعذر البيانات كفجوة. كل مصدر يحتاج رابط صفحة مفتوحة محددة وتاريخ '
+            'أعد ادعاءات مسندة فقط، واحتفظ بتعذر البيانات للتتبع الداخلي ولا تذكر المعلومة الغائبة في الرد. كل مصدر يحتاج رابط صفحة مفتوحة محددة وتاريخ '
             'بيانات ومكانًا ومستوى موثوقية. غطِّ أنشطة المشروع المختارة فقط؛ ولا تذكر قطاعًا آخر إلا كسياق موجز '
             'يخدم نشاطًا محددًا.\n')
     return (
@@ -365,6 +393,9 @@ def build_summary_chat_research_prompt(payload, axis, message, history, state, q
         + '\nQueries requested by the discussion turn:\n' + query_lines + '\n\n'
         + _summary_activity_scope_block(payload, offer_lang)
         + _summary_scope_block(payload, offer_lang) + instructions
+        + ('Use SAR for all monetary values, converting foreign amounts with a verified rate tied to the data date. Omit an amount when no verified rate is available. Use formal advisory language and do not mention access dates in the reply.\n'
+           if en else
+           'اعرض كل مبلغ بالريال السعودي بعد تحويل موثق مرتبط بتاريخ البيانات، واحذف المبلغ إن تعذر توثيق سعر التحويل. استخدم صياغة استشارية رسمية ولا تذكر تاريخ الوصول في الرد.\n')
         + 'أرجع JSON فقط:\n{"reply":"...","ops":[],"sources_add":'
         '[{"name":"","url":"","data_date":"","note":"","reliability":""}]}\n'
         + _SUMMARY_CHAT_OPS_SPEC

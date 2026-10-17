@@ -388,6 +388,149 @@ def merge_generated_competitors(existing, generated, mode='generate', offer_lang
     return current, 0, updated
 
 
+_SUMMARY_MONEY_NUMBER = r'(?:\d{1,3}(?:[,٬]\d{3})+|\d+)(?:[.٫]\d+)?'
+_SUMMARY_CURRENCY_TOKEN = (
+    r'(?:US\$|(?<![A-Za-z])(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|'
+    r'BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|'
+    r'CHF|CLP|CNY|COP|CRC|CUP|CVE|CZK|DJF|DKK|DOP|DZD|EGP|ERN|ETB|EUR|FJD|'
+    r'FKP|GBP|GEL|GHS|GIP|GMD|GNF|GTQ|GYD|HKD|HNL|HTG|HUF|IDR|ILS|INR|IQD|'
+    r'IRR|ISK|JMD|JOD|JPY|KES|KGS|KHR|KMF|KPW|KRW|KWD|KYD|KZT|LAK|LBP|LKR|'
+    r'LRD|LSL|LYD|MAD|MDL|MGA|MKD|MMK|MNT|MOP|MRU|MUR|MVR|MWK|MXN|MYR|MZN|'
+    r'NAD|NGN|NIO|NOK|NPR|NZD|OMR|PAB|PEN|PGK|PHP|PKR|PLN|PYG|QAR|RON|RSD|'
+    r'RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SOS|SRD|SSP|STN|SYP|SZL|THB|'
+    r'TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|'
+    r'XAF|XCD|XOF|XPF|YER|ZAR|ZMW|ZWL)(?![A-Za-z])|[$€£¥₹₺₽]|ر\.?\s?س\.?|'
+    r'(?:ريال(?:ات)?(?:\s+سعودي(?:ة)?)?|دولار(?:ات)?(?:\s+أمريكي(?:ة)?)?|يورو|'
+    r'درهم(?:ات)?(?:\s+(?:إماراتي|مغربي))?|جنيه(?:ات)?(?:\s+(?:إسترليني|مصري))?|'
+    r'دينار(?:ات)?(?:\s+(?:كويتي|بحريني|أردني|عراقي|ليبي|تونسي|جزائري))?|'
+    r'فرنك\s+سويسري|ليرة(?:ات)?(?:\s+(?:تركية|لبنانية|سورية))?|ين\s+ياباني|يوان|روبية)'
+    r'(?:[\u064b-\u065f]*ا?)?|'
+    r'dollars?|euros?|pounds?|dirhams?|riyals?|yen|yuan|rupees?)'
+)
+_SUMMARY_MONEY_RANGE_RE = re.compile(
+    rf'(?:(?P<pre_currency>{_SUMMARY_CURRENCY_TOKEN})\s*'
+    rf'(?P<pre_first>{_SUMMARY_MONEY_NUMBER})\s*(?:–|—|-|إلى|to)\s*'
+    rf'(?P<pre_second>{_SUMMARY_MONEY_NUMBER})|'
+    rf'(?P<post_first>{_SUMMARY_MONEY_NUMBER})\s*(?:–|—|-|إلى|to)\s*'
+    rf'(?P<post_second>{_SUMMARY_MONEY_NUMBER})\s*(?P<post_currency>{_SUMMARY_CURRENCY_TOKEN}))',
+    re.IGNORECASE,
+)
+_SUMMARY_MONEY_AMOUNT_RE = re.compile(
+    rf'(?:(?P<prefix>{_SUMMARY_CURRENCY_TOKEN})\s*(?P<prefix_amount>{_SUMMARY_MONEY_NUMBER})|'
+    rf'(?P<suffix_amount>{_SUMMARY_MONEY_NUMBER})\s*(?P<suffix>{_SUMMARY_CURRENCY_TOKEN}))',
+    re.IGNORECASE,
+)
+_SUMMARY_CURRENCY_CODES = frozenset((
+    'AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND '
+    'BOB BRL BSD BTN BWP BYN BZD CAD CDF CHF CLP CNY COP CRC CUP CVE CZK DJF '
+    'DKK DOP DZD EGP ERN ETB EUR FJD FKP GBP GEL GHS GIP GMD GNF GTQ GYD HKD '
+    'HNL HTG HUF IDR ILS INR IQD IRR ISK JMD JOD JPY KES KGS KHR KMF KPW KRW '
+    'KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT MOP MRU MUR '
+    'MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN '
+    'PYG QAR RON RSD RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN '
+    'SYP SZL THB TJS TMT TND TOP TRY TTD TWD TZS UAH UGX USD UYU UZS VES VND '
+    'VUV WST XAF XCD XOF XPF YER ZAR ZMW ZWL'
+).split())
+
+
+def _summary_currency_code(token):
+    text = str(token or '').strip()
+    folded = (text.casefold().replace('أ', 'ا').replace('إ', 'ا')
+              .replace('آ', 'ا').replace('ة', 'ه'))
+    for prefix, code in (
+            ('ريال عماني', 'OMR'), ('ريال قطري', 'QAR'), ('ريال سعودي', 'SAR'),
+            ('ريال', 'SAR'), ('دولار', 'USD'), ('يورو', 'EUR'),
+            ('درهم اماراتي', 'AED'), ('درهم مغربي', 'MAD'), ('درهم', 'AED'),
+            ('جنيه مصري', 'EGP'), ('جنيه استرليني', 'GBP'), ('دينار كويتي', 'KWD'),
+            ('دينار بحريني', 'BHD'), ('دينار اردني', 'JOD'), ('دينار عراقي', 'IQD'),
+            ('دينار ليبي', 'LYD'), ('دينار تونسي', 'TND'), ('دينار جزائري', 'DZD'),
+            ('دينار', 'KWD'), ('فرنك سويسري', 'CHF'), ('ليره تركيه', 'TRY'),
+            ('ليره لبنانيه', 'LBP'), ('ليره سوريه', 'SYP'), ('ين ياباني', 'JPY'),
+            ('ين', 'JPY'), ('يوان', 'CNY'), ('روبيه', 'INR'),
+            ('dollar', 'USD'), ('euro', 'EUR'), ('dirham', 'AED'),
+            ('yen', 'JPY'), ('yuan', 'CNY'), ('rupee', 'INR')):
+        if folded.startswith(prefix):
+            return code
+    token_upper = text.upper()
+    symbols = {'$': 'USD', 'US$': 'USD', '€': 'EUR', '£': 'GBP',
+               '¥': 'JPY', '₺': 'TRY', '₹': 'INR', '₽': 'RUB'}
+    if token_upper in symbols:
+        return symbols[token_upper]
+    if re.fullmatch(r'[A-Z]{3}', token_upper) and token_upper in _SUMMARY_CURRENCY_CODES:
+        return token_upper
+    return _canonical_price_currency(text)
+
+
+def _summary_sar_amount(raw_amount, currency):
+    code = _summary_currency_code(currency)
+    if not code:
+        return ''
+    try:
+        normalized = str(raw_amount).translate(str.maketrans(
+            '٠١٢٣٤٥٦٧٨٩', '0123456789')).replace('٬', ',').replace('٫', '.')
+        amount = Decimal(normalized.replace(',', ''))
+        rate = price_fx_to_sar(code)
+        if rate is None:
+            return ''
+        converted = amount * Decimal(str(rate))
+        quantum = Decimal('1') if converted == converted.to_integral_value() else Decimal('0.01')
+        rounded = converted.quantize(quantum, rounding=ROUND_HALF_UP)
+        formatted = f'{rounded:,.2f}'
+        return formatted.rstrip('0').rstrip('.') if '.' in formatted else f'{rounded:,}'
+    except (InvalidOperation, TypeError, ValueError):
+        return ''
+
+
+def normalize_summary_currency(text):
+    """Convert visible monetary values to SAR; omit amounts without a verified FX rate."""
+    value = str(text or '').replace('\\r\\n', '\n').replace('\\n', '\n')
+    if not value:
+        return ''
+    sar_label = ' ريال سعودي' if re.search(r'[\u0600-\u06ff]', value) else ' SAR'
+
+    def replace_range(match):
+        currency = match.group('pre_currency') or match.group('post_currency')
+        first = match.group('pre_first') or match.group('post_first')
+        second = match.group('pre_second') or match.group('post_second')
+        left = _summary_sar_amount(first, currency)
+        right = _summary_sar_amount(second, currency)
+        if not left or not right:
+            return ''
+        connector = ' إلى ' if re.search(r'[\u0600-\u06ff]', value) else ' to '
+        return f'{left}{sar_label}{connector}{right}{sar_label}'
+
+    value = _SUMMARY_MONEY_RANGE_RE.sub(replace_range, value)
+
+    def replace_amount(match):
+        currency = match.group('prefix') or match.group('suffix')
+        amount = match.group('prefix_amount') or match.group('suffix_amount')
+        converted = _summary_sar_amount(amount, currency)
+        return f'{converted}{sar_label}' if converted else ''
+
+    value = _SUMMARY_MONEY_AMOUNT_RE.sub(replace_amount, value)
+    value = re.sub(r'\(\s*\)', '', value)
+    value = re.sub(r'[ \t]{2,}', ' ', value)
+    value = re.sub(r'\s+([،,.;:])', r'\1', value)
+    return value.strip()
+
+
+def _normalize_summary_axis_text(value):
+    text = normalize_summary_currency(value)
+    lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    result = []
+    for line in lines:
+        if line or (result and result[-1]):
+            result.append(line)
+    text = '\n'.join(result).strip()
+    if text in {MISSING_VALUE_PHRASE, MISSING_VALUE_PHRASE_EN}:
+        return ''
+    return text
+
+
 def normalize_summary(raw):
     data = raw if isinstance(raw, dict) else {}
     raw_summary = data.get('summary')
@@ -398,13 +541,13 @@ def normalize_summary(raw):
             summary_source = top_level
     if isinstance(summary_source, dict):
         summary = {
-            item['key']: _norm(summary_source.get(item['key'])) or MISSING_VALUE_PHRASE
+            item['key']: _normalize_summary_axis_text(summary_source.get(item['key']))
             for item in SUMMARY_SECTIONS
         }
     else:
         # Keep a paragraph returned by an older model readable until the next
         # generation. New responses always use the structured object above.
-        summary = _norm(raw_summary) if isinstance(raw_summary, str) else {}
+        summary = _normalize_summary_axis_text(raw_summary) if isinstance(raw_summary, str) else {}
     decision = _norm(data.get('decision'))
     if decision not in DECISION_OPTIONS:
         matched = next((option for option in DECISION_OPTIONS if option in decision), '')
@@ -426,7 +569,7 @@ def normalize_summary(raw):
                 'data_date': _norm(row.get('data_date') or row.get('dataDate')),
                 'accessed_at': _norm(row.get('accessed_at') or row.get('accessedAt')) or date.today().isoformat(),
                 'reliability': _norm(row.get('reliability')) or official_source_reliability('', name, url),
-                'note': _norm(row.get('note')),
+                'note': normalize_summary_currency(row.get('note')),
             })
     disclaimer = _norm(data.get('disclaimer')) or (
         'هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.'
@@ -442,7 +585,7 @@ def normalize_summary(raw):
     for item in SWOT_SECTIONS:
         value = ''
         for key in aliases[item['key']]:
-            value = _norm(raw_swot.get(key) or data.get(key))
+            value = _normalize_summary_axis_text(raw_swot.get(key) or data.get(key))
             if value:
                 break
         swot[item['key']] = value
@@ -452,7 +595,7 @@ def normalize_summary(raw):
         or data.get('market_summary_block')
         or data.get('executive_summary')
     )
-    one_block_summary = str(raw_one_block or '').strip()
+    one_block_summary = normalize_summary_currency(raw_one_block)
     one_block_summary = one_block_summary.replace('\\r\\n', '\n').replace('\\n', '\n')
     one_block_summary = re.sub(r'[ \t]+', ' ', one_block_summary)
     one_block_summary = re.sub(r'\n{3,}', '\n\n', one_block_summary)

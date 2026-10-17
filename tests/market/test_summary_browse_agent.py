@@ -74,7 +74,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(captured['search_provider'], 'searxng')
         self.assertEqual(captured['max_steps'], 100)
         self.assertEqual(captured['search_budget'], 16)
-        self.assertEqual(captured['max_tokens'], 8000)
+        self.assertEqual(captured['max_tokens'], 66000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         self.assertIs(captured['on_event'], on_event)
         self.assertIn('site:rei.rega.gov.sa', captured['prompt'])
@@ -95,7 +95,37 @@ class SummaryBrowseAgentTests(unittest.TestCase):
             retrieved_evidence='صفقات الشقق ذات الغرفتين: العدد 12، المتوسط 900000، الأعلى 1200000.')
         self.assertIn('أبقِ كل فئة متاحة في sector_performance', prompt)
         self.assertIn('لا تدمج فئات غرف النوم في متوسط واحد', prompt)
-        self.assertIn('لا تستبدله بأسعار الإعلانات', prompt)
+        self.assertIn('ولا تستبدلها بأسعار الإعلانات', prompt)
+
+    def test_final_summary_prompt_uses_sar_formal_lines_and_omits_missing_details(self):
+        prompt = market_study.build_summary_user_prompt(
+            {'city': 'جدة', 'projectType': 'سكني'}, [],
+            retrieved_evidence='صفقات الشقق ذات الغرفتين: 12 صفقة، متوسط 900000 ريال.')
+        self.assertIn('كل القيم المالية في الدراسة وملاحظات المصادر بالريال السعودي', prompt)
+        self.assertIn('احذف الفئات الفرعية غير المتاحة', prompt)
+        self.assertIn('صياغة استشارية عقارية رسمية', prompt)
+        self.assertIn('أسطر قصيرة ذات عناوين وصفية', prompt)
+        self.assertIn('لا تذكر تاريخ الوصول', prompt)
+        self.assertIn('لا تكتب كلمة «وسيط»', prompt)
+        self.assertNotIn('في حدود 350 كلمة', prompt)
+
+    def test_summary_normalization_converts_foreign_money_and_preserves_lines(self):
+        with patch.object(market_study, 'price_fx_to_sar',
+                          side_effect=lambda code: {'USD': 3.75, 'EUR': 4.0, 'SAR': 1.0}.get(code)):
+            normalized = market_study.normalize_summary({
+                'summary': {
+                    'sector_performance': 'الفنادق:\nسعر الليلة 100 USD\nالشقق:\nغرفتان: 5 صفقات',
+                    'city_position': 'غير متوفر من مصدر موثوق',
+                },
+                'one_block_summary': 'الفندق بسعر 100 دولارًا.',
+                'sources': [{'name': 'مرجع الأسعار', 'note': 'EUR 50–75'}],
+            })
+        self.assertEqual(normalized['summary']['city_position'], '')
+        self.assertIn('الفنادق:\nسعر الليلة 375 ريال سعودي\nالشقق:',
+                      normalized['summary']['sector_performance'])
+        self.assertNotIn('USD', normalized['summary']['sector_performance'])
+        self.assertIn('375 ريال سعودي', normalized['one_block_summary'])
+        self.assertIn('200 SAR to 300 SAR', normalized['sources'][0]['note'])
 
     def test_source_plan_pages_remain_usable_when_browser_research_fails(self):
         module = self.module
@@ -320,7 +350,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(captured['model'], module.GEMINI_TEXT_MODEL)
         self.assertEqual(captured['model'], 'google/gemini-4-argon')
         self.assertEqual(captured['reasoning_effort'], 'medium')
-        self.assertEqual(captured['max_tokens'], 64000)
+        self.assertEqual(captured['max_tokens'], 66000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         annotations = result['choices'][0]['message']['annotations']
         self.assertEqual(annotations[0]['url_citation']['url'],
@@ -348,7 +378,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 deadline=time.time() + 30)
 
         self.assertIn('choices', result)
-        self.assertEqual(caps, [64000, 21600])
+        self.assertEqual(caps, [66000, 21600])
 
     def test_aggregator_stops_immediately_on_fatal_balance_error(self):
         module = self.module
@@ -371,7 +401,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 deadline=time.time() + 30)
 
         self.assertIs(result, fatal)
-        self.assertEqual(calls, [64000])
+        self.assertEqual(calls, [66000])
 
     def test_fatal_research_error_is_reported_as_credit_failure(self):
         module = self.module

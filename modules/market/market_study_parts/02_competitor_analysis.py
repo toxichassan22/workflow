@@ -146,26 +146,27 @@ def build_consultant_system_prompt(offer_lang=None):
         for item in SUMMARY_SECTIONS
     )
     if en:
-        axes_sentence = ('\nWrite each axis in deep, detailed analytical advisory prose (at least 2-3 substantive paragraphs or thoroughly substantiated breakdown with real figures and metrics per axis). '
-                         'Short bullets inside an axis value are allowed when needed, but brief superficial one-liners are strictly forbidden. '
-                         'Never compress the axes into one paragraph or merge them into a single field.\n')
+        axes_sentence = ('\nWrite each axis in formal, detailed advisory language. Divide its content into short labeled lines, '
+                         'with each selected activity, property type, and available unit category on its own line. '
+                         'Give apartments, villas, hotels, and other selected activities comparable depth in proportion to their evidence; '
+                         'never reduce an evidence-rich category to a one-line mention. Preserve all useful figures and analysis with no fixed word limit. '
+                         'Never merge axes into one field.\n')
         one_block_sentence = (
-            f'Field one_block_summary is {SUMMARY_TITLE} itself: one cohesive, polished English paragraph '
-            f'about this project\'s market, about {SUMMARY_WORD_TARGET} words, never fewer than {SUMMARY_MIN_WORDS} '
-            'words and no more than 400 words. Cover the market, city, sector, supply, demand, competition, '
+            f'Field one_block_summary is {SUMMARY_TITLE} itself: one cohesive, polished English executive paragraph '
+            'covering the project market without a fixed word limit. Cover the market, city, sector, supply, demand, competition, '
             'gap, recommendation and decision conditions with sufficient detail in one flow, with no subheadings, '
-            'numbering or lists. Make it a complete summary, not a short abstract, with no SWOT list and no '
+            'numbering or lists. Keep detailed analysis organized in the separate axis values. Make it a complete summary, not a short abstract, with no SWOT list and no '
             'sources list.\n\n'
         )
     else:
-        axes_sentence = ('\nاكتب كل محور بصياغة استشارية تحليلية معمقة ومفصلة وشاملة (فقرتان إلى ثلاث فقرات وافية أو تفصيل كمي وتحليلي رصين مدعوم بالأرقام والنسب والمؤشرات لكل محور). '
-                         'يمكن تنظيم التفاصيل داخله في نقاط قصيرة عند الحاجة، ولكن يُحظر تمامًا الاختصار المخل أو الاكتفاء بأسطر عابرة وموجزة. '
-                         'لا تختصر المحاور في فقرة واحدة ولا تدمجها في حقل واحد.\n')
+        axes_sentence = ('\nاكتب كل محور بلغة استشارية رسمية ومهنية ومفصلة. قسّم محتواه إلى أسطر قصيرة ذات عناوين وصفية، '
+                         'واجعل كل نشاط مختار ونوع عقار وفئة وحدات متاحة في سطر مستقل. امنح الشقق والفلل والفنادق وبقية الأنشطة المختارة '
+                         'عمقًا متقاربًا بحسب حجم الأدلة؛ لا تختزل فئة تدعمها بيانات كثيرة في سطر عابر. احتفظ بكل الأرقام والتحليل المفيد دون حد للكلمات. '
+                         'لا تدمج المحاور في حقل واحد.\n')
         one_block_sentence = (
-            f'حقل one_block_summary هو {SUMMARY_TITLE} نفسه: فقرة عربية واحدة متماسكة ومحترمة عن سوق هذا المشروع، '
-            f'في حدود {SUMMARY_WORD_TARGET} كلمة، على ألا تقل عن {SUMMARY_MIN_WORDS} كلمة وألا تتجاوز 400 كلمة. '
+            f'حقل one_block_summary هو {SUMMARY_TITLE} نفسه: فقرة تنفيذية عربية واحدة متماسكة ومهنية عن سوق هذا المشروع دون حد للكلمات. '
             'اشرح السوق والمدينة والقطاع والعرض والطلب والمنافسة والفجوة والتوصية وشروط القرار بتفصيل كافٍ داخل '
-            'سياق واحد، بلا عناوين فرعية ولا ترقيم ولا نقاط. اجعلها ملخصًا كاملًا لا مجرد خلاصة قصيرة، ولا تضع '
+            'سياق واحد، بلا عناوين فرعية ولا ترقيم ولا نقاط. اجعلها ملخصًا كاملًا لا مجرد خلاصة قصيرة، واترك التحليل التفصيلي منظمًا في قيم المحاور، ولا تضع '
             'فيها قائمة SWOT أو قائمة مصادر.\n\n'
         )
 
@@ -214,6 +215,10 @@ def build_consultant_system_prompt(offer_lang=None):
         'خامسًا قواعد إلزامية:\n'
         + _format_list(MANDATORY_RULES)
         + '\nالدراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.'
+        + '\nكل القيم المالية في الدراسة السعودية تُعرض بالريال السعودي. حوّل أي مبلغ بعملة أخرى إلى الريال بسعر صرف موثوق مرتبط بتاريخ البيانات؛ إذا تعذر توثيق السعر فاحذف المبلغ. لا تذكر تاريخ الوصول أو تاريخ تشغيل البحث في نص الدراسة؛ اذكر تاريخ إصدار الدراسة وتاريخ نشر المصدر عند توفرهما فقط.'
+        + '\nإذا غابت معلومة فرعية، احذفها من نص الدراسة ولا تكتب أنها غير متاحة أو لم يُعثر عليها. إذا خلا محور كامل من الأدلة، أعد قيمته فارغة.'
+        + '\nلا تكتب كلمة «وسيط» في أي نص ظاهر للمستخدم. استخدم «متوسط حسابي» فقط إذا كان الرقم متوسطًا حسابيًا فعلًا؛ أسقط أي قيمة لمقياس إحصائي مختلف بدل تسميتها متوسطًا.'
+        + '\nاستخدم صياغة استشارية رسمية خالية من نبرة المحادثة الودية. نظّم كل محور في أسطر منفصلة بعناوين وصفية واضحة، ووازن مستوى التفصيل بين جميع الأنشطة والفئات المدعومة بالأدلة.'
     )
 
 
@@ -799,8 +804,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
             '2. استهدف المصادر الأساسية والحكومية بأولوية قصوى: ابحث في منصة المؤشرات العقارية (rei.rega.gov.sa/ar/cities)، '
             'والمؤشر التفصيلي لسوق الإيجار من سكني وشبكة إيجار (sakani.sa/reports-and-data)، والتقارير المهنية المعتمدة (CBRE، JLL، Knight Frank).\n'
             '3. الأرقام التقريبية من نتائج البحث مقبولة — لا يُشترط رقم رسمي مطابق — '
-            'لكن كل رقم يجب أن يأتي من البحث أو البيانات المسترجعة لا من معرفتك السابقة، والمعلومة الغائبة تبقى '
-            '«غير متوفر من مصدر موثوق» بدل الرقم المختلق.\n'
+            'لكن كل رقم يجب أن يأتي من البحث أو البيانات المسترجعة لا من معرفتك السابقة. احذف التفاصيل '
+            'الفرعية التي لا يسندها دليل، ولا تكتب أنها غائبة أو غير متاحة.\n'
             '4. ضع في جدول sources روابط صفحات النتائج التي استند إليها كل رقم مع data_date؛ '
             'روابط الصفحة الرئيسية وحدها غير مقبولة.\n'
         )
@@ -808,16 +813,16 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
     if retrieved_evidence:
         evidence_block = f'\n{str(retrieved_evidence).strip()}\n\n'
     return (
-        f'تاريخ اليوم / تاريخ الوصول للمصادر: {today}\n'
+        f'تاريخ إصدار الدراسة: {today}\n'
         f'ابدأ المخرجات بعنوان: {SUMMARY_TITLE}.\n'
         + search_protocol
         + ('Write the detailed market analysis inside summary as organized axes, one independent value per axis, specific to this project — not a generic city description.\n'
            if en else
            'اكتب تحليل السوق التفصيلي داخل summary على شكل محاور منظمة، قيمة مستقلة لكل محور، مع تحليل خاص بهذا المشروع وليس وصفًا عامًا للمدينة.\n')
          + f'المفاتيح الإلزامية لمحاور summary بالترتيب: {section_keys}.\n'
-         + ('Cover each axis thoroughly with all brief elements, providing a deep, comprehensive real-estate advisory analysis with concrete numbers, data, and market metrics (at least 2-3 substantive paragraphs or structured analytical breakdown per axis). Use short bullets inside an axis value when needed, but brief superficial one-liners are strictly forbidden. Never put the detailed analysis in one paragraph or mix its axes.\n'
+         + ('Cover every axis in formal, detailed advisory language. Separate activities, property types, and available unit categories on labeled lines; give all evidence-supported categories comparable depth and preserve all useful figures without a word limit. Never merge axes.\n'
             if en else
-            'غطِّ في كل محور عناصر brief النظام كاملةً بتوسع ودقة، مع تقديم تحليل استشاري عقاري معمق ومفصل ومدعوم بالأرقام والبيانات والمؤشرات السوقية الحية (فقرتان إلى ثلاث فقرات وافية أو تفصيل تحليلي منظم لكل محور). استخدم نقاطًا قصيرة داخل قيمة المحور عند الحاجة لتنظيم الأرقام، ولكن يُحظر تمامًا الاختصار المخل أو الاكتفاء بأسطر عابرة وموجزة. لا تضع تحليل السوق التفصيلي في فقرة واحدة ولا تخلط محاوره.\n')
+             'غطِّ كل محور بلغة استشارية رسمية ومفصلة. افصل الأنشطة وأنواع العقارات وفئات الوحدات المتاحة في أسطر معنونة؛ وامنح كل فئة مدعومة بالأدلة عمقًا متقاربًا، واحتفظ بكل الأرقام المفيدة دون حد للكلمات. لا تدمج المحاور.\n')
          + _summary_scope_block(payload, offer_lang)
          + 'كل رقم يجب أن يظهر أيضًا في جدول المصادر.\n'
         + ('Never name sources, websites or bodies inside the axis values or inside '
@@ -847,7 +852,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
         + 'فترة البيانات الملزمة مكتوبة في بيانات المشروع: كل رقم أو مؤشر يجب أن يأتي من مصدر '
         + 'نُشر داخل تلك الفترة، ويُكتب تاريخ بياناته في data_date بصيغة YYYY-MM-DD أو YYYY-MM أو سنة. '
         + 'أي مصدر خارج الفترة غير مقبول — لا تستخدمه ولا تدرجه في sources.\n'
-        + f'إذا لم تتوفر معلومة فاكتب داخل المحور: {MISSING_VALUE_PHRASE}.\n'
+         + 'إذا غابت معلومة فرعية احذفها من النص ولا تذكر أنها مفقودة أو غير متاحة؛ وإذا خلا محور كامل من الأدلة فأعد قيمته فارغة.\n'
         + 'حقل القرار يجب أن يكون قيمة واحدة فقط من: '
         + '، '.join(DECISION_OPTIONS)
         + '. لا تختر «البيانات غير كافية» إلا إذا تعذر كتابة أغلب المحاور فعلًا؛ '
@@ -856,9 +861,10 @@ def build_summary_user_prompt(payload, competitors, current_summary=None, curren
            if en else
            'بعد محاور تحليل السوق اكتب تحليل SWOT مستقلًا من أربع خانات: نقاط القوة، نقاط الضعف، الفرص، التهديدات.\n')
         + 'اجعل كل خانة نقاطًا قصيرة خاصة بهذا المشروع وهذا النوع، ولا تكرر التحليل حرفيًا.\n'
-        + (f'Write one_block_summary as {SUMMARY_TITLE}: one cohesive, polished English paragraph covering the full project market in about {SUMMARY_WORD_TARGET} words, never fewer than {SUMMARY_MIN_WORDS} words and no more than 400 words. Not a short multi-sentence abstract; cover market definition, city position, sector performance, supply, demand, competition, market gap, recommendation and decision conditions in a sequenced analysis. No subheadings, numbering or lists; use only the existing facts, figures and sources, with no SWOT and no sources list.\n\n'
+         + (f'Write one_block_summary as {SUMMARY_TITLE}: a cohesive, polished English executive paragraph covering the full project market with no word limit. Keep detailed analysis organized in the separate axis values; use only evidence and no SWOT or sources list.\n\n'
            if en else
-           f'اكتب one_block_summary باعتباره {SUMMARY_TITLE}: فقرة عربية واحدة محترمة ومتماسكة تلخص سوق المشروع كاملًا، في حدود {SUMMARY_WORD_TARGET} كلمة، على ألا تقل عن {SUMMARY_MIN_WORDS} كلمة وألا تتجاوز 400 كلمة. لا تكتب خلاصة قصيرة من عدة جمل؛ اشرح داخل الفقرة تعريف السوق ووضع المدينة وأداء القطاع والمعروض والطلب والمنافسة والفجوة السوقية وتقييم المشروع والتوصية وشروط القرار، واربطها بتحليل متسلسل. بلا عناوين فرعية ولا ترقيم ولا نقاط، واستخدم الحقائق والأرقام والمصادر الموجودة فقط، ولا تضع فيها SWOT أو قائمة مصادر.\n\n')
+            f'اكتب one_block_summary باعتباره {SUMMARY_TITLE}: فقرة تنفيذية عربية متماسكة ومهنية تلخص سوق المشروع كاملًا دون حد للكلمات. اترك التحليل التفصيلي منظمًا في قيم المحاور، واستخدم الأدلة فقط دون SWOT أو قائمة مصادر.\n\n')
+         + 'كل القيم المالية بالريال السعودي؛ حوّل العملات الأخرى بسعر صرف موثق لتاريخ البيانات، واحذف المبلغ إذا تعذر التحقق. لا تذكر تاريخ الوصول في نص الدراسة، ولا تكتب كلمة «وسيط» في أي نص ظاهر للمستخدم. استخدم «متوسطًا حسابيًا» فقط للمعدل الحسابي الحقيقي.\n'
         + evidence_block
         + 'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
