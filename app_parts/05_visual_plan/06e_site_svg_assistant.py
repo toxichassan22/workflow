@@ -152,6 +152,7 @@ def _visual_plan_site_projected_layout(scene, contract, program):
 def _visual_plan_site_packet(data):
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     _visual_plan_report_site_chat_progress(0, 22)
+    scene_prepare_started = time.perf_counter()
     if 'scene' not in workflow or workflow.get('scene') is None:
         scene, _context, _reference_url = _visual_plan_create_scene(data)
         workflow = dict(workflow)
@@ -159,26 +160,33 @@ def _visual_plan_site_packet(data):
         data['plansWorkflow'] = workflow
     else:
         _visual_plan_report_site_chat_progress(1, 35)
+    _visual_plan_report_site_chat_timing('scene_prepare_ms', scene_prepare_started)
+    validation_started = time.perf_counter()
     scene, contract, context, program = _visual_plan_scene_from_request(data)
-    signature = _visual_plan_input_signature(data, context)
+    signature = scene.get('inputSignature') or _visual_plan_input_signature(data, context)
     clean_scene = {key: value for key, value in scene.items() if key not in ('token', 'inputSignature')}
+    _visual_plan_report_site_chat_timing('scene_validation_ms', validation_started)
+    layout_started = time.perf_counter()
+    drawing_layout = _visual_plan_site_projected_layout(scene, contract, program)
+    _visual_plan_report_site_chat_timing('layout_projection_ms', layout_started)
     packet = {
         'project': {'name': contract.get('projectName'), 'idea': contract.get('projectIdea')},
         'landAndRegulations': contract,
         'validatedScene': clean_scene,
         'program': program,
-        'drawingLayout': _visual_plan_site_projected_layout(scene, contract, program),
+        'drawingLayout': drawing_layout,
         'financialComponents': context.get('components') or [],
     }
     _visual_plan_report_site_chat_progress(2, 68)
     return packet, contract, context, signature
 
 
-def _visual_plan_site_call(system_prompt, user_prompt, data=None, max_tokens=12000):
+def _visual_plan_site_call(system_prompt, user_prompt, data=None, max_tokens=12000,
+                           reasoning_effort='high'):
     timeout = _visual_plan_job_call_timeout(1200)
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=max_tokens,
-        model=GEMINI_TEXT_MODEL, reasoning_effort='high', timeout=timeout,
+        model=GEMINI_TEXT_MODEL, reasoning_effort=reasoning_effort, timeout=timeout,
         response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data or {}))
     fatal = _ai_fatal_error_dict(response)
     if fatal is not None:
@@ -195,6 +203,7 @@ def _visual_plan_site_call(system_prompt, user_prompt, data=None, max_tokens=120
 
 
 def _visual_plan_site_interview(data, action='chat'):
+    interview_started = time.perf_counter()
     packet, _contract, _context, signature = _visual_plan_site_packet(data)
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     state = _visual_plan_site_state(data, signature)
@@ -204,14 +213,21 @@ def _visual_plan_site_interview(data, action='chat'):
             state['answers'].append({'question': state['pendingQuestion'], 'answer': message})
             state['answers'] = state['answers'][-100:]
         state['turns'].append({'role': 'user', 'text': message})
+    prior_assistant = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
+    continuing = bool(prior_assistant.get('inputSignature') == signature
+                      and state['summary'] and any(
+        item.get('role') == 'assistant' for item in state['turns']))
     system_prompt = (
         'You are Google Gemini 4 Argon and the only assistant for this site-plan session. '
-        'You receive the complete approved land, croquis, regulations, financial components, distribution, '
-        'validated geometry, and client notes. Keep the same project context across this conversation. '
+        'On the first interview turn, use the complete approved land, croquis, regulations, financial components, '
+        'distribution, validated geometry, and client notes. On a continuation turn, the full project packet is '
+        'omitted because the approved inputs are unchanged; continue from sessionMemory, resolvedAnswers, and recentTurns. '
+        'Do not repeat the initial site analysis on continuation turns. Keep the same project context across this conversation. '
         'Do not ask for a fact already present in the data or in resolved answers. Ask only when an '
         'important design decision is genuinely unresolved. Ask one concise Arabic question at a time, '
         'and offer 2-5 short choices when the answer can be chosen. Otherwise return ready=true. '
-        'Memory must preserve every resolved design choice and constraint so older turns and answers can be compacted safely. '
+        'Memory must compactly preserve the approved facts, constraints, and every resolved design choice needed '
+        'for remaining questions, so follow-up turns can continue without the full project packet. '
         'When the client asks to generate or draw the plan, set generateRequested=true and keep that intent '
         'across clarification turns. If ready=true, the server will generate the drawing. Otherwise ask the '
         'blocking question first. Never generate code in this interview response. '
@@ -227,16 +243,24 @@ def _visual_plan_site_interview(data, action='chat'):
         task = 'continue the site-plan interview'
     user_packet = {
         'task': task,
-        'validatedProjectData': packet,
-        'resolvedAnswers': state['answers'],
+        'continuation': continuing,
+        'validatedProjectData': None if continuing else packet,
+        'resolvedAnswers': state['answers'][-8:] if continuing else state['answers'],
         'sessionMemory': state['summary'],
-        'recentTurns': state['turns'][-8:],
+        'recentTurns': state['turns'][-4:] if continuing else state['turns'][-8:],
         'latestClientMessage': message,
         'compactContext': compact_mode,
     }
     _visual_plan_report_site_chat_progress(3, 82)
-    parsed, prompt_tokens = _visual_plan_site_call(
-        system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data, max_tokens=12000)
+    model_started = time.perf_counter()
+    reasoning_effort = 'medium' if continuing else 'high'
+    max_tokens = 6000 if continuing else 12000
+    try:
+        parsed, prompt_tokens = _visual_plan_site_call(
+            system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
+            max_tokens=max_tokens, reasoning_effort=reasoning_effort)
+    finally:
+        _visual_plan_report_site_chat_timing('interview_model_ms', model_started)
     question = _visual_concept_text(parsed.get('question'), 800)
     raw_choices = parsed.get('choices') if isinstance(parsed.get('choices'), list) else []
     choices = [str(item).strip()[:240] for item in raw_choices[:6] if str(item).strip()]
@@ -261,6 +285,7 @@ def _visual_plan_site_interview(data, action='chat'):
     state['turns'].append({'role': 'assistant',
                            'text': reply or ('جاهز للتوليد.' if ready else 'أحتاج توضيحًا قبل التوليد.'),
                            'choices': choices if question else []})
+    _visual_plan_report_site_chat_timing('interview_total_ms', interview_started)
     previous_assistant = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
     return {'success': True, 'readyForGeneration': ready, 'generateRequested': generate_requested,
             'needsClarification': bool(question),

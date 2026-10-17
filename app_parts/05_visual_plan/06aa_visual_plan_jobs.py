@@ -33,7 +33,7 @@ def _visual_plan_job_todos(kind, state='running', active_index=None):
               {'prepare': 0, 'render': 1, 'edit': 1, 'prompt': 1, 'notes': 0}.get(kind, 0))
     rows = []
     for index, label in enumerate(labels):
-        if state == 'completed' or state == 'running' and index < active:
+        if state == 'completed' or state in ('running', 'failed') and index < active:
             status = 'done'
         elif state == 'failed' and index == active:
             status = 'failed'
@@ -52,6 +52,14 @@ def _visual_plan_report_site_chat_progress(active_index, progress):
     if callable(callback):
         callback(progress=progress,
                  todos=_visual_plan_job_todos('site_chat', active_index=active_index))
+
+
+def _visual_plan_report_site_chat_timing(name, started_at):
+    if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') != 'site_chat':
+        return
+    callback = getattr(g, 'visual_plan_job_progress', None)
+    if callable(callback):
+        callback(timing={name: max(0, round((time.perf_counter() - started_at) * 1000))})
 
 
 def _visual_plan_execute(kind, data, slot_id=''):
@@ -127,17 +135,23 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
         except (TypeError, ValueError):
             g.visual_plan_job_deadline = time.time() + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
         g.visual_plan_job_kind = kind
-        def report_progress(progress, todos=None, checkpoint=None):
+        def report_progress(progress=None, todos=None, checkpoint=None, timing=None):
             try:
                 current = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
             except Exception:
                 current = {}
-            current.update({'status': 'running', 'success': True,
-                            'progress': max(5, min(99, int(progress)))})
+            if progress is not None or todos is not None or checkpoint is not None:
+                current.update({'status': 'running', 'success': True})
+            if progress is not None:
+                current['progress'] = max(5, min(99, int(progress)))
             if todos is not None:
                 current['todos'] = todos
             if checkpoint is not None:
                 current['checkpoint'] = checkpoint
+            if isinstance(timing, dict):
+                timings = current.get('timings') if isinstance(current.get('timings'), dict) else {}
+                timings.update({str(name): max(0, int(duration)) for name, duration in timing.items()})
+                current['timings'] = timings
             _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, current)
         g.visual_plan_job_progress = report_progress
         try:
@@ -275,11 +289,26 @@ def api_visual_concept_plan_job(job_id):
         deadline_at = float(job.get('createdAt') or job.get('updatedAt') or time.time()) + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
     if job.get('status') in ('queued', 'running') and time.time() >= deadline_at:
         kind = ((job.get('payload') or {}).get('kind') or 'render')
-        job = {'status': 'failed', 'success': False, 'progress': 100, 'httpStatus': 503,
-               'todos': _visual_plan_job_todos(kind, 'failed'),
-               'result': {'success': False, 'error': 'انتهت مهلة معالجة المشهد الهندسي.',
-                          'error_code': 'PLANS_JOB_EXPIRED'}}
+        todos = job.get('todos') if isinstance(job.get('todos'), list) else []
+        active_index = next((index for index, item in enumerate(todos)
+                             if isinstance(item, dict) and item.get('status') == 'active'), None)
+        if active_index is None:
+            active_index = next((index for index, item in enumerate(todos)
+                                 if isinstance(item, dict) and item.get('status') == 'pending'), 0)
+        job = dict(job)
+        job.update({'status': 'failed', 'success': False, 'progress': 100, 'httpStatus': 503,
+                    'todos': _visual_plan_job_todos(kind, 'failed', active_index=active_index),
+                    'result': {'success': False, 'error': 'انتهت مهلة معالجة المشهد الهندسي.',
+                               'error_code': 'PLANS_JOB_EXPIRED'}})
+        created_at = job.get('createdAt')
+        if created_at is not None:
+            try:
+                timings = job.get('timings') if isinstance(job.get('timings'), dict) else {}
+                timings['job_total_ms'] = max(0, round((time.time() - float(created_at)) * 1000))
+                job['timings'] = timings
+            except (TypeError, ValueError):
+                pass
         _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id, job)
     return jsonify({key: job[key] for key in
                     ('status', 'success', 'progress', 'todos', 'checkpoint', 'result', 'httpStatus',
-                     'timeoutSeconds') if key in job})
+                     'timeoutSeconds', 'createdAt', 'updatedAt', 'timings') if key in job})

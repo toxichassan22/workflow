@@ -104,7 +104,16 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         }])
         self.assertEqual(ready['assistantState']['compactionCount'], 1)
         second_packet = json.loads(model_call.call_args_list[1].args[1])
+        first_packet = json.loads(model_call.call_args_list[0].args[1])
+        self.assertIsNotNone(first_packet['validatedProjectData'])
+        self.assertTrue(second_packet['continuation'])
+        self.assertIsNone(second_packet['validatedProjectData'])
+        self.assertTrue(second_packet['sessionMemory'])
         self.assertEqual(second_packet['resolvedAnswers'][0]['answer'], 'West street')
+        self.assertEqual(model_call.call_args_list[0].kwargs['max_tokens'], 12000)
+        self.assertEqual(model_call.call_args_list[0].kwargs['reasoning_effort'], 'high')
+        self.assertEqual(model_call.call_args_list[1].kwargs['max_tokens'], 6000)
+        self.assertEqual(model_call.call_args_list[1].kwargs['reasoning_effort'], 'medium')
 
     def test_starting_site_plan_chat_analyzes_inputs_without_fabricating_a_user_message(self):
         module = self.application_module
@@ -123,6 +132,26 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(result['assistantState']['turns'], [{
             'role': 'assistant', 'text': 'ما جهة المدخل الرئيسي؟', 'choices': ['الغرب', 'الجنوب']
         }])
+
+    def test_changed_site_plan_inputs_restart_with_the_full_project_packet(self):
+        module = self.application_module
+        data = {'message': 'West street', 'plansWorkflow': {'siteAssistant': {
+            'inputSignature': 'old-input', 'summary': 'Old approved-context memory.',
+            'pendingQuestion': 'Which side is the entry?', 'turns': [
+                {'role': 'assistant', 'text': 'Which side is the entry?', 'choices': ['West', 'South']}
+            ],
+        }}}
+        reply = {'ready': False, 'question': 'Which street is the main frontage?',
+                 'choices': ['West', 'South'], 'memory': 'Use the updated approved inputs.'}
+        packet = {'project': {'name': 'Updated Parcel'}, 'landAndRegulations': {'landArea': 1200}}
+        with patch.object(module, '_visual_plan_site_packet',
+                          return_value=(packet, {}, {}, 'new-input')), \
+                patch.object(module, '_visual_plan_site_call', return_value=(reply, 100)) as model_call:
+            module._visual_plan_site_interview(data)
+        sent = json.loads(model_call.call_args.args[1])
+        self.assertFalse(sent['continuation'])
+        self.assertEqual(sent['validatedProjectData'], packet)
+        self.assertEqual(sent['sessionMemory'], '')
 
     def test_generate_request_waits_for_answer_then_generates_without_a_second_request(self):
         module = self.application_module
@@ -611,7 +640,9 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(response.get_json()['todos'][1]['status'], 'active')
 
         expired = {**running, 'deadlineAt': now - 1,
-                   'payload': {'kind': 'site_chat'}}
+                   'payload': {'kind': 'site_chat'},
+                   'todos': module._visual_plan_job_todos('site_chat', active_index=2),
+                   'timings': {'scene_validation_ms': 1200}}
         with patch.object(module, '_read_job', return_value=expired), \
                 patch.object(module, '_write_job') as write_job:
             response = client.get('/api/visual-concept/plans-jobs/expired-job',
@@ -619,7 +650,12 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['status'], 'failed')
         self.assertEqual(response.get_json()['result']['error_code'], 'PLANS_JOB_EXPIRED')
-        self.assertEqual(response.get_json()['todos'][0]['status'], 'failed')
+        self.assertEqual([item['status'] for item in response.get_json()['todos']],
+                         ['done', 'done', 'failed', 'pending'])
+        self.assertEqual(response.get_json()['timings']['scene_validation_ms'], 1200)
+        persisted = write_job.call_args.args[3]
+        self.assertEqual(persisted['createdAt'], expired['createdAt'])
+        self.assertEqual(persisted['timings']['scene_validation_ms'], 1200)
         write_job.assert_called_once()
 
     def test_visual_plan_provider_calls_obey_the_job_deadline(self):
@@ -644,14 +680,16 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertNotIn('تحميل بيانات', ' '.join(item['label'] for item in todos))
         failed = module._visual_plan_job_todos('site_chat', state='failed', active_index=3)
         self.assertEqual(failed[3]['status'], 'failed')
-        self.assertEqual(failed[0]['status'], 'pending')
+        self.assertEqual(failed[0]['status'], 'done')
         reported = []
         with self.app.test_request_context('/'):
             module.g.visual_plan_job_kind = 'site_chat'
             module.g.visual_plan_job_progress = lambda **kwargs: reported.append(kwargs)
             module._visual_plan_report_site_chat_progress(3, 82)
+            module._visual_plan_report_site_chat_timing('interview_model_ms', module.time.perf_counter() - 0.01)
         self.assertEqual(reported[0]['progress'], 82)
         self.assertEqual(reported[0]['todos'][3]['status'], 'active')
+        self.assertGreaterEqual(reported[1]['timing']['interview_model_ms'], 0)
 
     def test_temporary_svg_model_comparison_route_is_retired(self):
         module = self.application_module
