@@ -122,10 +122,15 @@ def site_view(image, scene):
     from PIL import ImageChops
     image.paste(guides, (0, 0), ImageChops.multiply(ground, guide_mask))
     draw = ImageDraw.Draw(image)
+    labeled_parking_components = set()
     for area in scene['openAreas']:
         color = COLORS['parking' if area['kind'] == 'surface_parking' else 'landscape']
         outlined(draw, [screen(point) for point in area['polygon']], color, 2)
-        label(draw, screen(polygon_center(area['polygon'])), 'Surface Parking' if area['kind'] == 'surface_parking' else 'Landscape', 17, 'mm')
+        if area['kind'] != 'surface_parking' or area.get('componentId') not in labeled_parking_components:
+            label(draw, screen(polygon_center(area['polygon'])),
+                  'Surface Parking' if area['kind'] == 'surface_parking' else 'Landscape', 17, 'mm')
+        if area['kind'] == 'surface_parking':
+            labeled_parking_components.add(area.get('componentId'))
     for building in scene['buildings']:
         above = [band for band in building['bands'] if band['kind'] not in ('basement', 'roof')]
         category = above[0]['category'] if above else 'amenity'

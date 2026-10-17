@@ -412,8 +412,10 @@ def _visual_plan_create_scene(data, context=None):
         'and optional #RRGGBB color. Main entries must use the recorded primary frontage; service '
         'and residential entries must use recorded streets, never neighboring land. Entry position '
         'is a fraction 0..1 along the longest parcel edge on that side. Every siteItems row with a '
-        'positive recorded area is required exactly once in openAreas with its recorded componentId '
-        'and exact area; never omit landscape, pools, padel courts, playgrounds or surface parking. '
+        'positive recorded area is required in openAreas with its recorded componentId and exact area. '
+        'Every nonparking site item must appear exactly once; surface parking may be split across '
+        'multiple openAreas whose combined area equals its recorded area. Never omit landscape, '
+        'pools, padel courts, playgrounds or surface parking. '
         'Use kind landscape for planting/open space, surface_parking for parking, and site_facility '
         'for pools, padel courts and other named site amenities. No source names, files or pages. '
         'Every program ID is a separate physical footprint. For repeated individual homes, place one '
@@ -527,8 +529,9 @@ def _visual_plan_create_scene(data, context=None):
                 ]
                 feedback = (
                     '\nThe previous geometry proposal was rejected because required approved site areas '
-                    'were missing or duplicated. Retry the layout now. Return each listed componentId exactly '
-                    'once in openAreas, preserve its exact area, and include every building footprint. '
+                    'were missing or duplicated. Retry the layout now. Return every nonparking componentId '
+                    'exactly once in openAreas. Surface parking may use multiple openAreas; their combined '
+                    'area must equal its recorded area. Preserve all recorded areas and include every building footprint. '
                     'Required site areas: ' + json.dumps(site_requirements, ensure_ascii=False)
                     + '\nDo not return an error object or ask the client to fix a model omission.'
                     + orientation_rule)

@@ -216,7 +216,7 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
         if feature_type in ('pool', 'padel', 'playground'):
             label = {'pool': 'Swimming Pool', 'padel': 'Padel Court',
                      'playground': "Children's Playground"}[feature_type]
-        if label:
+        if label and (feature_type != 'parking' or label not in labels):
             labels.append(label)
         if category not in categories:
             categories.append(category)

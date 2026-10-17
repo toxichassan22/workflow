@@ -35,7 +35,8 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         self.assertEqual(model_call.call_count, 2)
         retry_prompt = model_call.call_args_list[1].args[1]
         self.assertIn('pool_row', retry_prompt)
-        self.assertIn('exactly once in openAreas', retry_prompt)
+        self.assertIn('every nonparking componentId exactly once', retry_prompt)
+        self.assertIn('Surface parking may use multiple openAreas', retry_prompt)
         pool_area = next(item for item in body['scene']['openAreas']
                          if item['componentId'] == 'pool_row')
         self.assertAlmostEqual(abs(module.visual_plan_geometry.signed_area(pool_area['polygon'])), 40)
@@ -97,6 +98,10 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
              'polygon': [[27, 12], [34, 12], [34, 16], [27, 16]]},
             {'id': 'green_area', 'componentId': 'green_row', 'kind': 'landscape',
              'polygon': [[15, 20], [26, 20], [26, 25], [15, 25]]},
+            {'id': 'parking_area_a', 'componentId': 'parking_row', 'kind': 'surface_parking',
+             'polygon': [[2, 2], [4, 2], [4, 4], [2, 4]]},
+            {'id': 'parking_area_b', 'componentId': 'parking_row', 'kind': 'surface_parking',
+             'polygon': [[5, 2], [7, 2], [7, 4], [5, 4]]},
         ]
         scene = {
             'geometry': geometry, 'buildings': buildings,
@@ -120,6 +125,8 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
                  'siteType': 'padel', 'category': 'amenity'},
                 {'id': 'green_row', 'name': 'Green Area', 'label': 'Green Area',
                  'siteType': 'landscape', 'category': 'landscape'},
+                {'id': 'parking_row', 'name': 'Parking', 'label': 'Parking',
+                 'siteType': 'parking', 'category': 'parking'},
             ],
         }
         with patch.object(module.visual_plan_scene, 'buildable_envelopes', return_value=[]):
@@ -132,9 +139,9 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         self.assertEqual(layout['buildings'][1]['displayLabel'], 'V 1')
         self.assertTrue(layout['siteCirculation'])
         self.assertEqual({item['featureType'] for item in layout['openAreas']},
-                         {'pool', 'padel', 'landscape'})
+                         {'pool', 'padel', 'landscape', 'parking'})
         self.assertEqual({item['category'] for item in layout['architecturalColorLegend']},
-                         {'residential', 'pool', 'padel', 'landscape'})
+                         {'residential', 'pool', 'padel', 'landscape', 'parking'})
 
         coordinates = module._visual_plan_site_coordinates_fragment(layout)
         access = module._visual_plan_site_access_fragment(layout)
@@ -149,6 +156,7 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         self.assertIn('>V 1</', components)
         self.assertIn('data-site-feature="pool"', landscape)
         self.assertIn('data-site-feature="padel"', landscape)
+        self.assertEqual(landscape.count('Parking'), 1)
         self.assertIn('مشروع النخيل', legend)
         self.assertIn('شركة النخيل للتطوير', legend)
         self.assertIn('BUILDING SCHEDULE', legend)

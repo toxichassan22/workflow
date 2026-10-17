@@ -97,6 +97,40 @@ class VisualPlanSceneTests(unittest.TestCase):
             for other in scene['buildings'][index + 1:]:
                 self.assertFalse(polygons_overlap(building['footprint'], other['footprint']))
 
+    def test_fallback_parks_use_combined_residual_space_when_no_single_lot_fits(self):
+        contract = _contract()
+        width, height = 250.0, 24906.43 / 250.0
+        contract['geometry'] = boundary_geometry([
+            {'eastings': x, 'northings': y}
+            for x, y in ((0, 0), (width, 0), (width, height), (0, height))
+        ])
+        contract['landArea'] = '24912.95'
+        buildings = [_building(index, 105) for index in range(1, 101)]
+        buildings.extend((_building('tower_a', 1040), _building('tower_b', 1040)))
+        program = _program(*buildings)
+        program['siteItems'] = [
+            {'id': 'parking', 'name': 'Parking', 'label': 'Parking',
+             'category': 'parking', 'siteType': 'parking', 'area': 9000},
+            {'id': 'pool', 'name': 'Pool', 'label': 'Pool',
+             'category': 'amenity', 'siteType': 'pool', 'area': 800},
+            {'id': 'padel', 'name': 'Padel', 'label': 'Padel',
+             'category': 'amenity', 'siteType': 'padel', 'area': 200},
+            {'id': 'playground', 'name': 'Playground', 'label': 'Playground',
+             'category': 'amenity', 'siteType': 'playground', 'area': 200},
+            {'id': 'landscape', 'name': 'Landscape', 'label': 'Landscape',
+             'category': 'landscape', 'siteType': 'landscape', 'area': 2007.3},
+        ]
+
+        scene = fallback_scene(contract, program)
+
+        parking = [area for area in scene['openAreas'] if area['componentId'] == 'parking']
+        self.assertGreater(len(parking), 1)
+        self.assertAlmostEqual(sum(abs(signed_area(area['polygon'])) for area in parking), 9000, places=3)
+        self.assertEqual(len(scene['buildings']), 102)
+        for index, area in enumerate(scene['openAreas']):
+            for other in scene['openAreas'][index + 1:]:
+                self.assertFalse(polygons_overlap(area['polygon'], other['polygon']))
+
     def test_fallback_scene_places_missing_basements_through_make_scene(self):
         contract = _contract()
         scene = fallback_scene(contract, _program(_building(1, 200),

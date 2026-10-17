@@ -203,6 +203,7 @@ def _visual_plan_site_landscape_fragment(layout):
     root = etree.Element('{%s}g' % namespace, id='ll-section-landscape')
     colors = {str(item.get('category') or ''): str(item.get('color') or '')
               for item in layout.get('architecturalColorLegend') or [] if isinstance(item, dict)}
+    labeled_parking_components = set()
     for area in layout.get('openAreas') or []:
         points = area.get('points') if isinstance(area, dict) else None
         if not isinstance(points, list) or len(points) < 3:
@@ -253,6 +254,11 @@ def _visual_plan_site_landscape_fragment(layout):
                     'stroke': '#07182C', 'stroke-width': '0.9',
                 })
         label_value = _visual_plan_site_short_label(area.get('label'))
+        component_id = str(area.get('componentId') or '')
+        if feature_type == 'parking' and component_id in labeled_parking_components:
+            label_value = ''
+        elif feature_type == 'parking':
+            labeled_parking_components.add(component_id)
         if label_value:
             label = etree.SubElement(root, '{%s}text' % namespace, {
                 'x': f'{center_x:g}', 'y': f'{center_y:g}', 'fill': '#07182C',
