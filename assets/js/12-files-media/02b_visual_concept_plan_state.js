@@ -217,10 +217,9 @@
           try { parsed = JSON.parse(text); } catch (error) { /* Keep ordinary text unchanged. */ }
         }
       }
-      if (key === 'survey_coordinates') {
-        // Draft form hydration rebuilds the editable table, so the same rows can
-        // arrive here as JSON text before save and as normalized rows after load.
-        // Compare the geometric facts, not formatting or provenance defaults.
+      if (key === 'survey_coordinates' || key === 'regulation_coordinates') {
+        // Draft hydration can turn either coordinate source from JSON text into
+        // normalized rows. Compare the geometric facts, not formatting or provenance.
         return visualConceptBoundaryPoints(parsed).map(point => ({
           parcel_id: point.parcel_id,
           point: point.point,

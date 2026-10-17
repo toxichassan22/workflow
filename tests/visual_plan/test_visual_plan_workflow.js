@@ -436,6 +436,49 @@ test('a saved approval survives numeric inputs hydrating from numbers to strings
   }
 });
 
+test('distribution checks and approval survive regulation coordinates hydrating from JSON', () => {
+  for (const conflicted of [false, true]) {
+    const context = fixture();
+    const modal = { style: {}, listeners: {}, setAttribute() {},
+      addEventListener(type, fn) { this.listeners[type] = fn; },
+      querySelector() { return { textContent: '' }; } };
+    context.document.createElement = () => modal;
+    context.document.body = { appendChild() {} };
+    context.markVisualConceptDirty = () => {};
+    context.renderVisualConceptPage = () => {};
+    const before = { regulation_coordinates: JSON.stringify([
+      { point: '1', eastings: '500000', northings: '2000000', source: 'regulation_table' },
+      { point: '2', eastings: '500020', northings: '2000000', source: 'regulation_table' },
+      { point: '3', eastings: '500020', northings: '2000020', source: 'regulation_table' },
+    ]) };
+    context.tenantProjectData = before;
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {
+      verification: { approved: true, canProceed: true },
+      boundary: { approved: true, points: [
+        { eastings: 1, northings: 1 }, { eastings: 2, northings: 1 }, { eastings: 2, northings: 2 }] },
+      distribution: { rows: [{ id: 'row_1', component: 'مكاتب' }], aiReviewed: true,
+        canProceed: !conflicted,
+        checks: [{ item: 'الارتداد', result: conflicted ? 'متعارض' : 'مطابق' }] },
+    } });
+    context.tenantVisualConceptState.plansWorkflow.sourceStamp = context.visualConceptPlanInputStamp(before);
+
+    const after = { regulation_coordinates: [
+      { point: 1, eastings: 500000, northings: 2000000, source: 'hydrated' },
+      { point: 2, eastings: 500020, northings: 2000000, source: 'hydrated' },
+      { point: 3, eastings: 500020, northings: 2000020, source: 'hydrated' },
+    ] };
+    context.syncVisualConceptPlanInputs(after);
+
+    assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.aiReviewed, true);
+    context.approveVisualConceptPlansDistribution();
+    if (conflicted) {
+      modal.listeners.click({ target: { closest: selector =>
+        selector === '[data-plans-risk-continue]' ? {} : null } });
+    }
+    assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.approved, true);
+  }
+});
+
 test('a changed parking plan invalidates the saved conflict review and approvals', () => {
   const context = fixture();
   const before = { financial_study_model: { inputs: { basementArea: 800 },
