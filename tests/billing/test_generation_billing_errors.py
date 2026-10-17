@@ -93,6 +93,34 @@ class GenerationBillingErrorTests(unittest.TestCase):
         self.assertEqual(err.get('http_status'), 402)
         self.assertEqual(err.get('message'), module._COMPANY_CREDIT_EXHAUSTED_MSG)
 
+    def test_market_summary_refusal_includes_configured_estimate(self):
+        module = self.application_module
+        usage_ctx = {
+            'billing_flow': 'market_summary',
+        }
+        with patch.object(module, '_ai_call_uses_tenant_key', return_value=True), \
+             patch.object(module.db, 'get_billing_flow_estimates',
+                          return_value={'market_summary': 1.0}), \
+             patch.object(module.db, 'usd_to_sar', return_value=3.75):
+            data = self._chat_call(
+                {'error': {'message': 'Insufficient credits'}}, 402,
+                usage_ctx=usage_ctx)
+        err = data.get('error') or {}
+        self.assertEqual(err.get('error_code'), 'INSUFFICIENT_CREDITS')
+        self.assertIn(module._COMPANY_CREDIT_EXHAUSTED_MSG, err.get('message') or '')
+        self.assertIn('1.00 دولار', err.get('message') or '')
+        self.assertIn('3.75 نقطة', err.get('message') or '')
+        self.assertEqual(err.get('estimated_required_usd'), 1.0)
+        self.assertEqual(err.get('estimated_required_sar'), 3.75)
+        with module.app.app_context():
+            response, status = module._ai_fatal_http_response(err)
+        body = response.get_json()
+        self.assertEqual(status, 402)
+        self.assertIn('1.00 دولار', body.get('error') or '')
+        self.assertIn('3.75 نقطة', body.get('error') or '')
+        self.assertEqual(body.get('estimated_required_usd'), 1.0)
+        self.assertEqual(body.get('estimated_required_sar'), 3.75)
+
     def test_unrelated_provider_error_is_not_normalized(self):
         data = self._chat_call({'error': {'message': 'model not found'}}, 404)
         err = data.get('error') or {}

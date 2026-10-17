@@ -473,6 +473,7 @@ class SummaryChatApiTests(unittest.TestCase):
         self.assertTrue(max_tokens and 1000 <= int(max_tokens) <= 8000, max_tokens)
         usage_ctx = captured['kwargs'].get('usage_ctx') or {}
         self.assertEqual(usage_ctx.get('tenant_id'), self.tenant)
+        self.assertEqual(usage_ctx.get('billing_flow'), 'market_summary')
         # The turn prompt carries the axis under discussion and the message.
         self.assertIn('النرجس', captured['prompt'])
         self.assertIn('حدّث أرقام العرض بالربع الأخير', captured['prompt'])

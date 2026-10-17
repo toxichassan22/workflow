@@ -659,6 +659,7 @@ def _run_market_summary(data, tenant_id=None, progress=None,
                 'failureReason': 'summary_scope_required'}
     report(10, 'جاري فحص مصادر السوق في جميع القطاعات — قد يستغرق دقائق...')
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
+    usage_ctx['billing_flow'] = 'market_summary'
     # Dispatch independent, geographically scoped browser tasks directly;
     # each researcher receives its assigned source domains from the full
     # catalog and opens only the pages needed for its evidence.

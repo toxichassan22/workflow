@@ -63,6 +63,28 @@ def _ai_call_uses_tenant_key(usage_ctx):
             return False
 
 
+def _billing_estimate_for_usage_ctx(usage_ctx):
+    """Return the configured preflight estimate for a provider call, if known."""
+    if not isinstance(usage_ctx, dict):
+        return None
+    flow_key = str(usage_ctx.get('billing_flow') or '').strip()
+    if not flow_key:
+        return None
+    try:
+        with _worker_app_context():
+            estimate_usd = float(
+                db.get_billing_flow_estimates().get(flow_key) or 0.0)
+            if estimate_usd <= 0:
+                return None
+            estimate_sar = float(db.usd_to_sar(estimate_usd))
+        return {
+            'estimated_required_usd': round(estimate_usd, 2),
+            'estimated_required_sar': round(estimate_sar, 2),
+        }
+    except Exception:
+        return None
+
+
 def _provider_credit_error_dict(error, status_code, usage_ctx=None):
     """Normalize a provider spend-capacity refusal into a fatal error dict.
 
@@ -84,14 +106,25 @@ def _provider_credit_error_dict(error, status_code, usage_ctx=None):
     if not (credit or disabled):
         return None
     refusal = {'fatal': True, 'provider_message': msg or combined}
+    estimate = _billing_estimate_for_usage_ctx(usage_ctx)
     if _ai_call_uses_tenant_key(usage_ctx):
-        refusal.update({'message': _COMPANY_CREDIT_EXHAUSTED_MSG,
+        message = _COMPANY_CREDIT_EXHAUSTED_MSG
+        if estimate:
+            message += (
+                f" تقدير النظام المبدئي لهذه العملية: "
+                f"{estimate['estimated_required_usd']:.2f} دولار "
+                f"(نحو {estimate['estimated_required_sar']:.2f} نقطة). "
+                'التكلفة الفعلية قد تختلف.'
+            )
+        refusal.update({'message': message,
                         'error_code': 'INSUFFICIENT_CREDITS',
                         'http_status': 402})
     else:
         refusal.update({'message': 'استُنفد رصيد خدمة الذكاء الاصطناعي لدى المزود — جارٍ معالجتها، أعد المحاولة لاحقًا',
                         'error_code': 'PROVIDER_CREDITS_EXHAUSTED',
                         'http_status': 503})
+    if estimate:
+        refusal.update(estimate)
     return refusal
 
 
@@ -136,11 +169,15 @@ def _ai_fatal_http_response(exc_or_response):
     if not isinstance(status, int):
         status = (402 if code in ('INSUFFICIENT_BALANCE', 'INSUFFICIENT_CREDITS')
                   else 403 if code == 'TRIAL_EXPIRED' else 503)
-    return jsonify({
+    body = {
         'success': False,
         'error': _client_safe_llm_error(err.get('message') or ''),
         'error_code': code or 'GENERATION_FAILED',
-    }), status
+    }
+    for key in ('estimated_required_usd', 'estimated_required_sar'):
+        if err.get(key) is not None:
+            body[key] = err[key]
+    return jsonify(body), status
 
 
 def _chat_affordable_tokens(response_or_text):

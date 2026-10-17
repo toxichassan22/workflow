@@ -546,7 +546,11 @@ def _require_billing_balance(flow_key):
     if balance < estimate_sar:
         return jsonify({
             'success': False,
-            'error': 'الرصيد غير كافٍ لتشغيل هذه العملية. اشحن رصيد الشركة ثم أعد المحاولة',
+            'error': (
+                'الرصيد غير كافٍ لتشغيل هذه العملية. اشحن رصيد الشركة ثم أعد المحاولة. '
+                f'التقدير المبدئي المطلوب: {estimate_sar:.2f} نقطة، '
+                f'والمتاح: {balance:.2f} نقطة.'
+            ),
             'error_code': 'INSUFFICIENT_BALANCE',
             'required_sar': round(estimate_sar, 2),
             'available_sar': round(balance, 2),

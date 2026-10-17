@@ -208,6 +208,16 @@ def _client_safe_llm_error(exc_or_text, fallback='تعذر تنفيذ الطلب
     the fallback instead of reaching the client."""
     text = str(exc_or_text or '').strip()
     if _is_company_credit_error(text):
+        estimate = re.search(
+            r'تقدير النظام المبدئي لهذه العملية:\s*([0-9]+(?:\.[0-9]+)?)\s*دولار\s*'
+            r'\(نحو\s*([0-9]+(?:\.[0-9]+)?)\s*نقطة\)\.\s*التكلفة الفعلية قد تختلف\.',
+            text)
+        if estimate and text.startswith(_COMPANY_CREDIT_EXHAUSTED_MSG):
+            return (
+                _COMPANY_CREDIT_EXHAUSTED_MSG
+                + f' تقدير النظام المبدئي لهذه العملية: {float(estimate.group(1)):.2f} دولار '
+                + f'(نحو {float(estimate.group(2)):.2f} نقطة). التكلفة الفعلية قد تختلف.'
+            )
         return _COMPANY_CREDIT_EXHAUSTED_MSG
     lowered = text.lower()
     if any(m in lowered for m in ('rate_limit', 'rate limit', 'rate-limited',

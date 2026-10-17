@@ -205,6 +205,7 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
+    usage_ctx['billing_flow'] = 'market_summary'
 
     # Phase A — discuss: one JSON answer with the reply, an optional research
     # request, and the ops the model proposes (displayed, never applied here).
@@ -370,6 +371,7 @@ def _execute_market_summary_consolidate(data, tenant_id=None, progress=None):
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
+    usage_ctx['billing_flow'] = 'market_summary'
     report(40, 'جاري إعادة توليد المخرجات المعلّمة...')
     prompt = market_study.build_summary_consolidate_prompt(state, stale_keys, offer_lang)
     res = call_text_chat(system_prompt, prompt, max_tokens=6000,

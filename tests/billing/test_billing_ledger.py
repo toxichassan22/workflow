@@ -439,6 +439,8 @@ class BillingLedgerTests(unittest.TestCase):
         body = response.get_json()
         self.assertFalse(body['success'])
         self.assertEqual(body['error_code'], 'INSUFFICIENT_BALANCE')
+        self.assertIn(f"{body['required_sar']:.2f} نقطة", body['error'])
+        self.assertIn(f"{body['available_sar']:.2f} نقطة", body['error'])
 
     def test_preflight_fails_closed_when_balance_lookup_errors(self):
         """ISS-037: an unreadable wallet is not a funded wallet — a DB error

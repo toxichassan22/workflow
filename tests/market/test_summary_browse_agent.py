@@ -286,11 +286,14 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         research = {'success': False, 'error': 'no pages',
                     'outcomes': [{'result': fatal}]}
         with self.app.app_context(), \
-                patch.object(module, '_run_market_summary_research', return_value=research):
+                patch.object(module, '_run_market_summary_research',
+                             return_value=research) as research_mock:
             result = module._run_market_summary({'city': 'جدة'}, tenant_id=None)
         self.assertFalse(result['success'])
         self.assertEqual(result['failureReason'], 'insufficient_credit')
         self.assertEqual(result['providerError'], 'رصيد غير كافٍ')
+        usage_ctx = research_mock.call_args.args[1]
+        self.assertEqual(usage_ctx.get('billing_flow'), 'market_summary')
 
     def test_summary_prompt_assigns_research_to_playwright_workers(self):
         prompt = market_study.build_summary_user_prompt(
