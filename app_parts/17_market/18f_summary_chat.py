@@ -252,11 +252,10 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
         # deadline bound the native search like every other market search.
         chat_pool = _new_evidence_pool()
         research_res = _browse_agent_call(
-            system_prompt, research_prompt, usage_ctx, model=chat_model,
+            system_prompt, research_prompt, usage_ctx, model=GEMINI_TEXT_MODEL,
             evidence_pool=chat_pool,
             deadline=time.time() + _SUMMARY_CHAT_JOB_TIME_BUDGET,
-            server_tools=_SUMMARY_NATIVE_SEARCH_TOOLS, local_tools=False,
-            tool_choice=_SUMMARY_NATIVE_TOOL_CHOICE,
+            local_tools=True, search_provider='searxng', search_budget=3,
             max_steps=_SUMMARY_CHAT_MAX_STEPS, max_tokens=8000,
             reasoning_effort='low',
             on_event=_market_agent_progress(report, 46, 68,

@@ -648,14 +648,13 @@ class SummaryChatApiTests(unittest.TestCase):
         self.assertTrue(result['success'], result)
         self.assertEqual(chat_mock.call_count, 1)
         self.assertEqual(len(browse_kwargs), 1)
-        # Phase B researches through native Google search with zero page
-        # opens — the same owner-ordered protocol as the summary main call.
-        self.assertEqual(browse_kwargs[0].get('server_tools'),
-                         [{"type": "openrouter:web_search", "engine": "native"}])
-        self.assertIs(browse_kwargs[0].get('local_tools'), False)
-        self.assertEqual(browse_kwargs[0].get('tool_choice'),
-                         {"type": "openrouter:web_search"})
-        self.assertNotIn('search_budget', browse_kwargs[0])
+        # Phase B uses the same local interactive browser and pinned SearXNG
+        # provider as the main market summary.
+        self.assertIs(browse_kwargs[0].get('local_tools'), True)
+        self.assertEqual(browse_kwargs[0].get('search_provider'), 'searxng')
+        self.assertEqual(browse_kwargs[0].get('search_budget'), 3)
+        self.assertNotIn('server_tools', browse_kwargs[0])
+        self.assertNotIn('tool_choice', browse_kwargs[0])
         self.assertEqual(browse_kwargs[0].get('max_steps'), 8)
         self.assertEqual(browse_kwargs[0].get('max_tokens'), 8000)
         self.assertTrue(result.get('searchPerformed'))

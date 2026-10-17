@@ -110,8 +110,10 @@ class SummaryChatPromptTests(unittest.TestCase):
         self.assertIn('طلب المكاتب جدة 2025', prompt)
         self.assertIn('إشغال المكاتب حي المشروع', prompt)
         self.assertIn('"sources_add"', prompt)         # research output shape
-        self.assertIn('بحث جوجل الأصلي', prompt)       # native search required
-        self.assertNotIn('افتح الصفحات', prompt)       # zero page opens here
+        self.assertIn('SearXNG', prompt)
+        self.assertIn('type_text', prompt)
+        self.assertIn('افتح صفحات النتائج', prompt)
+        self.assertNotIn('بحث جوجل الأصلي', prompt)
         self.assertIn('فترة البيانات', prompt)         # period lock restated
 
     def test_consolidate_prompt_regenerates_only_flagged_keys(self):

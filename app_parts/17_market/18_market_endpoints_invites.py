@@ -49,6 +49,9 @@ def _market_project_facts(data, tenant_id=None):
 
 def _prepare_market_payload(data, tenant_id=None):
     payload = dict(data or {})
+    project_data = payload.get('projectData') or payload.get('project_data')
+    if isinstance(project_data, dict) and not payload.get('city'):
+        payload['city'] = project_data.get('city') or project_data.get('City') or ''
     payload['dataPeriodLabel'] = _market_period_label(payload)
     payload['dataPeriodBounds'] = market_study.data_period_bounds(
         payload.get('dataPeriod') or payload.get('data_period'),
@@ -72,7 +75,10 @@ def _prepare_market_payload(data, tenant_id=None):
                        if 'comparisonTypes' in payload else payload.get('comparison_types'))
     payload['comparisonTypes'] = market_study.normalize_comparison_types(raw_comparisons)
     payload['summaryScope'] = market_study.normalize_summary_scope(
-        payload.get('summaryScope') or payload.get('summary_scope'))
+        payload.get('summaryScope') or payload.get('summary_scope'),
+        payload.get('city'))
+    payload['summaryLocalBenchmarks'] = market_study.build_summary_local_benchmarks(
+        payload)
     payload['projectFacts'] = _market_project_facts(data, tenant_id)
     return payload
 
@@ -184,7 +190,8 @@ def _market_agent_progress(report, lo, hi, label):
 
 
 def _run_market_source_plan(payload, offer_lang='ar', evidence_pool=None,
-                            session=None, deadline=None, report=None):
+                            session=None, deadline=None, report=None,
+                            market_wide=False):
     """Known-sources-first retrieval: the catalog's deep links (REGA datasets,
     sakani/ejar/stats, portal listing pages) feed the evidence pool before any
     model search runs. No-op until the retrieval-plan part lands in
@@ -196,7 +203,7 @@ def _run_market_source_plan(payload, offer_lang='ar', evidence_pool=None,
     if not callable(build) or not callable(run):
         return
     try:
-        plan = build(payload, offer_lang=offer_lang)
+        plan = build(payload, offer_lang=offer_lang, market_wide=market_wide)
     except Exception as exc:
         print(f'[MARKET STUDY] source plan build failed: {exc}')
         return
@@ -582,22 +589,6 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     }
 
 
-# The summary researches through provider-native search only (Google
-# grounding via the OpenRouter server tool — owner-ordered): the model asks
-# Google's own search inside the request and cites it, so no page is opened
-# by our browser and the datacenter bot-wall never comes into play.
-# Competitors and row verification stay on the self-hosted browse agent.
-_SUMMARY_NATIVE_SEARCH_TOOLS = [
-    {"type": "openrouter:web_search", "engine": "native"},
-]
-# Forced (not model-optional): the server tool alone lets the model answer
-# from memory, which failed twice as search_not_run. Naming the tool in
-# tool_choice compels at least one provider search per request.
-_SUMMARY_NATIVE_TOOL_CHOICE = {"type": _SUMMARY_NATIVE_SEARCH_TOOLS[0]["type"]}
-# The native call answers inside one request, but the loop cap stays as a
-# guard so a stalled model cannot spin rounds against the job deadline.
-_SUMMARY_MAX_STEPS = 16
-
 # The whole summary job — source plan plus the one wide browse call — spends
 # the same wall-clock minutes; env-overridable like _MARKET_JOB_TIME_BUDGET.
 try:
@@ -624,7 +615,7 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
     evidence_pool = _new_evidence_pool()
     _preload_failed_run_evidence(tenant_id, 'summary', data, evidence_pool)
     deadline = time.time() + _SUMMARY_JOB_TIME_BUDGET
-    session = _market_browser_session()
+    session = _market_browser_session(search_provider='searxng')
     try:
         result = _run_market_summary(
             data, tenant_id=tenant_id, progress=report,
@@ -654,42 +645,56 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         except Exception:
             tenant_id = None
     system_prompt = market_study.build_consultant_system_prompt(offer_lang=offer_lang)
+    system_prompt += ('\n\nحلل السوق في جميع القطاعات بصرف النظر عن فئة المشروع. '
+                      'استخدم نوع المشروع فقط لتقييمه ومحور المنافسة، وليس لتضييق بقية دراسة السوق.')
     training_context = (db.get_training_context(tenant_id, surface='content', offer_lang=offer_lang)
                         if tenant_id else '')
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         system_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
-    report(10, 'جاري فحص المصادر الأساسية وتحليل السوق والمنافسين بالبحث في الويب — قد يستغرق دقائق...')
+    if not payload['summaryScope'].get('cities'):
+        return {'success': False,
+                'error': 'حدد مدينة واحدة على الأقل لنطاق ملخص السوق.',
+                'failureReason': 'summary_scope_required'}
+    report(10, 'جاري فحص مصادر السوق في جميع القطاعات — قد يستغرق دقائق...')
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
-    # Native Google search inside the request itself: the model queries and
-    # cites provider search (AI-overview style) with zero page opens, so the
-    # reply's url_citation annotations — or provider grounding metadata — are
-    # the retrieved evidence. A transport failure, or a clean reply with
-    # neither, is an explicit search_not_run, never a silent memory answer.
-    # Known sources first: the catalog's deep links land in the shared pool
-    # before the model searches, so their pages still enrich the sources table
-    # and feed extracted evidence directly into the summary model prompt.
-    _run_market_source_plan(payload, offer_lang=offer_lang,
-                            evidence_pool=evidence_pool, session=session,
-                            deadline=deadline, report=report)
+    # Dispatch independent, geographically scoped browser tasks directly;
+    # each researcher receives its assigned source domains from the full
+    # catalog and opens only the pages needed for its evidence.
+    research = _run_market_summary_research(
+        payload, usage_ctx, evidence_pool, deadline, report=report,
+        offer_lang=offer_lang)
+    if not research.get('success'):
+        fatal = next((_ai_fatal_error_dict(item.get('result') or {})
+                      for item in research.get('outcomes') or []
+                      if _ai_fatal_error_dict(item.get('result') or {})), None)
+        provider_error = ((fatal or {}).get('message')
+                          or research.get('error')
+                          or 'no researcher opened evidence')
+        return {
+            'success': False,
+            'error': (provider_error if fatal else
+                      'تعذر فتح أدلة ويب لملخص السوق. لم يُستبدل النص الحالي.'),
+            'failureReason': 'insufficient_credit' if fatal else 'search_not_run',
+            'providerError': provider_error,
+            'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
+        }
     retrieved_evidence = market_study.format_retrieved_evidence_block(
         evidence_pool, offer_lang=offer_lang)
+    researcher_block = json.dumps(research.get('reports') or [],
+                                  ensure_ascii=False, indent=2, default=str)
+    evidence_block = '\n\n'.join(part for part in
+                                  (retrieved_evidence, researcher_block) if part)
     user_prompt = market_study.build_summary_user_prompt(
         payload, competitors, current_summary, current_sources=current_sources, current_swot=current_swot,
-        offer_lang=offer_lang, retrieved_evidence=retrieved_evidence,
+        offer_lang=offer_lang, retrieved_evidence=evidence_block,
     )
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         user_prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
-    res = _browse_agent_call(
-        system_prompt, user_prompt, usage_ctx,
-        evidence_pool=evidence_pool, deadline=deadline, session=session,
-        server_tools=_SUMMARY_NATIVE_SEARCH_TOOLS, local_tools=False,
-        tool_choice=_SUMMARY_NATIVE_TOOL_CHOICE,
-        max_steps=_SUMMARY_MAX_STEPS,
-        max_tokens=MARKET_STUDY_MAX_TOKENS, reasoning_effort='low',
-        on_event=_market_agent_progress(report, 24, 70,
-                                        'بحث الويب لملخص السوق'))
+    report(68, 'تجميع الأدلة وكتابة تحليل السوق الكامل')
+    res = _run_market_summary_aggregator(
+        system_prompt, user_prompt, usage_ctx, research, deadline=deadline)
     failed = res.get('error') is not None
     provider_error = _chat_error_message(res) if failed else ''
     if not failed and not _market_search_ran(res):

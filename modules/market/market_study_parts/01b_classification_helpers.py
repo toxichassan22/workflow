@@ -526,69 +526,86 @@ def resolve_competitor_radius_km(radius_value, custom_km=None):
     return number if number > 0 else DEFAULT_COMPETITOR_RADIUS_KM
 
 
-# Summary-scope modes: the market summary's own geographic frame, separate
-# from the competitors radius. 'distance' is the historical behaviour
-# (entered district + radius scope, single nearest-district substitute);
-# 'city' / 'district' cover an explicit user-entered place list instead.
-SUMMARY_SCOPE_MODES = ('distance', 'city', 'district')
-SUMMARY_SCOPE_MAX_PLACES = 12
+# Summary scope is independent of the competitors radius. Each city may
+# optionally list districts; an empty district list means the full city.
+SUMMARY_SCOPE_MAX_CITIES = 12
+SUMMARY_SCOPE_MAX_DISTRICTS_PER_CITY = 20
 
 
-def normalize_summary_scope(value):
-    """Cleaned {mode, distance, distance_custom_km, places} summary scope.
+def normalize_summary_scope(value, default_city=''):
+    """Return a bounded {cities:[{name, districts}]} summary scope.
 
-    Anything unrecognized falls back to the historical distance behaviour,
-    so old drafts without the field generate exactly as before. A listed
-    mode with an empty place list also falls back — a scope with no names
-    cannot bind any figure.
+    Legacy city/district place lists are accepted during migration. Old saved
+    drafts with no scope use their project city when the caller supplies it.
     """
-    scope = {'mode': 'distance', 'distance': '10',
-             'distance_custom_km': '', 'places': []}
-    if not isinstance(value, dict):
-        return scope
-    mode = _norm(value.get('mode'))
-    if mode in ('city', 'district'):
-        scope['mode'] = mode
-    distance = _norm(value.get('distance') or value.get('radius') or '')
-    if distance in ('3', '5', '10', 'city', 'custom'):
-        scope['distance'] = distance
-    custom_km = _norm(value.get('distance_custom_km')
-                      or value.get('distanceCustomKm')
-                      or value.get('custom_km') or '')
-    if custom_km:
-        scope['distance_custom_km'] = custom_km
-    raw_places = value.get('places')
-    if isinstance(raw_places, str):
-        raw_places = re.split(r'[,،\n;|]+', raw_places)
-    places = []
-    if isinstance(raw_places, (list, tuple)):
-        for item in raw_places:
-            name = _norm(item)
-            if name and name not in places:
-                places.append(name)
-            if len(places) >= SUMMARY_SCOPE_MAX_PLACES:
+    scope = {'cities': []}
+    raw_cities = value.get('cities') if isinstance(value, dict) else None
+    if isinstance(raw_cities, str):
+        raw_cities = re.split(r'[,،\n;|]+', raw_cities)
+    cities = []
+    seen_cities = set()
+
+    def add_city(name, districts=None):
+        name = _norm(name)
+        if not name or _fold_choice(name) in seen_cities:
+            return
+        seen_cities.add(_fold_choice(name))
+        clean_districts = []
+        if isinstance(districts, str):
+            districts = re.split(r'[,،\n;|]+', districts)
+        if isinstance(districts, (list, tuple)):
+            seen_districts = set()
+            for raw_district in districts:
+                district = _norm(raw_district)
+                folded = _fold_choice(district)
+                if district and folded not in seen_districts:
+                    seen_districts.add(folded)
+                    clean_districts.append(district)
+                if len(clean_districts) >= SUMMARY_SCOPE_MAX_DISTRICTS_PER_CITY:
+                    break
+        cities.append({'name': name, 'districts': clean_districts})
+
+    if isinstance(raw_cities, (list, tuple)):
+        for item in raw_cities:
+            if isinstance(item, dict):
+                add_city(item.get('name') or item.get('city'),
+                         item.get('districts'))
+            else:
+                add_city(item)
+            if len(cities) >= SUMMARY_SCOPE_MAX_CITIES:
                 break
-    scope['places'] = places
-    if scope['mode'] in ('city', 'district') and not places:
-        scope['mode'] = 'distance'
+
+    # Migrate the former flat places shape without reintroducing distance.
+    if not cities and isinstance(value, dict):
+        mode = _norm(value.get('mode'))
+        places = value.get('places')
+        if isinstance(places, str):
+            places = re.split(r'[,،\n;|]+', places)
+        if mode == 'city' and isinstance(places, (list, tuple)):
+            for name in places[:SUMMARY_SCOPE_MAX_CITIES]:
+                add_city(name)
+        elif mode == 'district' and isinstance(places, (list, tuple)):
+            legacy_city = _norm(value.get('city') or default_city)
+            if legacy_city:
+                add_city(legacy_city, places)
+
+    if not cities and _norm(default_city):
+        add_city(default_city)
+    scope['cities'] = cities
     return scope
 
 
 def summary_scope_label(scope):
-    """Short Arabic label of a normalized summary scope for prompts."""
-    scope = scope if isinstance(scope, dict) else {}
-    mode = scope.get('mode')
-    if mode == 'city':
-        return 'مدن محددة: ' + '، '.join(scope.get('places') or [])
-    if mode == 'district':
-        return 'أحياء محددة: ' + '، '.join(scope.get('places') or [])
-    distance = _norm(scope.get('distance')) or '10'
-    if distance == 'custom':
-        custom = _norm(scope.get('distance_custom_km'))
-        return f'نطاق {custom} كم'.strip() if custom else 'نطاق مخصص'
-    if distance == 'city':
-        return 'كامل المدينة'
-    return f'نطاق {distance} كم'
+    """Readable city and optional-district list for prompts and UI state."""
+    scope = normalize_summary_scope(scope)
+    if not scope['cities']:
+        return 'لا توجد مدينة محددة'
+    labels = []
+    for city in scope['cities']:
+        districts = city['districts']
+        labels.append(city['name'] + (f' — الأحياء: {"، ".join(districts)}'
+                                      if districts else ' — كامل المدينة'))
+    return '؛ '.join(labels)
 
 
 def parse_selected_list(value):

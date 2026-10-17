@@ -88,29 +88,10 @@
         <div class="market-block">
           <h4>الملخص التنفيذي لسوق المشروع</h4>
           <div style="margin-top:12px">
-            <div><label data-i18n="market.summary_scope">نطاق الملخص</label>
-              <select id="marketSummaryScopeMode">
-                <option value="distance" data-i18n="market.summary_scope_distance">بالمسافة</option>
-                <option value="city" data-i18n="market.summary_scope_city">بالمدينة</option>
-                <option value="district" data-i18n="market.summary_scope_district">بالحي</option>
-              </select>
-            </div>
-            <div id="marketSummaryScopeDistanceWrap" style="margin-top:8px">
-              <div><label data-i18n="market.summary_scope_distance_value">مسافة النطاق</label>
-                <select id="marketSummaryScopeDistance">
-                  <option value="3">3 كم</option>
-                  <option value="5">5 كم</option>
-                  <option value="10" selected>10 كم</option>
-                  <option value="city">كامل المدينة</option>
-                  <option value="custom">نطاق مخصص</option>
-                </select>
-              </div>
-              <div id="marketSummaryScopeCustomWrap" hidden><label>النطاق المخصص (كم)</label><input id="marketSummaryScopeCustomKm" type="number" min="1" step="0.1"></div>
-            </div>
-            <div id="marketSummaryScopePlacesWrap" style="margin-top:8px" hidden>
-              <div><label id="marketSummaryScopePlacesLabel" data-i18n="market.summary_scope_cities">المدن</label></div>
-              <div class="table-wrap"><table><tbody id="marketSummaryScopePlaces"></tbody></table></div>
-              <div class="market-actions" style="margin-top:8px"><button type="button" class="btn ghost" id="marketSummaryScopeAddBtn" data-i18n="market.summary_scope_add_city" onclick="addMarketSummaryScopePlace()">إضافة مدينة</button></div>
+            <div><label data-i18n="market.summary_scope">نطاق ملخص السوق</label></div>
+            <div id="marketSummaryScopeCities" style="margin-top:8px"></div>
+            <div class="market-actions" style="margin-top:8px">
+              <button type="button" class="btn ghost" id="marketSummaryScopeAddCityBtn" data-i18n="market.summary_scope_add_city" onclick="addMarketSummaryScopeCity()">إضافة مدينة</button>
             </div>
           </div>
           <div class="market-actions" style="margin-top:12px">
@@ -168,13 +149,13 @@
           '<textarea id="marketSwot_' + item.key + '" rows="4"></textarea></div>'
         ).join('');
       }
-      ['marketCompetitorScopeMode', 'marketDataPeriod', 'marketSummaryScopeMode', 'marketSummaryScopeDistance'].forEach(id => {
+      ['marketCompetitorScopeMode', 'marketDataPeriod'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', () => {
           updateMarketStudyFieldVisibility();
           persistMarketStudyFromDom();
         });
       });
-      ['marketSummaryScopeCustomKm', 'marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
+      ['marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
         .forEach(id => document.getElementById(id)?.addEventListener('input', persistMarketStudyFromDom));
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
         document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);

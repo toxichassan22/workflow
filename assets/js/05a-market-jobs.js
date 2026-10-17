@@ -222,18 +222,14 @@
       const fail = document.getElementById('marketSummaryFailure');
       if (btn) btn.disabled = true;
       if (fail) fail.textContent = '';
-      // The summary scope is mandatory: a listed mode (city/district) with
-      // no names cannot bind any figure, so the run is refused up front
-      // instead of failing minutes later on the server.
       const scopeCheck = (typeof collectMarketSummaryScope === 'function')
         ? collectMarketSummaryScope()
-        : { mode: 'distance', places: [] };
-      if ((scopeCheck.mode === 'city' || scopeCheck.mode === 'district')
-          && !(scopeCheck.places || []).length) {
-        const message = WFT('market.summary_scope_required', 'أضف مدينة أو حيًا واحدًا على الأقل لنطاق الملخص');
+        : { cities: [] };
+      if (!(scopeCheck.cities || []).some(city => String(city?.name || '').trim())) {
+        const message = WFT('market.summary_scope_required', 'يجب تحديد مدينة واحدة على الأقل لنطاق الملخص');
         if (fail) fail.textContent = message;
         toast(message);
-        document.getElementById('marketSummaryScopeAddBtn')?.focus();
+        document.getElementById('marketSummaryScopeAddCityBtn')?.focus();
         if (btn) btn.disabled = false;
         return;
       }

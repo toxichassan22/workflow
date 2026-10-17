@@ -377,7 +377,7 @@ def _project_input_block(payload):
         f"- مستوى المشروع: {payload.get('projectLevel') or payload.get('project_level') or 'غير مدخل'}",
         f"- الفئة المستهدفة: {audience_text or 'غير مدخل'}",
         f"- نطاق المنافسين (لجدول المنافسين فقط): {competitor_scope_text(payload)}",
-        f"- نطاق الملخص (الملزم لمحاور الملخص): {summary_scope_label(normalize_summary_scope(payload.get('summaryScope') or payload.get('summary_scope')))}",
+        f"- نطاق ملخص السوق: {summary_scope_label(normalize_summary_scope(payload.get('summaryScope') or payload.get('summary_scope'), payload.get('city')))}",
         f"- فترة البيانات المطلوبة: {payload.get('dataPeriodLabel') or payload.get('data_period') or 'غير مدخل'}",
         f"- فترة البيانات الملزمة (تاريخ نشر المصدر): {data_period_window_text(payload) or 'غير مقيدة'}",
     ]

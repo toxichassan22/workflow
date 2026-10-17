@@ -438,8 +438,9 @@ class ExecutorWiringTests(_MarketTestBase):
         fake_evidence = types.ModuleType('evidence')
         fake_evidence.EvidencePool = lambda: pool
 
-        def fake_build(payload, offer_lang='ar'):
+        def fake_build(payload, offer_lang='ar', market_wide=False):
             order.append('build_plan')
+            self.assertFalse(market_wide)
             return [{'purpose': 'x', 'url': 'https://rei.rega.gov.sa/ar',
                      'tier': 1, 'needs_browser': False, 'label': 'مؤشرات'}]
 

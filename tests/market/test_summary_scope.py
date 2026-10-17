@@ -1,18 +1,4 @@
-"""Summary scope: the market summary's own geographic frame.
-
-The summary used to inherit exactly one frame — the entered district plus the
-competitors radius, with a single nearest-district substitute. It now carries
-its own ``summary_scope`` setting, independent of the competitors table:
-
-- ``distance`` (default): the historical behaviour, byte for byte — old
-  drafts without the field generate exactly as before.
-- ``city`` / ``district``: the analysis binds to a user-entered place list
-  instead, with the same listed-only discipline and no invented substitutes.
-
-Run like every other suite, one suite per process::
-
-    python -m unittest tests.market.test_summary_scope
-"""
+"""Market summary geography, scope rules and client controls."""
 
 import os
 import sys
@@ -31,175 +17,105 @@ import market_study  # noqa: E402
 
 
 def read_frontend_text(order):
-    """The full client source: shell + styles + scripts in load order."""
     parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
-    for _css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
-        parts.append(_css.read_text(encoding='utf-8'))
-    for name in order:
-        parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+    parts.extend(path.read_text(encoding='utf-8')
+                 for path in sorted((ROOT / 'assets' / 'css').rglob('*.css')))
+    parts.extend((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8')
+                 for name in order)
     return '\n'.join(parts)
 
 
 class SummaryScopeModelTests(unittest.TestCase):
 
-    def test_absent_scope_is_historical_distance(self):
-        scope = market_study.normalize_summary_scope(None)
-        self.assertEqual(scope['mode'], 'distance')
-        self.assertEqual(scope['distance'], '10')
-        self.assertEqual(scope['places'], [])
-
-    def test_unknown_mode_falls_back_to_distance(self):
-        scope = market_study.normalize_summary_scope(
-            {'mode': 'country', 'places': ['الرياض']})
-        self.assertEqual(scope['mode'], 'distance')
-
-    def test_listed_mode_keeps_clean_places(self):
+    def test_scope_canonical_shape_supports_whole_city_and_optional_districts(self):
         scope = market_study.normalize_summary_scope({
-            'mode': 'city', 'places': [' جدة ', '', 'مكة', 'جدة']})
-        self.assertEqual(scope['mode'], 'city')
-        self.assertEqual(scope['places'], ['جدة', 'مكة'])
+            'cities': [
+                {'name': ' جدة ', 'districts': ['النرجس', '', 'الياسمين', 'النرجس']},
+                {'name': 'جدة', 'districts': ['حي آخر']},
+                {'name': 'مكة', 'districts': []},
+            ]})
+        self.assertEqual(scope, {'cities': [
+            {'name': 'جدة', 'districts': ['النرجس', 'الياسمين']},
+            {'name': 'مكة', 'districts': []},
+        ]})
 
-    def test_listed_mode_without_names_falls_back(self):
-        # A scope with no names cannot bind any figure — behave as before.
-        scope = market_study.normalize_summary_scope(
-            {'mode': 'district', 'places': []})
-        self.assertEqual(scope['mode'], 'distance')
+    def test_old_draft_uses_project_city_and_never_restores_distance(self):
+        self.assertEqual(market_study.normalize_summary_scope(None, 'جدة'),
+                         {'cities': [{'name': 'جدة', 'districts': []}]})
+        self.assertEqual(market_study.normalize_summary_scope(
+            {'mode': 'distance', 'distance': '10'}, 'جدة'),
+            {'cities': [{'name': 'جدة', 'districts': []}]})
 
-    def test_places_cap_and_string_shape(self):
-        scope = market_study.normalize_summary_scope(
-            {'mode': 'district',
-             'places': 'النرجس، الياسمين\nالعليا'})
-        self.assertEqual(scope['places'], ['النرجس', 'الياسمين', 'العليا'])
-        many = market_study.normalize_summary_scope(
-            {'mode': 'city', 'places': [f'مدينة{i}' for i in range(30)]})
-        self.assertEqual(len(many['places']),
-                         market_study.SUMMARY_SCOPE_MAX_PLACES)
+    def test_legacy_city_and_district_shapes_migrate_to_cities(self):
+        self.assertEqual(market_study.normalize_summary_scope(
+            {'mode': 'city', 'places': ['جدة', 'مكة']}),
+            {'cities': [{'name': 'جدة', 'districts': []},
+                        {'name': 'مكة', 'districts': []}]})
+        self.assertEqual(market_study.normalize_summary_scope(
+            {'mode': 'district', 'places': ['النرجس', 'الياسمين']}, 'جدة'),
+            {'cities': [{'name': 'جدة', 'districts': ['النرجس', 'الياسمين']}]})
 
-    def test_distance_values_mirror_radius_options(self):
-        scope = market_study.normalize_summary_scope(
-            {'mode': 'distance', 'distance': 'custom',
-             'distance_custom_km': '7'})
-        self.assertEqual(scope['distance'], 'custom')
-        self.assertEqual(scope['distance_custom_km'], '7')
-        scope = market_study.normalize_summary_scope(
-            {'mode': 'distance', 'distance': 'bogus'})
-        self.assertEqual(scope['distance'], '10')
+    def test_scope_caps_city_and_district_rows(self):
+        many = market_study.normalize_summary_scope({
+            'cities': [{'name': f'مدينة{i}', 'districts': [f'حي{n}' for n in range(30)]}
+                       for i in range(30)]})
+        self.assertEqual(len(many['cities']), market_study.SUMMARY_SCOPE_MAX_CITIES)
+        self.assertEqual(len(many['cities'][0]['districts']),
+                         market_study.SUMMARY_SCOPE_MAX_DISTRICTS_PER_CITY)
 
 
 class SummaryScopePromptTests(unittest.TestCase):
 
-    def test_default_prompt_keeps_the_single_neighbour_rule(self):
-        prompt = market_study.build_summary_user_prompt({}, [])
-        self.assertIn('حيين مجاورين مختلفين ممنوع', prompt)
-        self.assertIn('المفاتيح الإلزامية لمحاور summary', prompt)
+    def test_city_scope_has_full_city_and_optional_district_rules(self):
+        block = market_study._summary_scope_block({
+            'summaryScope': {'cities': [
+                {'name': 'جدة', 'districts': ['النرجس', 'الياسمين']},
+                {'name': 'مكة', 'districts': []},
+            ]}})
+        self.assertIn('جدة', block)
+        self.assertIn('النرجس', block)
+        self.assertIn('مكة: كامل المدينة', block)
+        self.assertIn('city_position يغطي المدينة كاملة دائمًا', block)
+        self.assertIn('sector_performance وsupply وdemand', block)
+        self.assertIn('نطاق المنافسين يخص جدول المنافسين فقط', block)
+        self.assertNotIn('كم', block)
 
-    def test_city_scope_names_every_city_and_forbids_the_rest(self):
+    def test_market_prompt_is_market_wide_and_evidence_only(self):
         prompt = market_study.build_summary_user_prompt(
-            {'summaryScope': {'mode': 'city', 'places': ['جدة', 'مكة']}}, [])
-        self.assertIn('جدة', prompt)
-        self.assertIn('مكة', prompt)
-        self.assertIn('غير مدخلة', prompt)
+            {'city': 'جدة', 'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
+             'projectType': 'سكني'}, [])
+        self.assertIn('حلل السوق كله عبر السكني والتجاري والصناعي واللوجستي والفندقي', prompt)
+        self.assertIn('لا تبحث الآن ولا تستخدم معرفتك السابقة', prompt)
+        self.assertIn('المنافسون، لمحور competition فقط', prompt)
+        self.assertNotIn('بحث جوجل الأصلي', prompt)
         self.assertNotIn('حيين مجاورين مختلفين ممنوع', prompt)
 
-    def test_district_scope_names_every_district(self):
-        prompt = market_study.build_summary_user_prompt(
-            {'summary_scope': {'mode': 'district',
-                               'places': ['النرجس', 'الياسمين']}}, [])
-        self.assertIn('النرجس', prompt)
-        self.assertIn('الياسمين', prompt)
-        self.assertNotIn('البديل الأقرب الوحيد', prompt)
-
-    def test_listed_scope_english_variant(self):
-        prompt = market_study.build_summary_user_prompt(
-            {'summaryScope': {'mode': 'city', 'places': ['Jeddah']}},
-            [], offer_lang='en')
-        self.assertIn('Jeddah', prompt)
-        self.assertIn('unlisted', prompt)
-
-    def test_research_prompt_carries_the_listed_scope(self):
-        prompt = market_study.build_summary_chat_research_prompt(
-            {'city': 'جدة',
-             'summaryScope': {'mode': 'district', 'places': ['النرجس']}},
-            'demand', 'ابحث عن الطلب', [], {}, [])
-        self.assertIn('النرجس', prompt)
-        self.assertIn('بحث جوجل الأصلي', prompt)
-
-    def test_distance_scope_binds_to_own_distance_not_competitors(self):
-        # Regression: the distance scope used to point at the competitors
-        # radius, so a 3 km summary with a 10 km competitor radius still
-        # analyzed 10 km. It must bind to its own distance instead.
-        payload = {
-            'summaryScope': {'mode': 'distance', 'distance': '3'},
-            'resolvedRadiusKm': 10,
-            'competitorRadiusLabel': '10 km',
-        }
-        block = market_study._summary_scope_block(payload)
-        self.assertIn('نطاق 3 كم', block)
-        self.assertIn('نطاق الملخص', block)
-        self.assertIn('جدول المنافسين فقط', block)
-        self.assertNotIn('نطاق المنافسين المحدد فيها', block)
-        self.assertIn('حيين مجاورين مختلفين ممنوع', block)
-
-    def test_distance_scope_english_binds_to_own_distance(self):
-        payload = {
-            'summaryScope': {'mode': 'distance', 'distance': '5'},
-            'resolvedRadiusKm': 10,
-            'competitorRadiusLabel': '10 km',
-        }
-        block = market_study._summary_scope_block(payload, 'en')
-        self.assertIn('summary scope', block.lower())
-        self.assertIn('competitors table only', block)
-        self.assertNotIn('competitor scope stated there', block)
-
-    def test_project_block_shows_both_scopes_separately(self):
-        # The project facts must carry the two frames side by side so the
-        # model never reads the competitors line as the summary frame.
-        payload = {
-            'summaryScope': {'mode': 'distance', 'distance': '3'},
-            'resolvedRadiusKm': 10,
-            'competitorRadiusLabel': '10 km',
-        }
-        block = market_study._project_input_block(payload)
-        self.assertIn('نطاق المنافسين (لجدول المنافسين فقط)', block)
-        self.assertIn('نطاق الملخص (الملزم لمحاور الملخص)', block)
-        self.assertIn('نطاق 3 كم', block)
-
-    def test_city_scope_binds_market_definition_to_listed_cities(self):
-        # Regression: with scope جدة+الرياض the model wrote market_definition
-        # as "حي الأندلس ضمن نطاق المنافسين 3 كم" instead of the two cities.
-        payload = {
-            'city': 'جدة',
-            'district': 'الأندلس',
-            'summaryScope': {'mode': 'city', 'places': ['جدة', 'الرياض']},
-            'resolvedRadiusKm': 3,
-            'competitorRadiusLabel': '3 km',
-        }
-        block = market_study._summary_scope_block(payload)
-        self.assertIn('جدة', block)
-        self.assertIn('الرياض', block)
-        self.assertIn('تعريف السوق', block)
-        self.assertIn('ولا تذكر نطاق المنافسين', block)
-        prompt = market_study.build_summary_user_prompt(payload, [])
-        self.assertIn('جدة', prompt)
-        self.assertIn('الرياض', prompt)
-
-    def test_city_scope_english_binds_market_definition(self):
+    def test_english_scope_and_research_prompt(self):
         block = market_study._summary_scope_block(
-            {'summaryScope': {'mode': 'city', 'places': ['Jeddah', 'Riyadh']}},
-            'en')
+            {'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': ['Al Narjis']}]}}, 'en')
         self.assertIn('Jeddah', block)
-        self.assertIn('Riyadh', block)
-        self.assertIn('market_definition', block)
+        self.assertIn('city_position always covers the full city', block)
+        prompt = market_study.build_summary_user_prompt(
+            {'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': []}]}}, [], offer_lang='en')
+        self.assertIn('regardless of the client project type', prompt)
+        self.assertNotIn('native Google search', prompt)
 
-    def test_distance_scope_binds_market_definition_to_summary_distance(self):
-        payload = {
-            'summaryScope': {'mode': 'distance', 'distance': '3'},
-            'resolvedRadiusKm': 10,
-            'competitorRadiusLabel': '10 km',
-        }
-        block = market_study._summary_scope_block(payload)
-        self.assertIn('تعريف السوق', block)
-        self.assertIn('ولا تذكر نطاق المنافسين كنطاق السوق', block)
+    def test_chat_research_prompt_uses_browser_search_and_city_scope(self):
+        prompt = market_study.build_summary_chat_research_prompt(
+            {'city': 'جدة', 'summaryScope': {'cities': [
+                {'name': 'جدة', 'districts': ['النرجس']}]}},
+            'demand', 'ابحث عن الطلب', [], {}, ['طلب الإيجار'])
+        self.assertIn('SearXNG', prompt)
+        self.assertIn('type_text', prompt)
+        self.assertIn('النرجس', prompt)
+        self.assertNotIn('بحث جوجل الأصلي', prompt)
+
+    def test_project_brief_labels_summary_city_scope(self):
+        block = market_study._project_input_block({
+            'city': 'جدة', 'summaryScope': {
+                'cities': [{'name': 'جدة', 'districts': ['النرجس']}]}})
+        self.assertIn('نطاق ملخص السوق: جدة — الأحياء: النرجس', block)
+        self.assertIn('نطاق المنافسين (لجدول المنافسين فقط)', block)
 
 
 class SummaryScopePayloadTests(unittest.TestCase):
@@ -219,20 +135,21 @@ class SummaryScopePayloadTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp_dir.cleanup()
 
-    def test_payload_normalizes_the_summary_scope(self):
-        module = self.application_module
-        payload = module._prepare_market_payload(
-            {'projectData': {'city': 'جدة'},
-             'summaryScope': {'mode': 'city', 'places': ['جدة', 'مكة']}},
-            tenant_id=None)
-        self.assertEqual(payload['summaryScope']['mode'], 'city')
-        self.assertEqual(payload['summaryScope']['places'], ['جدة', 'مكة'])
+    def test_payload_normalizes_scope_and_reads_project_city(self):
+        payload = self.application_module._prepare_market_payload({
+            'projectData': {'city': 'جدة'},
+            'summaryScope': {'cities': [{'name': 'جدة', 'districts': ['النرجس']}]},
+        }, tenant_id=None)
+        self.assertEqual(payload['summaryScope']['cities'], [
+            {'name': 'جدة', 'districts': ['النرجس']}])
+        self.assertEqual(payload['city'], 'جدة')
+        self.assertIn('summaryLocalBenchmarks', payload)
 
-    def test_payload_without_scope_stays_historical(self):
-        module = self.application_module
-        payload = module._prepare_market_payload(
+    def test_payload_without_scope_defaults_to_project_city(self):
+        payload = self.application_module._prepare_market_payload(
             {'projectData': {'city': 'جدة'}}, tenant_id=None)
-        self.assertEqual(payload['summaryScope']['mode'], 'distance')
+        self.assertEqual(payload['summaryScope'], {
+            'cities': [{'name': 'جدة', 'districts': []}]})
 
 
 class SummaryScopeFrontendTests(unittest.TestCase):
@@ -242,53 +159,35 @@ class SummaryScopeFrontendTests(unittest.TestCase):
         cls.temp_dir = tempfile.TemporaryDirectory()
         db.DB_PATH = os.path.join(cls.temp_dir.name, 'summary-scope-fe.db')
         import app as application_module
-        cls.application_module = application_module
         cls.frontend = read_frontend_text(application_module.FRONTEND_JS_ORDER)
 
     @classmethod
     def tearDownClass(cls):
         cls.temp_dir.cleanup()
 
-    def test_scope_controls_exist_and_persist(self):
+    def test_scope_controls_carry_city_and_optional_districts_without_distance(self):
         text = self.frontend
-        self.assertIn('marketSummaryScopeMode', text)
-        self.assertIn('marketSummaryScopeDistance', text)
-        self.assertIn('marketSummaryScopePlaces', text)
+        self.assertIn('marketSummaryScopeCities', text)
+        self.assertIn('data-summary-district-name', text)
+        self.assertIn('addMarketSummaryScopeDistrict', text)
         self.assertIn('summary_scope', text)
-        self.assertIn('addMarketSummaryScopePlace', text)
+        self.assertIn('addMarketSummaryScopeCity', text)
+        self.assertNotIn('marketSummaryScopeDistance', text)
+        self.assertNotIn('marketSummaryScopeMode', text)
 
-    def test_scope_controls_live_above_the_summary(self):
-        # Owner rule: the scope picker belongs to the executive-summary
-        # block, not to the competitors scope block at the top.
+    def test_scope_picker_is_inside_market_tab(self):
         text = self.frontend
-        scope_at = text.index('id="marketSummaryScopeMode"')
-        summary_at = text.index('الملخص التنفيذي لسوق المشروع')
+        market_panel = text.index('id="marketMarketPanel" data-market-study-panel="market"')
+        scope_at = text.index('id="marketSummaryScopeCities"')
         generate_at = text.index('marketGenerateSummaryBtn')
-        competitors_at = text.index('marketCompetitorScopeMode')
-        self.assertGreater(scope_at, summary_at)
-        self.assertLess(scope_at, generate_at)
-        self.assertGreater(scope_at, competitors_at)
-
-    def test_market_study_splits_competitors_and_summary_tabs(self):
-        text = self.frontend
-        competitor_panel = text.index(
-            'id="marketCompetitorsPanel" data-market-study-panel="competitors"')
-        market_panel = text.index(
-            'id="marketMarketPanel" data-market-study-panel="market"')
-        table_at = text.index('id="marketCompetitorsTable"')
-        scope_at = text.index('id="marketSummaryScopeMode"')
-        self.assertIn('data-market-study-tab="competitors"', text)
-        self.assertIn('data-market-study-tab="market"', text)
-        self.assertGreater(table_at, competitor_panel)
-        self.assertLess(table_at, market_panel)
         self.assertGreater(scope_at, market_panel)
+        self.assertLess(scope_at, generate_at)
 
-    def test_summary_generation_refuses_an_empty_listed_scope(self):
-        # A city/district mode with no names cannot bind any figure — the
-        # run is refused in the browser before any request is sent.
+    def test_scope_validation_requires_at_least_one_named_city(self):
         text = self.frontend
         self.assertIn('market.summary_scope_required', text)
-        self.assertIn('collectMarketSummaryScope', text)
+        self.assertIn('scopeCheck.cities', text)
+        self.assertIn('marketSummaryScopeAddCityBtn', text)
 
 
 if __name__ == '__main__':

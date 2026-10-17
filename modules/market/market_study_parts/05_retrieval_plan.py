@@ -239,7 +239,7 @@ def _listing_urls(kinds, ops, city):
                    f'aqar.fm — {cat} {op} — {city}')
 
 
-def build_source_plan(payload, offer_lang='ar'):
+def build_source_plan(payload, offer_lang='ar', market_wide=False):
     """Ordered [{purpose, url, tier, needs_browser, label}] fetch plan.
 
     Known sources first: the portal dataset pages that actually expose the
@@ -284,7 +284,7 @@ def build_source_plan(payload, offer_lang='ar'):
 
     # 2) Catalog deep links: the universal priority list plus the lists of
     #    this project's kinds (mixed-use draws on every component's list).
-    kinds = _payload_source_kinds(payload)
+    kinds = list(TYPE_SOURCE_PRIORITY) if market_wide else _payload_source_kinds(payload)
     lines = [line for tier_lines in SOURCE_PRIORITY.values() for line in tier_lines]
     for kind in kinds:
         lines.extend(TYPE_SOURCE_PRIORITY.get(kind) or [])
@@ -305,12 +305,22 @@ def build_source_plan(payload, offer_lang='ar'):
     explicit_scope = bool(normalize_comparison_types(
         payload.get('comparisonTypes') if 'comparisonTypes' in payload
         else payload.get('comparison_types')))
-    if not ops and not explicit_scope:
+    if market_wide:
         ops = {'بيع', 'إيجار'}
-    city = _norm(payload.get('city'))
-    if city:
+        kinds = list(TYPE_SOURCE_PRIORITY)
+    elif not ops and not explicit_scope:
+        ops = {'بيع', 'إيجار'}
+    if market_wide:
+        market_scope = normalize_summary_scope(
+            payload.get('summaryScope') or payload.get('summary_scope'),
+            payload.get('city'))
+        cities = [item['name'] for item in market_scope['cities']]
+    else:
+        city = _norm(payload.get('city'))
+        cities = [city] if city else []
+    for city in cities:
         _add(f'https://rei.rega.gov.sa/ar/cities/{quote(city)}', 'dataset',
-             label='المؤشرات العقارية — صفحة المدينة', needs_browser=True)
+             label=f'المؤشرات العقارية — صفحة المدينة — {city}', needs_browser=True)
         for url, label in _listing_urls(kinds, ops, city):
             _add(url, 'listing', label=label, needs_browser=True)
 
