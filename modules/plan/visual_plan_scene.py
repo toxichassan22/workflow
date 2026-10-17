@@ -657,12 +657,14 @@ def fallback_scene(contract, program, version=1):
                     continue
             if polygon is None:
                 if kind == 'building':
-                    largest_free = max(((right - left) * (top - bottom)
-                                        for _index, left, bottom, right, top in free_spaces), default=0)
+                    # Remaining buildable area is the envelope minus footprints already placed.
+                    # Parcel boxes in free_spaces include setback strips, so they are not used.
+                    remaining = max(0.0, sum(abs(signed_area(envelope)) for envelope in envelopes)
+                                    - sum(abs(signed_area(placed_polygon)) for placed_polygon in occupied))
                     label = item.get('label') or item.get('name') or item['id']
                     failure = PlanGeometryError(
                         f'المبنى «{label}» ({area:g} م²) لا تتسع داخل أي جزء متبقٍ من منطقة البناء '
-                        f'بعد الارتدادات المسجلة (أكبر جزء متبقٍ ~{largest_free:g} م²).',
+                        f'بعد الارتدادات المسجلة (المساحة المتبقية فيها ~{remaining:g} م²).',
                         'PLANS_SETBACK_CONFLICT')
                 else:
                     label = item.get('label') or item.get('name') or item['id']

@@ -1,3 +1,4 @@
+import re
 import unittest
 import math
 from unittest.mock import patch
@@ -228,6 +229,16 @@ class VisualPlanSceneTests(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn('Building 1', message)
         self.assertNotIn('1000', message)
+
+    def test_fallback_scene_reports_remaining_buildable_area_inside_the_envelope(self):
+        # The 40x30 parcel with 3-5 m setbacks leaves a 32x24 = 768 m2 envelope.
+        # Nothing is placed before the 800 m2 building fails, so the whole envelope remains.
+        contract = _contract()
+        with self.assertRaises(PlanGeometryError) as caught:
+            fallback_scene(contract, _program(_building(1, 800), _building(2, 200)))
+        match = re.search(r'~([0-9.]+) \u0645\u00b2\)\.$', str(caught.exception))
+        self.assertIsNotNone(match)
+        self.assertAlmostEqual(float(match.group(1)), 768, places=3)
 
     def test_context_rebase_revalidates_geometry_against_new_setbacks(self):
         program = _program(_building(1, 200))
