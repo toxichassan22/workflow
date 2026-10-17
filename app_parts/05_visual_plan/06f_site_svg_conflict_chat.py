@@ -39,16 +39,34 @@ def _visual_plan_site_conflict_summary(facts):
         failed_area = visual_plan_geometry.finite_number(failed_item.get('areaSqm'))
         occupied = facts.get('requiredFootprintTotalSqm')
         parcel_area = facts.get('parcelAreaSqm') or facts.get('landAreaSqm')
-        parts = [
-            f'سبب توقف المخطط أن المساحة المعتمدة «{failed_label}» لا تتسع داخل حدود الأرض مع البصمات المسجلة.'
-        ]
-        if failed_area is not None:
-            parts.append(f'مساحة «{failed_label}» المسجلة {_visual_plan_site_area_text(failed_area)} م².')
+        parts = [f'فشل البحث الهندسي الحالي في إيجاد موضع لـ«{failed_label}» مع التوزيع الذي جرّبه.']
+        available = visual_plan_geometry.finite_number(facts.get('availableAreaBeforeFailingSqm'))
+        surplus = visual_plan_geometry.finite_number(facts.get('aggregateAreaSurplusSqm'))
+        if facts.get('aggregateAreaSufficient') and available is not None and surplus is not None:
+            parts.append(
+                f'حسابيًا، يتبقى بعد البصمات والعناصر الأخرى {_visual_plan_site_area_text(available)} م²، '
+                f'مقابل {_visual_plan_site_area_text(failed_area)} م² لـ«{failed_label}»، '
+                f'أي فائض {_visual_plan_site_area_text(surplus)} م².')
+            parts.append(
+                'إذًا لا يظهر عجز في مجموع المساحات. مسار التوزيع الاحتياطي يضع المباني أولًا ثم يبحث '
+                'عن أشكال مستطيلة محدودة للمساحات؛ لا يعيد ترتيب المباني ولا يختبر كل الترتيبات الممكنة، '
+                'لذلك فشل البحث لا يثبت استحالة وجود توزيع صالح.')
+        else:
+            if failed_area is not None:
+                parts.append(f'مساحة «{failed_label}» المسجلة {_visual_plan_site_area_text(failed_area)} م².')
+            if available is not None:
+                parts.append(f'المتاح حسابيًا قبل هذه المساحة {_visual_plan_site_area_text(available)} م².')
+            parts.append('نحتاج مراجعة المساحات أو إعادة توزيع المواضع قبل اعتبار ذلك عجزًا هندسيًا مؤكدًا.')
         if occupied is not None:
             parts.append(f'إجمالي بصمات المباني المسجلة {_visual_plan_site_area_text(occupied)} م².')
         if parcel_area is not None:
-            parts.append(f'مساحة الأرض المسجلة {_visual_plan_site_area_text(parcel_area)} م².')
-        parts.append('نحتاج تحديد ما إذا كانت مساحة العنصر أو بصمات المباني أو موضع توزيع المساحة يحتاج مراجعة.')
+            parts.append(f'مساحة حدود الإحداثيات المستخدمة في الفحص {_visual_plan_site_area_text(parcel_area)} م².')
+        land_area = visual_plan_geometry.finite_number(facts.get('landAreaSqm'))
+        if (parcel_area is not None and land_area is not None
+                and abs(parcel_area - land_area) > 0.5):
+            parts.append(
+                f'مساحة الأرض المسجلة {_visual_plan_site_area_text(land_area)} م²؛ '
+                f'يوجد فرق {_visual_plan_site_area_text(abs(parcel_area - land_area))} م² عن مساحة الحدود.')
         return ' '.join(parts)
 
     land = facts.get('landAreaSqm')
@@ -236,11 +254,27 @@ def _visual_plan_site_conflict_interview(data, error):
         'financialComponentInputs': component_inputs[:20],
     }
     if is_site_area_conflict:
+        failing_site_area = (visual_plan_geometry.finite_number(failing_site_item.get('areaSqm'))
+                             if isinstance(failing_site_item, dict) else None)
+        other_site_area = sum(
+            item.get('areaSqm') or 0 for item in site_items
+            if not failing_site_item or item.get('id') != failing_site_item.get('id'))
+        available_area_before_failing = (parcel_area - required - other_site_area
+                                         if parcel_area is not None else None)
+        area_surplus = (available_area_before_failing - failing_site_area
+                        if available_area_before_failing is not None
+                        and failing_site_area is not None else None)
         facts.update({
             'requiredSiteItems': site_items[:20],
             'requiredSiteAreaTotalSqm': round(sum(item.get('areaSqm') or 0 for item in site_items), 2),
             'failingSiteItem': failing_site_item,
             'parcelAreaSqm': round(parcel_area, 2) if parcel_area is not None else None,
+            'otherSiteAreaTotalSqm': round(other_site_area, 2),
+            'availableAreaBeforeFailingSqm': (round(available_area_before_failing, 2)
+                                              if available_area_before_failing is not None else None),
+            'aggregateAreaSurplusSqm': round(area_surplus, 2) if area_surplus is not None else None,
+            'aggregateAreaSufficient': area_surplus is not None and area_surplus >= -0.5,
+            'placementSearchExhaustive': False,
         })
     state = _visual_plan_site_state(data, signature)
     message = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
@@ -253,15 +287,18 @@ def _visual_plan_site_conflict_interview(data, error):
     if is_site_area_conflict:
         system_prompt = (
             'You are the site-planning assistant continuing a client conversation in Arabic. '
-            'The approved site area named in siteAreaConflict.failingSiteItem cannot be placed inside '
-            'the surveyed land together with the recorded building footprints. Use only the supplied '
-            'facts and conversation history. Explain the specific conflict, answer the latest client '
-            'message, then ask one focused question about whether to review the approved site-area value, '
-            'the building footprints, or the placement strategy. Do not claim that total-area subtraction '
-            'proves a shape will fit. Do not change or approve any project input, survey geometry, or '
-            'approved distribution. Never repeat a generic coverage-limit explanation. Do not claim the '
-            'conflict is resolved, do not set ready, and do not generate a drawing. Always return ready=false '
-            'and generateRequested=false. Return JSON only: {"ready":false,"generateRequested":false,'
+            'The deterministic fallback did not find a placement for the approved site area. It places '
+            'buildings first and tests a limited set of rectangular placements; it does not rearrange '
+            'buildings or exhaustively search every possible geometry. Use only the supplied facts and '
+            'conversation history. If aggregateAreaSufficient is true, explicitly say that the total area '
+            'arithmetic is sufficient by the supplied surplus and that this search failure does not prove '
+            'a valid arrangement is impossible. Do not claim the remaining spaces are fragmented unless '
+            'the supplied scene geometry proves it. Answer the latest client message and ask one focused '
+            'question about keeping the recorded areas while reconsidering placement. Do not change or '
+            'approve any project input, survey geometry, or approved distribution. Never repeat a generic '
+            'coverage-limit explanation. Do not claim the conflict is resolved, do not set ready, and do not '
+            'generate a drawing. Always return ready=false and generateRequested=false. Return JSON only: '
+            '{"ready":false,"generateRequested":false,'
             '"question":"","choices":[],"reply":"","memory":""}.'
         )
     else:
@@ -304,10 +341,53 @@ def _visual_plan_site_conflict_interview(data, error):
     if is_site_area_conflict and not prior_conflict_conversation:
         failed_item = failing_site_item or {}
         failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
-        model_reply = 'سأبقي القيم المعتمدة كما هي حتى تحدد الجزء الذي تريد مراجعته.'
-        model_question = (f'ما الذي نراجعه أولًا: مساحة «{failed_item_label}»، بصمات المباني، أم طريقة توزيع المساحة؟')
-        choices = [f'مراجعة مساحة {failed_item_label}', 'مراجعة بصمات المباني',
-                   f'مناقشة توزيع {failed_item_label} داخل الأرض']
+        if facts.get('aggregateAreaSufficient'):
+            model_reply = 'مجموع المساحات المسجل يكفي حسابيًا؛ نتيجة البحث الحالي تعني أن التوزيع لم يجد موضعًا، '
+            model_question = ('هل نعيد ترتيب المباني وعناصر الموقع مع تثبيت مساحة Parking وبقية القيم المعتمدة؟')
+            choices = ['إعادة توزيع المواضع مع تثبيت المساحات', 'مراجعة شكل حدود الأرض']
+        else:
+            model_reply = 'سأبقي القيم المعتمدة كما هي حتى تحدد الجزء الذي تريد مراجعته.'
+            model_question = (f'ما الذي نراجعه أولًا: مساحة «{failed_item_label}»، بصمات المباني، أم طريقة توزيع المساحة؟')
+            choices = [f'مراجعة مساحة {failed_item_label}', 'مراجعة بصمات المباني',
+                       f'مناقشة توزيع {failed_item_label} داخل الأرض']
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    elif (is_site_area_conflict and facts.get('aggregateAreaSufficient')
+          and any(term in message for term in ('المتبقي', 'المساحة المتبقية', 'قد اي', 'كم يتبقى', 'كم المساحة'))):
+        available = facts.get('availableAreaBeforeFailingSqm')
+        failed_item = failing_site_item or {}
+        failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
+        failed_item_area = failed_item.get('areaSqm')
+        surplus = facts.get('aggregateAreaSurplusSqm')
+        model_reply = (
+            f'بحسب مساحة حدود الإحداثيات المستخدمة في الفحص، المتبقي بعد المباني وبقية العناصر '
+            f'{_visual_plan_site_area_text(available)} م²؛ وبعد خصم «{failed_item_label}» '
+            f'({_visual_plan_site_area_text(failed_item_area)} م²) يبقى فائض '
+            f'{_visual_plan_site_area_text(surplus)} م². هذا يثبت كفاية المجموع حسابيًا، لا نجاح البحث '
+            'الهندسي المحدود في إيجاد موضع.'
+        )
+        land_area = facts.get('landAreaSqm')
+        parcel_area = facts.get('parcelAreaSqm')
+        if land_area is not None and parcel_area is not None and abs(parcel_area - land_area) > 0.5:
+            model_reply += (
+                f' مساحة الأرض المسجلة {_visual_plan_site_area_text(land_area)} م²، '
+                f'ومساحة الحدود المحسوبة {_visual_plan_site_area_text(parcel_area)} م²؛ '
+                f'الفرق {_visual_plan_site_area_text(abs(parcel_area - land_area))} م².'
+            )
+        model_question = 'هل نعيد ترتيب مواضع المباني وعناصر الموقع مع إبقاء المساحات المسجلة؟'
+        choices = ['إعادة توزيع المواضع مع تثبيت المساحات', 'مراجعة مساحة Parking']
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    elif (is_site_area_conflict and facts.get('aggregateAreaSufficient')
+          and any(term in message for term in ('مناقشة توزيع', 'توزيع parking', 'إعادة ترتيب', 'اعادة ترتيب'))):
+        available = facts.get('availableAreaBeforeFailingSqm')
+        surplus = facts.get('aggregateAreaSurplusSqm')
+        model_reply = (
+            f'الأرقام لا تُظهر عجزًا في المساحة: يتبقى حسابيًا {_visual_plan_site_area_text(available)} م² '
+            f'مقابل المساحة المعتمدة، مع فائض {_visual_plan_site_area_text(surplus)} م². '
+            'الرفض حصل لأن البحث الاحتياطي وضع المباني أولًا ولم يجرّب إعادة ترتيبها؛ لذلك لا يصح اعتباره '
+            'دليلًا على استحالة توزيع المواقف.'
+        )
+        model_question = ('هل نبدأ بإعادة توزيع مواضع الأبراج والفلل مع تثبيت المساحات المعتمدة؟')
+        choices = ['إعادة التوزيع مع تثبيت القيم', 'مراجعة حدود الأرض']
         parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
     elif is_site_area_conflict and source_question:
         failed_item = failing_site_item or {}

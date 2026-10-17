@@ -122,3 +122,61 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
         self.assertIn('المساحة المعتمدة لبندها في التوزيع', result['reply'])
         self.assertIn('500 م²', result['reply'])
         self.assertIn('هل قيمة «Parking» صحيحة', result['question'])
+
+    def test_area_sufficient_parking_failure_is_explained_as_a_search_limit(self):
+        module = self.application_module
+        contract = {
+            'landArea': 24906.43, 'distribution': {'rows': []},
+            'geometry': {'parcels': [{'polygon': [
+                [0, 0], [250, 0], [250, 99.6518], [0, 99.6518],
+            ]}]},
+        }
+        context = {'components': []}
+        program = {
+            'buildings': [
+                {'id': 'tower_a', 'name': 'البرج أ', 'footprintArea': 1040,
+                 'basementOnly': False},
+                {'id': 'tower_b', 'name': 'البرج ب', 'footprintArea': 1040,
+                 'basementOnly': False},
+                *[{'id': f'villa_{index}', 'name': 'فلل سكنية', 'footprintArea': 105,
+                   'basementOnly': False} for index in range(100)],
+            ],
+            'siteItems': [
+                {'id': 'parking', 'label': 'Parking', 'name': 'Parking', 'area': 9000},
+                {'id': 'pool', 'label': 'Swimming Pool', 'name': 'Pool', 'area': 800},
+                {'id': 'padel', 'label': 'Padel Court', 'name': 'Padel', 'area': 200},
+                {'id': 'playground', 'label': 'Children Playground', 'name': 'Playground', 'area': 200},
+                {'id': 'landscape', 'label': 'Landscape', 'name': 'Landscape', 'area': 2007.3},
+            ],
+        }
+        error = module.visual_plan_geometry.PlanGeometryError(
+            'المساحة المعتمدة «Parking» لا تتسع داخل حدود الأرض مع البصمات المسجلة.',
+            'PLANS_SITE_AREA_CONFLICT')
+        first_data = {'message': 'ابدأ المخطط', 'plansWorkflow': {'siteAssistant': {}}}
+
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            with patch.object(module, '_visual_plan_site_packet', side_effect=error), \
+                    patch.object(module, '_visual_plan_contract', return_value=(contract, context)), \
+                    patch.object(module, '_visual_plan_program', return_value=program), \
+                    patch.object(module, '_visual_plan_input_signature', return_value='same-site-input'), \
+                    patch.object(module, '_visual_plan_site_call', side_effect=AssertionError(
+                        'The area arithmetic and search limitation should be stated deterministically')):
+                first, first_status = module._visual_plan_site_assistant_execute(first_data, 'generate')
+                followup_data = {
+                    'message': 'مناقشة توزيع Parking داخل الأرض',
+                    'plansWorkflow': {'siteAssistant': first['assistantState']},
+                }
+                followup, followup_status = module._visual_plan_site_assistant_execute(
+                    followup_data, 'chat')
+
+        self.assertEqual(first_status, 200)
+        self.assertEqual(followup_status, 200)
+        self.assertEqual(first['siteAreaConflict']['aggregateAreaSurplusSqm'], 125.65)
+        self.assertEqual(first['siteAreaConflict']['availableAreaBeforeFailingSqm'], 9125.65)
+        self.assertTrue(first['siteAreaConflict']['aggregateAreaSufficient'])
+        self.assertIn('لا يظهر عجز في مجموع المساحات', first['reply'])
+        self.assertIn('لا يثبت استحالة وجود توزيع صالح', first['reply'])
+        self.assertIn('فائض 125.65 م²', followup['reply'])
+        self.assertIn('لم يجرّب إعادة ترتيبها', followup['reply'])
+        self.assertNotIn('الفراغات المتبقية مجزأة', followup['reply'])
