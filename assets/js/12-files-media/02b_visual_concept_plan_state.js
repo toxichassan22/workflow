@@ -32,7 +32,7 @@
         verification: { checks: [], issues: [], summary: '', canProceed: false, approved: false },
         boundary: { points: [], referenceUrl: '', approved: false },
         distribution: { rows: [], totals: [], notes: [], checks: [], issues: [], approved: false,
-          aiReviewed: false, canProceed: null },
+          aiReviewed: false, reviewSignature: '', canProceed: null },
         distributionNotes: '',
         distributionRevision: '',
         conflictChats: { verify: [], distribution: [] },
@@ -117,6 +117,7 @@
           issues: Array.isArray(distribution.issues) ? distribution.issues.slice(0, 30) : [],
           approved: Boolean(distribution.approved),
           aiReviewed: Boolean(distribution.aiReviewed),
+          reviewSignature: String(distribution.reviewSignature || '').slice(0, 80),
           canProceed: typeof distribution.canProceed === 'boolean' ? distribution.canProceed : null
         },
         distributionNotes: String(source.distributionNotes || '').slice(0, 1000000),
@@ -295,21 +296,49 @@
       });
     }
 
+    function invalidateVisualConceptDistributionReview(workflow) {
+      if (!workflow?.distribution) return;
+      workflow.distribution.approved = false;
+      workflow.distribution.aiReviewed = false;
+      workflow.distribution.reviewSignature = '';
+      workflow.distribution.checks = [];
+      workflow.distribution.issues = [];
+      workflow.distribution.canProceed = null;
+    }
+
     function setVisualConceptPlanNotes(value) {
       const workflow = visualConceptPlansWorkflowState();
       const notes = String(value || '').slice(0, 1000000);
       if (workflow.clientNotes === notes) return;
       workflow.clientNotes = notes;
-      workflow.distribution.approved = false;
+      invalidateVisualConceptDistributionReview(workflow);
       invalidateVisualConceptPlanGeneration(workflow);
       markVisualConceptDirty();
     }
 
     function syncVisualConceptPlanInputs(projectData) {
       const workflow = visualConceptPlansWorkflowState();
-      if (!workflow.sourceStamp || workflow.sourceStamp === visualConceptPlanInputStamp(projectData)) return;
+      const currentStamp = visualConceptPlanInputStamp(projectData);
+      const distribution = workflow.distribution;
+      // Older saved reviews have no per-review signature. The persisted
+      // aiReviewed flag is itself proof that the AI check completed; bind that
+      // legacy result to the hydrated inputs once, then invalidate normally on
+      // subsequent input changes.
+      if (distribution.aiReviewed && !distribution.reviewSignature) {
+        distribution.reviewSignature = currentStamp;
+      }
+      const distributionReviewCurrent = Boolean(distribution.aiReviewed
+        && distribution.reviewSignature === currentStamp);
+      if (distribution.reviewSignature && !distributionReviewCurrent) {
+        invalidateVisualConceptDistributionReview(workflow);
+      }
+      // sourceStamp belongs to downstream prompt and notes work. A matching
+      // distribution review signature is the stronger proof that this saved
+      // analysis still describes the hydrated inputs, so a stale legacy
+      // sourceStamp must not revoke its review or approval on reload.
+      if (!workflow.sourceStamp || workflow.sourceStamp === currentStamp || distributionReviewCurrent) return;
       workflow.distribution.approved = false;
-      workflow.distribution.aiReviewed = false;
+      if (!distributionReviewCurrent) invalidateVisualConceptDistributionReview(workflow);
       workflow.verification = emptyVisualConceptPlansWorkflow().verification;
       workflow.viewStage = 'verify';
       workflow.planContext = null;

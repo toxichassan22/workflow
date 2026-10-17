@@ -350,10 +350,7 @@
             const state = visualConceptPlansWorkflowState();
             const id = removeBtn.getAttribute('data-dist-remove');
             state.distribution.rows = (state.distribution.rows || []).filter(item => item.id !== id);
-            state.distribution.approved = false;
-            state.distribution.aiReviewed = false;
-            state.distribution.checks = [];
-            state.distribution.issues = [];
+            invalidateVisualConceptDistributionReview(state);
             invalidateVisualConceptPlanGeneration(state);
             markVisualConceptDirty();
             renderVisualConceptPage();
@@ -385,7 +382,12 @@
           const distNotesInput = event.target.closest('[data-plans-distribution-notes]');
           if (distNotesInput) {
             const state = visualConceptPlansWorkflowState();
-            state.distributionNotes = String(distNotesInput.value || '').slice(0, 1000000);
+            const notes = String(distNotesInput.value || '').slice(0, 1000000);
+            if (state.distributionNotes !== notes) {
+              state.distributionNotes = notes;
+              invalidateVisualConceptDistributionReview(state);
+              invalidateVisualConceptPlanGeneration(state);
+            }
             markVisualConceptDirty();
             return;
           }
@@ -411,10 +413,7 @@
           const row = (state.distribution.rows || []).find(item => item.id === id);
           if (!row) return;
           row[field] = input.value;
-          state.distribution.approved = false;
-          state.distribution.aiReviewed = false;
-          state.distribution.checks = [];
-          state.distribution.issues = [];
+          invalidateVisualConceptDistributionReview(state);
           invalidateVisualConceptPlanGeneration(state);
           markVisualConceptDirty();
           scheduleVisualConceptDistributionCheck();

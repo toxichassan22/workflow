@@ -104,6 +104,9 @@ test('changing notes invalidates their review and scene without removing saved i
       prompts: { site: 'site', uses: 'uses', massing: 'massing' },
       scene: { version: 1, token: 'old-scene' },
       notesReview: { verified: true, canProceed: true, token: 'old-review' },
+      distribution: { aiReviewed: true, reviewSignature: 'old-review-signature',
+        checks: [{ item: 'مساحة التوزيع', result: 'متعارض' }],
+        issues: [{ title: 'تعارض محفوظ' }], canProceed: false },
     }) };
   context.markVisualConceptDirty = () => {};
   context.setVisualConceptPlanNotes('new note');
@@ -112,6 +115,10 @@ test('changing notes invalidates their review and scene without removing saved i
   assert.equal(workflow.notesReview.verified, false);
   assert.equal(workflow.promptReady, false);
   assert.equal(workflow.scene, null);
+  assert.equal(workflow.distribution.aiReviewed, false);
+  assert.equal(workflow.distribution.reviewSignature, '');
+  assert.equal(workflow.distribution.checks.length, 0);
+  assert.equal(workflow.distribution.issues.length, 0);
   assert.equal(context.tenantVisualConceptState.slots.plan_site.imageUrl, '/uploads/creative/old.png');
 });
 
@@ -230,7 +237,40 @@ test('a stage-two conflict review and its decision survive draft normalization',
   assert.equal(reloaded.checks[0].result, 'متعارض');
   assert.equal(reloaded.issues[0].title, 'تعارض موثق');
   assert.equal(reloaded.aiReviewed, true);
+  assert.equal(reloaded.reviewSignature, 'same-inputs');
   assert.equal(reloaded.canProceed, false);
+});
+
+test('a legacy saved distribution review remains approvable after reload without another analysis', () => {
+  const context = fixture();
+  context.tenantProjectData = {};
+  context.markVisualConceptDirty = () => {};
+  context.renderVisualConceptPage = () => {};
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {
+    verification: { approved: true, canProceed: true },
+    boundary: { approved: true },
+    distribution: { approved: false, aiReviewed: true, canProceed: true,
+      rows: [{ id: 'row_1', component: 'مكاتب' }],
+      checks: [{ item: 'المساحات', result: 'مطابق' }], issues: [] },
+    sourceStamp: 'older-downstream-stamp', viewStage: 'generate',
+  } });
+
+  const savedDraft = JSON.stringify(context.tenantVisualConceptState);
+  context.tenantVisualConceptState = context.normalizeVisualConceptState(savedDraft);
+  context.syncVisualConceptPlanInputs(context.tenantProjectData);
+
+  const workflow = context.tenantVisualConceptState.plansWorkflow;
+  assert.equal(workflow.distribution.aiReviewed, true);
+  assert.equal(workflow.distribution.reviewSignature, context.visualConceptPlanInputStamp());
+  assert.equal(workflow.distribution.checks[0].result, 'مطابق');
+  assert.equal(workflow.viewStage, 'generate');
+  const html = context.visualConceptDistributionResultsHtml(workflow.distribution);
+  const approveButton = html.match(/data-plans-workflow-action="approve-distribution"([^>]*)>/);
+  assert.ok(approveButton);
+  assert.ok(!approveButton[1].includes('disabled'));
+
+  context.approveVisualConceptPlansDistribution();
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.distribution.approved, true);
 });
 
 test('unchecked notes approve through the responsibility dialog with a signed ack', async () => {
@@ -486,9 +526,13 @@ test('a changed parking plan invalidates the saved conflict review and approvals
     parkingPlan: { id: 'parking_1', approved: true, requiredSpaces: 20 } } };
   context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {},
     plansWorkflow: { verification: { approved: true, canProceed: false, checks: [{ item: 'الارتداد', result: 'متعارض' }] },
-      boundary: { approved: true }, distribution: { approved: true, aiReviewed: true },
+      boundary: { approved: true }, distribution: { approved: true, aiReviewed: true,
+        checks: [{ item: 'المساحة', result: 'متعارض' }],
+        issues: [{ title: 'تعارض محفوظ' }], canProceed: false },
       notesReview: { verified: true, canProceed: true } } });
-  context.tenantVisualConceptState.plansWorkflow.sourceStamp = context.visualConceptPlanInputStamp(before);
+  const reviewStamp = context.visualConceptPlanInputStamp(before);
+  context.tenantVisualConceptState.plansWorkflow.sourceStamp = reviewStamp;
+  context.tenantVisualConceptState.plansWorkflow.distribution.reviewSignature = reviewStamp;
 
   context.syncVisualConceptPlanInputs({ financial_study_model: { ...before.financial_study_model,
     parkingPlan: { ...before.financial_study_model.parkingPlan, requiredSpaces: 24 } } });
@@ -498,6 +542,10 @@ test('a changed parking plan invalidates the saved conflict review and approvals
   assert.equal(workflow.verification.checks.length, 0);
   assert.equal(workflow.boundary.approved, true);
   assert.equal(workflow.distribution.approved, false);
+  assert.equal(workflow.distribution.aiReviewed, false);
+  assert.equal(workflow.distribution.reviewSignature, '');
+  assert.equal(workflow.distribution.checks.length, 0);
+  assert.equal(workflow.distribution.issues.length, 0);
 });
 
 test('page preflight and image deletion keep the approved plan workflow on stage three', async () => {

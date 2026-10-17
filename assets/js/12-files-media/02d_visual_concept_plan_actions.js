@@ -149,10 +149,7 @@
         workflow.planContext = response.planContext || workflow.planContext || null;
         workflow.status = 'verified';
         workflow.viewStage = 'verify';
-        workflow.distribution.approved = false;
-        workflow.distribution.aiReviewed = false;
-        workflow.distribution.checks = [];
-        workflow.distribution.issues = [];
+        invalidateVisualConceptDistributionReview(workflow);
         invalidateVisualConceptPlanGeneration(workflow);
         markVisualConceptDirty();
         renderVisualConceptPage();
@@ -208,10 +205,7 @@
         building: '', floor_range: '', component: '',
         units_per_floor: '', floor_area_sqm: '', circulation: ''
       });
-      workflow.distribution.approved = false;
-      workflow.distribution.aiReviewed = false;
-      workflow.distribution.checks = [];
-      workflow.distribution.issues = [];
+      invalidateVisualConceptDistributionReview(workflow);
       invalidateVisualConceptPlanGeneration(workflow);
       markVisualConceptDirty();
       renderVisualConceptPage();
@@ -315,6 +309,7 @@
           workflow.distribution.checks = Array.isArray(response.checks) ? response.checks : [];
           if (Array.isArray(response.issues)) workflow.distribution.issues = response.issues;
           workflow.distribution.aiReviewed = mode === 'ai';
+          workflow.distribution.reviewSignature = mode === 'ai' ? stamp : '';
           workflow.distribution.canProceed = response.canProceed !== false;
           workflow.conflictChats.distribution = [];
         }
