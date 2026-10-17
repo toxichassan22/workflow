@@ -1,4 +1,4 @@
-"""Owner-uploaded, anonymized transaction worksheets for market summaries."""
+"""Owner-uploaded transaction worksheets with their recorded sources."""
 
 
 def _summary_benchmark_files():
@@ -254,6 +254,6 @@ def build_summary_local_benchmarks(payload):
         'period_from': start,
         'period_to': end,
         'groups': output,
-        'limitations': ('ملفات معاملات مجهولة الهوية ومحدودة بالأحياء والفئات والفترة الموجودة فيها؛ '
-                        'عدد السجلات ليس تعدادًا كاملًا للسوق ولا يحدد أسماء منافسين.'),
+        'limitations': ('صفقات مرجعية بمصادرها المدونة ومحدودة بالأحياء والفئات والتواريخ الموجودة في الملفات؛ '
+                        'عدد السجلات ليس تعدادًا كاملًا للسوق ولا يحدد أسماء مشاريع منافسة.'),
     }

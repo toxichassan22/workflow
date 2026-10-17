@@ -63,6 +63,11 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'annual hotel ADR/occupancy. An inaccessible, gated, missing, or stale source is a coverage gap, '
             'not permission to estimate. Do not turn national data into city data or a sampled sheet into a '
             'complete city census. Cite each used specific page in sources; never use a homepage as evidence.\n')
+        local_data_rules = (
+            'For reference transactions from the supplied files, use the source names exactly as listed in each '
+            'group’s sources field, such as Ministry of Justice. Attribute each figure to its listed source. '
+            'These records are limited to the districts, categories, and dates present in the files and do not '
+            'identify named competitor projects.\n')
         narrative_rules = (
             'Write each axis as connected analytical prose with evidence, interpretation, limits, and practical '
             'implication. Avoid empty bullet lists and repeated generic statements. Keep source names out of '
@@ -95,6 +100,10 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'المصدر المتعذر أو المحجوب أو الغائب أو القديم فجوة تغطية، وليس مبررًا للتقدير. لا تحوّل بيانات المملكة '
             'إلى بيانات مدينة، ولا تجعل شيتًا محدودًا تعدادًا كاملًا للمدينة. أدرج في sources كل صفحة محددة استُخدمت؛ '
             'الصفحة الرئيسية وحدها ليست دليلًا.\n')
+        local_data_rules = (
+            'انسب صفقات الملفات إلى أسماء المصادر كما تظهر حرفيًا في حقل sources لكل مجموعة؛ إذا ظهر «وزارة العدل» '
+            'فسمّها «صفقات وزارة العدل». هذه سجلات مرجعية محدودة بالأحياء والفئات والتواريخ الموجودة في الملفات، '
+            'ولا تحدد أسماء مشاريع منافسة.\n')
         narrative_rules = (
             'اكتب كل محور كنص تحليلي مترابط يوضح الدليل ثم دلالته وحدوده وأثره العملي. تجنب قوائم النقاط الجافة '
             'والعبارات العامة المتكررة. لا تذكر أسماء المصادر داخل نص المحاور؛ اجمعها في sources فقط. يجوز أن يستفيد '
@@ -113,7 +122,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
         + 'المهام المحورية: ' + ', '.join(keys) + '. حللها كلها بعمق وبلا إسقاط لأي محور.\n'
         + narrative_rules + lang + '\n' + decision
         + 'الأدلة وصفحات المصادر المفتوحة من الباحثين:\n' + evidence + '\n\n'
-        + 'بيانات الصفقات المرجعية من ملفات المالك، إن وجدت (مجهولة الهوية ومحدودة بتغطية الملف):\n'
+        + local_data_rules
+        + 'بيانات الصفقات المرجعية من ملفات المالك، إن وجدت؛ يتضمن كل سجل اسم مصدره ضمن حقل sources:\n'
         + json.dumps(local, ensure_ascii=False, indent=2, default=str) + '\n\n'
         + 'مدخلات المشروع للسياق والتقييم المحايد فقط؛ لا تجعل نوع المشروع قيدًا على تحليل السوق كله:\n'
         + _project_input_block(payload) + '\n\n'

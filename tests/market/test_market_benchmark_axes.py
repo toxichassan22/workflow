@@ -210,7 +210,7 @@ class BenchmarkAxesTests(unittest.TestCase):
             {'name': 'منافس', 'benchmarks': 'سكني، فندقي'})
         self.assertEqual(row['benchmarks'], ['سكني', 'فندقي'])
 
-    def test_uploaded_transactions_are_anonymous_and_match_neighborhood(self):
+    def test_uploaded_transactions_name_their_source_and_match_neighborhood(self):
         axis = market_study.normalize_comparison_types(
             [{'type': 'residential', 'operation': 'sale'}])[0]
         data = market_study.build_transaction_price_benchmarks({
@@ -221,7 +221,9 @@ class BenchmarkAxesTests(unittest.TestCase):
         self.assertGreater(data['groups'][0]['deal_count'], 0)
         self.assertEqual({group['district'] for group in data['groups']}, {'الروضة'})
         self.assertNotIn('name', data['groups'][0])
-        self.assertIn('مجهولة الهوية', data['note'])
+        self.assertIn('وزارة العدل', data['source_label'])
+        self.assertIn('وزارة العدل', data['note'])
+        self.assertNotIn('مجهولة الهوية', data['note'])
 
     def test_uploaded_transactions_are_not_used_for_rental_comparisons(self):
         axis = market_study.normalize_comparison_types(

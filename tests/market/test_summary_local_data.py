@@ -1,4 +1,4 @@
-"""Reads anonymized transaction rows from owner-provided Excel workbooks."""
+"""Reads source-attributed transaction rows from owner-provided Excel workbooks."""
 
 import sys
 import tempfile
@@ -88,7 +88,8 @@ class SummaryLocalDataTests(unittest.TestCase):
         self.assertIn('https://rei.rega.gov.sa/ar/advanced-search/deals',
                       group['source_urls'])
         self.assertNotIn('name', group)
-        self.assertIn('مجهولة الهوية', result['limitations'])
+        self.assertIn('مصادرها المدونة', result['limitations'])
+        self.assertNotIn('مجهولة الهوية', result['limitations'])
 
     def test_city_scope_includes_available_districts_and_preserves_coverage_limit(self):
         result = market_study.build_summary_local_benchmarks({

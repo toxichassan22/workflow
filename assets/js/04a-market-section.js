@@ -370,7 +370,8 @@
       }
       const format = value => value === null || value === undefined || value === ''
         ? 'غير متاح' : new Intl.NumberFormat('ar-SA', { maximumFractionDigits: 0 }).format(Number(value));
-      host.innerHTML = '<div class="market-transaction-benchmarks"><h4>صفقات مرجعية مجهولة الهوية</h4>' +
+      const sourceLabel = benchmark.source_label || 'صفقات مرجعية من ملفات البيانات';
+      host.innerHTML = '<div class="market-transaction-benchmarks"><h4>' + escapeHtml(sourceLabel) + '</h4>' +
         '<div class="tenant-hint">' + escapeHtml(benchmark.note || '') + '</div>' +
         '<div class="table-wrap"><table><thead><tr><th>الحي</th><th>نوع الوحدة</th><th>عدد الصفقات</th><th>وسيط سعر المتر</th><th>وسيط قيمة الصفقة</th><th>الفترة</th></tr></thead><tbody>' +
         groups.map(item => '<tr><td>' + escapeHtml(item.district || '') + '</td><td>' + escapeHtml(item.unit_type || '') + '</td>' +

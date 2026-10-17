@@ -90,6 +90,17 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertNotIn('بحث جوجل الأصلي', prompt)
         self.assertNotIn('حيين مجاورين مختلفين ممنوع', prompt)
 
+    def test_market_prompt_attributes_uploaded_transactions_to_their_named_source(self):
+        prompt = market_study.build_summary_user_prompt({
+            'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
+            'summaryLocalBenchmarks': {'groups': [{
+                'sources': ['وزارة العدل'], 'deal_count_in_file': 3,
+            }]},
+        }, [])
+        self.assertIn('سمّها «صفقات وزارة العدل»', prompt)
+        self.assertIn('وزارة العدل', prompt)
+        self.assertNotIn('مجهولة الهوية', prompt)
+
     def test_english_scope_and_research_prompt(self):
         block = market_study._summary_scope_block(
             {'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': ['Al Narjis']}]}}, 'en')

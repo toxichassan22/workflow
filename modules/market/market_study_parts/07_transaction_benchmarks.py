@@ -1,4 +1,4 @@
-"""Local, anonymized transaction-price context for selected comparisons."""
+"""Local, source-attributed transaction-price context for selected comparisons."""
 
 
 def build_transaction_price_benchmarks(payload, axes):
@@ -84,7 +84,15 @@ def build_transaction_price_benchmarks(payload, axes):
         })
     covered = sorted({group['district'] for group in output_groups}, key=_fold_choice)
     scope_name = district if mode == 'district' else city
-    note = ('هذه صفقات مرجعية مجهولة الهوية؛ لا تمثل مشاريع منافسة مسماة ولا تُحتسب ضمن عدد المنافسين. '
+    source_names = sorted({source for group in output_groups
+                           for source in group.get('sources') or [] if source})
+    if len(source_names) == 1:
+        source_label = f'صفقات {source_names[0]}'
+    elif source_names:
+        source_label = 'صفقات من ' + '، '.join(source_names)
+    else:
+        source_label = 'صفقات مرجعية من ملفات البيانات'
+    note = (f'يعرض الجدول {source_label}؛ لا تمثل مشاريع منافسة مسماة ولا تُحتسب ضمن عدد المنافسين. '
             'نطاق المدينة يعرض الأحياء الموجودة في ملفات البيانات فقط، ولا يمثل تغطية كاملة للمدينة.')
     if not output_groups:
         note = 'لا توجد صفقات بيع سكنية مطابقة للمدينة والحي وفترة البيانات المحددة.'
@@ -98,6 +106,7 @@ def build_transaction_price_benchmarks(payload, axes):
         'period_to': end,
         'groups': output_groups,
         'note': note,
+        'source_label': source_label,
         'source': 'صفقات عقارية واردة في ملفات البيانات المرفوعة، بمصادرها الأصلية',
         'source_url': 'https://rei.rega.gov.sa/ar/advanced-search/deals',
     }

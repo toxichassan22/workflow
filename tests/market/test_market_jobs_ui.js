@@ -59,6 +59,7 @@ function fixture() {
     marketResumeSummaryBtn: { disabled: false, hidden: true },
     marketSummaryFailure: recordingText(),
     marketSummaryCompare: { hidden: true, innerHTML: '' },
+    marketCompetitorPriceBenchmarks: { hidden: false, innerHTML: '' },
     marketStudyData: { value: '', dataset: { key: 'market_study_data' } },
     marketStudyOneBlockSummary: { value: '', closest: () => null },
     marketSummaryChat: { innerHTML: '' },
@@ -189,6 +190,17 @@ test('market study separates competitors and market into accessible tabs', () =>
   assert.equal(tabs[1].attributes['aria-selected'], 'true');
   assert.equal(panels[0].attributes['aria-hidden'], 'true');
   assert.equal(panels[1].attributes['aria-hidden'], 'false');
+});
+
+test('transaction benchmark title uses the source recorded in the files', () => {
+  const { context, inputs } = fixture();
+  context.renderMarketTransactionBenchmarks({
+    source_label: 'صفقات وزارة العدل',
+    note: 'بيانات مرجعية محدودة التغطية.',
+    groups: [{ district: 'الروضة', unit_type: 'فيلا', deal_count: 3 }]
+  });
+  assert.match(inputs.marketCompetitorPriceBenchmarks.innerHTML, /صفقات وزارة العدل/);
+  assert.doesNotMatch(inputs.marketCompetitorPriceBenchmarks.innerHTML, /مجهولة الهوية/);
 });
 
 test('comparison rows accept several operations or hotel classifications', () => {
