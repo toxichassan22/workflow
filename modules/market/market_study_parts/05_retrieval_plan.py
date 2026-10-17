@@ -51,7 +51,7 @@ _LISTING_PORTAL_HOSTS = {'aqar.fm', 'sa.aqar.fm', 'bayut.sa', 'wasalt.sa', 'deal
 
 # Official data hosts that appear only inside TYPE_SOURCE_PRIORITY (never in
 # the tiered SOURCE_PRIORITY list) but are still tier-1 official sources.
-_HOST_TIER_EXTRAS = {'saudiexchange.sa': 1}
+_HOST_TIER_EXTRAS = {'saudiexchange.sa': 1, 'tourism.sa': 1}
 
 # Domain tokens inside the catalog lines. The TLD allowlist keeps Arabic
 # prose and tokens like '3PL' or '2026' from ever becoming URLs.

@@ -373,7 +373,7 @@ class BestUseScanPoolTests(unittest.TestCase):
                                  call['kwargs'])
 
 
-_RESUMED_PAGE = 'https://ejar.sa/reports/previous-run'
+_RESUMED_PAGE = 'https://sakani.sa/reports/previous-run'
 
 
 class FailedJobResumeTests(unittest.TestCase):
@@ -467,8 +467,10 @@ class FailedJobResumeTests(unittest.TestCase):
         self.assertTrue(result['success'], result)
         self.assertIsNone(result.get('evidencePages'))
         self.assertTrue(pools, 'the browse call never ran')
-        urls = [page.get('url') for page in pools[0].pages()]
-        self.assertIn(_RESUMED_PAGE, urls)
+        self.assertTrue(any(
+            _RESUMED_PAGE in [page.get('url') for page in pool.pages()]
+            for pool in pools if pool is not None),
+            'the source-matched researcher did not receive the resumed page')
 
     def test_resume_never_crosses_into_another_draft(self):
         module = self.application_module
@@ -519,6 +521,67 @@ class FailedJobResumeTests(unittest.TestCase):
         self.assertTrue(pools)
         urls = [page.get('url') for page in pools[0].pages()]
         self.assertNotIn(_RESUMED_PAGE, urls)
+
+    def test_ministry_pdf_pages_reach_only_the_tourism_research_prompt(self):
+        module = self.application_module
+        payload = dict(self.PAYLOAD, projectType='فندقي',
+                       _tourismReportEvidence=[{
+                           'title': 'أداء قطاع الضيافة لعام 2026',
+                           'year': 2026,
+                           'url': 'https://cdn.mt.gov.sa/reports/hospitality.pdf',
+                           'pages': [{
+                               'page_number': 6,
+                               'content': 'جدة: نسبة إشغال مرافق الضيافة 73 بالمئة',
+                           }],
+                       }])
+        hospitality_group = next(
+            group for group in module._SUMMARY_RESEARCH_GROUPS
+            if group.get('key') == 'hospitality_and_tourism')
+
+        prompt = module._summary_research_prompt(
+            payload, hospitality_group, ['mt.gov.sa'], 'جدة', 'الأندلس')
+
+        self.assertIn('https://cdn.mt.gov.sa/reports/hospitality.pdf', prompt)
+        self.assertIn('نسبة إشغال مرافق الضيافة 73 بالمئة', prompt)
+        general_prompt = module._summary_research_prompt(
+            payload, {'key': 'professional_and_city_context',
+                     'label': 'تقارير مهنية', 'focus': 'reports'},
+            ['cbre.com'], 'جدة', 'الأندلس')
+        self.assertNotIn('hospitality.pdf', general_prompt)
+
+    def test_hospitality_summary_syncs_reports_before_existing_research(self):
+        import tourism_report_sync
+        module = self.application_module
+        report_rows = [{
+            'title': 'أداء قطاع الضيافة لعام 2026',
+            'year': 2026,
+            'url': 'https://cdn.mt.gov.sa/reports/hospitality.pdf',
+            'pages': [],
+        }]
+        trace_events = []
+        seen = {}
+
+        def continue_summary(data, **kwargs):
+            seen['data'] = data
+            seen['kwargs'] = kwargs
+            return {'success': True}
+
+        with patch.object(tourism_report_sync, 'sync_ministry_tourism_reports',
+                          return_value={'reports': report_rows, 'errors': [],
+                                        'pages_added': 0}) as sync_reports, \
+                patch.object(module, '_market_summary_before_ministry_report_sync',
+                             side_effect=continue_summary):
+            result = module._run_market_summary(
+                {'city': 'جدة', 'district': 'الأندلس', 'projectType': 'فندقي'},
+                trace_writer=trace_events.append)
+
+        self.assertTrue(result['success'])
+        self.assertEqual(sync_reports.call_count, 1)
+        self.assertEqual(sync_reports.call_args.kwargs['city'], ['جدة'])
+        self.assertEqual(sync_reports.call_args.kwargs['district'], ['الأندلس'])
+        self.assertEqual(seen['data']['_tourismReportEvidence'], report_rows)
+        self.assertTrue(any(event.get('event') == 'tourism_report_sync_result'
+                            for event in trace_events))
 
 
 if __name__ == '__main__':

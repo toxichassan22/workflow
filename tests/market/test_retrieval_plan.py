@@ -129,6 +129,17 @@ class BuildSourcePlanTests(unittest.TestCase):
             if payload['projectType'] != 'فندقي':
                 self.assertIn('listing', purposes)
 
+    def test_official_tourism_publications_are_hospitality_only_tier_one(self):
+        url = 'https://tourism.sa/ar/data-insights/publications'
+        hotel_plan = market_study.build_source_plan(
+            {'projectType': 'فندقي', 'city': 'جدة'})
+        publication = next(entry for entry in hotel_plan if entry['url'] == url)
+        self.assertEqual(publication['tier'], 1)
+
+        residential_plan = market_study.build_source_plan(
+            {'projectType': 'سكني', 'city': 'جدة'})
+        self.assertNotIn(url, [entry['url'] for entry in residential_plan])
+
     def test_dataset_expansion_entries_are_browser_bound(self):
         plan = market_study.build_source_plan(
             {'projectType': 'سكني', 'city': 'الرياض'})
