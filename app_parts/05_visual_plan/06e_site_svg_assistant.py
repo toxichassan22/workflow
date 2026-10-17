@@ -768,22 +768,27 @@ def _visual_plan_site_edit(data):
 
 
 def _visual_plan_site_assistant_execute(data, action):
-    if action == 'edit':
-        return _visual_plan_site_edit(data), 200
-    interview = None
-    if action == 'generate':
-        _packet, _contract, _context, signature = _visual_plan_site_packet(data)
-        state = _visual_plan_site_state(data, signature)
-        if state['readyForGeneration'] and not state['pendingQuestion']:
-            interview = {'success': True, 'readyForGeneration': True,
-                         'needsClarification': False, 'assistantState': state}
-    if interview is None:
-        interview = _visual_plan_site_interview(data, 'generate' if action == 'generate' else 'chat')
-    if interview.get('needsClarification'):
-        return interview, 200
-    if action != 'generate' and not interview.get('generateRequested'):
-        return interview, 200
-    return _visual_plan_site_generate(data, interview), 200
+    try:
+        if action == 'edit':
+            return _visual_plan_site_edit(data), 200
+        interview = None
+        if action == 'generate':
+            _packet, _contract, _context, signature = _visual_plan_site_packet(data)
+            state = _visual_plan_site_state(data, signature)
+            if state['readyForGeneration'] and not state['pendingQuestion']:
+                interview = {'success': True, 'readyForGeneration': True,
+                             'needsClarification': False, 'assistantState': state}
+        if interview is None:
+            interview = _visual_plan_site_interview(data, 'generate' if action == 'generate' else 'chat')
+        if interview.get('needsClarification'):
+            return interview, 200
+        if action != 'generate' and not interview.get('generateRequested'):
+            return interview, 200
+        return _visual_plan_site_generate(data, interview), 200
+    except visual_plan_geometry.PlanGeometryError as error:
+        if error.code != 'PLANS_COVERAGE_CONFLICT':
+            raise
+        return _visual_plan_site_conflict_interview(data, error), 200
 
 
 @app.route('/api/visual-concept/site-plan-assistant', methods=['POST'])
