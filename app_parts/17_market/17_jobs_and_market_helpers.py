@@ -1,6 +1,64 @@
 _MARKET_JOB_RESUME_LOCK = threading.Lock()
 
 
+def _acquire_market_job_resume_guard():
+    """Serialize resume sweeps across threads and Gunicorn worker processes."""
+    _MARKET_JOB_RESUME_LOCK.acquire()
+    handle = None
+    try:
+        os.makedirs(UPLOADS_DIR, exist_ok=True)
+        lock_path = os.path.join(UPLOADS_DIR, '.market-job-resume.lock')
+        handle = open(lock_path, 'a+b')
+        try:
+            import fcntl
+        except ImportError:
+            # Windows test/dev runs still get process-local serialization.
+            return handle, None
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        return handle, fcntl
+    except Exception:
+        if handle is not None:
+            handle.close()
+        _MARKET_JOB_RESUME_LOCK.release()
+        raise
+
+
+def _release_market_job_resume_guard(guard):
+    handle, lock_module = guard
+    try:
+        if lock_module is not None:
+            lock_module.flock(handle.fileno(), lock_module.LOCK_UN)
+    finally:
+        try:
+            handle.close()
+        finally:
+            _MARKET_JOB_RESUME_LOCK.release()
+
+
+def _job_owner_pid_is_alive(owner_pid):
+    """Return True/False for a valid PID, or None when the PID is unavailable."""
+    try:
+        pid = int(owner_pid)
+    except (TypeError, ValueError):
+        return None
+    if pid <= 0:
+        return None
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as error:
+        import errno
+        if error.errno == errno.ESRCH:
+            return False
+        # Treat unexpected OS errors conservatively; duplicate work is worse
+        # than delaying recovery until a later housekeeping sweep.
+        return True
+    return True
+
+
 def _job_dir(namespace, tenant_id):
     path = os.path.join(UPLOADS_DIR, namespace, str(tenant_id))
     os.makedirs(path, exist_ok=True)
@@ -85,14 +143,20 @@ def _read_job(namespace, tenant_id, job_id):
 def _resume_interrupted_jobs():
     """Re-dispatch persisted jobs whose owning process died.
 
-    Every `_write_job` stamps the writing pid. A job still 'queued' or
-    'running' under a foreign pid at startup belongs to a dead worker —
-    Gunicorn respawns one — so this worker claims it and re-runs the stored
-    request. A live sibling's job keeps that worker's pid and is left alone.
-    Orphans that predate resumable payloads are closed as failed once stale
-    so clients stop polling a job that will never finish.
+    Every `_write_job` stamps the writing pid. A foreign pid is not proof that
+    its worker died: Gunicorn workers share the job directory, so a live
+    sibling must be left alone. The file lock makes the check-and-redispatch
+    atomic across worker processes. Legacy jobs without a usable pid are only
+    resumed after they become stale.
     """
-    my_pid = os.getpid()
+    guard = _acquire_market_job_resume_guard()
+    try:
+        return _resume_interrupted_jobs_locked()
+    finally:
+        _release_market_job_resume_guard(guard)
+
+
+def _resume_interrupted_jobs_locked():
     orphan_fail_seconds = int(os.environ.get('JOB_ORPHAN_FAIL_SECONDS') or 900)
     resumed = 0
     for namespace in ('.market_jobs', '.plan_jobs', '.land_jobs', '.slide_jobs',
@@ -116,8 +180,16 @@ def _resume_interrupted_jobs():
                     continue
                 if str(job.get('status') or '') not in ('queued', 'running'):
                     continue
-                if job.get('pid') == my_pid:
+                owner_alive = _job_owner_pid_is_alive(job.get('pid'))
+                if owner_alive is True:
                     continue
+                if owner_alive is None:
+                    try:
+                        age = time.time() - float(job.get('updatedAt') or 0)
+                    except (TypeError, ValueError):
+                        age = orphan_fail_seconds + 1
+                    if age <= orphan_fail_seconds:
+                        continue
                 if not isinstance(job.get('payload'), dict):
                     try:
                         age = time.time() - float(job.get('updatedAt') or 0)
