@@ -34,6 +34,16 @@
       return WFT('market.job_resumed', 'توجد مهمة قيد التنفيذ — جاري متابعة نتيجتها.');
     }
 
+    function marketCompetitorOnlyNoEvidenceVerifyFailure(res) {
+      const competitors = Array.isArray(res && res.competitors) ? res.competitors : [];
+      const failures = competitors.filter(row => String(row && (row.verify_state || row.verifyState) || '') === 'search_not_run');
+      if (!failures.length || !(Number(res && res.searchNotRunCount) > 0)) return false;
+      if (res.searchVerified === false || Number(res.noEvidenceCount) > 0 || Number(res.missingPriceCount) > 0) return false;
+      if (res.providerError && !marketCompetitorVerificationErrorIsNoEvidence(res.providerError)) return false;
+      return failures.every(row => marketCompetitorVerificationErrorIsNoEvidence(
+        row && (row.verify_provider_error || row.verifyProviderError)));
+    }
+
     function marketJobMap(state) {
       const jobs = state && state.activeMarketJobs;
       return (jobs && typeof jobs === 'object' && !Array.isArray(jobs)) ? jobs : {};
@@ -131,6 +141,8 @@
         persistMarketStudyFromDom();
         const extra = res.expansionNote || res.notes || '';
         const conflictCount = Array.isArray(res.conflictWarnings) ? res.conflictWarnings.length : 0;
+        const onlyNoEvidenceVerifyFailure = marketCompetitorOnlyNoEvidenceVerifyFailure(res);
+        const showPartialStatus = Boolean(res.partial) && !onlyNoEvidenceVerifyFailure;
         const doneNote = resumed
           ? WFT('market.job_done_count', 'اكتمل تحديث المنافسين — {n} في الجدول', { n: (res.competitors || []).length })
           : (mode === 'fill'
@@ -141,16 +153,16 @@
             (conflictCount ? WFT('market.note_conflicts_kept', ' — تم الإبقاء على {n} قيمة حالية متعارضة', { n: conflictCount }) : '') +
             (res.searchVerified === false ? WFT('market.note_search_not_run', ' — لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة') : '') +
             ((res.noEvidenceCount || 0) ? WFT('market.note_no_evidence', ' — {n} منافس لم تظهر أسماؤهم في نتائج البحث', { n: res.noEvidenceCount }) : '') +
-            ((res.searchNotRunCount || 0) ? WFT('market.note_search_failed', ' — تعذر تنفيذ البحث عن {n} منافس', { n: res.searchNotRunCount }) : '') +
+            ((res.searchNotRunCount && !onlyNoEvidenceVerifyFailure) ? WFT('market.note_search_failed', ' — تعذر تنفيذ البحث عن {n} منافس', { n: res.searchNotRunCount }) : '') +
             ((res.missingPriceCount || 0) ? WFT('market.note_missing_price', ' — {n} منافس بلا سعر موثق', { n: res.missingPriceCount }) : '') +
-            (res.providerError ? WFT('market.note_provider_error', ' — خطأ مزود البحث: {err}', { err: res.providerError }) : '') +
+            (res.providerError && !onlyNoEvidenceVerifyFailure ? WFT('market.note_provider_error', ' — خطأ مزود البحث: {err}', { err: res.providerError }) : '') +
             (extra ? ' — ' + extra : '');
         }
-        toast(res.partial
+        toast(showPartialStatus
           ? 'اكتمل التحديث بنتيجة جزئية — التفاصيل موضحة أسفل الجدول'
           : (resumed ? doneNote
             : (mode === 'fill' ? 'تم إكمال بيانات المنافسين دون حذف الصفوف' : 'تم استبدال جدول المنافسين بالنتيجة الجديدة')));
-        updateLoaderProgress(100, res.partial ? 'اكتمل التحديث بنتيجة جزئية' : 'اكتمل تحديث المنافسين');
+        updateLoaderProgress(100, showPartialStatus ? 'اكتمل التحديث بنتيجة جزئية' : 'اكتمل تحديث المنافسين');
       } catch (error) {
         toast(error.message || 'تعذر تحديث المنافسين');
       } finally {

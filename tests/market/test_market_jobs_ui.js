@@ -27,6 +27,7 @@ const files = [
   'assets/js/04a-market-section.js',
   'assets/js/05-market-competitors.js',
   'assets/js/05-market-competitors/01_project_data_snapshot.js',
+  'assets/js/05-market-competitors/02_table_ux.js',
   'assets/js/05a-market-jobs.js',
   'assets/js/05a-market-summary-chat.js'
 ];
@@ -145,6 +146,7 @@ test('market study separates competitors and market into accessible tabs', () =>
   assert.match(ui, /id="marketCompetitorScopeMode"/);
   assert.match(ui, /id="marketComparisonTypes"/);
   assert.match(ui, /id="marketAddComparisonTypeBtn"/);
+  assert.match(ui, /id="marketCompetitorTypeTabs"/);
   assert.match(ui, /data-comparison-field="stars"/);
   assert.match(ui, /إضافة نوع مقارنة/);
   assert.doesNotMatch(ui, /marketCompetitorRadius/);
@@ -221,6 +223,45 @@ test('comparison rows accept several operations or hotel classifications', () =>
   assert.deepEqual(JSON.parse(JSON.stringify(context.collectMarketComparisonTypes())), [{
     type: 'residential', operation: ['sale', 'rent'], stars: []
   }]);
+});
+
+test('competitor table keeps blank type cells aligned and compacts comparison choices', () => {
+  const { context } = fixture();
+  const renderer = fs.readFileSync(path.join(root, 'assets/js/05-market-competitors.js'), 'utf8');
+  assert.match(renderer, /'<td' \+ marketHotelStarsCellAttributes\(isHotel\)/);
+  assert.match(renderer, /const benchmarksHtml = marketBenchmarkPickerHtml\(benchAxes, benchSelected\)/);
+  assert.match(renderer, /el\.style\.visibility = show \? 'visible' : 'hidden'/);
+  assert.match(renderer, /benchmarks: marketSelectedBenchmarkValues\(tr\)/);
+
+  const emptyStarsCell = context.marketHotelStarsCellAttributes(false);
+  assert.match(emptyStarsCell, /data-hotel-stars-cell/);
+  assert.match(emptyStarsCell, /market-hotel-stars-empty/);
+  assert.doesNotMatch(emptyStarsCell, /\shidden(?:\s|=|>)/);
+
+  const picker = context.marketBenchmarkPickerHtml([
+    { label: 'سكني - بيع', labelEn: 'Residential sale' },
+    { label: 'فندقي - 4 نجوم', labelEn: '4-star hotel' }
+  ], ['سكني - بيع']);
+  const summary = picker.match(/<summary>([\s\S]*?)<\/summary>/)[1];
+  assert.match(summary, /سكني - بيع/);
+  assert.doesNotMatch(summary, /فندقي/);
+  assert.match(picker, /type="checkbox"/);
+  assert.match(picker, /فندقي - 4 نجوم/);
+
+  const tabs = context.marketCompetitorTypeTabsModel([
+    { project_type: 'سكني' }, { project_type: 'فندقي' }, { project_type: 'تجاري' }
+  ], []);
+  assert.deepEqual(JSON.parse(JSON.stringify(tabs.map(item => item.key))), [
+    'residential', 'commercial', 'hotel'
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(context.marketCompetitorRowsForType([
+    { project_type: 'سكني', name: 'أ' }, { project_type: 'فندقي', name: 'ب' }
+  ], 'residential').map(row => row.name))), ['أ']);
+
+  const row = { querySelectorAll: selector => selector.includes(':checked')
+    ? [{ checked: true, value: 'سكني - بيع' }]
+    : [{ checked: true, value: 'سكني - بيع' }, { checked: false, value: 'فندقي - 4 نجوم' }] };
+  assert.deepEqual(JSON.parse(JSON.stringify(context.marketSelectedBenchmarkValues(row))), ['سكني - بيع']);
 });
 
 test('poll budget constant is 40 minutes', () => {
@@ -328,6 +369,45 @@ test('a fresh post remembers the job id and clears it on completion', async () =
   assert.equal(postCount(context, '/api/market-study/competitors'), 1);
   assert.equal(context.rememberedMarketJob('competitors'), '');
   assert.equal(context.appliedStates.length, 1);
+});
+
+test('no browsed evidence is hidden as a warning while verification status stays available', async () => {
+  const { context, inputs } = fixture();
+  const result = {
+    ...completedCompetitors(),
+    partial: true,
+    searchVerified: true,
+    searchNotRunCount: 1,
+    providerError: 'browse_agent: no browsed evidence',
+    competitors: [{
+      name: 'منافس واحد', verify_state: 'search_not_run',
+      verify_provider_error: 'browse_agent: no browsed evidence'
+    }]
+  };
+  const row = { dataset: {
+    verifyState: result.competitors[0].verify_state,
+    verifyProviderError: result.competitors[0].verify_provider_error
+  } };
+
+  assert.equal(context.marketCompetitorVerificationWarningHtml(row), '');
+  assert.equal(row.dataset.verifyState, 'search_not_run');
+  assert.equal(row.dataset.verifyProviderError, 'browse_agent: no browsed evidence');
+
+  context.nextApi = () => result;
+  await context.runMarketCompetitorsJob('generate');
+  assert.equal(inputs.marketCompetitorsNote.textContent, 'تم استبدال الجدول بـ 1 منافس');
+  assert.ok(context.toasts.includes('تم استبدال جدول المنافسين بالنتيجة الجديدة'));
+  assert.ok(!context.toasts.includes('اكتمل التحديث بنتيجة جزئية — التفاصيل موضحة أسفل الجدول'));
+});
+
+test('a real competitor verification timeout remains visible', async () => {
+  const { context } = fixture();
+  const row = { dataset: {
+    verifyState: 'search_not_run', verifyProviderError: 'deadline_exceeded'
+  } };
+  const warning = context.marketCompetitorVerificationWarningHtml(row);
+  assert.match(warning, /تعذر تشغيل بحث التحقق لهذا المنافس/);
+  assert.match(warning, /deadline_exceeded/);
 });
 
 test('a still-running poll result shows status text and keeps the memory', async () => {

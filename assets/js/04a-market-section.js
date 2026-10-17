@@ -72,6 +72,7 @@
             <button type="button" class="btn primary" id="marketGenerateCompetitorsBtn" onclick="runMarketCompetitorsJob('generate')">توليد المنافسين</button>
           </div>
           <div id="marketCompetitorsNote"></div>
+          <div id="marketCompetitorTypeTabs" class="market-competitor-type-tabs" role="group" aria-label="نوع المشروع" hidden></div>
           <div class="table-wrap">
             <table id="marketCompetitorsTable">
               <thead><tr>

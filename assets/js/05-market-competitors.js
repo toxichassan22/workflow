@@ -93,7 +93,7 @@
     function syncMarketBenchmarksColumn() {
       const show = marketBenchmarkAxes().length > 1;
       document.querySelectorAll('#marketCompetitorsTable [data-benchmarks-col], #marketCompetitorsTable [data-field="benchmarks_cell"]').forEach(el => {
-        el.style.display = show ? '' : 'none';
+        el.style.visibility = show ? 'visible' : 'hidden';
       });
     }
 
@@ -311,9 +311,12 @@
       return cache;
     }
 
-    function addMarketCompetitorRow(row = {}) {
+    function addMarketCompetitorRow(row = {}, deferTypeTabs = false) {
       const tb = document.querySelector('#marketCompetitorsTable tbody');
       if (!tb) return;
+      if (MARKET_COMPETITOR_ACTIVE_TYPE_TAB !== 'all' && !row.project_type && !row.projectType) {
+        row = { ...row, project_type: marketCompetitorTypeSelectValue(MARKET_COMPETITOR_ACTIVE_TYPE_TAB) };
+      }
       const tr = document.createElement('tr');
       tr.dataset.competitorId = row.id || ('c_' + Date.now() + '_' + Math.random().toString(16).slice(2));
       tr.dataset.classification = row.classification || '';
@@ -341,6 +344,7 @@
       tr.dataset.noSearchEvidence = row.no_search_evidence || row.noSearchEvidence ? '1' : '';
       tr.dataset.verifyState = row.verify_state || row.verifyState || '';
       tr.dataset.verifyProviderError = row.verify_provider_error || row.verifyProviderError || '';
+      tr.dataset.projectType = row.project_type || row.projectType || '';
       const areaCache = row.area_cache || row.areaCache || {};
       tr.dataset.areaFixed = cleanMarketNumber(row.area_sqm || row.areaSqm || areaCache.area_sqm || '');
       tr.dataset.areaFrom = cleanMarketNumber(row.area_from || row.areaFrom || areaCache.area_from || '');
@@ -352,14 +356,7 @@
       tr.dataset.previousPriceType = priceType;
       const benchAxes = marketBenchmarkAxes();
       const benchSelected = marketBenchmarkValues(row);
-      const benchOptions = Array.from(new Set(
-        benchAxes.map(marketBenchmarkAxisLabel).concat(benchSelected)));
-      const benchmarksHtml = '<select data-field="benchmarks" multiple size="' +
-        Math.min(Math.max(benchAxes.length, 1), 4) + '">' +
-        benchOptions.map(value =>
-          '<option value="' + escapeHtml(value) + '"' +
-          (benchSelected.includes(value) ? ' selected' : '') + '>' + escapeHtml(value) + '</option>'
-        ).join('') + '</select>';
+      const benchmarksHtml = marketBenchmarkPickerHtml(benchAxes, benchSelected);
       let warnings = [];
       try { warnings = JSON.parse(tr.dataset.conflictWarnings || '[]') || []; } catch (error) { warnings = []; }
       const warningsHtml = warnings.map(item => {
@@ -380,12 +377,7 @@
       (tr.dataset.noSearchEvidence
         ? '<div style="color:#b91c1c;margin-top:4px">لم يظهر اسم هذا المنافس في أي صفحة من نتائج البحث — الاسم غير موثق.</div>'
         : '') +
-      (tr.dataset.verifyState === 'search_not_run'
-        ? '<div style="color:#b91c1c;margin-top:4px">تعذر تشغيل بحث التحقق لهذا المنافس — لم يرجع مزود البحث أي صفحة.</div>'
-        : '') +
-      (tr.dataset.verifyProviderError
-        ? '<div style="color:#b91c1c;margin-top:4px;font-size:0.85em">' + escapeHtml(WFT('market.provider_detail', 'تفاصيل المزود: {err}', { err: tr.dataset.verifyProviderError })) + '</div>'
-        : '');
+      marketCompetitorVerificationWarningHtml(tr);
       const typeValue = marketTranslateCompetitorValue(row.project_type);
       const starsValue = String(row.hotel_stars || row.hotelStars || '');
       const isHotel = /فندق|فندقي|hotel|hospitality/i.test(typeValue);
@@ -393,7 +385,7 @@
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td data-field="logo_cell"></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_PROJECT_TYPES_EN : MARKET_PROJECT_TYPES, marketTranslateCompetitorValue(row.project_type)) + '</select></td>' +
-        '<td data-hotel-stars-cell' + (isHotel ? '' : ' hidden') + '><select data-field="hotel_stars">' +
+        '<td' + marketHotelStarsCellAttributes(isHotel) + '><select data-field="hotel_stars">' +
         marketSelectHtml(['1', '2', '3', '4', '5'], starsValue) + '</select></td>' +
         '<td><select data-field="classification">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_CLASSIFICATIONS_EN : MARKET_COMPETITOR_CLASSIFICATIONS, marketTranslateCompetitorValue(row.classification)) + '</select></td>' +
         '<td data-field="benchmarks_cell">' + benchmarksHtml + '</td>' +
@@ -407,6 +399,7 @@
         '<td data-field="price_cell"></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-competitor>حذف</button></td>';
       tb.appendChild(tr);
+      tr.dataset.projectType = String(row.project_type || row.projectType || tr.querySelector('[data-field="project_type"]')?.value || '');
       renderCompetitorLogoCell(tr);
       renderCompetitorSourceUrlEditor(tr, row);
       renderCompetitorSourceLinks(tr);
@@ -415,7 +408,9 @@
       tr.querySelector('[data-field="project_type"]')?.addEventListener('change', event => {
         const value = String(event.target.value || '');
         const starsCell = tr.querySelector('[data-hotel-stars-cell]');
-        if (starsCell) starsCell.hidden = !/فندق|فندقي|hotel|hospitality/i.test(value);
+        tr.dataset.projectType = value;
+        setMarketHotelStarsCellApplicable(starsCell, /فندق|فندقي|hotel|hospitality/i.test(value));
+        syncMarketCompetitorTypeTabs();
         persistMarketStudyFromDom();
       });
       tr.querySelector('[data-field="operation_type"]').addEventListener('change', () => {
@@ -438,11 +433,17 @@
       });
       tr.querySelector('[data-remove-competitor]').addEventListener('click', () => {
         tr.remove();
+        syncMarketCompetitorTypeTabs();
         persistMarketStudyFromDom();
       });
       tr.querySelectorAll('input,select,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
+      tr.querySelectorAll('[data-market-benchmark-option]').forEach(input => input.addEventListener('change', () => {
+        refreshMarketBenchmarkPicker(tr);
+        persistMarketStudyFromDom();
+      }));
       syncMarketBenchmarksColumn();
       refreshDynamicI18n(tr);
+      if (!deferTypeTabs) syncMarketCompetitorTypeTabs();
     }
 
     function renderCompetitorPriceInputs(tr, row) {
@@ -509,7 +510,7 @@
         area_cache,
         status: read('status'),
         classification: read('classification'),
-        benchmarks: Array.from(tr.querySelector('[data-field="benchmarks"]')?.selectedOptions || []).map(option => option.value).filter(Boolean),
+        benchmarks: marketSelectedBenchmarkValues(tr),
         logo_file_id: tr.dataset.logoFileId || '',
         logo_path: tr.dataset.logoPath || '',
         logo_url: tr.dataset.logoUrl || '',
@@ -567,7 +568,8 @@
       if (!tb) return;
       tb.innerHTML = '';
       const visibleRows = Array.isArray(rows) && rows.length ? rows : [{}];
-      visibleRows.forEach(row => addMarketCompetitorRow(row));
+      visibleRows.forEach(row => addMarketCompetitorRow(row, true));
+      syncMarketCompetitorTypeTabs();
     }
 
     function marketSourcesTableHtml() {

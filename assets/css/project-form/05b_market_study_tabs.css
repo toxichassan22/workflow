@@ -94,6 +94,85 @@
   display: none !important;
 }
 
+#section-market-study .market-competitor-type-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 4px 2px 8px;
+}
+
+#section-market-study .market-competitor-type-tabs[hidden] {
+  display: none !important;
+}
+
+#section-market-study .market-hotel-stars-empty {
+  visibility: hidden;
+}
+
+#section-market-study .market-benchmark-picker {
+  min-width: 145px;
+}
+
+#section-market-study .market-benchmark-picker summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--line, #d8e0e8);
+  border-radius: 8px;
+  color: var(--navy, #07182C);
+  background: var(--white, #FFFFFF);
+  cursor: pointer;
+  list-style: none;
+}
+
+#section-market-study .market-benchmark-picker summary::-webkit-details-marker {
+  display: none;
+}
+
+#section-market-study .market-benchmark-selected {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#section-market-study .market-benchmark-edit {
+  flex: 0 0 auto;
+  color: var(--muted, #64748B);
+  font-size: 11px;
+}
+
+#section-market-study .market-benchmark-options {
+  display: grid;
+  gap: 5px;
+  max-height: 180px;
+  overflow: auto;
+  margin-top: 6px;
+  padding: 8px;
+  border: 1px solid var(--line, #d8e0e8);
+  border-radius: 8px;
+  background: var(--white, #FFFFFF);
+}
+
+#section-market-study .market-benchmark-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  cursor: pointer;
+}
+
+#section-market-study .market-benchmark-options input {
+  flex: 0 0 auto;
+  width: auto;
+  margin: 3px 0 0;
+  accent-color: var(--navy, #07182C);
+}
+
 #section-market-study .market-transaction-benchmarks {
   margin-top: 18px;
 }
