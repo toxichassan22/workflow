@@ -18,6 +18,16 @@
         workflow.jobTodos = job.todos;
         changed = true;
       }
+      const checkpoint = job.checkpoint && typeof job.checkpoint === 'object' ? job.checkpoint : {};
+      const revision = Number(checkpoint.svgRenderRevision) || 0;
+      const signature = String(checkpoint.svgInputSignature || '');
+      if (revision && signature &&
+          (workflow.siteAssistant.renderRevision !== revision || workflow.siteAssistant.inputSignature !== signature)) {
+        workflow.siteAssistant.checkpoints = {};
+        workflow.siteAssistant.renderRevision = revision;
+        workflow.siteAssistant.inputSignature = signature;
+        changed = true;
+      }
       const sections = job.checkpoint?.svgSections;
       if (sections && typeof sections === 'object') {
         workflow.siteAssistant.checkpoints = workflow.siteAssistant.checkpoints || {};

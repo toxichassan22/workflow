@@ -153,13 +153,13 @@ def validate_scene(scene, contract, program):
     return scene
 
 
-def _rect_search(regions, area, blocked=()):
-    """Grid search for an axis-aligned rect of the exact required area, wholly
-    inside one region and clear of every blocked footprint — the deterministic
-    placement the layout fallbacks share. Largest region first."""
+def _rect_search(regions, area, blocked=(), angle=0):
+    """Grid search for an exact-area rectangle aligned with the parcel axis."""
     wanted = finite_number(area)
     if not wanted or wanted <= 0:
         return None
+    radians = math.radians(angle)
+    cosine, sine = math.cos(radians), math.sin(radians)
     for region in sorted((r for r in regions if len(r) >= 3),
                          key=lambda item: -abs(signed_area(item))):
         min_x = min(point[0] for point in region)
@@ -169,15 +169,68 @@ def _rect_search(regions, area, blocked=()):
         for ratio in (1.0, 1.3, 1.7, 2.3, 0.77, 0.59, 0.44, 3.1, 0.32, 4.0, 0.25):
             width = math.sqrt(wanted * ratio)
             height = wanted / width
-            if width > max_x - min_x or height > max_y - min_y:
+            half_x = (width * abs(cosine) + height * abs(sine)) / 2
+            half_y = (width * abs(sine) + height * abs(cosine)) / 2
+            if 2 * half_x > max_x - min_x or 2 * half_y > max_y - min_y:
                 continue
             for fy in range(21):
                 for fx in range(21):
-                    x = min_x + (max_x - min_x - width) * fx / 20
-                    y = min_y + (max_y - min_y - height) * fy / 20
-                    rect = [[x, y], [x + width, y], [x + width, y + height], [x, y + height]]
+                    cx = min_x + half_x + (max_x - min_x - 2 * half_x) * fx / 20
+                    cy = min_y + half_y + (max_y - min_y - 2 * half_y) * fy / 20
+                    rect = [[cx + dx * cosine - dy * sine,
+                             cy + dx * sine + dy * cosine]
+                            for dx, dy in ((-width / 2, -height / 2),
+                                           (width / 2, -height / 2),
+                                           (width / 2, height / 2),
+                                           (-width / 2, height / 2))]
                     if polygon_inside(rect, region) and not any(
                             polygons_overlap(rect, item) for item in blocked):
+                        return rect
+    return None
+
+
+def _rect_grid_search(regions, area, blocked=(), angle=0):
+    """Pack exact-area footprints on a parcel-aligned grid for dense programs."""
+    wanted = finite_number(area)
+    if not wanted or wanted <= 0:
+        return None
+    radians = math.radians(angle)
+    cosine, sine = math.cos(radians), math.sin(radians)
+    ratios = (1.3, 1.0, 1.7, 0.77, 2.3, 0.59, 3.1, 0.44, 4.0, 0.32, 0.25)
+    blocked_bounds = [(min(point[0] for point in item), max(point[0] for point in item),
+                       min(point[1] for point in item), max(point[1] for point in item))
+                      for item in blocked if item]
+    for region in sorted((r for r in regions if len(r) >= 3),
+                         key=lambda item: -abs(signed_area(item))):
+        local = [(x * cosine + y * sine, -x * sine + y * cosine) for x, y in region]
+        min_x, max_x = min(point[0] for point in local), max(point[0] for point in local)
+        min_y, max_y = min(point[1] for point in local), max(point[1] for point in local)
+        for ratio in ratios:
+            width, height = math.sqrt(wanted * ratio), math.sqrt(wanted / ratio)
+            columns = int((max_x - min_x) // width)
+            rows = int((max_y - min_y) // height)
+            if columns <= 0 or rows <= 0:
+                continue
+            for row in range(rows):
+                cy = min_y + height / 2 + row * height
+                for column in range(columns):
+                    cx = min_x + width / 2 + column * width
+                    rect = []
+                    for u, v in ((cx - width / 2, cy - height / 2),
+                                 (cx + width / 2, cy - height / 2),
+                                 (cx + width / 2, cy + height / 2),
+                                 (cx - width / 2, cy + height / 2)):
+                        rect.append([u * cosine - v * sine, u * sine + v * cosine])
+                    if not polygon_inside(rect, region):
+                        continue
+                    left, right = min(point[0] for point in rect), max(point[0] for point in rect)
+                    bottom, top = min(point[1] for point in rect), max(point[1] for point in rect)
+                    possible_collisions = [item for item, bounds in zip(blocked, blocked_bounds)
+                                           if not (right <= bounds[0] + 1e-8
+                                                   or left >= bounds[1] - 1e-8
+                                                   or top <= bounds[2] + 1e-8
+                                                   or bottom >= bounds[3] - 1e-8)]
+                    if not any(polygons_overlap(rect, item) for item in possible_collisions):
                         return rect
     return None
 
@@ -202,17 +255,38 @@ def buildable_envelopes(contract):
     return envelopes
 
 
+def _parcel_long_axis_angle(regions):
+    edges = [(a, b) for region in regions
+             for a, b in zip(region, region[1:] + region[:1])]
+    if not edges:
+        return 0.0
+    a, b = max(edges, key=lambda edge: math.dist(*edge))
+    angle = math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+    while angle > 90:
+        angle -= 180
+    while angle <= -90:
+        angle += 180
+    return angle
+
+
 def fallback_scene(contract, program, version=1):
     """Deterministic last-resort layout — exact-area rects placed inside the
     setback envelopes — tried only when the layout model fails, so prepare
     still seals a valid scene or refuses with the precise capacity reason."""
     envelopes = [item['polygon'] for item in buildable_envelopes(contract)]
+    parcel_axis = _parcel_long_axis_angle(envelopes)
     placed = {}
     for building in sorted(program['buildings'],
                            key=lambda item: -(finite_number(item['footprintArea']) or 0)):
         if building.get('basementOnly'):
             continue
-        footprint = _rect_search(envelopes, building['footprintArea'], list(placed.values()))
+        footprint = _rect_grid_search(envelopes, building['footprintArea'], list(placed.values()), parcel_axis)
+        if footprint is None:
+            footprint = _rect_search(envelopes, building['footprintArea'], list(placed.values()), parcel_axis)
+        if footprint is None and abs(parcel_axis) > 0.01:
+            footprint = _rect_grid_search(envelopes, building['footprintArea'], list(placed.values()))
+        if footprint is None and abs(parcel_axis) > 0.01:
+            footprint = _rect_search(envelopes, building['footprintArea'], list(placed.values()))
         if footprint is None:
             required = sum(finite_number(item['footprintArea']) or 0
                            for item in program['buildings'] if not item.get('basementOnly'))

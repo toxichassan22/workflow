@@ -49,7 +49,7 @@
         jobTodos: [],
         siteAssistant: {
           inputSignature: '', summary: '', turns: [], answers: [], pendingQuestion: '',
-          readyForGeneration: false, designSpec: null, checkpoints: {},
+          readyForGeneration: false, designSpec: null, checkpoints: {}, renderRevision: 0,
           promptTokens: 0, compactionCount: 0, status: 'idle'
         }
       };
@@ -152,6 +152,7 @@
         })).filter(item => item.label),
         siteAssistant: {
           inputSignature: String(assistant.inputSignature || '').slice(0, 80),
+          renderRevision: Math.max(0, Number(assistant.renderRevision) || 0),
           summary: String(assistant.summary || '').slice(0, 40000),
           turns: assistantTurns,
           answers: assistantAnswers,

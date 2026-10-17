@@ -2,12 +2,76 @@ import visual_plan_scene as visual_plan_scene
 import visual_plan_renderer as visual_plan_renderer
 
 
+def _visual_plan_is_individual_home(value):
+    return bool(re.search(
+        r'\b(?:detached\s+homes?|villas?|townhouses?|chalets?)\b|فلل|فيلا|تاون\s*هاوس|شاليهات?',
+        str(value or ''), re.IGNORECASE))
+
+
+def _visual_plan_individual_home_levels(values):
+    floors = set()
+    annex_fraction = 0.0
+    for value in values:
+        text = str(value or '').strip()
+        if not text:
+            continue
+        annexes = [float(item) / 100 for item in re.findall(
+            r'(\d+(?:\.\d+)?)\s*%\s*(?:annex|ملحق)', text, flags=re.IGNORECASE)]
+        annex_fraction = max(annex_fraction, sum(annexes))
+        clean = re.sub(r'\d+(?:\.\d+)?\s*%\s*(?:annex|ملحق)', ' ', text, flags=re.IGNORECASE)
+        parsed = _visual_concept_plan_floor_range(clean)
+        if not parsed or parsed['kind'] in ('basement', 'site', 'roof'):
+            continue
+        if parsed['kind'] == 'mezzanine':
+            floors.add(0.5)
+        else:
+            low, high = int(parsed['lo']), int(parsed['hi'])
+            floors.update(range(low, min(high, low + 200) + 1))
+    return max(1.0, len(floors) + annex_fraction)
+
+
+def _visual_plan_home_component_match(row, components):
+    names = [str(row.get('component') or ''), str(row.get('building') or '')]
+    row_keys = {_visual_concept_plan_component_key(_visual_concept_plan_component_base(name))
+                for name in names if name}
+    matches = []
+    for component in components:
+        name = str(component.get('name') or '')
+        if not _visual_plan_is_individual_home(name):
+            continue
+        key = _visual_concept_plan_component_key(_visual_concept_plan_component_base(name))
+        if key and any(row_key and (key == row_key or key in row_key or row_key in key)
+                       for row_key in row_keys):
+            matches.append(component)
+    if len(matches) == 1:
+        return matches[0]
+    home_components = [item for item in components
+                       if _visual_plan_is_individual_home(item.get('name'))]
+    if not matches and len(home_components) == 1 and _visual_plan_is_individual_home(
+            row.get('component') or row.get('building')):
+        return home_components[0]
+    return None
+
+
+def _visual_plan_component_name_keys(value):
+    base = _visual_concept_plan_component_base(value)
+    return {_visual_concept_plan_component_key(item)
+            for item in (value, base) if item}
+
+
 def _visual_plan_program(contract, context):
-    groups, site_items = {}, []
+    groups, site_items, home_groups = {}, [], {}
+    components = context.get('components') or []
+    current_component_keys = set().union(*(
+        _visual_plan_component_name_keys(component.get('name'))
+        for component in components if component.get('name')) if components else set())
     site_keys = _visual_concept_plan_site_component_keys(context)
     floor_cap = (_visual_concept_number(context.get('approved_floor_count'))
                  or _visual_concept_plan_regulation_floor_cap(context.get('regulations') or {}))
     for row in contract['distribution']['rows']:
+        if (components and not current_component_keys.intersection(
+                _visual_plan_component_name_keys(row.get('component')))):
+            continue
         parsed = _visual_concept_plan_floor_range(row.get('floor_range'))
         if parsed is None and _visual_concept_plan_row_site(row, site_keys):
             parsed = {'kind': 'site', 'lo': 0, 'hi': 0, 'count': 1}
@@ -30,6 +94,12 @@ def _visual_plan_program(contract, context):
                 'units': row['units_per_floor'], 'circulation': row['circulation']}
         if parsed['kind'] == 'site' or _visual_concept_plan_row_site(row, site_keys):
             site_items.append(band)
+        elif _visual_plan_is_individual_home(row.get('component') or row.get('building')):
+            matched = _visual_plan_home_component_match(row, components)
+            key = str((matched or {}).get('id') or row['id'])
+            group = home_groups.setdefault(key, {'component': matched, 'rows': [], 'bands': []})
+            group['rows'].append(row)
+            group['bands'].append(band)
         else:
             name = row['building'] or 'المبنى الرئيسي'
             groups.setdefault(name, []).append(band)
@@ -62,6 +132,48 @@ def _visual_plan_program(contract, context):
                           'footprintArea': footprint_area, 'bands': bands,
                           'basementOnly': not bool(above),
                           'levels': max((band['end'] for band in bands if band['kind'] != 'basement'), default=0)})
+    for group_index, group in enumerate(home_groups.values(), 1):
+        component = group['component'] or {}
+        rows = group['rows']
+        bands = group['bands']
+        unit_count = _visual_concept_number(component.get('units'))
+        if unit_count is None:
+            unit_values = [_visual_concept_number(row.get('units_per_floor')) for row in rows]
+            unit_values = [value for value in unit_values if value is not None]
+            unit_count = max(unit_values, default=0)
+        if unit_count <= 0 or not float(unit_count).is_integer() or unit_count > 200:
+            raise visual_plan_geometry.PlanGeometryError(
+                'عدد الفلل الفردية غير محدد كعدد صحيح في المكونات المعتمدة؛ لا يمكن اختصارها إلى كتلة واحدة.',
+                'PLANS_DISTRIBUTION_INCOMPLETE')
+        levels = _visual_plan_individual_home_levels(
+            [component.get('floorRange'), *(row.get('floor_range') for row in rows)])
+        total_area = _visual_concept_number(component.get('builtArea'))
+        if total_area is None or total_area <= 0:
+            area_values = [_visual_concept_number(row.get('floor_area_sqm')) for row in rows]
+            area_values = [value for value in area_values if value is not None and value > 0]
+            total_area = sum(area_values) if area_values else 0
+        if total_area <= 0:
+            unit_area = _visual_concept_number(component.get('unitArea'))
+            total_area = unit_area * unit_count if unit_area and unit_area > 0 else 0
+        footprint_area = total_area / unit_count / levels if total_area > 0 else 0
+        if footprint_area <= 0:
+            raise visual_plan_geometry.PlanGeometryError(
+                'مساحة بصمة الفيلا الواحدة غير مكتملة في المكونات والتوزيع المعتمد.',
+                'PLANS_DISTRIBUTION_INCOMPLETE')
+        source_name = str(component.get('name') or rows[0].get('component') or 'Villa')
+        label = _visual_concept_plan_component_en(source_name)
+        if not label or re.search(r'[\u0600-\u06FF]', label):
+            label = 'Villa'
+        category = bands[0]['category'] if bands else 'residential'
+        for unit_index in range(int(unit_count)):
+            unit_id = f'unit_{group_index}_{unit_index + 1:03d}'
+            unit_band = {'id': unit_id, 'name': source_name, 'label': label,
+                         'category': category, 'floorLabel': '', 'floorRange': '',
+                         'kind': 'range', 'count': 1, 'lo': 0, 'hi': 0,
+                         'area': footprint_area, 'units': 1, 'circulation': ''}
+            buildings.append({'id': unit_id, 'name': source_name, 'label': label,
+                              'footprintArea': footprint_area, 'bands': [unit_band],
+                              'basementOnly': False, 'levels': levels})
     return {'buildings': buildings, 'siteItems': site_items}
 
 
@@ -98,11 +210,23 @@ _PLAN_LENGTH_FINISH = {'length', 'max_tokens', 'max_output_tokens', 'max_complet
 
 
 def _visual_plan_rect_polygon(value):
-    """Expand a {"rect": [x, y, width, height]} footprint shorthand into a
-    polygon. The model matches an exact required area far more reliably with
-    width*height than by iterating shoelace math on free polygons."""
+    """Expand axis-aligned or parcel-oriented rectangle shorthand to a polygon."""
     rect = None
     if isinstance(value, dict):
+        oriented = value.get('orientedRect')
+        if isinstance(oriented, (list, tuple)) and len(oriented) == 5:
+            cx, cy, width, height, angle = (
+                visual_plan_geometry.finite_number(item) for item in oriented)
+            if (None not in (cx, cy, width, height, angle)
+                    and width > 0 and height > 0):
+                radians = math.radians(angle)
+                cosine, sine = math.cos(radians), math.sin(radians)
+                return [[cx + dx * cosine - dy * sine,
+                         cy + dx * sine + dy * cosine]
+                        for dx, dy in ((-width / 2, -height / 2),
+                                       (width / 2, -height / 2),
+                                       (width / 2, height / 2),
+                                       (-width / 2, height / 2))]
         rect = value.get('rect')
         if rect is None and {'x', 'y', 'width', 'height'} <= set(value):
             rect = [value.get('x'), value.get('y'), value.get('width'), value.get('height')]
@@ -210,6 +334,24 @@ def _visual_plan_create_scene(data, context=None):
     visual_plan_scene.check_program_feasibility(contract, program)
     reference_url = _visual_concept_render_plan_boundary_reference(contract['geometry']['surveyPoints'], g.tenant_id)
     references = _visual_concept_reference_uris(urls=[reference_url], tenant_id=g.tenant_id) if reference_url else []
+    parcel_edges = [(a, b) for parcel in contract['geometry']['parcels']
+                    for a, b in zip(parcel['polygon'], parcel['polygon'][1:] + parcel['polygon'][:1])]
+    longest_edge = max(parcel_edges, key=lambda edge: math.dist(*edge))
+    axis_degrees = math.degrees(math.atan2(
+        longest_edge[1][1] - longest_edge[0][1],
+        longest_edge[1][0] - longest_edge[0][0]))
+    while axis_degrees > 90:
+        axis_degrees -= 180
+    while axis_degrees <= -90:
+        axis_degrees += 180
+    orientation_rule = (
+        f'\nPARCEL-ALIGNED BUILDING AXIS: the longest surveyed parcel edge is '
+        f'{axis_degrees:.3f} degrees counterclockwise from east. Align the long side of every '
+        'rectangular building footprint with this edge; do not align buildings to the page or '
+        'north/east axes. For rectangles use {"orientedRect":[centerX,centerY,longSide,shortSide,angleDegrees]} '
+        'with the same angle and exact footprintArea = longSide*shortSide. Axis-aligned rect is '
+        'allowed only when this parcel angle is within 2 degrees of 0 or 90.'
+    )
     system_prompt = (
         'You plan a conceptual architectural scene; the application renders the images. '
         'The surveyed parcel geometry, primary frontage, north, setbacks, regulatory constraints, '
@@ -230,9 +372,12 @@ def _visual_plan_create_scene(data, context=None):
         'and residential entries must use recorded streets, never neighboring land. Entry position '
         'is a fraction 0..1 along the longest parcel edge on that side. Surface parking requires a '
         'recorded siteItems componentId and its recorded area. No source names, files or pages. '
-        'Any footprint or open-area polygon may be written as an axis-aligned rect instead: '
-        '{"rect":[x,y,width,height]} in metres — its area is exactly width*height, which makes '
-        'matching the required area exact; prefer it for rectangular masses. '
+        'Every program ID is a separate physical footprint. For repeated individual homes, place one '
+        'separate polygon for every unit ID; never merge multiple homes into one building or block. '
+        'Calculate each placement in metres against parcel edges, setbacks and neighboring footprints; '
+        'keep the footprints separate with usable gaps and verify the full required count before returning. '
+        'A footprint or open-area rectangle may use {"orientedRect":[centerX,centerY,width,height,angleDegrees]} '
+        'in metres; expand its rotated corners and preserve width*height exactly. '
         'Return JSON only: {"buildings":[{"id":"b1","footprint":[[0,0],[1,0],[1,1],[0,1]],'
         '"facades":{"west":{"material":"glass","pattern":"grid"}}}],'
         '"entries":[{"id":"main_entry","kind":"main","buildingId":"b1","side":"west",'
@@ -245,14 +390,21 @@ def _visual_plan_create_scene(data, context=None):
         envelope_note = ('\nBUILDABLE ENVELOPE AFTER RECORDED SETBACKS — place every above-ground '
                          'footprint inside one of these polygons:\n'
                          + json.dumps(envelopes, ensure_ascii=False))
+    placement_program = {
+        'buildings': [{key: building.get(key) for key in (
+            'id', 'name', 'label', 'footprintArea', 'basementOnly', 'levels')}
+                      for building in program.get('buildings') or []],
+        'siteItems': program.get('siteItems') or [],
+    }
     user_prompt = ('COMPLETE FIXED LAND AND PROJECT CONTRACT:\n' + json.dumps(contract, ensure_ascii=False)
+                   + orientation_rule
                    + envelope_note
                    + '\nBUILDINGS AND FLOOR PROGRAM TO PLACE WITHOUT CHANGES:\n'
-                   + json.dumps(program, ensure_ascii=False))
+                   + json.dumps(placement_program, ensure_ascii=False))
     feedback = ''
     error = None
     raw_keys = []
-    cap = 8000
+    cap = min(24000, max(8000, 8000 + max(0, len(program['buildings']) - 40) * 120))
     for attempt in range(2):
         response = call_openrouter_chat(
             system_prompt, user_prompt + feedback, temperature=None, max_tokens=cap,
@@ -328,7 +480,8 @@ def _visual_plan_create_scene(data, context=None):
                            + ' — return exactly one footprint per program building id.'
                            if missing else '')
                         + '\nCorrect only the proposed scene; the fixed contract remains unchanged.'
-                        + ' Keep every footprint inside the provided buildable envelope polygons.')
+                        + ' Keep every footprint inside the provided buildable envelope polygons.'
+                        + orientation_rule)
     fallback_error = None
     try:
         scene = visual_plan_scene.fallback_scene(contract, program, VISUAL_PLAN_SCENE_VERSION)

@@ -1,4 +1,5 @@
 import unittest
+import math
 
 from visual_plan_geometry import (PlanGeometryError, boundary_geometry, polygons_overlap,
                                   signed_area, validate_footprint)
@@ -52,6 +53,48 @@ class VisualPlanSceneTests(unittest.TestCase):
         self.assertFalse(polygons_overlap(first['footprint'], second['footprint']))
         self.assertEqual(scene['entries'][0]['side'], 'west')
         self.assertEqual(scene['entries'][0]['kind'], 'main')
+
+    def test_fallback_scene_rotates_building_footprints_to_match_the_parcel(self):
+        angle = math.radians(23)
+        surveyed = []
+        for x, y in ((0, 0), (40, 0), (40, 30), (0, 30)):
+            surveyed.append({'eastings': x * math.cos(angle) - y * math.sin(angle),
+                             'northings': x * math.sin(angle) + y * math.cos(angle)})
+        contract = _contract(setbacks={})
+        contract['geometry'] = boundary_geometry(surveyed)
+
+        scene = fallback_scene(contract, _program(_building(1, 200)))
+        footprint = scene['buildings'][0]['footprint']
+        longest = max(zip(footprint, footprint[1:] + footprint[:1]),
+                      key=lambda edge: math.dist(*edge))
+        actual_angle = math.degrees(math.atan2(longest[1][1] - longest[0][1],
+                                               longest[1][0] - longest[0][0]))
+        while actual_angle > 90:
+            actual_angle -= 180
+        while actual_angle <= -90:
+            actual_angle += 180
+
+        self.assertAlmostEqual(abs(signed_area(footprint)), 200, places=4)
+        self.assertAlmostEqual(actual_angle, 23, places=4)
+
+    def test_fallback_scene_places_all_one_hundred_home_footprints_separately(self):
+        contract = _contract(setbacks={})
+        contract['geometry'] = boundary_geometry([
+            {'eastings': x, 'northings': y}
+            for x, y in ((0, 0), (200, 0), (200, 150), (0, 150))
+        ])
+        program = _program(*(_building(index, 104) for index in range(1, 101)))
+
+        scene = fallback_scene(contract, program)
+
+        self.assertEqual(len(scene['buildings']), 100)
+        self.assertEqual({item['id'] for item in scene['buildings']},
+                         {f'b{index}' for index in range(1, 101)})
+        for item in scene['buildings']:
+            self.assertAlmostEqual(abs(signed_area(item['footprint'])), 104, places=5)
+        for index, building in enumerate(scene['buildings']):
+            for other in scene['buildings'][index + 1:]:
+                self.assertFalse(polygons_overlap(building['footprint'], other['footprint']))
 
     def test_fallback_scene_places_missing_basements_through_make_scene(self):
         contract = _contract()

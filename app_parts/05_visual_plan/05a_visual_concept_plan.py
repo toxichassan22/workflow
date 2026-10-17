@@ -550,6 +550,11 @@ def _visual_concept_plan_setback_en(text):
 _VISUAL_PLAN_NAME_EN = (
     (r'خمس[ةه]?\s*نجوم|5\s*نجوم', 'Five-Star Hotel'),
     (r'شقق[^.]*فاخر|فاخر[^.]*شقق|سكنية?\s*فاخرة?|فاخرة?\s*سكنية?', 'Luxury Residential Apartments'),
+    (r'فلل|فيلا|تاون\s*هاوس|شاليهات?', 'Villas'),
+    (r'ملعب\s*كرة(?:\s*القدم)?|كرة\s*القدم', 'Football Field'),
+    (r'بادل|padel', 'Padel Court'),
+    (r'مسبح|حمام\s*سباحة|swimming\s*pool', 'Swimming Pool'),
+    (r'ملعب\s*(?:أطفال|اطفال)|ألعاب\s*أطفال|العاب\s*اطفال', "Children's Playground"),
     (r'فندق|فنادق|ضيافة', 'Hotel'),
     (r'شقق|سكني|سكن\b|وحدات\s*سكنية', 'Residential Apartments'),
     (r'مطاعم|مطعم|كافيه|كافيتيريا', 'Restaurants'),
@@ -633,6 +638,19 @@ def _visual_concept_plan_building_en(name):
     """Building label for English spec text: our own default names translate;
     anything the client recorded stays a proper name."""
     text = str(name or '').strip()
+    if re.search(r'[\u0600-\u06FF]', text):
+        letter_map = {'أ': 'A', 'ا': 'A', 'ب': 'B', 'ج': 'C', 'د': 'D',
+                      'ه': 'E', 'و': 'F', 'ز': 'G', 'ح': 'H', 'ط': 'I', 'ي': 'J'}
+        letter = r'([A-Jأابجدهوزحطي])(?=\s|$|[-–—])'
+        match = re.search(r'(?:ال)?برج\s*' + letter, text, re.IGNORECASE)
+        if match:
+            return 'Tower ' + letter_map.get(match.group(1), match.group(1).upper())
+        match = re.search(r'مخطط\s*' + letter, text, re.IGNORECASE)
+        if match:
+            return 'Plan ' + letter_map.get(match.group(1), match.group(1).upper())
+        match = re.search(r'(?:ال)?مبنى\s*' + letter, text, re.IGNORECASE)
+        if match:
+            return 'Building ' + letter_map.get(match.group(1), match.group(1).upper())
     return _VISUAL_PLAN_BUILDING_EN.get(text, text) or 'Main Building'
 
 

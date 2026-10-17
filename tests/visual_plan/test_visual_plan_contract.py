@@ -1,6 +1,7 @@
 import copy
 import base64
 import json
+import math
 import tempfile
 import unittest
 import xml.etree.ElementTree as ElementTree
@@ -517,23 +518,14 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                     'prompts': prepared.get_json()['prompts']}
 
         section_ids = ('coordinates', 'colors', 'components', 'access', 'landscape', 'legend')
-        section_replies = []
-        for section in section_ids:
-            if section == 'colors':
-                fragment = '<defs id="ll-section-colors"><style>.parcel{stroke:#18324A}</style></defs>'
-            else:
-                fragment = (f'<g id="ll-section-{section}"><text>{section.title()}</text>'
-                            f'<path d="M 1 1 L 2 2" class="parcel"/></g>')
-            section_replies.append({'choices': [{'message': {'content': json.dumps({'code': fragment})}}],
-                                    'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}})
         model_replies = [{'choices': [{'message': {'content': json.dumps(
             {'ready': True, 'reply': 'Requirements are clear.', 'memory': 'Preserve the approved layout.'})}}],
-                          'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}}] + section_replies
-        model_replies.append({'choices': [{'message': {'content': json.dumps({
+                          'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}},
+                         {'choices': [{'message': {'content': json.dumps({
             'clear': True, 'targetSection': 'components',
-            'code': '<g id="ll-section-components"><text>Residential</text></g>',
+            'code': '<g id="ll-section-components"><text>Main Building</text></g>',
             'reply': 'Updated the component label.'})}}],
-            'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}})
+            'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}}]
         with tempfile.TemporaryDirectory() as upload_dir:
             with patch.dict('os.environ', {'PLAN_SITE_MODEL': 'another/provider-model'}, clear=False), \
                     patch.object(module, 'UPLOADS_DIR', upload_dir), \
@@ -564,7 +556,13 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                     svg_root = ElementTree.fromstring(preview.data)
                     svg_namespace = '{http://www.w3.org/2000/svg}'
                     self.assertEqual(svg_root.tag, svg_namespace + 'svg')
-                    self.assertEqual(svg_root.find('.//' + svg_namespace + 'text').text, 'Coordinates')
+                    component_label = svg_root.find(
+                        './/' + svg_namespace + 'g[@id="ll-section-components"]/' + svg_namespace + 'text')
+                    self.assertEqual(component_label.text, 'Main Building')
+                    for section in ('coordinates', 'access', 'landscape'):
+                        group = next(item for item in svg_root.iter()
+                                     if item.get('id') == 'll-section-' + section)
+                        self.assertFalse(any(item.tag == svg_namespace + 'text' for item in group.iter()))
                     found_ids = {element.attrib.get('id') for element in svg_root.iter()}
                     for section in section_ids:
                         self.assertIn('ll-section-' + section, found_ids)
@@ -593,23 +591,19 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                                           if element.attrib.get('id') == 'll-section-' + section).itertext())
                     for section in section_ids
                 }
-                self.assertEqual(after_sections['components'], 'Residential')
+                self.assertEqual(after_sections['components'], 'Main Building')
                 for section in set(section_ids) - {'components'}:
                     self.assertEqual(after_sections[section], before_sections[section])
         self.assertEqual(render.status_code, 200, render.get_json())
         body = render.get_json()
         self.assertEqual(body['model'], 'google/gemini-4-argon')
-        self.assertEqual(chat_call.call_count, 8)
+        self.assertEqual(chat_call.call_count, 2)
         self.assertTrue(all(call.kwargs.get('model') == 'google/gemini-4-argon'
                             for call in chat_call.call_args_list))
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('reasoning_effort'), 'high')
-        self.assertTrue(all(call.kwargs.get('reasoning_effort') == 'medium'
-                            for call in chat_call.call_args_list[1:7]))
-        self.assertEqual(chat_call.call_args_list[7].kwargs.get('reasoning_effort'), 'high')
+        self.assertEqual(chat_call.call_args_list[1].kwargs.get('reasoning_effort'), 'high')
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('max_tokens'), 12000)
-        self.assertTrue(all(call.kwargs.get('max_tokens') == 32000
-                            for call in chat_call.call_args_list[1:7]))
-        self.assertEqual(chat_call.call_args_list[7].kwargs.get('max_tokens'), 24000)
+        self.assertEqual(chat_call.call_args_list[1].kwargs.get('max_tokens'), 24000)
         persisted_uri = persist_mock.call_args.args[0]
         self.assertTrue(persisted_uri.startswith('data:image/svg+xml;base64,'))
         persisted_svg = base64.b64decode(persisted_uri.split(',', 1)[1])
@@ -715,7 +709,8 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                          ['done', 'done', 'active', 'pending', 'pending', 'pending', 'pending'])
         failed = module._visual_plan_job_terminal_todos(
             'site_chat', 'failed', current_todos=todos)
-        self.assertEqual(failed[2]['label'], 'Every approved building and component footprint, labels and approved areas.')
+        self.assertEqual(failed[2]['label'],
+                         'Current approved footprints only, with one short approved name per building or component.')
         self.assertEqual([item['status'] for item in failed],
                          ['done', 'done', 'failed', 'pending', 'pending', 'pending', 'pending'])
         self.assertEqual(failed[-1]['stage'], 'site_svg_assembly')
@@ -723,9 +718,11 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         with self.app.test_request_context('/'):
             module.g.visual_plan_job_kind = 'site_generate'
             module.g.visual_plan_job_progress = lambda **kwargs: reported.append(kwargs)
-            module._visual_plan_report_site_chat_timing(
-                'site_svg_components_model_ms', module.time.perf_counter() - 0.01)
-        self.assertGreaterEqual(reported[0]['timing']['site_svg_components_model_ms'], 0)
+            module._visual_plan_site_report_progress(42, todos, checkpoints, 'current-input')
+        self.assertEqual(reported[0]['checkpoint']['svgRenderRevision'],
+                         module._VISUAL_PLAN_SITE_RENDER_REVISION)
+        self.assertEqual(reported[0]['checkpoint']['svgInputSignature'], 'current-input')
+        self.assertEqual(reported[0]['checkpoint']['svgSections'], checkpoints)
 
     def test_arabic_svg_labels_are_removed_without_rejecting_the_section(self):
         module = self.application_module
@@ -745,6 +742,180 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertIn('Parking area', cleaned)
         self.assertNotRegex(cleaned, r'[\u0600-\u06FF]')
         self.assertEqual(sanitized_sections, ['components'])
+
+    def test_site_svg_checkpoints_require_current_inputs_and_render_rules(self):
+        module = self.application_module
+        current = {'inputSignature': 'current',
+                   'renderRevision': module._VISUAL_PLAN_SITE_RENDER_REVISION, 'checkpoints': {
+            'components': '<g id="ll-section-components"/>', 'unknown': '<g/>'}}
+        self.assertEqual(module._visual_plan_site_reusable_checkpoints(current, 'current'), {
+            'components': '<g id="ll-section-components"/>'})
+        self.assertEqual(module._visual_plan_site_reusable_checkpoints(current, 'changed'), {})
+        old_renderer = {**current, 'renderRevision': module._VISUAL_PLAN_SITE_RENDER_REVISION - 1}
+        self.assertEqual(module._visual_plan_site_reusable_checkpoints(old_renderer, 'current'), {})
+
+    def test_individual_villa_program_expands_every_approved_unit_with_exact_area(self):
+        module = self.application_module
+        contract = {'distribution': {'rows': [{
+            'id': 'villa_row', 'building': 'الفلل', 'component': 'فلل سكنية',
+            'floor_range': 'G+1+50% Annex', 'units_per_floor': 100,
+            'floor_area_sqm': 13000, 'circulation': '',
+        }]}}
+        context = {'components': [{
+            'id': 'villa_component', 'name': 'فلل سكنية', 'useType': 'residential',
+            'units': 100, 'builtArea': 26000, 'floorRange': 'G+1+50% Annex',
+        }]}
+
+        program = module._visual_plan_program(contract, context)
+        villas = program['buildings']
+
+        self.assertEqual(len(villas), 100)
+        self.assertEqual(len({villa['id'] for villa in villas}), 100)
+        self.assertTrue(all(villa['label'] == 'Villas' for villa in villas))
+        self.assertTrue(all(villa['levels'] == 2.5 for villa in villas))
+        self.assertTrue(all(villa['footprintArea'] == 104 for villa in villas))
+        self.assertTrue(all(villa['bands'][0]['units'] == 1 for villa in villas))
+
+    def test_scene_program_ignores_distribution_rows_absent_from_current_components(self):
+        module = self.application_module
+        contract = {'distribution': {'rows': [
+            {'id': 'current_villas', 'building': 'Main Building', 'component': 'فلل سكنية',
+             'floor_range': 'G+1', 'units_per_floor': 100, 'floor_area_sqm': 26000,
+             'circulation': ''},
+            {'id': 'deleted_health_club', 'building': 'U Cluster', 'component': 'Health Club',
+             'floor_range': 'G', 'units_per_floor': 1, 'floor_area_sqm': 600,
+             'circulation': ''},
+        ]}}
+        context = {'components': [{
+            'id': 'current_villas', 'name': 'فلل سكنية', 'useType': 'residential',
+            'units': 100, 'builtArea': 26000, 'floorRange': 'G+1',
+        }]}
+
+        program = module._visual_plan_program(contract, context)
+
+        self.assertEqual(len(program['buildings']), 100)
+        self.assertNotIn('Health Club', json.dumps(program))
+        self.assertNotIn('U Cluster', json.dumps(program))
+
+    def test_short_plan_labels_translate_only_the_component_or_building_name(self):
+        module = self.application_module
+        self.assertEqual(module._visual_concept_plan_building_en('برج أ'), 'Tower A')
+        self.assertEqual(module._visual_concept_plan_building_en('مخطط ب'), 'Plan B')
+        self.assertEqual(module._visual_concept_plan_component_en('ملعب كرة'), 'Football Field')
+        self.assertEqual(module._visual_concept_plan_component_en('ملعب بادل'), 'Padel Court')
+        self.assertEqual(module._visual_concept_plan_component_en('فلل سكنية'), 'Villas')
+
+    def test_site_components_are_rendered_as_individual_approved_footprints(self):
+        module = self.application_module
+        layout = {
+            'architecturalColorLegend': [{'category': 'residential', 'color': '#B9D1EB'}],
+            'buildings': [{
+                'id': f'villa_{index:03d}', 'label': 'Villas', 'category': 'residential',
+                'footprint': [[index * 4, 0], [index * 4 + 3, 0],
+                              [index * 4 + 3, 3], [index * 4, 3]],
+            } for index in range(100)],
+        }
+
+        fragment = module._visual_plan_site_component_fragment(layout)
+        root = ElementTree.fromstring(fragment)
+
+        polygons = [item for item in root if item.tag.endswith('polygon')]
+        labels = [item.text for item in root if item.tag.endswith('text')]
+        self.assertEqual(len(polygons), 100)
+        self.assertEqual(len({item.get('data-building-id') for item in polygons}), 100)
+        self.assertEqual(labels, ['Villas'])
+
+    def test_parcel_oriented_rectangle_shorthand_preserves_angle_and_area(self):
+        module = self.application_module
+        polygon = module._visual_plan_rect_polygon({'orientedRect': [20, 30, 12, 5, 27]})
+        from visual_plan_geometry import signed_area
+        self.assertAlmostEqual(abs(signed_area(polygon)), 60, places=8)
+        edge = (polygon[0], polygon[1])
+        self.assertAlmostEqual(math.degrees(math.atan2(
+            edge[1][1] - edge[0][1], edge[1][0] - edge[0][0])), 27, places=8)
+
+    def test_site_svg_layout_contains_current_short_labels_and_uses_the_full_canvas(self):
+        module = self.application_module
+        polygon = [[0, 0], [40, 0], [40, 30], [0, 30]]
+        contract = {'geometry': {'parcels': [{'id': 'p1', 'polygon': polygon}]}}
+        scene = {
+            'geometry': contract['geometry'],
+            'buildings': [{'id': 'b1', 'footprint': [[5, 5], [15, 5], [15, 15], [5, 15]]}],
+            'openAreas': [{'id': 'a1', 'componentId': 'row2', 'kind': 'landscape',
+                           'polygon': [[20, 5], [25, 5], [25, 10], [20, 10]]}],
+            'entries': [],
+        }
+        program = {
+            'buildings': [{'id': 'b1', 'label': 'Tower A (1,040 m²)',
+                           'bands': [{'kind': 'ground', 'category': 'residential'}]}],
+            'siteItems': [{'id': 'row2', 'label': 'Padel Court (20 x 10m)', 'category': 'amenity'}],
+        }
+        with patch.object(module.visual_plan_scene, 'buildable_envelopes', return_value=[]):
+            layout = module._visual_plan_site_projected_layout(scene, contract, program)
+
+        self.assertEqual(layout['viewBox'], '0 0 1600 900')
+        self.assertEqual(layout['siteDrawingBounds'], [36, 36, 1160, 828])
+        self.assertEqual(layout['approvedLabels'], ['Tower A', 'Padel Court'])
+        self.assertEqual([item['label'] for item in layout['buildings']], ['Tower A'])
+        self.assertNotIn('U Cluster', json.dumps(layout))
+        self.assertNotIn('distribution', layout)
+        self.assertNotIn('approvedSiteAreaSqm', layout)
+
+    def test_site_svg_removes_unapproved_names_and_all_nonlegend_text(self):
+        module = self.application_module
+        raw = ('<g id="ll-section-components"><rect x="1" y="2" width="3" height="4"/>'
+               '<text>Tower A</text><text>U Cluster</text><text>1,040 m2</text></g>')
+        cleaned = module._visual_plan_site_section_fragment(
+            raw, 'components', allowed_text=['Tower A'])
+        self.assertIn('Tower A', cleaned)
+        self.assertNotIn('U Cluster', cleaned)
+        self.assertNotIn('1,040 m2', cleaned)
+
+        legend = ('<g id="ll-section-legend"><text>Architectural Color</text>'
+                  '<text>Health Club</text><text>Residential</text></g>')
+        cleaned_legend = module._visual_plan_site_section_fragment(
+            legend, 'legend', allowed_text=['Architectural Color', 'Residential'])
+        self.assertIn('Architectural Color', cleaned_legend)
+        self.assertIn('Residential', cleaned_legend)
+        self.assertNotIn('Health Club', cleaned_legend)
+
+    def test_site_svg_generation_does_not_reuse_checkpoints_for_old_inputs(self):
+        module = self.application_module
+        layout = {'approvedLabels': ['Tower A'], 'parcels': [{
+            'id': 'parcel_1', 'points': [[0, 0], [10, 0], [10, 8], [0, 8]],
+        }], 'buildableEnvelopes': [], 'legendBounds': [1212, 40, 352, 820], 'entries': [],
+            'openAreas': [], 'buildings': [{
+            'id': 'b1', 'label': 'Tower A', 'category': 'residential',
+            'footprint': [[1, 1], [3, 1], [3, 3], [1, 3]],
+        }], 'architecturalColorLegend': [
+            {'label': 'Residential', 'category': 'residential', 'color': '#B9D1EB'}]}
+        packet = {'drawingLayout': layout}
+        stale = {name: '<g id="ll-section-' + name + '"><text>U Cluster</text></g>'
+                 for name in ('coordinates', 'colors', 'components', 'access', 'landscape', 'legend')}
+        state = module._visual_plan_site_state({'plansWorkflow': {'siteAssistant': {
+            'inputSignature': 'current', 'renderRevision': 1,
+        }}}, 'current')
+        interview = {'readyForGeneration': True, 'assistantState': state}
+        data = {'plansWorkflow': {'siteAssistant': {
+            'inputSignature': 'old-input', 'renderRevision': 2, 'checkpoints': stale,
+        }}}
+        with patch.object(module, '_visual_plan_site_packet',
+                          return_value=(packet, {}, {}, 'current')), \
+                patch.object(module, '_visual_plan_site_call', side_effect=AssertionError(
+                    'SVG generation must render the validated scene without model calls')) as model_call, \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/plan.svg'), \
+                self.app.test_request_context('/'):
+            module.g.tenant_id = self.tenant_a
+            result = module._visual_plan_site_generate(data, interview)
+
+        model_call.assert_not_called()
+        self.assertIn('Tower A', result['svgCode'])
+        self.assertIn('Architectural Color', result['svgCode'])
+        self.assertEqual(result['svgCode'].count('data-building-id="b1"'), 1)
+        self.assertNotIn('U Cluster', result['svgCode'])
+        self.assertNotIn('Recorded Survey Coordinates', result['svgCode'])
+        self.assertEqual(result['assistantState']['renderRevision'],
+                         module._VISUAL_PLAN_SITE_RENDER_REVISION)
 
     def test_temporary_svg_model_comparison_route_is_retired(self):
         module = self.application_module

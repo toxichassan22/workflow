@@ -6,16 +6,16 @@ from lxml import etree
 
 
 _VISUAL_PLAN_SITE_SECTIONS = (
-    ('coordinates', 'Surveyed parcel, north direction, setbacks and area dimensions.'),
-    ('colors', 'A restrained, internationally familiar planning palette and reusable SVG styles.'),
-    ('components', 'Every approved building and component footprint, labels and approved areas.'),
-    ('access', 'Main and service entries, basement access when present, and pedestrian and vehicle circulation.'),
-    ('landscape', 'Approved open areas, planted zones and individual trees.'),
-    ('legend', 'A clear English legend and area table using named color swatches, with no numbered keys.'),
+    ('coordinates', 'Parcel and setback outlines only. Draw no north arrow, dimensions, areas, coordinate labels, tables or title block.'),
+    ('colors', 'Reusable SVG styles and color definitions only.'),
+    ('components', 'Current approved footprints only, with one short approved name per building or component.'),
+    ('access', 'Main and service entries, basement access when present, and pedestrian and vehicle circulation. Draw no text.'),
+    ('landscape', 'Current approved open areas and planted zones. Draw no text.'),
+    ('legend', 'Architectural Color legend only, using supplied current categories and color swatches. Draw no schedule, metrics or summary.'),
 )
 _VISUAL_PLAN_SITE_SECTION_IDS = {name for name, _description in _VISUAL_PLAN_SITE_SECTIONS}
 _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT = 900000
-_VISUAL_PLAN_SITE_SECTION_OUTPUT_LIMIT = 32000
+_VISUAL_PLAN_SITE_RENDER_REVISION = 4
 
 
 def _visual_plan_site_number(value):
@@ -67,12 +67,33 @@ def _visual_plan_site_state(data, signature):
         'promptTokens': _visual_plan_site_number(source.get('promptTokens')),
         'compactionCount': _visual_plan_site_number(source.get('compactionCount')),
         'compactedAtTokens': _visual_plan_site_number(source.get('compactedAtTokens')),
+        'renderRevision': _visual_plan_site_number(source.get('renderRevision')),
         'status': str(source.get('status') or 'idle'),
     }
 
 
+def _visual_plan_site_reusable_checkpoints(previous, signature):
+    if (not isinstance(previous, dict)
+            or previous.get('inputSignature') != signature
+            or _visual_plan_site_number(previous.get('renderRevision')) != _VISUAL_PLAN_SITE_RENDER_REVISION):
+        return {}
+    checkpoints = previous.get('checkpoints') if isinstance(previous.get('checkpoints'), dict) else {}
+    return {key: value for key, value in checkpoints.items()
+            if key in _VISUAL_PLAN_SITE_SECTION_IDS and isinstance(value, str)}
+
+
+def _visual_plan_site_short_label(value):
+    label = str(value or '').strip()
+    label = re.sub(r'\([^)]*\)|\[[^]]*\]', '', label)
+    label = re.sub(r'\s*[-–—|/]\s*.*$', '', label)
+    label = re.sub(r'\s+', ' ', label).strip(' -–—|/,:;')
+    if re.search(r'[\u0600-\u06FF]', label):
+        return ''
+    return label[:32]
+
+
 def _visual_plan_site_projected_layout(scene, contract, program):
-    """Project the validated metre-based scene to one shared SVG canvas."""
+    """Project current geometry and short labels onto a full-size SVG canvas."""
     polygons = []
     geometry = scene.get('geometry') or {}
     parcels = geometry.get('parcels') or []
@@ -97,9 +118,11 @@ def _visual_plan_site_projected_layout(scene, contract, program):
     min_x, max_x = min(point[0] for point in points), max(point[0] for point in points)
     min_y, max_y = min(point[1] for point in points), max(point[1] for point in points)
     span_x, span_y = max(max_x - min_x, 1), max(max_y - min_y, 1)
-    scale = min(900 / span_x, 720 / span_y)
-    offset_x = 70 + (900 - span_x * scale) / 2
-    offset_y = 70 + (720 - span_y * scale) / 2
+    canvas_width, canvas_height = 1600, 900
+    bounds = (36, 36, 1160, 828)
+    scale = min(bounds[2] / span_x, bounds[3] / span_y)
+    offset_x = bounds[0] + (bounds[2] - span_x * scale) / 2
+    offset_y = bounds[1] + (bounds[3] - span_y * scale) / 2
 
     def project(point):
         return [round(offset_x + (point[0] - min_x) * scale, 2),
@@ -107,16 +130,21 @@ def _visual_plan_site_projected_layout(scene, contract, program):
 
     buildings_by_id = {item['id']: item for item in program.get('buildings', [])}
     projected_buildings = []
+    labels = []
+    categories = []
     for building in scene.get('buildings') or []:
         source = buildings_by_id.get(building.get('id'), {})
+        bands = source.get('bands') or []
+        category = next((band.get('category') for band in bands
+                         if band.get('kind') not in ('basement', 'roof')),
+                        (bands[0].get('category') if bands else 'amenity'))
+        label = _visual_plan_site_short_label(source.get('label') or building.get('id') or 'Building')
+        if label:
+            labels.append(label)
+        if category not in categories:
+            categories.append(category)
         projected_buildings.append({
-            'id': building.get('id'), 'label': source.get('label') or building.get('id'),
-            'footprintAreaSqm': building.get('footprintArea'),
-            'basementOnly': bool(building.get('basementOnly')),
-            'levels': source.get('levels', []),
-            'components': [{'label': band.get('label'), 'floorLabel': band.get('floorLabel'),
-                            'areaSqm': band.get('area'), 'units': band.get('units')}
-                           for band in source.get('bands', [])],
+            'id': building.get('id'), 'label': label, 'category': category,
             'footprint': [project(point) for point in building.get('footprint') or []],
         })
     projected_parcels = [{'id': parcel.get('id'), 'points': [project(point) for point in parcel.get('polygon') or []]}
@@ -134,19 +162,33 @@ def _visual_plan_site_projected_layout(scene, contract, program):
                             'point': project(visual_plan_scene.entry_position(entry, scene))})
         except Exception:
             continue
-    open_areas = [{'id': item.get('id'), 'componentId': item.get('componentId'), 'kind': item.get('kind'),
-                   'points': [project(point) for point in item.get('polygon') or []]}
-                  for item in scene.get('openAreas') or []]
-    return {'viewBox': '0 0 1600 900', 'siteDrawingBounds': [70, 70, 900, 720],
+    approved_site_items = program.get('siteItems') or []
+    site_items = {str(item.get('id')): item for item in approved_site_items}
+    for source in approved_site_items:
+        if source.get('category') and source['category'] not in categories:
+            categories.append(source['category'])
+    open_areas = []
+    for item in scene.get('openAreas') or []:
+        source = site_items.get(str(item.get('componentId') or ''), {})
+        category = source.get('category') or ('parking' if item.get('kind') == 'surface_parking' else 'landscape')
+        label = _visual_plan_site_short_label(
+            source.get('label') or visual_plan_renderer.USE_LABELS.get(category, 'Open space'))
+        if label:
+            labels.append(label)
+        if category not in categories:
+            categories.append(category)
+        open_areas.append({'id': item.get('id'), 'componentId': item.get('componentId'),
+                           'kind': item.get('kind'), 'category': category, 'label': label,
+                           'points': [project(point) for point in item.get('polygon') or []]})
+    legend = [{'label': visual_plan_renderer.USE_LABELS.get(category, 'Amenities'),
+               'category': category, 'color': visual_plan_renderer.COLORS.get(
+                   category, visual_plan_renderer.COLORS['amenity'])}
+              for category in categories]
+    return {'viewBox': f'0 0 {canvas_width} {canvas_height}', 'siteDrawingBounds': list(bounds),
+            'legendBounds': [1212, 40, 352, 820],
             'parcels': projected_parcels, 'buildableEnvelopes': envelopes,
             'buildings': projected_buildings, 'entries': entries, 'openAreas': open_areas,
-            'approvedSiteAreaSqm': contract.get('landArea'),
-            'approvedBuildingAreaSqm': contract.get('approvedBuildingArea'),
-            'distribution': contract.get('distribution') or {},
-            'northDirection': contract.get('northDirection') or contract.get('north') or '',
-            'streets': contract.get('streets') or contract.get('surroundingStreets') or [],
-            'regulations': contract.get('regulatoryConstraints') or {},
-            'clientNotes': contract.get('clientNotes') or ''}
+            'approvedLabels': list(dict.fromkeys(labels)), 'architecturalColorLegend': legend}
 
 
 def _visual_plan_site_packet(data):
@@ -325,7 +367,7 @@ def _visual_plan_site_strip_non_english_text(element):
     return changed
 
 
-def _visual_plan_site_section_fragment(raw, section, sanitized_sections=None):
+def _visual_plan_site_section_fragment(raw, section, sanitized_sections=None, allowed_text=None):
     raw_text = str(raw or '').strip()
     parsed = {} if raw_text.startswith('<') else parse_json_object(raw_text)
     fragment = parsed.get('code', raw_text) if isinstance(parsed, dict) else raw_text
@@ -342,7 +384,19 @@ def _visual_plan_site_section_fragment(raw, section, sanitized_sections=None):
         expected = 'defs' if section == 'colors' else 'g'
         if etree.QName(element).localname != expected or element.get('id') != 'll-section-' + section:
             raise ValueError('section ID or element type mismatch')
-        if _visual_plan_site_strip_non_english_text(element):
+        changed = _visual_plan_site_strip_non_english_text(element)
+        if allowed_text is not None:
+            allowed = {str(item).strip().casefold() for item in allowed_text if str(item).strip()}
+            for node in list(element.iter()):
+                if not isinstance(node.tag, str) or etree.QName(node).localname.lower() not in ('text', 'title', 'desc'):
+                    continue
+                text = ' '.join(' '.join(node.itertext()).split()).casefold()
+                if text not in allowed:
+                    parent = node.getparent()
+                    if parent is not None:
+                        parent.remove(node)
+                        changed = True
+        if changed:
             if isinstance(sanitized_sections, list) and section not in sanitized_sections:
                 sanitized_sections.append(section)
         return etree.tostring(element, encoding='unicode')
@@ -351,12 +405,191 @@ def _visual_plan_site_section_fragment(raw, section, sanitized_sections=None):
             'كود قسم «' + section + '» غير صالح.', 'PLANS_SVG_INVALID') from error
 
 
+def _visual_plan_site_component_fragment(layout):
+    """Render every validated building footprint directly, without model abstraction."""
+    namespace = 'http://www.w3.org/2000/svg'
+    root = etree.Element('{%s}g' % namespace, id='ll-section-components')
+    legend_colors = {
+        str(item.get('category') or ''): str(item.get('color') or '')
+        for item in layout.get('architecturalColorLegend') or [] if isinstance(item, dict)
+    }
+    rendered = 0
+    labels_drawn = set()
+    for building in layout.get('buildings') or []:
+        points = building.get('footprint') if isinstance(building, dict) else None
+        if not isinstance(points, list) or len(points) < 3:
+            raise visual_plan_geometry.PlanGeometryError(
+                'بصمة أحد المكونات المعتمدة غير صالحة للرسم.', 'PLANS_SCENE_REQUIRED')
+        serialized_points = []
+        for point in points:
+            if not isinstance(point, list) or len(point) != 2:
+                raise visual_plan_geometry.PlanGeometryError(
+                    'إحداثيات أحد المكونات المعتمدة غير صالحة للرسم.', 'PLANS_SCENE_REQUIRED')
+            x = visual_plan_geometry.finite_number(point[0])
+            y = visual_plan_geometry.finite_number(point[1])
+            if x is None or y is None:
+                raise visual_plan_geometry.PlanGeometryError(
+                    'إحداثيات أحد المكونات المعتمدة غير صالحة للرسم.', 'PLANS_SCENE_REQUIRED')
+            serialized_points.append((x, y))
+        fill = legend_colors.get(str(building.get('category') or ''),
+                                 visual_plan_renderer.COLORS.get('amenity', '#DCE6F0'))
+        etree.SubElement(root, '{%s}polygon' % namespace, {
+            'data-building-id': str(building.get('id') or ''),
+            'class': 'll-building',
+            'points': ' '.join(f'{x:g},{y:g}' for x, y in serialized_points),
+            'fill': fill, 'fill-opacity': '0.82', 'stroke': '#07182C', 'stroke-width': '1.5',
+        })
+        rendered += 1
+        label = _visual_plan_site_short_label(building.get('label'))
+        if label and label.casefold() not in labels_drawn:
+            labels_drawn.add(label.casefold())
+            center_x = sum(point[0] for point in serialized_points) / len(serialized_points)
+            center_y = sum(point[1] for point in serialized_points) / len(serialized_points)
+            text = etree.SubElement(root, '{%s}text' % namespace, {
+                'x': f'{center_x:g}', 'y': f'{center_y:g}', 'fill': '#07182C',
+                'font-size': '11', 'font-weight': '600', 'text-anchor': 'middle',
+            })
+            text.text = label
+    expected = len(layout.get('buildings') or [])
+    if rendered != expected:
+        raise visual_plan_geometry.PlanGeometryError(
+            'لم تكتمل بصمات المكونات المعتمدة في الرسم.', 'PLANS_SVG_INCOMPLETE')
+    return etree.tostring(root, encoding='unicode')
+
+
+def _visual_plan_site_coordinates_fragment(layout):
+    namespace = 'http://www.w3.org/2000/svg'
+    root = etree.Element('{%s}g' % namespace, id='ll-section-coordinates')
+    for envelope in layout.get('buildableEnvelopes') or []:
+        points = envelope.get('points') or []
+        if len(points) >= 3:
+            etree.SubElement(root, '{%s}polygon' % namespace, {
+                'class': 'll-envelope',
+                'points': ' '.join(f'{float(x):g},{float(y):g}' for x, y in points),
+                'fill': '#17C8E3', 'fill-opacity': '0.035', 'stroke': '#0FA9C4',
+                'stroke-width': '1.3', 'stroke-dasharray': '7 6',
+            })
+    for parcel in layout.get('parcels') or []:
+        points = parcel.get('points') or []
+        if len(points) < 3:
+            raise visual_plan_geometry.PlanGeometryError(
+                'حدود قطعة الأرض غير صالحة للرسم.', 'PLANS_SCENE_REQUIRED')
+        etree.SubElement(root, '{%s}polygon' % namespace, {
+            'class': 'll-parcel',
+            'points': ' '.join(f'{float(x):g},{float(y):g}' for x, y in points),
+            'fill': '#FFFFFF', 'stroke': '#07182C', 'stroke-width': '3.2',
+            'stroke-linejoin': 'round',
+        })
+    if not len(root):
+        raise visual_plan_geometry.PlanGeometryError(
+            'حدود قطعة الأرض غير متاحة للرسم.', 'PLANS_SCENE_REQUIRED')
+    return etree.tostring(root, encoding='unicode')
+
+
+def _visual_plan_site_colors_fragment():
+    return ('<defs xmlns="http://www.w3.org/2000/svg" id="ll-section-colors">'
+            '<style>.ll-parcel{stroke:#07182C;stroke-width:3.2;fill:#FFFFFF}'
+            '.ll-envelope{fill:#17C8E3;fill-opacity:.035;stroke:#0FA9C4;'
+            'stroke-width:1.3;stroke-dasharray:7 6}'
+            '.ll-building{stroke:#07182C;stroke-width:1.5;fill-opacity:.82}'
+            '.ll-open-area{stroke:#FFFFFF;stroke-width:1.2;fill-opacity:.68}'
+            '</style></defs>')
+
+
+def _visual_plan_site_access_fragment(layout):
+    namespace = 'http://www.w3.org/2000/svg'
+    root = etree.Element('{%s}g' % namespace, id='ll-section-access')
+    for entry in layout.get('entries') or []:
+        point = entry.get('point') if isinstance(entry, dict) else None
+        if not isinstance(point, list) or len(point) != 2:
+            continue
+        x = visual_plan_geometry.finite_number(point[0])
+        y = visual_plan_geometry.finite_number(point[1])
+        if x is None or y is None:
+            continue
+        kind = str(entry.get('kind') or '')
+        etree.SubElement(root, '{%s}circle' % namespace, {
+            'cx': f'{x:g}', 'cy': f'{y:g}', 'r': '6' if kind == 'main' else '4.5',
+            'fill': '#07182C' if kind == 'main' else '#FFFFFF',
+            'stroke': '#FFFFFF' if kind == 'main' else '#07182C', 'stroke-width': '2',
+        })
+    return etree.tostring(root, encoding='unicode')
+
+
+def _visual_plan_site_landscape_fragment(layout):
+    namespace = 'http://www.w3.org/2000/svg'
+    root = etree.Element('{%s}g' % namespace, id='ll-section-landscape')
+    colors = {str(item.get('category') or ''): str(item.get('color') or '')
+              for item in layout.get('architecturalColorLegend') or [] if isinstance(item, dict)}
+    for area in layout.get('openAreas') or []:
+        points = area.get('points') if isinstance(area, dict) else None
+        if not isinstance(points, list) or len(points) < 3:
+            continue
+        serialized = []
+        for point in points:
+            if not isinstance(point, list) or len(point) != 2:
+                serialized = []
+                break
+            x = visual_plan_geometry.finite_number(point[0])
+            y = visual_plan_geometry.finite_number(point[1])
+            if x is None or y is None:
+                serialized = []
+                break
+            serialized.append((x, y))
+        if not serialized:
+            continue
+        category = str(area.get('category') or '')
+        etree.SubElement(root, '{%s}polygon' % namespace, {
+            'data-site-item-id': str(area.get('componentId') or ''),
+            'class': 'll-open-area',
+            'points': ' '.join(f'{x:g},{y:g}' for x, y in serialized),
+            'fill': colors.get(category, visual_plan_renderer.COLORS.get(category, '#DCE6F0')),
+            'fill-opacity': '0.68', 'stroke': '#FFFFFF', 'stroke-width': '1.2',
+            'stroke-linejoin': 'round',
+        })
+    return etree.tostring(root, encoding='unicode')
+
+
+def _visual_plan_site_legend_fragment(layout):
+    namespace = 'http://www.w3.org/2000/svg'
+    root = etree.Element('{%s}g' % namespace, id='ll-section-legend')
+    bounds = layout.get('legendBounds') or [1212, 40, 352, 820]
+    x, y, width, _height = [float(value) for value in bounds]
+    etree.SubElement(root, '{%s}line' % namespace, {
+        'x1': f'{x:g}', 'y1': f'{y:g}', 'x2': f'{x:g}', 'y2': '860',
+        'stroke': '#D8E2EC', 'stroke-width': '1.4',
+    })
+    title = etree.SubElement(root, '{%s}text' % namespace, {
+        'x': f'{x + 22:g}', 'y': f'{y + 32:g}', 'fill': '#07182C',
+        'font-size': '19', 'font-weight': '700',
+    })
+    title.text = 'Architectural Color'
+    etree.SubElement(root, '{%s}line' % namespace, {
+        'x1': f'{x + 22:g}', 'y1': f'{y + 47:g}',
+        'x2': f'{x + width - 18:g}', 'y2': f'{y + 47:g}',
+        'stroke': '#D8E2EC', 'stroke-width': '1',
+    })
+    row_height = 38 if len(layout.get('architecturalColorLegend') or []) <= 16 else 30
+    for index, item in enumerate(layout.get('architecturalColorLegend') or []):
+        row_y = y + 78 + index * row_height
+        etree.SubElement(root, '{%s}rect' % namespace, {
+            'x': f'{x + 22:g}', 'y': f'{row_y - 12:g}', 'width': '16', 'height': '16',
+            'rx': '2', 'fill': str(item.get('color') or '#DCE6F0'),
+            'stroke': '#07182C', 'stroke-width': '0.8',
+        })
+        label = etree.SubElement(root, '{%s}text' % namespace, {
+            'x': f'{x + 48:g}', 'y': f'{row_y:g}', 'fill': '#07182C',
+            'font-size': '13', 'font-weight': '500',
+        })
+        label.text = str(item.get('label') or '')[:44]
+    return etree.tostring(root, encoding='unicode')
+
+
 def _visual_plan_site_svg_from_blocks(blocks):
     missing = _VISUAL_PLAN_SITE_SECTION_IDS - set(blocks)
     if missing:
         raise visual_plan_geometry.PlanGeometryError('لم تكتمل أقسام كود SVG.', 'PLANS_SVG_INCOMPLETE')
-    parts = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">',
-             '<title>CONCEPTUAL SITE PLAN</title>']
+    parts = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">']
     for section, _description in _VISUAL_PLAN_SITE_SECTIONS:
         parts.extend(['<!-- LL_SECTION_START:' + section + ' -->', blocks[section],
                       '<!-- LL_SECTION_END:' + section + ' -->'])
@@ -364,10 +597,14 @@ def _visual_plan_site_svg_from_blocks(blocks):
     return _visual_plan_sanitize_svg('\n'.join(parts))
 
 
-def _visual_plan_site_report_progress(progress, todos, checkpoints):
+def _visual_plan_site_report_progress(progress, todos, checkpoints, signature=None):
     callback = getattr(g, 'visual_plan_job_progress', None)
     if callable(callback):
-        callback(progress=progress, todos=todos, checkpoint={'svgSections': checkpoints})
+        callback(progress=progress, todos=todos, checkpoint={
+            'svgSections': checkpoints,
+            'svgRenderRevision': _VISUAL_PLAN_SITE_RENDER_REVISION,
+            'svgInputSignature': signature or '',
+        })
 
 
 def _visual_plan_site_section_todos(checkpoints=None, active_section=None,
@@ -394,66 +631,48 @@ def _visual_plan_site_generate(data, interview):
         return interview
     packet, _contract, _context, signature = _visual_plan_site_packet(data)
     state = interview['assistantState']
-    spec = state.get('designSpec') if isinstance(state.get('designSpec'), dict) else {}
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     previous = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
-    checkpoints = previous.get('checkpoints') if isinstance(previous.get('checkpoints'), dict) else {}
-    checkpoints = {key: value for key, value in checkpoints.items()
-                  if key in _VISUAL_PLAN_SITE_SECTION_IDS and isinstance(value, str)}
-    state.update({'status': 'generating', 'inputSignature': signature, 'checkpoints': checkpoints})
-    sanitized_sections = []
+    checkpoints = _visual_plan_site_reusable_checkpoints(previous, signature)
+    state.update({'status': 'generating', 'inputSignature': signature,
+                  'renderRevision': _VISUAL_PLAN_SITE_RENDER_REVISION,
+                  'checkpoints': checkpoints})
+    drawing_layout = packet['drawingLayout']
+    renderers = {
+        'coordinates': lambda: _visual_plan_site_coordinates_fragment(drawing_layout),
+        'colors': _visual_plan_site_colors_fragment,
+        'components': lambda: _visual_plan_site_component_fragment(drawing_layout),
+        'access': lambda: _visual_plan_site_access_fragment(drawing_layout),
+        'landscape': lambda: _visual_plan_site_landscape_fragment(drawing_layout),
+        'legend': lambda: _visual_plan_site_legend_fragment(drawing_layout),
+    }
     total = len(_VISUAL_PLAN_SITE_SECTIONS)
-    for section, description in _VISUAL_PLAN_SITE_SECTIONS:
+    for section, _description in _VISUAL_PLAN_SITE_SECTIONS:
         if section in checkpoints:
             continue
         _visual_plan_site_report_progress(
             20 + int(65 * len(checkpoints) / total),
-            _visual_plan_site_section_todos(checkpoints, active_section=section), checkpoints)
-        system_prompt = (
-            'You are Google Gemini 4 Argon writing one named, editable section of a real-estate site-plan SVG. '
-            'Use only the validated pixel geometry and fixed project facts supplied. Output JSON only: '
-            '{"code":"<one SVG section>"}. Visible labels are English only. Keep the plan calm and legible: '
-            'no overlapping text, no narrative paragraphs, and only essential dimensions. Use the supplied '
-            'named color palette consistently. Do not number legend entries. Use text labels for entrances, '
-            'exits, basement access, pedestrian routes, vehicle routes, landscape, and areas when applicable. '
-            'The code must be a single <g> with id="ll-section-' + section + '"; for the colors section use '
-            'a single <defs id="ll-section-colors">. Preserve all given coordinates exactly.'
-        )
-        user_packet = {'section': section, 'sectionPurpose': description,
-                       'projectFacts': packet, 'designSpec': spec,
-                       'resolvedAnswers': state.get('answers') or [],
-                       'sessionMemory': state.get('summary') or '',
-                       'existingSections': sorted(checkpoints)}
-        section_started = time.perf_counter()
-        try:
-            parsed, _tokens = _visual_plan_site_call(
-                system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
-                max_tokens=_VISUAL_PLAN_SITE_SECTION_OUTPUT_LIMIT, reasoning_effort='medium')
-        finally:
-            _visual_plan_report_site_chat_timing('site_svg_' + section + '_model_ms', section_started)
-        checkpoints[section] = _visual_plan_site_section_fragment(
-            parsed.get('code'), section, sanitized_sections)
+            _visual_plan_site_section_todos(checkpoints, active_section=section), checkpoints, signature)
+        checkpoints[section] = renderers[section]()
         state['checkpoints'] = checkpoints
-        _visual_plan_site_record_tokens(state, _tokens)
         next_section = next((name for name, _label in _VISUAL_PLAN_SITE_SECTIONS
                              if name not in checkpoints), None)
         _visual_plan_site_report_progress(
             20 + int(65 * len(checkpoints) / total),
             _visual_plan_site_section_todos(
                 checkpoints, active_section=next_section,
-                assembly_active=next_section is None), checkpoints)
+                assembly_active=next_section is None), checkpoints, signature)
     svg = _visual_plan_site_svg_from_blocks(checkpoints)
     if not svg or any('LL_SECTION_START:' + section not in svg for section in _VISUAL_PLAN_SITE_SECTION_IDS):
         raise visual_plan_geometry.PlanGeometryError('تعذر تركيب أقسام SVG في مخطط صالح.', 'PLANS_SVG_INVALID')
     encoded = base64.b64encode(svg.encode('utf-8')).decode('ascii')
     image = persist_generated_image('data:image/svg+xml;base64,' + encoded, g.tenant_id)
     state.update({'status': 'review', 'readyForGeneration': True,
-                  'generateRequested': False, 'checkpoints': checkpoints})
+                  'generateRequested': False, 'renderRevision': _VISUAL_PLAN_SITE_RENDER_REVISION,
+                  'checkpoints': checkpoints})
     _visual_plan_site_report_progress(
-        98, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints)
+        98, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints, signature)
     reply = 'تم إنشاء المخطط لمراجعته.'
-    if sanitized_sections:
-        reply += ' حُذفت تسميات غير إنجليزية من بعض الأقسام.'
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': svg,
             'model': GEMINI_TEXT_MODEL, 'reply': reply,
             'assistantState': state, 'scene': workflow.get('scene')}
@@ -471,6 +690,10 @@ def _visual_plan_site_edit(data):
     if workflow_assistant.get('inputSignature') and workflow_assistant.get('inputSignature') != signature:
         return {'success': True, 'needsClarification': True, 'contextChanged': True,
                 'question': 'تغيرت بيانات الأرض أو التوزيع منذ توليد هذا المخطط. أعد بناء المخطط قبل تعديله.',
+                'choices': [], 'assistantState': state}
+    if _visual_plan_site_number(workflow_assistant.get('renderRevision')) != _VISUAL_PLAN_SITE_RENDER_REVISION:
+        return {'success': True, 'needsClarification': True, 'contextChanged': True,
+                'question': 'المخطط الحالي أُنشئ بإصدار سابق. أعد بناء المخطط قبل تعديله.',
                 'choices': [], 'assistantState': state}
     if state['pendingQuestion']:
         state['answers'].append({'question': state['pendingQuestion'], 'answer': instruction})
@@ -506,7 +729,11 @@ def _visual_plan_site_edit(data):
         raise visual_plan_geometry.PlanGeometryError('قسم التعديل غير معروف.', 'PLANS_EDIT_INVALID')
     sanitized_sections = []
     replacement = _visual_plan_site_section_fragment(
-        parsed.get('code'), section, sanitized_sections)
+        parsed.get('code'), section, sanitized_sections,
+        allowed_text=(packet['drawingLayout']['approvedLabels'] if section == 'components' else
+                      ['Architectural Color', *[item['label'] for item in
+                                                packet['drawingLayout']['architecturalColorLegend']]]
+                      if section == 'legend' else []))
     start, end = '<!-- LL_SECTION_START:' + section + ' -->', '<!-- LL_SECTION_END:' + section + ' -->'
     pattern = re.compile(re.escape(start) + r'[\s\S]*?' + re.escape(end))
     if len(pattern.findall(svg)) != 1:

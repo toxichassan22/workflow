@@ -87,6 +87,17 @@ test('plan notes and their review survive workflow normalization and JSON round 
   assert.equal(state.notesReview.verified, true);
 });
 
+test('site-plan SVG checkpoints retain their input signature and render revision', () => {
+  const context = fixture();
+  const state = plain(context.normalizeVisualConceptPlansWorkflow({
+    siteAssistant: { inputSignature: 'current-input', renderRevision: 4,
+      checkpoints: { components: '<g id="ll-section-components"/>' } }
+  }));
+  assert.equal(state.siteAssistant.inputSignature, 'current-input');
+  assert.equal(state.siteAssistant.renderRevision, 4);
+  assert.equal(state.siteAssistant.checkpoints.components, '<g id="ll-section-components"/>');
+});
+
 test('empty or boolean survey values cannot become invented zero coordinates', () => {
   const context = fixture();
   const result = plain(context.visualConceptBoundaryPoints([
