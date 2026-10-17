@@ -353,6 +353,42 @@ test('a saved conflict review survives financial calculations rebuilt on draft r
   assert.equal(workflow.notesReview.verified, true);
 });
 
+test('a saved conflict review survives survey coordinates changing from JSON text to hydrated rows', () => {
+  const context = fixture();
+  const before = { survey_coordinates: JSON.stringify([
+    { point: '1', eastings: '500000', northings: '2000000' },
+    { point: '2', eastings: '500020', northings: '2000000' },
+    { point: '3', eastings: '500020', northings: '2000020' },
+  ]) };
+  context.tenantProjectData = before;
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {},
+    plansWorkflow: {
+      verification: { approved: true, canProceed: false,
+        checks: [{ item: 'الارتداد', result: 'متعارض' }] },
+      boundary: { approved: true, points: [
+        { eastings: 1, northings: 1 }, { eastings: 2, northings: 1 }, { eastings: 2, northings: 2 }] },
+      distribution: { approved: true, aiReviewed: true,
+        rows: [{ id: 'row_1', component: 'مكاتب' }],
+        checks: [{ item: 'المساحة', result: 'متعارض' }] },
+    }
+  });
+  context.tenantVisualConceptState.plansWorkflow.sourceStamp = context.visualConceptPlanInputStamp(before);
+
+  // Hydration rebuilds the editable table and stores its rows as an array.
+  const after = { survey_coordinates: JSON.parse(before.survey_coordinates) };
+  const savedDraft = JSON.stringify(context.tenantVisualConceptState);
+  context.tenantVisualConceptState = context.normalizeVisualConceptState(savedDraft);
+  context.tenantProjectData = after;
+  context.syncVisualConceptPlanInputs(after);
+
+  const workflow = context.tenantVisualConceptState.plansWorkflow;
+  assert.equal(workflow.verification.approved, true);
+  assert.equal(workflow.verification.checks[0].item, 'الارتداد');
+  assert.equal(workflow.distribution.approved, true);
+  assert.equal(workflow.distribution.aiReviewed, true);
+  assert.equal(workflow.distribution.checks[0].item, 'المساحة');
+});
+
 test('a changed parking plan invalidates the saved conflict review and approvals', () => {
   const context = fixture();
   const before = { financial_study_model: { inputs: { basementArea: 800 },

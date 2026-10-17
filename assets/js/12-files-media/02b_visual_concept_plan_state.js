@@ -194,7 +194,8 @@
         'north_direction', 'surrounding_streets', 'setbacks', 'building_ratio_setbacks',
         'directions_table', 'survey_coordinates', 'regulation_coordinates', 'facades_directions',
         'boundary_lengths', 'land_documents_analysis', 'project_components_data'];
-      const fields = Object.fromEntries(keys.map(key => [key, projectData?.[key] ?? '']));
+      const fields = Object.fromEntries(keys.map(key => [key,
+        visualConceptPlanCanonicalInput(key, projectData?.[key] ?? '')]));
       const data = JSON.stringify({ fields,
         financialParking: visualConceptPlanFinancialInput(projectData?.financial_study_model),
         boundary: workflow.boundary.points,
@@ -206,6 +207,38 @@
         second = Math.imul(second, 33) ^ data.charCodeAt(index);
       }
       return (first >>> 0).toString(16) + ':' + (second >>> 0).toString(16) + ':' + data.length;
+    }
+
+    function visualConceptPlanCanonicalInput(key, value) {
+      let parsed = value;
+      if (typeof parsed === 'string') {
+        const text = parsed.trim();
+        if (text.startsWith('{') || text.startsWith('[')) {
+          try { parsed = JSON.parse(text); } catch (error) { /* Keep ordinary text unchanged. */ }
+        }
+      }
+      if (key === 'survey_coordinates') {
+        // Draft form hydration rebuilds the editable table, so the same rows can
+        // arrive here as JSON text before save and as normalized rows after load.
+        // Compare the geometric facts, not formatting or provenance defaults.
+        return visualConceptBoundaryPoints(parsed).map(point => ({
+          parcel_id: point.parcel_id,
+          point: point.point,
+          eastings: point.eastings,
+          northings: point.northings
+        }));
+      }
+      if (key === 'directions_table' && typeof normalizeSurveyDirections === 'function') {
+        parsed = normalizeSurveyDirections(parsed);
+      }
+      const stable = item => {
+        if (Array.isArray(item)) return item.map(stable);
+        if (item && typeof item === 'object') {
+          return Object.fromEntries(Object.keys(item).sort().map(name => [name, stable(item[name])]));
+        }
+        return item;
+      };
+      return stable(parsed);
     }
 
     function visualConceptPlanFinancialInput(value) {
