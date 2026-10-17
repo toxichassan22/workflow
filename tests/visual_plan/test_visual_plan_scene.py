@@ -3,7 +3,7 @@ import math
 
 from visual_plan_geometry import (PlanGeometryError, boundary_geometry, polygons_overlap,
                                   signed_area, validate_footprint)
-from visual_plan_scene import buildable_envelopes, fallback_scene, rebase_scene_context
+from visual_plan_scene import buildable_envelopes, fallback_scene, rebase_scene_context, validate_scene
 
 
 SETBACKS = {'west': 5, 'east': 3, 'north': 3, 'south': 3}
@@ -104,6 +104,36 @@ class VisualPlanSceneTests(unittest.TestCase):
         basement = next(item for item in scene['buildings'] if item['id'] == 'b2')
         self.assertTrue(basement['basementOnly'])
         self.assertAlmostEqual(abs(signed_area(basement['footprint'])), 100, places=4)
+
+    def test_fallback_scene_places_recorded_pool_area_with_its_full_area(self):
+        contract = _contract(setbacks={})
+        program = _program(_building(1, 200))
+        program['siteItems'] = [{
+            'id': 'pool_1', 'name': 'Swimming Pool', 'label': 'Swimming Pool',
+            'category': 'amenity', 'siteType': 'pool', 'area': 120,
+        }]
+
+        scene = fallback_scene(contract, program)
+
+        self.assertEqual(len(scene['openAreas']), 1)
+        self.assertEqual(scene['openAreas'][0]['componentId'], 'pool_1')
+        self.assertEqual(scene['openAreas'][0]['kind'], 'site_facility')
+        self.assertAlmostEqual(abs(signed_area(scene['openAreas'][0]['polygon'])), 120, places=4)
+
+    def test_scene_rejects_an_omitted_recorded_site_area(self):
+        contract = _contract(setbacks={})
+        program = _program(_building(1, 200))
+        program['siteItems'] = [{
+            'id': 'padel_1', 'name': 'Padel Court', 'label': 'Padel Court',
+            'category': 'amenity', 'siteType': 'padel', 'area': 200,
+        }]
+        scene = fallback_scene(contract, program)
+        scene['openAreas'] = []
+
+        with self.assertRaises(PlanGeometryError) as caught:
+            validate_scene(scene, contract, program)
+
+        self.assertEqual(caught.exception.code, 'PLANS_SITE_ITEMS_MISSING')
 
     def test_fallback_scene_explains_why_nothing_fits(self):
         contract = _contract()

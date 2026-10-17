@@ -1,21 +1,23 @@
 import base64
+import copy
 import json
+import math
 import re
 import time
 from lxml import etree
 
 
 _VISUAL_PLAN_SITE_SECTIONS = (
-    ('coordinates', 'Parcel and setback outlines only. Draw no north arrow, dimensions, areas, coordinate labels, tables or title block.'),
+    ('coordinates', 'White drawing sheet, parcel and recorded setback outlines with adjoining street bands.'),
     ('colors', 'Reusable SVG styles and color definitions only.'),
-    ('components', 'Current approved footprints only, with one short approved name per building or component.'),
-    ('access', 'Main and service entries, basement access when present, and pedestrian and vehicle circulation. Draw no text.'),
-    ('landscape', 'Current approved open areas and planted zones. Draw no text.'),
-    ('legend', 'Architectural Color legend only, using supplied current categories and color swatches. Draw no schedule, metrics or summary.'),
+    ('components', 'Current approved footprints, distinct unit labels and building names.'),
+    ('access', 'Recorded streets, internal access between repeated units, and building entries.'),
+    ('landscape', 'Current approved planting, pools, courts, parking and other site facilities.'),
+    ('legend', 'Project and developer identity, building schedule and site feature color key.'),
 )
 _VISUAL_PLAN_SITE_SECTION_IDS = {name for name, _description in _VISUAL_PLAN_SITE_SECTIONS}
 _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT = 900000
-_VISUAL_PLAN_SITE_RENDER_REVISION = 4
+_VISUAL_PLAN_SITE_RENDER_REVISION = 5
 
 
 def _visual_plan_site_number(value):
@@ -92,7 +94,27 @@ def _visual_plan_site_short_label(value):
     return label[:32]
 
 
-def _visual_plan_site_projected_layout(scene, contract, program):
+def _visual_plan_site_identity_value(value, limit=120):
+    value = re.sub(r'[\x00-\x1f\x7f]', ' ', str(value or ''))
+    return re.sub(r'\s+', ' ', value).strip()[:limit]
+
+
+def _visual_plan_site_feature_type(source, kind=''):
+    text = ' '.join(str(source.get(key) or '') for key in ('name', 'label', 'siteType')).lower()
+    if re.search(r'\bpadel\b|بادل', text, re.IGNORECASE):
+        return 'padel'
+    if re.search(r'\bswimming\s*pool\b|\bpool\b|مسبح|حمام\s*سباحة', text, re.IGNORECASE):
+        return 'pool'
+    if re.search(r'\bplayground\b|\bchildren.?s?\s+play\b|ملعب\s*أطفال|العاب\s*أطفال', text, re.IGNORECASE):
+        return 'playground'
+    if kind == 'surface_parking' or re.search(r'\bparking\b|مواقف|جراج|باركينج', text, re.IGNORECASE):
+        return 'parking'
+    if re.search(r'\blandscape\b|\bopen\s*space\b|\bgreen\s*area\b|حدائق|مسطحات\s*خضراء|لاندسكيب|ممشى', text, re.IGNORECASE):
+        return 'landscape'
+    return 'landscape' if kind == 'landscape' else 'amenity'
+
+
+def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
     """Project current geometry and short labels onto a full-size SVG canvas."""
     polygons = []
     geometry = scene.get('geometry') or {}
@@ -119,7 +141,7 @@ def _visual_plan_site_projected_layout(scene, contract, program):
     min_y, max_y = min(point[1] for point in points), max(point[1] for point in points)
     span_x, span_y = max(max_x - min_x, 1), max(max_y - min_y, 1)
     canvas_width, canvas_height = 1600, 900
-    bounds = (36, 36, 1160, 828)
+    bounds = (90, 150, 1000, 690)
     scale = min(bounds[2] / span_x, bounds[3] / span_y)
     offset_x = bounds[0] + (bounds[2] - span_x * scale) / 2
     offset_y = bounds[1] + (bounds[3] - span_y * scale) / 2
@@ -132,6 +154,12 @@ def _visual_plan_site_projected_layout(scene, contract, program):
     projected_buildings = []
     labels = []
     categories = []
+    building_label_counts = {}
+    for building in scene.get('buildings') or []:
+        source = buildings_by_id.get(building.get('id'), {})
+        label = _visual_plan_site_short_label(source.get('label') or building.get('id') or 'Building')
+        if label:
+            building_label_counts[label.casefold()] = building_label_counts.get(label.casefold(), 0) + 1
     for building in scene.get('buildings') or []:
         source = buildings_by_id.get(building.get('id'), {})
         bands = source.get('bands') or []
@@ -139,12 +167,19 @@ def _visual_plan_site_projected_layout(scene, contract, program):
                          if band.get('kind') not in ('basement', 'roof')),
                         (bands[0].get('category') if bands else 'amenity'))
         label = _visual_plan_site_short_label(source.get('label') or building.get('id') or 'Building')
-        if label:
-            labels.append(label)
+        unit_match = re.search(r'^unit_\d+_(\d+)$', str(building.get('id') or ''), re.IGNORECASE)
+        display_label = ('V ' + unit_match.group(1).lstrip('0') if unit_match else label)
+        if not unit_match and building_label_counts.get(label.casefold(), 0) > 1:
+            id_suffix = re.search(r'(\d+)$', str(building.get('id') or ''))
+            if id_suffix:
+                display_label = (label[:19] + ' ' + id_suffix.group(1))[:24]
+        if display_label:
+            labels.append(display_label)
         if category not in categories:
             categories.append(category)
         projected_buildings.append({
-            'id': building.get('id'), 'label': label, 'category': category,
+            'id': building.get('id'), 'label': label, 'displayLabel': display_label,
+            'category': category,
             'footprint': [project(point) for point in building.get('footprint') or []],
         })
     projected_parcels = [{'id': parcel.get('id'), 'points': [project(point) for point in parcel.get('polygon') or []]}
@@ -165,30 +200,166 @@ def _visual_plan_site_projected_layout(scene, contract, program):
     approved_site_items = program.get('siteItems') or []
     site_items = {str(item.get('id')): item for item in approved_site_items}
     for source in approved_site_items:
-        if source.get('category') and source['category'] not in categories:
-            categories.append(source['category'])
+        site_type = _visual_plan_site_feature_type(source)
+        display_category = (site_type if site_type in ('pool', 'padel', 'playground', 'landscape')
+                            else source.get('category'))
+        if display_category and display_category not in categories:
+            categories.append(display_category)
     open_areas = []
     for item in scene.get('openAreas') or []:
         source = site_items.get(str(item.get('componentId') or ''), {})
-        category = source.get('category') or ('parking' if item.get('kind') == 'surface_parking' else 'landscape')
+        feature_type = _visual_plan_site_feature_type(source, item.get('kind'))
+        category = (feature_type if feature_type in ('pool', 'padel', 'playground', 'landscape') else
+                    source.get('category') or ('parking' if item.get('kind') == 'surface_parking' else 'landscape'))
         label = _visual_plan_site_short_label(
             source.get('label') or visual_plan_renderer.USE_LABELS.get(category, 'Open space'))
+        if feature_type in ('pool', 'padel', 'playground'):
+            label = {'pool': 'Swimming Pool', 'padel': 'Padel Court',
+                     'playground': "Children's Playground"}[feature_type]
         if label:
             labels.append(label)
         if category not in categories:
             categories.append(category)
         open_areas.append({'id': item.get('id'), 'componentId': item.get('componentId'),
-                           'kind': item.get('kind'), 'category': category, 'label': label,
+                           'kind': item.get('kind'), 'featureType': feature_type,
+                           'category': category, 'label': label,
                            'points': [project(point) for point in item.get('polygon') or []]})
-    legend = [{'label': visual_plan_renderer.USE_LABELS.get(category, 'Amenities'),
-               'category': category, 'color': visual_plan_renderer.COLORS.get(
-                   category, visual_plan_renderer.COLORS['amenity'])}
+    street_rows = {item.get('direction'): item for item in contract.get('directions') or []}
+    streets = []
+    for edge in visual_plan_scene.parcel_edges({'parcels': parcels}):
+        direction = edge.get('direction')
+        source = street_rows.get(direction, {})
+        if not source.get('street'):
+            continue
+        start, end = project(edge['a']), project(edge['b'])
+        dx, dy = end[0] - start[0], end[1] - start[1]
+        length = math.hypot(dx, dy)
+        if length <= 0:
+            continue
+        parcel = next((item for item in parcels if item.get('id') == edge.get('parcelId')), None)
+        projected_parcel = [project(point) for point in (parcel or {}).get('polygon') or []]
+        area = 0
+        for index, point in enumerate(projected_parcel):
+            following = projected_parcel[(index + 1) % len(projected_parcel)]
+            area += point[0] * following[1] - following[0] * point[1]
+        outward = (dy / length, -dx / length) if area > 0 else (-dy / length, dx / length)
+        width = 28
+        road_polygon = [start, end,
+                        [round(end[0] + outward[0] * width, 2), round(end[1] + outward[1] * width, 2)],
+                        [round(start[0] + outward[0] * width, 2), round(start[1] + outward[1] * width, 2)]]
+        street_name = _visual_plan_site_short_label(source.get('streetName'))
+        label = street_name or (direction.title() + ' Street')
+        street_width = visual_plan_geometry.finite_number(source.get('streetWidth'))
+        if street_width is not None:
+            label += f', {street_width:g} m'
+        streets.append({'direction': direction, 'label': label, 'polygon': road_polygon,
+                        'centerLine': [
+                            [round(start[0] + outward[0] * width / 2, 2), round(start[1] + outward[1] * width / 2, 2)],
+                            [round(end[0] + outward[0] * width / 2, 2), round(end[1] + outward[1] * width / 2, 2)]],
+                        'labelPoint': [round((start[0] + end[0]) / 2 + outward[0] * width / 2, 2),
+                                       round((start[1] + end[1]) / 2 + outward[1] * width / 2, 2)]})
+        labels.append(label)
+    repeated_units = [item for item in projected_buildings
+                      if re.match(r'^unit_\d+_\d+$', str(item.get('id') or ''), re.IGNORECASE)]
+    site_circulation = []
+    site_edges = [(a, b) for parcel in projected_parcels
+                  for a, b in zip(parcel.get('points') or [],
+                                  (parcel.get('points') or [])[1:] + (parcel.get('points') or [])[:1])]
+    if site_edges:
+        axis_a, axis_b = max(site_edges, key=lambda edge: math.dist(*edge))
+        axis_angle = math.atan2(axis_b[1] - axis_a[1], axis_b[0] - axis_a[0])
+    else:
+        axis_angle = 0
+    axis_cos, axis_sin = math.cos(axis_angle), math.sin(axis_angle)
+
+    def site_local(point):
+        return [point[0] * axis_cos + point[1] * axis_sin,
+                -point[0] * axis_sin + point[1] * axis_cos]
+
+    def site_project(point):
+        return [point[0] * axis_cos - point[1] * axis_sin,
+                point[0] * axis_sin + point[1] * axis_cos]
+
+    def unit_bounds(item):
+        points = [site_local(point) for point in item.get('footprint') or []]
+        if len(points) < 3:
+            return None
+        return (min(point[0] for point in points), max(point[0] for point in points),
+                min(point[1] for point in points), max(point[1] for point in points))
+
+    for first_index, first in enumerate(repeated_units):
+        first_bounds = unit_bounds(first)
+        if first_bounds is None:
+            continue
+        first_center = ((first_bounds[0] + first_bounds[1]) / 2,
+                        (first_bounds[2] + first_bounds[3]) / 2)
+        for second in repeated_units[first_index + 1:]:
+            second_bounds = unit_bounds(second)
+            if second_bounds is None:
+                continue
+            second_center = ((second_bounds[0] + second_bounds[1]) / 2,
+                             (second_bounds[2] + second_bounds[3]) / 2)
+            horizontal_gap = (second_bounds[0] - first_bounds[1] if first_center[0] <= second_center[0]
+                              else first_bounds[0] - second_bounds[1])
+            vertical_overlap = min(first_bounds[3], second_bounds[3]) - max(first_bounds[2], second_bounds[2])
+            if (9 <= horizontal_gap <= 90
+                    and vertical_overlap >= min(first_bounds[3] - first_bounds[2],
+                                                second_bounds[3] - second_bounds[2]) * 0.45):
+                left, right = (first_bounds, second_bounds) if first_center[0] <= second_center[0] else (second_bounds, first_bounds)
+                center_y = (max(left[2], right[2]) + min(left[3], right[3])) / 2
+                site_circulation.append({'points': [site_project([left[1], center_y]),
+                                                    site_project([right[0], center_y])],
+                                         'width': round(min(12, max(4, horizontal_gap * 0.6)), 2)})
+                continue
+            vertical_gap = (second_bounds[2] - first_bounds[3] if first_center[1] <= second_center[1]
+                            else first_bounds[2] - second_bounds[3])
+            horizontal_overlap = min(first_bounds[1], second_bounds[1]) - max(first_bounds[0], second_bounds[0])
+            if (9 <= vertical_gap <= 90
+                    and horizontal_overlap >= min(first_bounds[1] - first_bounds[0],
+                                                  second_bounds[1] - second_bounds[0]) * 0.45):
+                top, bottom = (first_bounds, second_bounds) if first_center[1] <= second_center[1] else (second_bounds, first_bounds)
+                center_x = (max(top[0], bottom[0]) + min(top[1], bottom[1])) / 2
+                site_circulation.append({'points': [site_project([center_x, top[3]]),
+                                                    site_project([center_x, bottom[2]])],
+                                         'width': round(min(12, max(4, vertical_gap * 0.6)), 2)})
+    category_labels = {
+        'pool': 'Swimming Pool', 'padel': 'Padel Court',
+        'playground': "Children's Playground", 'landscape': 'Landscape/Open space',
+        'parking': 'Parking',
+    }
+    legend = [{'label': category_labels.get(category, visual_plan_renderer.USE_LABELS.get(category, 'Amenities')),
+               'category': category, 'color': visual_plan_renderer.COLORS.get(category,
+                   {'pool': '#B6E1EF', 'padel': '#E7DDB8', 'playground': '#F5E5AB'}.get(
+                       category, visual_plan_renderer.COLORS['amenity']))}
               for category in categories]
+    for feature_type in ('pool', 'padel', 'playground'):
+        if any(item.get('featureType') == feature_type for item in open_areas) and feature_type not in categories:
+            categories.append(feature_type)
+            legend.append({'label': category_labels[feature_type], 'category': feature_type,
+                           'color': {'pool': '#B6E1EF', 'padel': '#E7DDB8',
+                                     'playground': '#F5E5AB'}[feature_type]})
+    identity = identity if isinstance(identity, dict) else {}
+    identity = {
+        'projectName': _visual_plan_site_identity_value(identity.get('projectName') or contract.get('projectName')),
+        'developerName': _visual_plan_site_identity_value(identity.get('developerName')),
+        'landArea': _visual_plan_site_identity_value(contract.get('landArea'), 32),
+        'frontage': _visual_plan_site_identity_value(
+            (contract.get('primaryFrontage') or {}).get('direction', '').title(), 32),
+    }
+    grouped_buildings = {}
+    for item in projected_buildings:
+        key = (item.get('label') or item.get('category') or 'Building').casefold()
+        summary = grouped_buildings.setdefault(key, {'label': item.get('label') or 'Building',
+                                                      'category': item.get('category'), 'count': 0})
+        summary['count'] += 1
     return {'viewBox': f'0 0 {canvas_width} {canvas_height}', 'siteDrawingBounds': list(bounds),
             'legendBounds': [1212, 40, 352, 820],
             'parcels': projected_parcels, 'buildableEnvelopes': envelopes,
-            'buildings': projected_buildings, 'entries': entries, 'openAreas': open_areas,
-            'approvedLabels': list(dict.fromkeys(labels)), 'architecturalColorLegend': legend}
+            'buildings': projected_buildings, 'buildingSchedule': list(grouped_buildings.values()),
+            'entries': entries, 'streets': streets, 'siteCirculation': site_circulation,
+            'openAreas': open_areas,
+            'identity': identity, 'approvedLabels': list(dict.fromkeys(labels)),
+            'architecturalColorLegend': legend}
 
 
 def _visual_plan_site_packet(data):
@@ -209,7 +380,12 @@ def _visual_plan_site_packet(data):
     clean_scene = {key: value for key, value in scene.items() if key not in ('token', 'inputSignature')}
     _visual_plan_report_site_chat_timing('scene_validation_ms', validation_started)
     layout_started = time.perf_counter()
-    drawing_layout = _visual_plan_site_projected_layout(scene, contract, program)
+    tenant = getattr(g, 'tenant', {})
+    tenant = tenant if isinstance(tenant, dict) else {}
+    drawing_layout = _visual_plan_site_projected_layout(scene, contract, program, {
+        'projectName': contract.get('projectName'),
+        'developerName': tenant.get('company_name_en') or tenant.get('company_name'),
+    })
     _visual_plan_report_site_chat_timing('layout_projection_ms', layout_started)
     packet = {
         'project': {'name': contract.get('projectName'), 'idea': contract.get('projectIdea')},
@@ -416,196 +592,21 @@ def _visual_plan_site_section_fragment(raw, section, sanitized_sections=None, al
             'كود قسم «' + section + '» غير صالح.', 'PLANS_SVG_INVALID') from error
 
 
-def _visual_plan_site_component_fragment(layout):
-    """Render every validated building footprint directly, without model abstraction."""
-    namespace = 'http://www.w3.org/2000/svg'
-    root = etree.Element('{%s}g' % namespace, id='ll-section-components')
-    legend_colors = {
-        str(item.get('category') or ''): str(item.get('color') or '')
-        for item in layout.get('architecturalColorLegend') or [] if isinstance(item, dict)
-    }
-    rendered = 0
-    labels_drawn = set()
-    for building in layout.get('buildings') or []:
-        points = building.get('footprint') if isinstance(building, dict) else None
-        if not isinstance(points, list) or len(points) < 3:
-            raise visual_plan_geometry.PlanGeometryError(
-                'بصمة أحد المكونات المعتمدة غير صالحة للرسم.', 'PLANS_SCENE_REQUIRED')
-        serialized_points = []
-        for point in points:
-            if not isinstance(point, list) or len(point) != 2:
-                raise visual_plan_geometry.PlanGeometryError(
-                    'إحداثيات أحد المكونات المعتمدة غير صالحة للرسم.', 'PLANS_SCENE_REQUIRED')
-            x = visual_plan_geometry.finite_number(point[0])
-            y = visual_plan_geometry.finite_number(point[1])
-            if x is None or y is None:
-                raise visual_plan_geometry.PlanGeometryError(
-                    'إحداثيات أحد المكونات المعتمدة غير صالحة للرسم.', 'PLANS_SCENE_REQUIRED')
-            serialized_points.append((x, y))
-        fill = legend_colors.get(str(building.get('category') or ''),
-                                 visual_plan_renderer.COLORS.get('amenity', '#DCE6F0'))
-        etree.SubElement(root, '{%s}polygon' % namespace, {
-            'data-building-id': str(building.get('id') or ''),
-            'class': 'll-building',
-            'points': ' '.join(f'{x:g},{y:g}' for x, y in serialized_points),
-            'fill': fill, 'fill-opacity': '0.82', 'stroke': '#07182C', 'stroke-width': '1.5',
-        })
-        rendered += 1
-        label = _visual_plan_site_short_label(building.get('label'))
-        if label and label.casefold() not in labels_drawn:
-            labels_drawn.add(label.casefold())
-            center_x = sum(point[0] for point in serialized_points) / len(serialized_points)
-            center_y = sum(point[1] for point in serialized_points) / len(serialized_points)
-            text = etree.SubElement(root, '{%s}text' % namespace, {
-                'x': f'{center_x:g}', 'y': f'{center_y:g}', 'fill': '#07182C',
-                'font-size': '11', 'font-weight': '600', 'text-anchor': 'middle',
-            })
-            text.text = label
-    expected = len(layout.get('buildings') or [])
-    if rendered != expected:
-        raise visual_plan_geometry.PlanGeometryError(
-            'لم تكتمل بصمات المكونات المعتمدة في الرسم.', 'PLANS_SVG_INCOMPLETE')
-    return etree.tostring(root, encoding='unicode')
-
-
-def _visual_plan_site_coordinates_fragment(layout):
-    namespace = 'http://www.w3.org/2000/svg'
-    root = etree.Element('{%s}g' % namespace, id='ll-section-coordinates')
-    for envelope in layout.get('buildableEnvelopes') or []:
-        points = envelope.get('points') or []
-        if len(points) >= 3:
-            etree.SubElement(root, '{%s}polygon' % namespace, {
-                'class': 'll-envelope',
-                'points': ' '.join(f'{float(x):g},{float(y):g}' for x, y in points),
-                'fill': '#17C8E3', 'fill-opacity': '0.035', 'stroke': '#0FA9C4',
-                'stroke-width': '1.3', 'stroke-dasharray': '7 6',
-            })
-    for parcel in layout.get('parcels') or []:
-        points = parcel.get('points') or []
-        if len(points) < 3:
-            raise visual_plan_geometry.PlanGeometryError(
-                'حدود قطعة الأرض غير صالحة للرسم.', 'PLANS_SCENE_REQUIRED')
-        etree.SubElement(root, '{%s}polygon' % namespace, {
-            'class': 'll-parcel',
-            'points': ' '.join(f'{float(x):g},{float(y):g}' for x, y in points),
-            'fill': '#FFFFFF', 'stroke': '#07182C', 'stroke-width': '3.2',
-            'stroke-linejoin': 'round',
-        })
-    if not len(root):
-        raise visual_plan_geometry.PlanGeometryError(
-            'حدود قطعة الأرض غير متاحة للرسم.', 'PLANS_SCENE_REQUIRED')
-    return etree.tostring(root, encoding='unicode')
-
-
-def _visual_plan_site_colors_fragment():
-    return ('<defs xmlns="http://www.w3.org/2000/svg" id="ll-section-colors">'
-            '<style>.ll-parcel{stroke:#07182C;stroke-width:3.2;fill:#FFFFFF}'
-            '.ll-envelope{fill:#17C8E3;fill-opacity:.035;stroke:#0FA9C4;'
-            'stroke-width:1.3;stroke-dasharray:7 6}'
-            '.ll-building{stroke:#07182C;stroke-width:1.5;fill-opacity:.82}'
-            '.ll-open-area{stroke:#FFFFFF;stroke-width:1.2;fill-opacity:.68}'
-            '</style></defs>')
-
-
-def _visual_plan_site_access_fragment(layout):
-    namespace = 'http://www.w3.org/2000/svg'
-    root = etree.Element('{%s}g' % namespace, id='ll-section-access')
-    for entry in layout.get('entries') or []:
-        point = entry.get('point') if isinstance(entry, dict) else None
-        if not isinstance(point, list) or len(point) != 2:
-            continue
-        x = visual_plan_geometry.finite_number(point[0])
-        y = visual_plan_geometry.finite_number(point[1])
-        if x is None or y is None:
-            continue
-        kind = str(entry.get('kind') or '')
-        etree.SubElement(root, '{%s}circle' % namespace, {
-            'cx': f'{x:g}', 'cy': f'{y:g}', 'r': '6' if kind == 'main' else '4.5',
-            'fill': '#07182C' if kind == 'main' else '#FFFFFF',
-            'stroke': '#FFFFFF' if kind == 'main' else '#07182C', 'stroke-width': '2',
-        })
-    return etree.tostring(root, encoding='unicode')
-
-
-def _visual_plan_site_landscape_fragment(layout):
-    namespace = 'http://www.w3.org/2000/svg'
-    root = etree.Element('{%s}g' % namespace, id='ll-section-landscape')
-    colors = {str(item.get('category') or ''): str(item.get('color') or '')
-              for item in layout.get('architecturalColorLegend') or [] if isinstance(item, dict)}
-    for area in layout.get('openAreas') or []:
-        points = area.get('points') if isinstance(area, dict) else None
-        if not isinstance(points, list) or len(points) < 3:
-            continue
-        serialized = []
-        for point in points:
-            if not isinstance(point, list) or len(point) != 2:
-                serialized = []
-                break
-            x = visual_plan_geometry.finite_number(point[0])
-            y = visual_plan_geometry.finite_number(point[1])
-            if x is None or y is None:
-                serialized = []
-                break
-            serialized.append((x, y))
-        if not serialized:
-            continue
-        category = str(area.get('category') or '')
-        etree.SubElement(root, '{%s}polygon' % namespace, {
-            'data-site-item-id': str(area.get('componentId') or ''),
-            'class': 'll-open-area',
-            'points': ' '.join(f'{x:g},{y:g}' for x, y in serialized),
-            'fill': colors.get(category, visual_plan_renderer.COLORS.get(category, '#DCE6F0')),
-            'fill-opacity': '0.68', 'stroke': '#FFFFFF', 'stroke-width': '1.2',
-            'stroke-linejoin': 'round',
-        })
-    return etree.tostring(root, encoding='unicode')
-
-
-def _visual_plan_site_legend_fragment(layout):
-    namespace = 'http://www.w3.org/2000/svg'
-    root = etree.Element('{%s}g' % namespace, id='ll-section-legend')
-    bounds = layout.get('legendBounds') or [1212, 40, 352, 820]
-    x, y, width, _height = [float(value) for value in bounds]
-    etree.SubElement(root, '{%s}line' % namespace, {
-        'x1': f'{x:g}', 'y1': f'{y:g}', 'x2': f'{x:g}', 'y2': '860',
-        'stroke': '#D8E2EC', 'stroke-width': '1.4',
-    })
-    title = etree.SubElement(root, '{%s}text' % namespace, {
-        'x': f'{x + 22:g}', 'y': f'{y + 32:g}', 'fill': '#07182C',
-        'font-size': '19', 'font-weight': '700',
-    })
-    title.text = 'Architectural Color'
-    etree.SubElement(root, '{%s}line' % namespace, {
-        'x1': f'{x + 22:g}', 'y1': f'{y + 47:g}',
-        'x2': f'{x + width - 18:g}', 'y2': f'{y + 47:g}',
-        'stroke': '#D8E2EC', 'stroke-width': '1',
-    })
-    row_height = 38 if len(layout.get('architecturalColorLegend') or []) <= 16 else 30
-    for index, item in enumerate(layout.get('architecturalColorLegend') or []):
-        row_y = y + 78 + index * row_height
-        etree.SubElement(root, '{%s}rect' % namespace, {
-            'x': f'{x + 22:g}', 'y': f'{row_y - 12:g}', 'width': '16', 'height': '16',
-            'rx': '2', 'fill': str(item.get('color') or '#DCE6F0'),
-            'stroke': '#07182C', 'stroke-width': '0.8',
-        })
-        label = etree.SubElement(root, '{%s}text' % namespace, {
-            'x': f'{x + 48:g}', 'y': f'{row_y:g}', 'fill': '#07182C',
-            'font-size': '13', 'font-weight': '500',
-        })
-        label.text = str(item.get('label') or '')[:44]
-    return etree.tostring(root, encoding='unicode')
-
-
-def _visual_plan_site_svg_from_blocks(blocks):
-    missing = _VISUAL_PLAN_SITE_SECTION_IDS - set(blocks)
-    if missing:
-        raise visual_plan_geometry.PlanGeometryError('لم تكتمل أقسام كود SVG.', 'PLANS_SVG_INCOMPLETE')
-    parts = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" width="1600" height="900">']
-    for section, _description in _VISUAL_PLAN_SITE_SECTIONS:
-        parts.extend(['<!-- LL_SECTION_START:' + section + ' -->', blocks[section],
-                      '<!-- LL_SECTION_END:' + section + ' -->'])
-    parts.append('</svg>')
-    return _visual_plan_sanitize_svg('\n'.join(parts))
+def _visual_plan_site_retain_project_identity(fragment, current_svg):
+    parser = etree.XMLParser(resolve_entities=False, load_dtd=False, no_network=True)
+    replacement_root = etree.fromstring(fragment.encode('utf-8'), parser)
+    current_root = etree.fromstring(current_svg.encode('utf-8'), parser)
+    existing = next((node for node in current_root.iter()
+                     if isinstance(node.tag, str) and node.get('id') == 'll-project-identity'), None)
+    if existing is None:
+        return fragment
+    for node in list(replacement_root.iter()):
+        if isinstance(node.tag, str) and node.get('id') == 'll-project-identity':
+            parent = node.getparent()
+            if parent is not None:
+                parent.remove(node)
+    replacement_root.insert(0, copy.deepcopy(existing))
+    return etree.tostring(replacement_root, encoding='unicode')
 
 
 def _visual_plan_site_report_progress(progress, todos, checkpoints, signature=None):
@@ -742,9 +743,13 @@ def _visual_plan_site_edit(data):
     replacement = _visual_plan_site_section_fragment(
         parsed.get('code'), section, sanitized_sections,
         allowed_text=(packet['drawingLayout']['approvedLabels'] if section == 'components' else
-                      ['Architectural Color', *[item['label'] for item in
+                      ['PROJECT SITE PLAN', 'BUILDING SCHEDULE', 'SITE FEATURES',
+                       'Recorded street', 'Internal access', 'Road and access',
+                       'CONCEPTUAL PLAN | NOT TO SCALE', *[item['label'] for item in
                                                 packet['drawingLayout']['architecturalColorLegend']]]
                       if section == 'legend' else []))
+    if section == 'legend':
+        replacement = _visual_plan_site_retain_project_identity(replacement, svg)
     start, end = '<!-- LL_SECTION_START:' + section + ' -->', '<!-- LL_SECTION_END:' + section + ' -->'
     pattern = re.compile(re.escape(start) + r'[\s\S]*?' + re.escape(end))
     if len(pattern.findall(svg)) != 1:

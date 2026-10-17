@@ -93,6 +93,7 @@ def _visual_concept_plan_site_component_keys(context):
         use = str(comp.get('useType') or '').strip().lower()
         site = use in ('openarea', 'open_area', 'open area') or 'مفتوح' in use
         site = site or str(comp.get('parkingLocation') or '').strip().lower() == 'surface'
+        site = site or bool(_visual_concept_plan_site_type(comp))
         if not site:
             continue
         for variant in (comp.get('name'), _visual_concept_plan_component_base(comp.get('name'))):
@@ -100,6 +101,26 @@ def _visual_concept_plan_site_component_keys(context):
             if key:
                 keys.add(key)
     return keys
+
+
+def _visual_concept_plan_site_type(item):
+    """Classify explicitly named outdoor amenities for the site drawing."""
+    item = item if isinstance(item, dict) else {'name': item}
+    text = ' '.join(str(item.get(key) or '') for key in ('name', 'useType', 'notes')).lower()
+    if re.search(r'\bindoor\b|\binside\b|داخلي|داخل\s+المبنى', text, re.IGNORECASE):
+        return ''
+    if re.search(r'\bpadel\b|بادل', text, re.IGNORECASE):
+        return 'padel'
+    if re.search(r'\bswimming\s*pool\b|\bpool\b|مسبح|حمام\s*سباحة', text, re.IGNORECASE):
+        return 'pool'
+    if re.search(r'\bplayground\b|\bchildren.?s?\s+play\b|ملعب\s*أطفال|العاب\s*أطفال', text, re.IGNORECASE):
+        return 'playground'
+    if re.search(r'\blandscape\b|\bopen\s*space\b|\bgreen\s*area\b|حدائق|مسطحات\s*خضراء|لاندسكيب|ممشى', text, re.IGNORECASE):
+        return 'landscape'
+    use = str(item.get('useType') or '').strip().lower()
+    if use in ('openarea', 'open_area', 'open area') or 'مفتوح' in use:
+        return 'landscape'
+    return ''
 
 
 def _visual_concept_plan_name_site(name, site_keys):

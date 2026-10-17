@@ -648,7 +648,12 @@ class VisualPlanContractTests(VisualPlanContractBase):
                     for section in ('coordinates', 'access', 'landscape'):
                         group = next(item for item in svg_root.iter()
                                      if item.get('id') == 'll-section-' + section)
-                        self.assertFalse(any(item.tag == svg_namespace + 'text' for item in group.iter()))
+                        labels = [item.text for item in group.iter()
+                                  if item.tag == svg_namespace + 'text' and item.text]
+                        if section == 'access':
+                            self.assertTrue(any('Street' in label for label in labels))
+                        else:
+                            self.assertFalse(labels)
                     found_ids = {element.attrib.get('id') for element in svg_root.iter()}
                     for section in section_ids:
                         self.assertIn('ll-section-' + section, found_ids)
@@ -796,7 +801,7 @@ class VisualPlanContractTests(VisualPlanContractBase):
         failed = module._visual_plan_job_terminal_todos(
             'site_chat', 'failed', current_todos=todos)
         self.assertEqual(failed[2]['label'],
-                         'Current approved footprints only, with one short approved name per building or component.')
+                         'Current approved footprints, distinct unit labels and building names.')
         self.assertEqual([item['status'] for item in failed],
                          ['done', 'done', 'failed', 'pending', 'pending', 'pending', 'pending'])
         self.assertEqual(failed[-1]['stage'], 'site_svg_assembly')
@@ -909,7 +914,8 @@ class VisualPlanContractTests(VisualPlanContractBase):
         labels = [item.text for item in root if item.tag.endswith('text')]
         self.assertEqual(len(polygons), 100)
         self.assertEqual(len({item.get('data-building-id') for item in polygons}), 100)
-        self.assertEqual(labels, ['Villas'])
+        self.assertEqual(len(labels), 100)
+        self.assertEqual(labels[:3], ['Villas', 'Villas', 'Villas'])
 
     def test_parcel_oriented_rectangle_shorthand_preserves_angle_and_area(self):
         module = self.application_module
@@ -940,7 +946,7 @@ class VisualPlanContractTests(VisualPlanContractBase):
             layout = module._visual_plan_site_projected_layout(scene, contract, program)
 
         self.assertEqual(layout['viewBox'], '0 0 1600 900')
-        self.assertEqual(layout['siteDrawingBounds'], [36, 36, 1160, 828])
+        self.assertEqual(layout['siteDrawingBounds'], [90, 150, 1000, 690])
         self.assertEqual(layout['approvedLabels'], ['Tower A', 'Padel Court'])
         self.assertEqual([item['label'] for item in layout['buildings']], ['Tower A'])
         self.assertNotIn('U Cluster', json.dumps(layout))

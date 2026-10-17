@@ -87,12 +87,23 @@ def _visual_plan_program(contract, context):
         label = _visual_concept_plan_component_en(row['component'])
         if not label or re.search(r'[\u0600-\u06FF]', label):
             label = visual_plan_renderer.USE_LABELS.get(category, 'Amenities')
+        row_keys = _visual_plan_component_name_keys(row.get('component'))
+        source_component = next((item for item in components
+                                 if row_keys.intersection(
+                                     _visual_plan_component_name_keys(item.get('name')))), {})
         band = {'id': row['id'], 'name': row['component'], 'label': label, 'category': category,
                 'floorLabel': _visual_concept_plan_floor_label_en(row['floor_range']),
                 'floorRange': row['floor_range'], 'kind': parsed['kind'], 'count': parsed['count'],
                 'lo': parsed['lo'], 'hi': parsed['hi'], 'area': row['floor_area_sqm'],
                 'units': row['units_per_floor'], 'circulation': row['circulation']}
         if parsed['kind'] == 'site' or _visual_concept_plan_row_site(row, site_keys):
+            band['siteType'] = (_visual_concept_plan_site_type({
+                                    'name': row['component'],
+                                    'useType': source_component.get('useType'),
+                                    'notes': source_component.get('notes'),
+                                })
+                                or ('parking' if category == 'parking' else
+                                    'landscape' if category == 'landscape' else 'amenity'))
             site_items.append(band)
         elif _visual_plan_is_individual_home(row.get('component') or row.get('building')):
             matched = _visual_plan_home_component_match(row, components)
@@ -210,11 +221,13 @@ def _visual_plan_scene_from_request(data):
             try:
                 scene = visual_plan_scene.rebase_scene_context(scene, contract, program)
             except visual_plan_geometry.PlanGeometryError as refresh_error:
-                if refresh_error.code != 'PLANS_PROGRAM_CHANGED':
+                if refresh_error.code not in ('PLANS_PROGRAM_CHANGED', 'PLANS_SITE_ITEMS_MISSING',
+                                               'PLANS_SITE_ITEMS_DUPLICATED'):
                     raise
                 scene = visual_plan_scene.fallback_scene(
                     contract, program, VISUAL_PLAN_SCENE_VERSION)
-        elif error.code == 'PLANS_PROGRAM_CHANGED':
+        elif error.code in ('PLANS_PROGRAM_CHANGED', 'PLANS_SITE_ITEMS_MISSING',
+                            'PLANS_SITE_ITEMS_DUPLICATED'):
             # A signed scene can outlive a code change that expands a grouped
             # component (for example, one villa row) into its physical units.
             # Its input signature is still valid, but its building IDs are not.
@@ -386,7 +399,7 @@ def _visual_plan_create_scene(data, context=None):
         'surveyed parcel supplied numerically. Local coordinates are metres: x east, y north, '
         'relative to the recorded origin. Never rotate, resize, simplify or replace the parcel. '
         'Return ONLY a proposed footprint polygon per existing building, entries on recorded street '
-        'edges, and optional open areas. Every footprint must stay wholly inside one parcel, satisfy '
+        'edges, and open areas for recorded site facilities. Every footprint must stay wholly inside one parcel, satisfy '
         'the recorded setbacks, have the exact required footprintArea, and not overlap another '
         'above-ground building. A buildable envelope polygon per parcel is provided below — it '
         'already subtracts the recorded setbacks, so a footprint wholly inside it is compliant. '
@@ -396,8 +409,11 @@ def _visual_plan_create_scene(data, context=None):
         'limited to material neutral|glass|stone|metal|render, pattern plain|grid|vertical|horizontal, '
         'and optional #RRGGBB color. Main entries must use the recorded primary frontage; service '
         'and residential entries must use recorded streets, never neighboring land. Entry position '
-        'is a fraction 0..1 along the longest parcel edge on that side. Surface parking requires a '
-        'recorded siteItems componentId and its recorded area. No source names, files or pages. '
+        'is a fraction 0..1 along the longest parcel edge on that side. Every siteItems row with a '
+        'positive recorded area is required exactly once in openAreas with its recorded componentId '
+        'and exact area; never omit landscape, pools, padel courts, playgrounds or surface parking. '
+        'Use kind landscape for planting/open space, surface_parking for parking, and site_facility '
+        'for pools, padel courts and other named site amenities. No source names, files or pages. '
         'Every program ID is a separate physical footprint. For repeated individual homes, place one '
         'separate polygon for every unit ID; never merge multiple homes into one building or block. '
         'Calculate each placement in metres against parcel edges, setbacks and neighboring footprints; '
@@ -408,7 +424,7 @@ def _visual_plan_create_scene(data, context=None):
         '"facades":{"west":{"material":"glass","pattern":"grid"}}}],'
         '"entries":[{"id":"main_entry","kind":"main","buildingId":"b1","side":"west",'
         '"position":0.5}],"openAreas":[{"id":"open_1","componentId":"row_1",'
-        '"kind":"landscape|surface_parking","polygon":[[0,0],[1,0],[1,1]]}]}.'
+        '"kind":"landscape|surface_parking|site_facility","polygon":[[0,0],[1,0],[1,1]]}]}.'
     )
     envelopes = visual_plan_scene.buildable_envelopes(contract)
     envelope_note = ''
@@ -500,6 +516,21 @@ def _visual_plan_create_scene(data, context=None):
             returned = {item.get('id') for item in (proposed.get('buildings') or [])
                         if isinstance(item, dict)} if isinstance(proposed, dict) else set()
             missing = [building['id'] for building in program['buildings'] if building['id'] not in returned]
+            if failure.code in ('PLANS_SITE_ITEMS_MISSING', 'PLANS_SITE_ITEMS_DUPLICATED'):
+                site_requirements = [
+                    {'componentId': item['id'], 'label': item.get('label') or item.get('name') or item['id'],
+                     'area': item.get('area')}
+                    for item in program.get('siteItems') or []
+                    if (visual_plan_geometry.finite_number(item.get('area')) or 0) > 0
+                ]
+                feedback = (
+                    '\nThe previous geometry proposal was rejected because required approved site areas '
+                    'were missing or duplicated. Retry the layout now. Return each listed componentId exactly '
+                    'once in openAreas, preserve its exact area, and include every building footprint. '
+                    'Required site areas: ' + json.dumps(site_requirements, ensure_ascii=False)
+                    + '\nDo not return an error object or ask the client to fix a model omission.'
+                    + orientation_rule)
+                continue
             feedback = ('\nThe previous proposal failed geometry validation: ' + str(failure)
                         + '\nIt contained JSON keys: ' + received
                         + ('\nIt returned no footprint for building ids: ' + ', '.join(missing)

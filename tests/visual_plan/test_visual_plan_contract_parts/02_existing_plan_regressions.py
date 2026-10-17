@@ -30,7 +30,8 @@ class VisualPlanContractTestsPart02(VisualPlanContractBase):
 
         model_call.assert_not_called()
         self.assertIn('Tower A', result['svgCode'])
-        self.assertIn('Architectural Color', result['svgCode'])
+        self.assertIn('SITE FEATURES', result['svgCode'])
+        self.assertIn('PROJECT SITE PLAN', result['svgCode'])
         self.assertEqual(result['svgCode'].count('data-building-id="b1"'), 1)
         self.assertNotIn('U Cluster', result['svgCode'])
         self.assertNotIn('Recorded Survey Coordinates', result['svgCode'])

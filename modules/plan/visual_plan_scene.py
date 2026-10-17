@@ -34,6 +34,14 @@ def required_area(actual, wanted):
         raise PlanGeometryError('مساحة البصمة لا تطابق المساحة المستمدة من التوزيع.', 'PLANS_FOOTPRINT_AREA_CONFLICT')
 
 
+def _site_area_kind(item):
+    if item.get('category') == 'parking' or item.get('siteType') == 'parking':
+        return 'surface_parking'
+    if item.get('siteType') == 'landscape' or item.get('category') == 'landscape':
+        return 'landscape'
+    return 'site_facility'
+
+
 def entry_position(entry, scene):
     edges = [edge for edge in parcel_edges(scene['geometry']) if edge['direction'] == entry['side']]
     if not edges:
@@ -139,17 +147,39 @@ def validate_scene(scene, contract, program):
         polygon = validate_polygon(area.get('polygon'), 24)
         if not any(polygon_inside(polygon, parcel['polygon']) for parcel in scene['geometry']['parcels']):
             raise PlanGeometryError('مساحة مفتوحة تتجاوز حدود الأرض.', 'PLANS_FOOTPRINT_OUTSIDE')
-        if area.get('kind') not in ('landscape', 'surface_parking'):
+        if area.get('kind') not in ('landscape', 'surface_parking', 'site_facility'):
             raise PlanGeometryError('نوع المساحة المفتوحة غير صالح.')
         item = sites.get(area.get('componentId'))
         if area['kind'] == 'surface_parking' and (not item or item['category'] != 'parking'):
             raise PlanGeometryError('مواقف سطحية غير موجودة في التوزيع.', 'PLANS_PROGRAM_CHANGED')
+        if area['kind'] == 'site_facility' and not item:
+            raise PlanGeometryError('مرفق الموقع غير موجود في البرنامج المعتمد.', 'PLANS_PROGRAM_CHANGED')
         if item:
             required_area(abs(signed_area(polygon)), item.get('area'))
         if any(polygons_overlap(polygon, footprint) for footprint in footprints):
             raise PlanGeometryError('مساحة مفتوحة تتداخل مع بصمة مبنى.', 'PLANS_BUILDING_OVERLAP')
     if any(polygons_overlap(a['polygon'], b['polygon']) for index, a in enumerate(open_areas) for b in open_areas[index + 1:]):
         raise PlanGeometryError('المساحات المفتوحة تتداخل.')
+    site_placement_counts = {}
+    for area in open_areas:
+        component_id = area.get('componentId')
+        if component_id in sites:
+            site_placement_counts[component_id] = site_placement_counts.get(component_id, 0) + 1
+    duplicate_site_items = [str(sites[component_id].get('label')
+                              or sites[component_id].get('name') or component_id)
+                            for component_id, count in site_placement_counts.items() if count > 1]
+    if duplicate_site_items:
+        raise PlanGeometryError('تكرر رسم مساحة معتمدة: ' + ', '.join(duplicate_site_items[:8]) + '.',
+                                'PLANS_SITE_ITEMS_DUPLICATED')
+    placed_site_ids = set(site_placement_counts)
+    missing_site_items = [item for item in program['siteItems']
+                          if (finite_number(item.get('area')) or 0) > 0
+                          and item['id'] not in placed_site_ids]
+    if missing_site_items:
+        labels = ', '.join(str(item.get('label') or item.get('name') or item['id'])
+                           for item in missing_site_items[:8])
+        raise PlanGeometryError('المساحات المعتمدة غير مرسومة: ' + labels + '.',
+                                'PLANS_SITE_ITEMS_MISSING')
     return scene
 
 
@@ -316,7 +346,29 @@ def fallback_scene(contract, program, version=1):
         placed[building['id']] = footprint
     layout = [{'id': building['id'], 'footprint': placed[building['id']]}
               for building in program['buildings'] if building['id'] in placed]
-    return make_scene(contract, program, {'buildings': layout}, version)
+    open_areas = []
+    occupied = [placed[item['id']] for item in program['buildings']
+                if item['id'] in placed and not item.get('basementOnly')]
+    for item in sorted(program.get('siteItems') or [],
+                       key=lambda source: -(finite_number(source.get('area')) or 0)):
+        area = finite_number(item.get('area'))
+        if area is None or area <= 0:
+            continue
+        polygon = _rect_grid_search(
+            [parcel['polygon'] for parcel in contract['geometry']['parcels']], area,
+            occupied, parcel_axis)
+        if polygon is None:
+            polygon = _rect_search(
+                [parcel['polygon'] for parcel in contract['geometry']['parcels']], area,
+                occupied, parcel_axis)
+        if polygon is None:
+            raise PlanGeometryError(
+                f'المساحة المعتمدة «{item.get("label") or item.get("name") or item["id"]}» '
+                'لا تتسع داخل حدود الأرض مع البصمات المسجلة.', 'PLANS_SITE_AREA_CONFLICT')
+        occupied.append(polygon)
+        open_areas.append({'id': 'site_' + str(item['id']), 'componentId': item['id'],
+                           'kind': _site_area_kind(item), 'polygon': polygon})
+    return make_scene(contract, program, {'buildings': layout, 'openAreas': open_areas}, version)
 
 
 def make_scene(contract, program, layout, version=1):
