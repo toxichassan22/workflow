@@ -45,6 +45,33 @@ def _visual_plan_job_todos(kind, state='running', active_index=None):
     return rows
 
 
+def _visual_plan_job_terminal_todos(kind, state, current_todos=None, active_index=None):
+    rows = current_todos if isinstance(current_todos, list) else []
+    has_site_svg_steps = (kind in ('site_chat', 'site_generate') and any(
+        isinstance(item, dict) and item.get('stage') in ('site_svg_section', 'site_svg_assembly')
+        for item in rows))
+    if has_site_svg_steps:
+        target_index = next((index for index, item in enumerate(rows)
+                            if isinstance(item, dict) and item.get('status') == 'active'), None)
+        if target_index is None:
+            target_index = next((index for index, item in enumerate(rows)
+                                if isinstance(item, dict) and item.get('status') == 'pending'), None)
+        result = []
+        for index, item in enumerate(rows):
+            if not isinstance(item, dict):
+                continue
+            row = dict(item)
+            if state == 'completed':
+                row['status'] = 'done'
+            elif index == target_index:
+                row['status'] = 'failed'
+            elif row.get('status') == 'active':
+                row['status'] = 'pending'
+            result.append(row)
+        return result
+    return _visual_plan_job_todos(kind, state, active_index=active_index)
+
+
 def _visual_plan_report_site_chat_progress(active_index, progress):
     if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') != 'site_chat':
         return
@@ -55,7 +82,8 @@ def _visual_plan_report_site_chat_progress(active_index, progress):
 
 
 def _visual_plan_report_site_chat_timing(name, started_at):
-    if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') != 'site_chat':
+    if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') not in (
+            'site_chat', 'site_generate'):
         return
     callback = getattr(g, 'visual_plan_job_progress', None)
     if callable(callback):
@@ -193,7 +221,9 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                                  if isinstance(item, dict) and item.get('status') == 'active'), None)
             final_job.update({'status': 'completed' if result.get('success') else 'failed',
                               'success': bool(result.get('success')), 'progress': 100,
-                              'todos': _visual_plan_job_todos(kind, result_state, active_index=active_index),
+                              'todos': _visual_plan_job_terminal_todos(
+                                  kind, result_state, current_todos=final_job.get('todos'),
+                                  active_index=active_index),
                               'result': result, 'httpStatus': status})
             _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, final_job)
             if not flask_app.config.get('TESTING'):
@@ -208,7 +238,9 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                                  if isinstance(item, dict) and item.get('status') == 'active'), None)
             expired = time.time() >= g.visual_plan_job_deadline
             failed_job.update({'status': 'failed', 'success': False, 'progress': 100,
-                               'todos': _visual_plan_job_todos(kind, 'failed', active_index=active_index),
+                               'todos': _visual_plan_job_terminal_todos(
+                                   kind, 'failed', current_todos=failed_job.get('todos'),
+                                   active_index=active_index),
                                'httpStatus': 503,
                                'result': {'success': False,
                                           'error': ('انتهت مهلة معالجة المخطط الهندسي.' if expired
@@ -297,7 +329,8 @@ def api_visual_concept_plan_job(job_id):
                                  if isinstance(item, dict) and item.get('status') == 'pending'), 0)
         job = dict(job)
         job.update({'status': 'failed', 'success': False, 'progress': 100, 'httpStatus': 503,
-                    'todos': _visual_plan_job_todos(kind, 'failed', active_index=active_index),
+                    'todos': _visual_plan_job_terminal_todos(
+                        kind, 'failed', current_todos=todos, active_index=active_index),
                     'result': {'success': False, 'error': 'انتهت مهلة معالجة المشهد الهندسي.',
                                'error_code': 'PLANS_JOB_EXPIRED'}})
         created_at = job.get('createdAt')

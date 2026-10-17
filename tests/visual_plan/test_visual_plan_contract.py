@@ -339,7 +339,7 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                 json={'projectData': project, 'plansWorkflow': self.workflow(project)})
         self.assertEqual(prepared.status_code, 200, prepared.get_json())
         self.assertEqual(prepare_call.call_args.kwargs.get('model'), 'google/gemini-4-argon')
-        self.assertEqual(prepare_call.call_args.kwargs.get('reasoning_effort'), 'high')
+        self.assertEqual(prepare_call.call_args.kwargs.get('reasoning_effort'), 'medium')
         scene = prepared.get_json()['scene']
         workflow = {**self.workflow(project), 'scene': scene}
 
@@ -602,8 +602,10 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(chat_call.call_count, 8)
         self.assertTrue(all(call.kwargs.get('model') == 'google/gemini-4-argon'
                             for call in chat_call.call_args_list))
-        self.assertTrue(all(call.kwargs.get('reasoning_effort') == 'high'
-                            for call in chat_call.call_args_list))
+        self.assertEqual(chat_call.call_args_list[0].kwargs.get('reasoning_effort'), 'high')
+        self.assertTrue(all(call.kwargs.get('reasoning_effort') == 'medium'
+                            for call in chat_call.call_args_list[1:7]))
+        self.assertEqual(chat_call.call_args_list[7].kwargs.get('reasoning_effort'), 'high')
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('max_tokens'), 12000)
         self.assertTrue(all(call.kwargs.get('max_tokens') == 32000
                             for call in chat_call.call_args_list[1:7]))
@@ -658,6 +660,19 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(persisted['timings']['scene_validation_ms'], 1200)
         write_job.assert_called_once()
 
+        section_todos = module._visual_plan_site_section_todos(
+            {'coordinates': '<g/>', 'colors': '<defs/>'}, active_section='components')
+        expired_sections = {**expired, 'todos': section_todos}
+        with patch.object(module, '_read_job', return_value=expired_sections), \
+                patch.object(module, '_write_job'):
+            response = client.get('/api/visual-concept/plans-jobs/expired-svg-job',
+                                  headers=self._headers(self.token_a))
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual([item['label'] for item in response.get_json()['todos']],
+                         [item['label'] for item in section_todos])
+        self.assertEqual([item['status'] for item in response.get_json()['todos']],
+                         ['done', 'done', 'failed', 'pending', 'pending', 'pending', 'pending'])
+
     def test_visual_plan_provider_calls_obey_the_job_deadline(self):
         module = self.application_module
         with self.app.test_request_context('/'):
@@ -690,6 +705,27 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(reported[0]['progress'], 82)
         self.assertEqual(reported[0]['todos'][3]['status'], 'active')
         self.assertGreaterEqual(reported[1]['timing']['interview_model_ms'], 0)
+
+    def test_site_svg_section_progress_marks_the_active_section_and_preserves_it_on_failure(self):
+        module = self.application_module
+        checkpoints = {'coordinates': '<g/>', 'colors': '<defs/>'}
+        todos = module._visual_plan_site_section_todos(
+            checkpoints, active_section='components')
+        self.assertEqual([item['status'] for item in todos],
+                         ['done', 'done', 'active', 'pending', 'pending', 'pending', 'pending'])
+        failed = module._visual_plan_job_terminal_todos(
+            'site_chat', 'failed', current_todos=todos)
+        self.assertEqual(failed[2]['label'], 'Every approved building and component footprint, labels and approved areas.')
+        self.assertEqual([item['status'] for item in failed],
+                         ['done', 'done', 'failed', 'pending', 'pending', 'pending', 'pending'])
+        self.assertEqual(failed[-1]['stage'], 'site_svg_assembly')
+        reported = []
+        with self.app.test_request_context('/'):
+            module.g.visual_plan_job_kind = 'site_generate'
+            module.g.visual_plan_job_progress = lambda **kwargs: reported.append(kwargs)
+            module._visual_plan_report_site_chat_timing(
+                'site_svg_components_model_ms', module.time.perf_counter() - 0.01)
+        self.assertGreaterEqual(reported[0]['timing']['site_svg_components_model_ms'], 0)
 
     def test_temporary_svg_model_comparison_route_is_retired(self):
         module = self.application_module

@@ -256,7 +256,7 @@ def _visual_plan_create_scene(data, context=None):
     for attempt in range(2):
         response = call_openrouter_chat(
             system_prompt, user_prompt + feedback, temperature=None, max_tokens=cap,
-            model=GEMINI_TEXT_MODEL, reasoning_effort='high',
+            model=GEMINI_TEXT_MODEL, reasoning_effort='medium',
             timeout=_visual_plan_job_call_timeout(1200),
             response_format={'type': 'json_object'},
             image_references=references or None, usage_ctx=_usage_ctx('image', data))

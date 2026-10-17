@@ -339,6 +339,25 @@ def _visual_plan_site_report_progress(progress, todos, checkpoints):
         callback(progress=progress, todos=todos, checkpoint={'svgSections': checkpoints})
 
 
+def _visual_plan_site_section_todos(checkpoints=None, active_section=None,
+                                    assembly_active=False, complete=False):
+    completed = set(checkpoints) if isinstance(checkpoints, dict) else set()
+    rows = []
+    for section, label in _VISUAL_PLAN_SITE_SECTIONS:
+        if complete or section in completed:
+            status = 'done'
+        elif section == active_section:
+            status = 'active'
+        else:
+            status = 'pending'
+        rows.append({'id': 'site-svg-' + section, 'label': label,
+                     'status': status, 'stage': 'site_svg_section'})
+    rows.append({'id': 'site-svg-assembly', 'label': 'تركيب المخطط وفحصه',
+                 'status': ('done' if complete else 'active' if assembly_active else 'pending'),
+                 'stage': 'site_svg_assembly'})
+    return rows
+
+
 def _visual_plan_site_generate(data, interview):
     if interview.get('needsClarification') or not interview.get('readyForGeneration'):
         return interview
@@ -352,9 +371,12 @@ def _visual_plan_site_generate(data, interview):
                   if key in _VISUAL_PLAN_SITE_SECTION_IDS and isinstance(value, str)}
     state.update({'status': 'generating', 'inputSignature': signature, 'checkpoints': checkpoints})
     total = len(_VISUAL_PLAN_SITE_SECTIONS)
-    for index, (section, description) in enumerate(_VISUAL_PLAN_SITE_SECTIONS):
+    for section, description in _VISUAL_PLAN_SITE_SECTIONS:
         if section in checkpoints:
             continue
+        _visual_plan_site_report_progress(
+            20 + int(65 * len(checkpoints) / total),
+            _visual_plan_site_section_todos(checkpoints, active_section=section), checkpoints)
         system_prompt = (
             'You are Google Gemini 4 Argon writing one named, editable section of a real-estate site-plan SVG. '
             'Use only the validated pixel geometry and fixed project facts supplied. Output JSON only: '
@@ -370,17 +392,23 @@ def _visual_plan_site_generate(data, interview):
                        'resolvedAnswers': state.get('answers') or [],
                        'sessionMemory': state.get('summary') or '',
                        'existingSections': sorted(checkpoints)}
-        parsed, _tokens = _visual_plan_site_call(
-            system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
-            max_tokens=_VISUAL_PLAN_SITE_SECTION_OUTPUT_LIMIT)
+        section_started = time.perf_counter()
+        try:
+            parsed, _tokens = _visual_plan_site_call(
+                system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
+                max_tokens=_VISUAL_PLAN_SITE_SECTION_OUTPUT_LIMIT, reasoning_effort='medium')
+        finally:
+            _visual_plan_report_site_chat_timing('site_svg_' + section + '_model_ms', section_started)
         checkpoints[section] = _visual_plan_site_section_fragment(parsed.get('code'), section)
         state['checkpoints'] = checkpoints
         _visual_plan_site_record_tokens(state, _tokens)
+        next_section = next((name for name, _label in _VISUAL_PLAN_SITE_SECTIONS
+                             if name not in checkpoints), None)
         _visual_plan_site_report_progress(
-            20 + int(65 * (index + 1) / total),
-            [{'id': str(i + 1), 'label': label,
-              'status': ('done' if i <= index else 'pending')}
-             for i, (_name, label) in enumerate(_VISUAL_PLAN_SITE_SECTIONS)], checkpoints)
+            20 + int(65 * len(checkpoints) / total),
+            _visual_plan_site_section_todos(
+                checkpoints, active_section=next_section,
+                assembly_active=next_section is None), checkpoints)
     svg = _visual_plan_site_svg_from_blocks(checkpoints)
     if not svg or any('LL_SECTION_START:' + section not in svg for section in _VISUAL_PLAN_SITE_SECTION_IDS):
         raise visual_plan_geometry.PlanGeometryError('تعذر تركيب أقسام SVG في مخطط صالح.', 'PLANS_SVG_INVALID')
@@ -389,8 +417,7 @@ def _visual_plan_site_generate(data, interview):
     state.update({'status': 'review', 'readyForGeneration': True,
                   'generateRequested': False, 'checkpoints': checkpoints})
     _visual_plan_site_report_progress(
-        98, [{'id': str(i + 1), 'label': label, 'status': 'done'}
-            for i, (_name, label) in enumerate(_VISUAL_PLAN_SITE_SECTIONS)], checkpoints)
+        98, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints)
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': svg,
             'model': GEMINI_TEXT_MODEL, 'reply': 'تم إنشاء المخطط لمراجعته.',
             'assistantState': state, 'scene': workflow.get('scene')}
