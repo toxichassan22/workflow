@@ -391,10 +391,6 @@
             </div>
             <div id="visualConceptPlansUploadList" class="visual-concept-page"></div>
           </div>
-          <div class="visual-concept-actions">
-            <button type="button" class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
-          </div>
-          <div data-visual-section-bar="plans2d"></div>
         </div>
         <div id="visualConceptSketchesView" class="visual-concept-section" data-visual-concept-view="sketches" hidden>
           <div class="visual-concept-view-head">

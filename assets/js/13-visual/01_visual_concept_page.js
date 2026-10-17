@@ -69,6 +69,7 @@
       renderVisualConceptPlans();
       renderVisualConceptSketches();
       refreshVisualConceptSectionBars();
+      if (typeof refreshActiveSectionApproveButton === 'function') refreshActiveSectionApproveButton();
       const bindRoot = document.getElementById('section-visual-concept') || document.getElementById('tenantVisualConceptPage') || host;
       bindRoot.querySelectorAll('[data-visual-caption]').forEach(input => {
         input.addEventListener('input', () => {
@@ -197,6 +198,7 @@
       document.querySelectorAll('#section-visual-concept [data-visual-concept-view], #tenantVisualConceptPage [data-visual-concept-view]').forEach(node => {
         node.hidden = node.dataset.visualConceptView !== next;
       });
+      if (typeof refreshActiveSectionApproveButton === 'function') refreshActiveSectionApproveButton();
       if (getTenantNavigationState()?.pageId === 'tenantVisualConceptPage') {
         saveTenantNavigationState('tenantVisualConceptPage', { visualConceptView: next });
       }

@@ -9,6 +9,8 @@ const { test } = require('node:test');
 const dir = path.resolve(__dirname, '../../assets/js/12-files-media');
 const source = fs.readdirSync(dir).filter(file => /^02.*\.js$/.test(file)).sort()
   .map(file => fs.readFileSync(path.join(dir, file), 'utf8')).join('\n');
+const formSectionsSource = fs.readFileSync(path.resolve(__dirname,
+  '../../assets/js/07-project-form/01_form_sections.js'), 'utf8');
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function fixture() {
@@ -30,6 +32,40 @@ function fixture() {
   vm.runInContext(source, context);
   return context;
 }
+
+function installActiveSectionApproval(context) {
+  const start = formSectionsSource.indexOf('    function activeProjectSectionKey()');
+  const end = formSectionsSource.indexOf('    async function setSectionStatus', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInContext(formSectionsSource.slice(start, end), context);
+}
+
+test('plans approval is handled by the shared bottom action in the plans view', () => {
+  const context = fixture();
+  const button = { style: {}, dataset: {} };
+  let approved = false;
+  const called = [];
+  context.tenantActiveProjectSection = 'section-visual-concept';
+  context.tenantProjectSectionStatuses = { 'section-visual-concept': 'draft' };
+  context.document.querySelector = selector => selector.includes('plans2d')
+    ? { dataset: { visualConceptView: 'plans2d' } } : null;
+  context.document.getElementById = id => id === 'activeSectionApproveBtn' ? button : null;
+  context.getProjectSectionElement = () => ({ dataset: {} });
+  context.visualConceptSectionApproved = () => approved;
+  context.approveVisualConceptSection = id => { called.push(['approve', id]); approved = true; };
+  context.unapproveVisualConceptSection = id => { called.push(['unapprove', id]); approved = false; };
+  installActiveSectionApproval(context);
+
+  context.refreshActiveSectionApproveButton();
+  assert.equal(button.textContent, 'اعتماد القسم');
+  context.toggleActiveSectionApproval();
+  assert.deepEqual(called, [['approve', 'plans2d']]);
+
+  context.refreshActiveSectionApproveButton();
+  assert.equal(button.textContent, 'الغاء اعتماد القسم');
+  context.toggleActiveSectionApproval();
+  assert.deepEqual(called, [['approve', 'plans2d'], ['unapprove', 'plans2d']]);
+});
 
 test('plan notes and their review survive workflow normalization and JSON round trips', () => {
   const context = fixture();

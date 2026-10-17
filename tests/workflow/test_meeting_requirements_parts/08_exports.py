@@ -576,6 +576,14 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('data-visual-concept-target="plans2d"', index_source)
         self.assertNotIn('data-visual-concept-target="isometric"', index_source)
         self.assertIn('id="visualConceptPlansView"', index_source)
+        plans_view_start = index_source.index('<div id="visualConceptPlansView"')
+        plans_view_end = index_source.index('<div id="visualConceptSketchesView"', plans_view_start)
+        plans_view = index_source[plans_view_start:plans_view_end]
+        self.assertNotIn('onclick="saveProjectAsDraft()"', plans_view)
+        self.assertNotIn('data-visual-section-bar="plans2d"', plans_view)
+        self.assertIn('activeVisualConceptApprovalTarget', index_source)
+        self.assertIn('approveVisualConceptSection(visualApprovalTarget)', index_source)
+        self.assertIn('unapproveVisualConceptSection(visualApprovalTarget)', index_source)
         self.assertNotIn('visualConceptIsometricView', index_source)
         self.assertNotIn('visualConceptHomeIsometricStatus', index_source)
         # Plans run the same slot flow as every other visual card: each plan record is

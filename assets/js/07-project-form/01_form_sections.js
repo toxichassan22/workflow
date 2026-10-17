@@ -362,6 +362,13 @@
       return active ? active.dataset.section : null;
     }
 
+    function activeVisualConceptApprovalTarget(sectionKey = activeProjectSectionKey()) {
+      if (sectionKey !== 'section-visual-concept') return null;
+      const plansView = document.querySelector(
+        '#section-visual-concept [data-visual-concept-view="plans2d"]:not([hidden])');
+      return plansView ? 'plans2d' : null;
+    }
+
     function refreshActiveSectionApproveButton() {
       const btn = document.getElementById('activeSectionApproveBtn');
       if (!btn) return;
@@ -371,11 +378,18 @@
       const sectionKey = activeProjectSectionKey();
       const section = sectionKey ? getProjectSectionElement(sectionKey) : null;
       const approvable = !!section && section.dataset.underConstruction !== '1';
-      const approved = approvable && tenantProjectSectionStatuses[sectionKey] === 'approved';
+      const visualApprovalTarget = approvable && typeof visualConceptSectionApproved === 'function'
+        ? activeVisualConceptApprovalTarget(sectionKey) : null;
+      const approved = visualApprovalTarget
+        ? visualConceptSectionApproved(visualApprovalTarget)
+        : (approvable && tenantProjectSectionStatuses[sectionKey] === 'approved');
       btn.style.display = approvable ? '' : 'none';
       btn.disabled = !approvable;
-      btn.textContent = approved ? tr('الغاء الاعتماد') : tr('اعتماد');
-      btn.dataset.arText = approved ? 'الغاء الاعتماد' : 'اعتماد';
+      const arText = visualApprovalTarget
+        ? (approved ? WFT('vc.sec.unapprove', 'الغاء اعتماد القسم') : WFT('vc.sec.approve', 'اعتماد القسم'))
+        : (approved ? tr('الغاء الاعتماد') : tr('اعتماد'));
+      btn.textContent = arText;
+      btn.dataset.arText = arText;
     }
 
     function toggleActiveSectionApproval() {
@@ -383,6 +397,12 @@
       if (!sectionKey) return;
       const section = getProjectSectionElement(sectionKey);
       if (!section || section.dataset.underConstruction === '1') return;
+      const visualApprovalTarget = activeVisualConceptApprovalTarget(sectionKey);
+      if (visualApprovalTarget && typeof visualConceptSectionApproved === 'function') {
+        if (visualConceptSectionApproved(visualApprovalTarget)) unapproveVisualConceptSection(visualApprovalTarget);
+        else approveVisualConceptSection(visualApprovalTarget);
+        return;
+      }
       setSectionStatus(sectionKey, tenantProjectSectionStatuses[sectionKey] === 'approved' ? 'draft' : 'approved');
     }
 
