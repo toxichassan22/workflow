@@ -341,6 +341,36 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         usage_ctx = research_mock.call_args.args[1]
         self.assertEqual(usage_ctx.get('billing_flow'), 'market_summary')
 
+    def test_aggregator_failure_shows_safe_provider_reason_and_is_resumable(self):
+        module = self.module
+        provider_result = {'error': {'message': 'temporary upstream timeout'}}
+        research = {'success': True, 'reports': [], 'citation_urls': []}
+        data = {'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]}}
+        with patch.object(module, '_prepare_market_payload',
+                          return_value=data), \
+                patch.object(module, '_usage_ctx', return_value={}), \
+                patch.object(module, '_run_market_summary_research',
+                             return_value=research), \
+                patch.object(module.market_study,
+                             'format_retrieved_evidence_block', return_value=''), \
+                patch.object(module, '_run_market_summary_aggregator',
+                             return_value=provider_result):
+            result = module._run_market_summary(data, tenant_id=None)
+
+        self.assertFalse(result['success'])
+        self.assertEqual(result['failureReason'], 'aggregator_failed')
+        self.assertIn('تعذر تجميع نتائج بحث الويب', result['error'])
+        self.assertIn('temporary upstream timeout', result['error'])
+        self.assertEqual(result['providerError'], 'temporary upstream timeout')
+        resumable_job = {
+            'kind': 'summary', 'status': 'failed',
+            'failureReason': result['failureReason'],
+            'resumeState': {'researchers': {'task-1': {'searched': True}}},
+        }
+        self.assertTrue(module._market_job_can_resume(resumable_job))
+        resumable_job['resumeState']['researchers'] = {}
+        self.assertFalse(module._market_job_can_resume(resumable_job))
+
     def test_summary_prompt_assigns_research_to_playwright_workers(self):
         prompt = market_study.build_summary_user_prompt(
             {'city': 'جدة', 'summaryScope': {'cities': [

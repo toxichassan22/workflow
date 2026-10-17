@@ -215,12 +215,18 @@ _JOB_INTERNAL_KEYS = ('payload', 'actor', 'pid', 'evidencePages', 'resumeState')
 
 
 def _market_job_can_resume(job):
-    return bool(
-        isinstance(job, dict)
-        and str(job.get('kind') or '') == 'summary'
-        and str(job.get('status') or '') == 'failed'
-        and str(job.get('failureReason') or '') in (
-            'insufficient_credit', 'billing_refused'))
+    if not (isinstance(job, dict)
+            and str(job.get('kind') or '') == 'summary'
+            and str(job.get('status') or '') == 'failed'):
+        return False
+    reason = str(job.get('failureReason') or '')
+    if reason in ('insufficient_credit', 'billing_refused'):
+        return True
+    resume_state = job.get('resumeState')
+    researchers = (resume_state.get('researchers')
+                   if isinstance(resume_state, dict) else None)
+    return bool(reason == 'aggregator_failed'
+                and isinstance(researchers, dict) and researchers)
 
 
 def _public_job(job):

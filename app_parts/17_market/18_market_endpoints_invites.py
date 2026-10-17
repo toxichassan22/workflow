@@ -702,16 +702,27 @@ def _run_market_summary(data, tenant_id=None, progress=None,
     res = _run_market_summary_aggregator(
         system_prompt, user_prompt, usage_ctx, research, deadline=deadline)
     failed = res.get('error') is not None
+    aggregator_returned_error = failed
     provider_error = _chat_error_message(res) if failed else ''
     if not failed and not _market_search_ran(res):
         provider_error = 'browse_agent: no browsed evidence'
         failed = True
     if failed and _ai_fatal_error_dict(res) is None:
+        safe_provider_error = _client_safe_llm_error(
+            provider_error,
+            fallback='تعذر تحديد سبب تعذر تجميع نتائج البحث.')
+        is_credit_failure = (_is_company_credit_error(provider_error)
+                             or 'afford' in str(provider_error or '').lower())
+        error = 'تعذر تجميع نتائج بحث الويب لملخص السوق. لم يُستبدل النص الحالي.'
+        if safe_provider_error and safe_provider_error != error:
+            error += f' السبب: {safe_provider_error}'
         return {
             'success': False,
-            'error': 'تعذر تنفيذ بحث الويب لملخص السوق. لم يُستبدل النص الحالي.',
-            'failureReason': 'search_not_run',
-            'providerError': provider_error,
+            'error': error,
+            'failureReason': ('insufficient_credit' if is_credit_failure
+                              else 'aggregator_failed' if aggregator_returned_error
+                              else 'search_not_run'),
+            'providerError': safe_provider_error,
             'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         }
     report(72, 'التحقق من مصادر الملخص وفترة بياناتها...')
