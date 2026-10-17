@@ -389,6 +389,53 @@ test('a saved conflict review survives survey coordinates changing from JSON tex
   assert.equal(workflow.distribution.checks[0].item, 'المساحة');
 });
 
+test('a saved approval survives numeric inputs hydrating from numbers to strings', () => {
+  for (const verification of [
+    { approved: true, canProceed: false, checks: [{ item: 'الارتداد', result: 'متعارض' }] },
+    { approved: true, canProceed: true, checks: [{ item: 'الارتداد', result: 'مطابق' }] },
+  ]) {
+    const context = fixture();
+    const before = {
+      approved_floor_count: 4,
+      approved_coverage_ratio: 60,
+      boundary_lengths: { north_length: 24 },
+      project_components_data: [{ id: 'component_1', units_per_floor: 12, floor_area_sqm: 840 }],
+      financial_study_model: {
+        inputs: { basementArea: 800 },
+        dynamicRows: { components: [{ id: 'component_1', units: 12 }] },
+        parkingPlan: { id: 'parking_1', requiredSpaces: 24 },
+      },
+    };
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {
+      verification,
+      boundary: { approved: true, points: [
+        { eastings: 1, northings: 1 }, { eastings: 2, northings: 1 }, { eastings: 2, northings: 2 }] },
+      distribution: { approved: true, aiReviewed: true,
+        rows: [{ id: 'row_1', component: 'مكاتب', units_per_floor: 12 }] },
+    } });
+    context.tenantVisualConceptState.plansWorkflow.sourceStamp = context.visualConceptPlanInputStamp(before);
+
+    const after = {
+      approved_floor_count: '4',
+      approved_coverage_ratio: '60',
+      boundary_lengths: { north_length: '24' },
+      project_components_data: [{ id: 'component_1', units_per_floor: '12', floor_area_sqm: '840' }],
+      financial_study_model: {
+        inputs: { basementArea: '800' },
+        dynamicRows: { components: [{ id: 'component_1', units: '12' }] },
+        parkingPlan: { id: 'parking_1', requiredSpaces: '24' },
+      },
+    };
+    context.syncVisualConceptPlanInputs(after);
+
+    const reloaded = context.tenantVisualConceptState.plansWorkflow;
+    assert.equal(reloaded.verification.approved, true);
+    assert.equal(reloaded.verification.checks[0].item, 'الارتداد');
+    assert.equal(reloaded.distribution.approved, true);
+    assert.equal(reloaded.distribution.aiReviewed, true);
+  }
+});
+
 test('a changed parking plan invalidates the saved conflict review and approvals', () => {
   const context = fixture();
   const before = { financial_study_model: { inputs: { basementArea: 800 },

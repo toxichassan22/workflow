@@ -231,14 +231,34 @@
       if (key === 'directions_table' && typeof normalizeSurveyDirections === 'function') {
         parsed = normalizeSurveyDirections(parsed);
       }
-      const stable = item => {
-        if (Array.isArray(item)) return item.map(stable);
-        if (item && typeof item === 'object') {
-          return Object.fromEntries(Object.keys(item).sort().map(name => [name, stable(item[name])]));
-        }
-        return item;
-      };
-      return stable(parsed);
+      return visualConceptPlanStableInput(parsed, key);
+    }
+
+    const VISUAL_CONCEPT_PLAN_NUMERIC_INPUT_WORDS = new Set([
+      'area', 'sqm', 'count', 'ratio', 'coverage', 'length', 'width', 'height',
+      'setback', 'space', 'spaces', 'unit', 'units', 'easting', 'eastings',
+      'northing', 'northings', 'x', 'y', 'latitude', 'longitude', 'lat', 'lng',
+      'floor', 'floors', 'basement', 'capacity', 'percent', 'percentage',
+      'quantity', 'distance', 'size', 'level', 'amount'
+    ]);
+
+    function visualConceptPlanStableInput(value, parentKey = '') {
+      if (Array.isArray(value)) return value.map(item => visualConceptPlanStableInput(item, parentKey));
+      if (value && typeof value === 'object') {
+        return Object.fromEntries(Object.keys(value).sort().map(key =>
+          [key, visualConceptPlanStableInput(value[key], key)]));
+      }
+      if (typeof value !== 'string' || !visualConceptPlanNumericKey(parentKey)) return value;
+      const text = value.trim();
+      if (!text) return value;
+      const number = Number(text);
+      return Number.isFinite(number) ? number : value;
+    }
+
+    function visualConceptPlanNumericKey(key) {
+      const words = String(key || '').replace(/([a-z])([A-Z])/g, '$1 $2')
+        .toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      return words.some(word => VISUAL_CONCEPT_PLAN_NUMERIC_INPUT_WORDS.has(word));
     }
 
     function visualConceptPlanFinancialInput(value) {
@@ -254,16 +274,9 @@
         .slice().sort((left, right) => String(left.id || '').localeCompare(String(right.id || ''))) : [];
       const parkingPlan = model.parkingPlan && typeof model.parkingPlan === 'object'
         && !Array.isArray(model.parkingPlan) ? model.parkingPlan : {};
-      const stable = item => {
-        if (Array.isArray(item)) return item.map(stable);
-        if (item && typeof item === 'object') {
-          return Object.fromEntries(Object.keys(item).sort().map(key => [key, stable(item[key])]));
-        }
-        return item;
-      };
       // Calculated projections and report tables are rebuilt on draft load. Only
       // the parking inputs and plan affect visual-plan context and its checks.
-      return stable({ basementArea: inputs.basementArea ?? '', components, parkingPlan });
+      return visualConceptPlanStableInput({ basementArea: inputs.basementArea ?? '', components, parkingPlan });
     }
 
     function invalidateVisualConceptPlanGeneration(workflow, review = true) {
