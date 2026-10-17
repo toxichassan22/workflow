@@ -295,7 +295,37 @@ def _visual_plan_site_interview(data, action='chat'):
                                                             and previous_assistant.get('inputSignature') != signature)}
 
 
-def _visual_plan_site_section_fragment(raw, section):
+def _visual_plan_site_strip_non_english_text(element):
+    arabic = re.compile(r'[\u0600-\u06FF]')
+    changed = False
+    parents = {}
+    for parent in element.iter():
+        if not isinstance(parent.tag, str):
+            continue
+        for child in parent:
+            parents[child] = parent
+    for node in list(element.iter()):
+        if not isinstance(node.tag, str):
+            if isinstance(node, etree._Comment) and arabic.search(node.text or ''):
+                parent = parents.get(node)
+                if parent is not None:
+                    parent.remove(node)
+                    changed = True
+            continue
+        if arabic.search(node.text or ''):
+            node.text = ''
+            changed = True
+        if arabic.search(node.tail or ''):
+            node.tail = ''
+            changed = True
+        for name, value in list(node.attrib.items()):
+            if arabic.search(value):
+                del node.attrib[name]
+                changed = True
+    return changed
+
+
+def _visual_plan_site_section_fragment(raw, section, sanitized_sections=None):
     raw_text = str(raw or '').strip()
     parsed = {} if raw_text.startswith('<') else parse_json_object(raw_text)
     fragment = parsed.get('code', raw_text) if isinstance(parsed, dict) else raw_text
@@ -303,8 +333,6 @@ def _visual_plan_site_section_fragment(raw, section):
     fenced = re.search(r'```(?:svg|xml)?\s*\n?([\s\S]*?)```', fragment)
     if fenced:
         fragment = fenced.group(1).strip()
-    if re.search(r'[\u0600-\u06FF]', fragment):
-        raise visual_plan_geometry.PlanGeometryError('يحتوي قسم SVG على نص غير إنجليزي.', 'PLANS_SVG_INVALID')
     try:
         root = etree.fromstring(('<svg xmlns="http://www.w3.org/2000/svg">' + fragment + '</svg>').encode('utf-8'),
                                 etree.XMLParser(resolve_entities=False, load_dtd=False, no_network=True))
@@ -314,6 +342,9 @@ def _visual_plan_site_section_fragment(raw, section):
         expected = 'defs' if section == 'colors' else 'g'
         if etree.QName(element).localname != expected or element.get('id') != 'll-section-' + section:
             raise ValueError('section ID or element type mismatch')
+        if _visual_plan_site_strip_non_english_text(element):
+            if isinstance(sanitized_sections, list) and section not in sanitized_sections:
+                sanitized_sections.append(section)
         return etree.tostring(element, encoding='unicode')
     except Exception as error:
         raise visual_plan_geometry.PlanGeometryError(
@@ -370,6 +401,7 @@ def _visual_plan_site_generate(data, interview):
     checkpoints = {key: value for key, value in checkpoints.items()
                   if key in _VISUAL_PLAN_SITE_SECTION_IDS and isinstance(value, str)}
     state.update({'status': 'generating', 'inputSignature': signature, 'checkpoints': checkpoints})
+    sanitized_sections = []
     total = len(_VISUAL_PLAN_SITE_SECTIONS)
     for section, description in _VISUAL_PLAN_SITE_SECTIONS:
         if section in checkpoints:
@@ -399,7 +431,8 @@ def _visual_plan_site_generate(data, interview):
                 max_tokens=_VISUAL_PLAN_SITE_SECTION_OUTPUT_LIMIT, reasoning_effort='medium')
         finally:
             _visual_plan_report_site_chat_timing('site_svg_' + section + '_model_ms', section_started)
-        checkpoints[section] = _visual_plan_site_section_fragment(parsed.get('code'), section)
+        checkpoints[section] = _visual_plan_site_section_fragment(
+            parsed.get('code'), section, sanitized_sections)
         state['checkpoints'] = checkpoints
         _visual_plan_site_record_tokens(state, _tokens)
         next_section = next((name for name, _label in _VISUAL_PLAN_SITE_SECTIONS
@@ -418,8 +451,11 @@ def _visual_plan_site_generate(data, interview):
                   'generateRequested': False, 'checkpoints': checkpoints})
     _visual_plan_site_report_progress(
         98, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints)
+    reply = 'تم إنشاء المخطط لمراجعته.'
+    if sanitized_sections:
+        reply += ' حُذفت تسميات غير إنجليزية من بعض الأقسام.'
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': svg,
-            'model': GEMINI_TEXT_MODEL, 'reply': 'تم إنشاء المخطط لمراجعته.',
+            'model': GEMINI_TEXT_MODEL, 'reply': reply,
             'assistantState': state, 'scene': workflow.get('scene')}
 
 
@@ -468,7 +504,9 @@ def _visual_plan_site_edit(data):
     section = str(parsed.get('targetSection') or '')
     if section not in _VISUAL_PLAN_SITE_SECTION_IDS:
         raise visual_plan_geometry.PlanGeometryError('قسم التعديل غير معروف.', 'PLANS_EDIT_INVALID')
-    replacement = _visual_plan_site_section_fragment(parsed.get('code'), section)
+    sanitized_sections = []
+    replacement = _visual_plan_site_section_fragment(
+        parsed.get('code'), section, sanitized_sections)
     start, end = '<!-- LL_SECTION_START:' + section + ' -->', '<!-- LL_SECTION_END:' + section + ' -->'
     pattern = re.compile(re.escape(start) + r'[\s\S]*?' + re.escape(end))
     if len(pattern.findall(svg)) != 1:
@@ -482,6 +520,8 @@ def _visual_plan_site_edit(data):
     state['checkpoints'][section] = replacement
     state['status'] = 'review'
     reply = _visual_concept_text(parsed.get('reply'), 1200) or 'Updated the requested SVG section.'
+    if sanitized_sections:
+        reply += ' حُذفت تسميات غير إنجليزية من القسم المعدل.'
     state['turns'].append({'role': 'assistant', 'text': reply})
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
             'targetSection': section, 'model': GEMINI_TEXT_MODEL,

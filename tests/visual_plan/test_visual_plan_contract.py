@@ -727,6 +727,25 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                 'site_svg_components_model_ms', module.time.perf_counter() - 0.01)
         self.assertGreaterEqual(reported[0]['timing']['site_svg_components_model_ms'], 0)
 
+    def test_arabic_svg_labels_are_removed_without_rejecting_the_section(self):
+        module = self.application_module
+        sanitized_sections = []
+        fragment = (
+            '<g id="ll-section-components">'
+            '<rect x="10" y="20" width="30" height="40"/>'
+            '<text>المبنى الرئيسي</text><text>Parking area</text>'
+            '<g aria-label="المكونات"><circle cx="5" cy="5" r="2"/></g>'
+            '</g>'
+        )
+
+        cleaned = module._visual_plan_site_section_fragment(
+            fragment, 'components', sanitized_sections)
+
+        self.assertIn('<rect', cleaned)
+        self.assertIn('Parking area', cleaned)
+        self.assertNotRegex(cleaned, r'[\u0600-\u06FF]')
+        self.assertEqual(sanitized_sections, ['components'])
+
     def test_temporary_svg_model_comparison_route_is_retired(self):
         module = self.application_module
         routes = {rule.rule for rule in module.app.url_map.iter_rules()}
