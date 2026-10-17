@@ -1,5 +1,42 @@
 # Browser session and page tools. Executed into agent.py globals.
 
+_BROWSE_FATAL_ERROR_CODES = {
+    'INSUFFICIENT_BALANCE', 'INSUFFICIENT_CREDITS',
+    'PROVIDER_CREDITS_EXHAUSTED', 'TRIAL_EXPIRED', 'NO_TENANT_KEY',
+    'TENANT_KEY_CHECK_FAILED', 'BILLING_CHECK_UNAVAILABLE',
+}
+
+
+def _browse_fatal_provider_response(response):
+    error = response.get('error') if isinstance(response, dict) else None
+    if not isinstance(error, dict):
+        return False
+    if (error.get('fatal')
+            or str(error.get('error_code') or error.get('code') or '').upper()
+            in _BROWSE_FATAL_ERROR_CODES):
+        return True
+    try:
+        return int(error.get('http_status') or error.get('status') or error.get('code') or 0) == 402
+    except (TypeError, ValueError):
+        return False
+
+
+def _provider_affordable_token_limit(response):
+    """Return a non-fatal output-token allowance quoted by OpenRouter."""
+    error = response.get('error') if isinstance(response, dict) else None
+    if not isinstance(error, dict):
+        return None
+    if _browse_fatal_provider_response(response) or error.get('error_code'):
+        return None
+    for value in (error.get('provider_message'), error.get('message')):
+        match = re.search(r'can only afford\s+(\d+)', str(value or ''), re.IGNORECASE)
+        if match:
+            try:
+                return int(match.group(1))
+            except (TypeError, ValueError):
+                return None
+    return None
+
 def _browser_session(search_provider=None):
     """Return a fresh per-run browser context manager from browser.py.
 

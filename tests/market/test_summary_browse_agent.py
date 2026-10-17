@@ -65,9 +65,9 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(captured['model'], module.GEMINI_TEXT_MODEL)
         self.assertTrue(captured['local_tools'])
         self.assertEqual(captured['search_provider'], 'searxng')
-        self.assertEqual(captured['max_steps'], 24)
-        self.assertEqual(captured['search_budget'], 8)
-        self.assertEqual(captured['max_tokens'], 8000)
+        self.assertEqual(captured['max_steps'], 100)
+        self.assertEqual(captured['search_budget'], 16)
+        self.assertEqual(captured['max_tokens'], 64000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         self.assertIn('site:rei.rega.gov.sa', captured['prompt'])
         self.assertIn('https://rei.rega.gov.sa/ar/advanced-search/deals', captured['prompt'])
@@ -91,7 +91,8 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         captured = []
 
         def fake_researcher(group, hosts, payload, city, district,
-                            usage_ctx, deadline, offer_lang='ar'):
+                            usage_ctx, deadline, offer_lang='ar',
+                            cancel_event=None):
             nonlocal active, maximum_active
             with lock:
                 active += 1
@@ -127,6 +128,44 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertTrue(all(item.get('coverage_gap') for item in research['reports']))
         self.assertEqual(module._SUMMARY_RESEARCH_MAX_WORKERS, 100)
 
+    def test_fatal_research_credit_error_stops_parallel_research(self):
+        module = self.module
+        group = module._SUMMARY_RESEARCH_GROUPS[0]
+        fatal = {'error': {
+            'fatal': True, 'message': 'رصيد غير كافٍ',
+            'error_code': 'INSUFFICIENT_CREDITS', 'http_status': 402,
+        }}
+        started = []
+
+        def fake_researcher(group, hosts, payload, city, district,
+                            usage_ctx, deadline, offer_lang='ar',
+                            cancel_event=None):
+            started.append(hosts[0])
+            if hosts[0] == 'fatal.example':
+                return {'key': group['key'], 'label': group['label'],
+                        'city': city, 'district': district, 'hosts': hosts,
+                        'result': fatal, 'parsed': {}, 'parse_error': '',
+                        'pages': [], 'searched': False}
+            cancel_event.wait(timeout=5)
+            return {'key': group['key'], 'label': group['label'],
+                    'city': city, 'district': district, 'hosts': hosts,
+                    'result': {'error': {'message': 'cancelled'}},
+                    'parsed': {}, 'parse_error': '', 'pages': [],
+                    'searched': False}
+
+        source_map = {item['key']: [] for item in module._SUMMARY_RESEARCH_GROUPS}
+        source_map[group['key']] = ['fatal.example', 'other.example']
+        with patch.object(module, '_summary_research_sources_by_group',
+                          return_value=source_map), \
+                patch.object(module, '_run_summary_researcher',
+                             side_effect=fake_researcher):
+            research = module._run_market_summary_research(
+                {'city': 'جدة'}, {}, None, time.time() + 30)
+
+        self.assertFalse(research['success'])
+        self.assertEqual(research['error'], 'رصيد غير كافٍ')
+        self.assertIn('fatal.example', started)
+
     def test_aggregator_calls_argon_and_preserves_only_received_citations(self):
         module = self.module
         response = {'choices': [{'message': {'content': '{}', 'annotations': []}}]}
@@ -145,11 +184,58 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIs(result, response)
         self.assertEqual(captured['model'], module.GEMINI_TEXT_MODEL)
         self.assertEqual(captured['reasoning_effort'], 'medium')
+        self.assertEqual(captured['max_tokens'], 64000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         annotations = result['choices'][0]['message']['annotations']
         self.assertEqual(annotations[0]['url_citation']['url'],
                          'https://rega.gov.sa/city-data')
         self.assertTrue(result['browse_trace'])
+
+    def test_aggregator_retries_using_the_provider_affordable_token_cap(self):
+        module = self.module
+        responses = [
+            {'error': {
+                'provider_message': 'can only afford 24000 tokens',
+                'message': 'the requested output cap exceeds the current allowance',
+            }},
+            {'choices': [{'message': {'content': '{}', 'annotations': []}}]},
+        ]
+        caps = []
+
+        def fake_chat(_system, _prompt, **kwargs):
+            caps.append(kwargs['max_tokens'])
+            return responses.pop(0)
+
+        with patch.object(module, 'call_text_chat', side_effect=fake_chat):
+            result = module._run_market_summary_aggregator(
+                'system', 'evidence prompt', {}, {'citation_urls': []},
+                deadline=time.time() + 30)
+
+        self.assertIn('choices', result)
+        self.assertEqual(caps, [64000, 21600])
+
+    def test_aggregator_stops_immediately_on_fatal_balance_error(self):
+        module = self.module
+        fatal = {'error': {
+            'fatal': True,
+            'provider_message': 'can only afford 24000 tokens',
+            'message': 'رصيد غير كافٍ',
+            'error_code': 'INSUFFICIENT_CREDITS',
+            'http_status': 402,
+        }}
+        calls = []
+
+        def fake_chat(_system, _prompt, **kwargs):
+            calls.append(kwargs['max_tokens'])
+            return fatal
+
+        with patch.object(module, 'call_text_chat', side_effect=fake_chat):
+            result = module._run_market_summary_aggregator(
+                'system', 'evidence prompt', {}, {'citation_urls': []},
+                deadline=time.time() + 30)
+
+        self.assertIs(result, fatal)
+        self.assertEqual(calls, [64000])
 
     def test_fatal_research_error_is_reported_as_credit_failure(self):
         module = self.module

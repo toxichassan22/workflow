@@ -53,8 +53,12 @@ _SUMMARY_RESEARCH_GROUPS = (
 )
 
 _SUMMARY_RESEARCH_MAX_WORKERS = 100
-_SUMMARY_RESEARCH_MAX_STEPS = 24
-_SUMMARY_RESEARCH_SEARCH_BUDGET = 8
+_SUMMARY_RESEARCH_MAX_STEPS = 100
+_SUMMARY_RESEARCH_SEARCH_BUDGET = 16
+# Argon can return up to roughly 66k tokens; keep the request just below that
+# ceiling. Non-fatal output-cap quotes can reduce a request; fatal balance
+# refusals stop the research job immediately.
+_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS = 64000
 _SUMMARY_RESEARCH_REQUIRED_URLS = {
     'rei.rega.gov.sa': [
         'https://rei.rega.gov.sa',
@@ -177,7 +181,8 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
 
 
 def _run_summary_researcher(group, hosts, payload, city, district,
-                            usage_ctx, deadline, offer_lang='ar'):
+                            usage_ctx, deadline, offer_lang='ar',
+                            cancel_event=None):
     worker_pool = _new_evidence_pool()
     prompt = _summary_research_prompt(payload, group, hosts, city, district,
                                       offer_lang=offer_lang)
@@ -186,8 +191,9 @@ def _run_summary_researcher(group, hosts, payload, city, district,
         prompt, dict(usage_ctx or {}), model=GEMINI_TEXT_MODEL, evidence_pool=worker_pool,
         deadline=deadline, local_tools=True, search_provider='searxng',
         search_budget=_SUMMARY_RESEARCH_SEARCH_BUDGET,
-        max_steps=_SUMMARY_RESEARCH_MAX_STEPS, max_tokens=8000,
-        reasoning_effort='low')
+        max_steps=_SUMMARY_RESEARCH_MAX_STEPS,
+        max_tokens=_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS,
+        reasoning_effort='low', cancel_event=cancel_event)
     pages = worker_pool.pages() if worker_pool is not None else []
     parsed, parse_error = _parse_market_model_json(result)
     searched = _market_search_ran(result) or bool(pages)
@@ -220,15 +226,23 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                 'outcomes': [], 'citation_urls': []}
     report(12, f'بدء {len(jobs)} مهمة بحث للمصادر، بحد أقصى 100 باحث بالتوازي')
     outcomes = []
-    with ThreadPoolExecutor(max_workers=min(_SUMMARY_RESEARCH_MAX_WORKERS, len(jobs)),
-                            thread_name_prefix='market-research') as executor:
+    cancel_event = threading.Event()
+    executor = ThreadPoolExecutor(
+        max_workers=min(_SUMMARY_RESEARCH_MAX_WORKERS, len(jobs)),
+        thread_name_prefix='market-research')
+    futures = {}
+    fatal_found = False
+    try:
         futures = {
             executor.submit(_run_summary_researcher, group, hosts, payload,
-                            city, district, usage_ctx, deadline, offer_lang):
+                            city, district, usage_ctx, deadline, offer_lang,
+                            cancel_event=cancel_event):
             (group, hosts, city, district)
             for group, hosts, city, district in jobs
         }
         for future in as_completed(futures):
+            if future.cancelled():
+                continue
             group, hosts, city, district = futures[future]
             try:
                 outcome = future.result()
@@ -240,6 +254,14 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                            'parsed': {}, 'parse_error': 'worker_error',
                            'pages': [], 'searched': False}
             outcomes.append(outcome)
+            fatal = _ai_fatal_error_dict(outcome.get('result') or {})
+            if fatal is not None:
+                fatal_found = True
+                cancel_event.set()
+                for pending in futures:
+                    if pending is not future:
+                        pending.cancel()
+                break
             if evidence_pool is not None:
                 for page in outcome.get('pages') or []:
                     evidence_pool.add_page(page.get('url'), page.get('title'),
@@ -248,6 +270,15 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
             report(12 + int(56 * len(outcomes) / max(1, len(jobs))),
                    f"اكتملت مهمة البحث {len(outcomes)} من {len(jobs)}: "
                    f"{outcome['label']} — {city}" + (f' — {district}' if district else ''))
+    finally:
+        executor.shutdown(wait=not fatal_found, cancel_futures=fatal_found)
+    fatal = next((_ai_fatal_error_dict(item.get('result') or {})
+                  for item in outcomes
+                  if _ai_fatal_error_dict(item.get('result') or {})), None)
+    if fatal is not None:
+        return {'success': False, 'error': fatal.get('message') or
+                'insufficient_credit', 'outcomes': outcomes,
+                'citation_urls': []}
     outcomes.sort(key=lambda item: next(
         (index for index, group in enumerate(_SUMMARY_RESEARCH_GROUPS)
          if group['key'] == item['key']), len(_SUMMARY_RESEARCH_GROUPS)))
@@ -309,11 +340,38 @@ def _run_market_summary_aggregator(system_prompt, prompt, usage_ctx,
         remaining = max(1, int(float(deadline) - time.time()))
         if remaining <= 1:
             return {'error': {'message': 'deadline_exceeded'}}
-    result = call_text_chat(
-        system_prompt, prompt, model=GEMINI_TEXT_MODEL,
-        max_tokens=MARKET_STUDY_MAX_TOKENS,
-        reasoning_effort='medium', timeout=min(300, remaining or 300),
-        usage_ctx=usage_ctx)
+    cap = min(_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS,
+              int(MARKET_STUDY_MAX_TOKENS))
+    result = None
+    for _attempt in range(4):
+        if deadline is not None:
+            remaining = max(1, int(float(deadline) - time.time()))
+            if remaining <= 1:
+                return {'error': {'message': 'deadline_exceeded'}}
+        result = call_text_chat(
+            system_prompt, prompt, model=GEMINI_TEXT_MODEL,
+            max_tokens=cap, reasoning_effort='medium',
+            timeout=min(300, remaining or 300), usage_ctx=usage_ctx)
+        if _ai_fatal_error_dict(result) is not None:
+            return result
+        error = result.get('error') if isinstance(result, dict) else None
+        if isinstance(error, dict):
+            code = str(error.get('code') or '').upper()
+            if (error.get('fatal') or error.get('error_code')
+                    or code in {'INSUFFICIENT_BALANCE', 'INSUFFICIENT_CREDITS',
+                                'PROVIDER_CREDITS_EXHAUSTED'}):
+                return result
+            try:
+                if int(error.get('http_status') or error.get('status') or error.get('code') or 0) == 402:
+                    return result
+            except (TypeError, ValueError):
+                pass
+        affordable = (_chat_affordable_tokens(result)
+                      if isinstance(result, dict) and result.get('error') else None)
+        if not affordable or affordable >= cap:
+            break
+        cap = max(1, int(affordable * 0.9))
+        print(f'[MARKET SUMMARY] retrying aggregator with provider affordable cap={cap}')
     if not isinstance(result, dict):
         return {'error': {'message': 'aggregator returned an empty response'}}
     choices = result.get('choices') or []

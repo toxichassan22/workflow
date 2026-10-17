@@ -44,6 +44,7 @@ def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
         forwarded = dict(agent_kwargs)
         for _key, _value in (('evidence_pool', evidence_pool),
                              ('deadline', deadline), ('session', session),
+                             ('cancel_event', forwarded.pop('cancel_event', None)),
                              ('on_event', forwarded.pop('on_event', None))):
             if _value is not None and _agent_run_accepts(_agent_module, _key):
                 forwarded[_key] = _value

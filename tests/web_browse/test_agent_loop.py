@@ -990,5 +990,10 @@ class RunBrowseAgentCompactionTests(unittest.TestCase):
             result['choices'][0].get('finish_reason'), 'length')
 
 
+from tests.web_browse.test_agent_loop_parts.affordable_caps import (
+    RunBrowseAgentAffordableCapTests,
+)
+
+
 if __name__ == '__main__':
     unittest.main()
