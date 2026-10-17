@@ -77,13 +77,19 @@ def _prepare_market_payload(data, tenant_id=None):
     return payload
 
 
-# One wall-clock budget for a whole competitors job. The same deadline rides
-# into every browse call and fetch, so a stage stops handing the next stage
-# work the job no longer has time for instead of draining its own step cap.
-try:
-    _MARKET_JOB_TIME_BUDGET = max(60, int(os.environ.get('MARKET_JOB_TIME_BUDGET') or 540))
-except (TypeError, ValueError):
-    _MARKET_JOB_TIME_BUDGET = 540
+# One wall-clock budget for a whole competitors job, capped at 30 minutes.
+# The same deadline rides into every browse call and fetch, so a stage stops
+# handing the next stage work the job no longer has time for.
+def _market_job_time_budget(raw_value):
+    try:
+        configured = int(raw_value) if str(raw_value or '').strip() else 1800
+    except (TypeError, ValueError):
+        configured = 1800
+    return min(1800, max(60, configured))
+
+
+_MARKET_JOB_TIME_BUDGET = _market_job_time_budget(
+    os.environ.get('MARKET_JOB_TIME_BUDGET'))
 
 # Expansion rounds stop this far short of the deadline so row verification
 # and the logo pass still get their share of the budget.

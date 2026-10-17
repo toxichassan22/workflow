@@ -188,6 +188,41 @@ test('market study separates competitors and market into accessible tabs', () =>
   assert.equal(panels[1].attributes['aria-hidden'], 'false');
 });
 
+test('comparison rows accept several operations or hotel classifications', () => {
+  const { context } = fixture();
+  const operationRow = context.marketComparisonTypeRowHtml({
+    type: 'residential', operation: ['sale', 'rent']
+  });
+  assert.match(operationRow, /value="sale" checked/);
+  assert.match(operationRow, /value="rent" checked/);
+
+  const hotelRow = context.marketComparisonTypeRowHtml({
+    type: 'hotel', stars: ['4', '5']
+  });
+  assert.match(hotelRow, /value="4" checked/);
+  assert.match(hotelRow, /value="5" checked/);
+  const newRow = context.marketComparisonTypeRowHtml({}, ['hotel']);
+  assert.doesNotMatch(newRow, /value="hotel"/);
+  assert.match(newRow, /value="residential"/);
+
+  const merged = JSON.parse(JSON.stringify(context.normalizeMarketComparisonRows([
+    { type: 'residential', operation: 'sale' },
+    { type: 'residential', operation: 'rent' }
+  ])));
+  assert.deepEqual(merged, [{ type: 'residential', operation: ['sale', 'rent'], stars: [] }]);
+
+  const row = {
+    querySelector: selector => selector.includes('[data-comparison-field="type"]')
+      ? { value: 'residential' } : null,
+    querySelectorAll: selector => selector.includes('[data-comparison-field="operation"]')
+      ? [{ checked: true, value: 'sale' }, { checked: true, value: 'rent' }] : []
+  };
+  context.document.querySelectorAll = () => [row];
+  assert.deepEqual(JSON.parse(JSON.stringify(context.collectMarketComparisonTypes())), [{
+    type: 'residential', operation: ['sale', 'rent'], stars: []
+  }]);
+});
+
 test('poll budget constant is 40 minutes', () => {
   const { context } = fixture();
   assert.equal(vm.runInContext('MARKET_JOB_POLL_LIMIT_MS', context), 40 * 60 * 1000);
@@ -312,6 +347,7 @@ test('a still-running poll result shows status text and keeps the memory', async
 
 test('the summary job re-attaches to its remembered running job', async () => {
   const { context, inputs } = fixture();
+  context.collectMarketSummaryScope = () => ({ cities: [{ name: 'جدة', districts: [] }] });
   const state = context.getMarketStudyState();
   state.activeMarketJobs = { summary: 'job-s1' };
   context.setMarketStudyState(state);

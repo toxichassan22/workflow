@@ -299,6 +299,13 @@ class CompetitorsPipelinePoolTests(unittest.TestCase):
             return self.application_module._execute_market_competitors(
                 data, tenant_id=None)
 
+    def test_job_budget_defaults_to_and_caps_at_30_minutes(self):
+        budget = self.application_module._market_job_time_budget
+        self.assertEqual(budget(None), 30 * 60)
+        self.assertEqual(budget('900'), 900)
+        self.assertEqual(budget('2400'), 30 * 60)
+        self.assertEqual(budget('invalid'), 30 * 60)
+
     # -- phase 1: pool match ---------------------------------------------------
 
     def test_pool_evidence_verifies_without_any_search_or_agent(self):

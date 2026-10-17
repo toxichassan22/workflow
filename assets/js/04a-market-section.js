@@ -186,6 +186,7 @@
         if (event.target?.dataset?.comparisonField === 'type') {
           const row = event.target.closest('[data-comparison-row]');
           if (row) syncMarketComparisonRow(row);
+          syncMarketComparisonTypeOptions();
         }
         persistMarketStudyFromDom();
       });
@@ -221,46 +222,88 @@
       activateMarketStudyTab(root, active?.dataset.marketStudyTab || 'competitors');
     }
 
+    function marketComparisonValues(value, allowed) {
+      const values = Array.isArray(value) ? value : [value];
+      return [...new Set(values.flatMap(item => String(item ?? '').split(/[,،;|\n]/))
+        .map(item => item.trim()).filter(item => allowed.includes(item)))];
+    }
+
+    function normalizeMarketComparisonRows(items) {
+      const rows = [];
+      const byType = new Map();
+      let hasEmptyRow = false;
+      (Array.isArray(items) ? items : []).forEach(item => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+        const type = ['hotel', 'residential', 'commercial'].includes(item.type) ? item.type : '';
+        if (!type) {
+          hasEmptyRow = true;
+          return;
+        }
+        let row = byType.get(type);
+        if (!row) {
+          row = { type, operation: [], stars: [] };
+          byType.set(type, row);
+          rows.push(row);
+        }
+        if (type === 'hotel') {
+          row.stars = [...new Set(row.stars.concat(marketComparisonValues(
+            item.stars ?? item.hotelStars ?? item.hotel_stars, ['1', '2', '3', '4', '5'])))];
+        } else {
+          row.operation = [...new Set(row.operation.concat(marketComparisonValues(
+            item.operation ?? item.operations ?? item.operationType, ['sale', 'rent'])))];
+        }
+      });
+      if (hasEmptyRow) rows.push({ type: '', operation: [], stars: [] });
+      return rows;
+    }
+
     function readMarketComparisonRows() {
       return Array.from(document.querySelectorAll('#marketComparisonTypes [data-comparison-row]'))
         .map(row => ({
           type: row.querySelector('[data-comparison-field="type"]')?.value || '',
-          operation: row.querySelector('[data-comparison-field="operation"]')?.value || '',
-          stars: row.querySelector('[data-comparison-field="stars"]')?.value || ''
+          operation: Array.from(row.querySelectorAll('[data-comparison-field="operation"]'))
+            .filter(option => option.checked).map(option => option.value),
+          stars: Array.from(row.querySelectorAll('[data-comparison-field="stars"]'))
+            .filter(option => option.checked).map(option => option.value)
         }));
     }
 
     function collectMarketComparisonTypes() {
       return readMarketComparisonRows().filter(row =>
-        row.type === 'hotel' ? /^[1-5]$/.test(row.stars)
+        row.type === 'hotel' ? row.stars.some(value => /^[1-5]$/.test(value))
           : ['residential', 'commercial'].includes(row.type)
-            && ['sale', 'rent'].includes(row.operation)
+            && row.operation.some(value => ['sale', 'rent'].includes(value))
       );
     }
 
-    function marketComparisonTypeRowHtml(item = {}) {
+    function marketComparisonTypeRowHtml(item = {}, occupiedTypes = []) {
       const type = ['hotel', 'residential', 'commercial'].includes(item.type) ? item.type : '';
-      const operation = ['sale', 'rent'].includes(item.operation) ? item.operation : '';
-      const stars = /^[1-5]$/.test(String(item.stars || '')) ? String(item.stars) : '';
+      const operations = marketComparisonValues(item.operation ?? item.operations, ['sale', 'rent']);
+      const stars = marketComparisonValues(
+        item.stars ?? item.hotelStars ?? item.hotel_stars, ['1', '2', '3', '4', '5']);
       const typeOptions = [
         '<option value="">--</option>',
         '<option value="hotel"' + (type === 'hotel' ? ' selected' : '') + '>فندقي</option>',
         '<option value="residential"' + (type === 'residential' ? ' selected' : '') + '>سكني</option>',
         '<option value="commercial"' + (type === 'commercial' ? ' selected' : '') + '>تجاري</option>'
-      ].join('');
+      ].filter(option => {
+        const optionType = option.match(/value="(hotel|residential|commercial)"/)?.[1] || '';
+        return !optionType || optionType === type || !occupiedTypes.includes(optionType);
+      }).join('');
       const operationOptions = [
-        '<option value="">--</option>',
-        '<option value="sale"' + (operation === 'sale' ? ' selected' : '') + '>بيعي</option>',
-        '<option value="rent"' + (operation === 'rent' ? ' selected' : '') + '>تأجيري</option>'
-      ].join('');
-      const starOptions = ['<option value="">--</option>']
-        .concat([1, 2, 3, 4, 5].map(value =>
-          '<option value="' + value + '"' + (stars === String(value) ? ' selected' : '') + '>' + value + ' نجوم</option>'
-        )).join('');
+        ['sale', 'بيعي'], ['rent', 'تأجيري']
+      ].map(([value, label]) =>
+        '<label><input type="checkbox" data-comparison-field="operation" value="' + value + '"' +
+        (operations.includes(value) ? ' checked' : '') + '><span>' + label + '</span></label>'
+      ).join('');
+      const starOptions = [1, 2, 3, 4, 5].map(value =>
+        '<label><input type="checkbox" data-comparison-field="stars" value="' + value + '"' +
+        (stars.includes(String(value)) ? ' checked' : '') + '><span>' + value + ' نجوم</span></label>'
+      ).join('');
       return '<div class="market-comparison-type-row" data-comparison-row>' +
         '<div><label>نوع المقارنة</label><select data-comparison-field="type">' + typeOptions + '</select></div>' +
-        '<div data-comparison-operation' + (type === 'residential' || type === 'commercial' ? '' : ' hidden') + '><label>نوع العملية</label><select data-comparison-field="operation">' + operationOptions + '</select></div>' +
-        '<div data-comparison-stars' + (type === 'hotel' ? '' : ' hidden') + '><label>تصنيف الفندق</label><select data-comparison-field="stars">' + starOptions + '</select></div>' +
+        '<div data-comparison-operation' + (type === 'residential' || type === 'commercial' ? '' : ' hidden') + '><label>نوع العملية</label><div class="market-comparison-multi-options">' + operationOptions + '</div></div>' +
+        '<div data-comparison-stars' + (type === 'hotel' ? '' : ' hidden') + '><label>تصنيف الفندق</label><div class="market-comparison-multi-options">' + starOptions + '</div></div>' +
         '<button type="button" class="btn ghost small" data-remove-comparison-type>حذف</button>' +
         '</div>';
     }
@@ -268,16 +311,20 @@
     function renderMarketComparisonTypes(items) {
       const host = document.getElementById('marketComparisonTypes');
       if (!host) return;
-      const rows = Array.isArray(items) ? items : [];
-      host.innerHTML = rows.map(marketComparisonTypeRowHtml).join('') ||
+      const rows = normalizeMarketComparisonRows(items);
+      const occupiedTypes = rows.map(row => row.type).filter(Boolean);
+      host.innerHTML = rows.map(row => marketComparisonTypeRowHtml(row, occupiedTypes)).join('') ||
         '<div class="tenant-hint">لا توجد أنواع مقارنة محددة</div>';
       host.querySelectorAll('[data-comparison-row]').forEach(row => {
         row.querySelector('[data-remove-comparison-type]')?.addEventListener('click', () => {
           row.remove();
           persistMarketStudyFromDom();
           if (!host.querySelector('[data-comparison-row]')) renderMarketComparisonTypes([]);
+          else syncMarketComparisonTypeOptions();
         });
       });
+      const addButton = document.getElementById('marketAddComparisonTypeBtn');
+      if (addButton) addButton.disabled = occupiedTypes.length >= 3 || rows.some(row => !row.type);
       refreshDynamicI18n(host);
     }
 
@@ -285,12 +332,41 @@
       const type = row.querySelector('[data-comparison-field="type"]')?.value || '';
       const operation = row.querySelector('[data-comparison-operation]');
       const stars = row.querySelector('[data-comparison-stars]');
-      if (operation) operation.hidden = type !== 'residential' && type !== 'commercial';
-      if (stars) stars.hidden = type !== 'hotel';
+      const isOperation = type === 'residential' || type === 'commercial';
+      const isHotel = type === 'hotel';
+      if (operation) {
+        operation.hidden = !isOperation;
+        if (!isOperation) operation.querySelectorAll('[data-comparison-field="operation"]')
+          .forEach(option => { option.checked = false; });
+      }
+      if (stars) {
+        stars.hidden = !isHotel;
+        if (!isHotel) stars.querySelectorAll('[data-comparison-field="stars"]')
+          .forEach(option => { option.checked = false; });
+      }
+    }
+
+    function syncMarketComparisonTypeOptions() {
+      const host = document.getElementById('marketComparisonTypes');
+      if (!host) return;
+      const rows = Array.from(host.querySelectorAll('[data-comparison-row]'));
+      const selectedTypes = rows.map(row =>
+        row.querySelector('[data-comparison-field="type"]')?.value || '').filter(Boolean);
+      rows.forEach(row => {
+        const ownType = row.querySelector('[data-comparison-field="type"]')?.value || '';
+        row.querySelector('[data-comparison-field="type"]')?.querySelectorAll('option').forEach(option => {
+          const occupiedElsewhere = selectedTypes.includes(option.value) && option.value !== ownType;
+          option.hidden = occupiedElsewhere;
+          option.disabled = occupiedElsewhere;
+        });
+      });
+      const addButton = document.getElementById('marketAddComparisonTypeBtn');
+      if (addButton) addButton.disabled = selectedTypes.length >= 3 || rows.some(row => !row.type);
     }
 
     function addMarketComparisonType() {
-      const rows = readMarketComparisonRows();
+      const rows = normalizeMarketComparisonRows(readMarketComparisonRows());
+      if (rows.length >= 3 || rows.some(row => !row.type)) return;
       rows.push({ type: '', operation: '', stars: '' });
       renderMarketComparisonTypes(rows);
       persistMarketStudyFromDom();

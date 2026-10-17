@@ -65,45 +65,56 @@ def normalize_comparison_types(value):
                      if raw_type in {_fold_choice(alias) for alias in aliases}), '')
         if not kind:
             continue
-        operation = _fold_choice(item.get('operation') or item.get('operationType'))
-        stars = item.get('stars') or item.get('hotelStars') or item.get('hotel_stars')
+        raw_operation = (item.get('operation') or item.get('operations')
+                         or item.get('operationType'))
+        raw_stars = item.get('stars') or item.get('hotelStars') or item.get('hotel_stars')
         if kind == 'hotel':
-            try:
-                stars = int(str(stars).translate(
-                    str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).strip())
-            except (TypeError, ValueError):
-                continue
-            if stars < 1 or stars > 5:
-                continue
-            operation = 'hotel_operation'
-            key = f'hotel:{stars}'
-            label, label_en = f'فندقي - {stars} نجوم', f'{stars}-star hotel'
-            search = f'فنادق مصنفة {stars} نجوم'
+            for raw_star in _split_multi_values(raw_stars):
+                try:
+                    stars = int(str(raw_star).translate(
+                        str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).strip())
+                except (TypeError, ValueError):
+                    continue
+                if stars < 1 or stars > 5:
+                    continue
+                key = f'hotel:{stars}'
+                if key in seen:
+                    continue
+                seen.add(key)
+                normalized.append({
+                    'key': key, 'type': kind, 'base': kind,
+                    'operation': 'hotel_operation', 'stars': stars,
+                    'label': f'فندقي - {stars} نجوم',
+                    'label_en': f'{stars}-star hotel',
+                    'search': f'فنادق مصنفة {stars} نجوم',
+                    'names': [], 'explicit': True,
+                })
         else:
-            if operation in {'sale', 'بيع', 'for sale'}:
-                operation = 'sale'
-                operation_ar, operation_en = 'بيع', 'for sale'
-            elif operation in {'rent', 'rental', 'إيجار', 'تأجير', 'for rent'}:
-                operation = 'rent'
-                operation_ar, operation_en = 'إيجار', 'for rent'
-            else:
-                continue
-            key = f'{kind}:{operation}'
-            type_ar, type_en = (('سكني', 'residential') if kind == 'residential'
-                                else ('تجاري', 'commercial'))
-            label, label_en = f'{type_ar} - {operation_ar}', f'{type_en} {operation_en}'
-            search = (f'مشاريع {type_ar} {operation_ar} مسماة'
-                      if kind == 'residential' else
-                      f'مشاريع تجارية {operation_ar} مسماة')
-            stars = ''
-        if key in seen:
-            continue
-        seen.add(key)
-        normalized.append({
-            'key': key, 'type': kind, 'base': kind, 'operation': operation,
-            'stars': stars, 'label': label, 'label_en': label_en,
-            'search': search, 'names': [], 'explicit': True,
-        })
+            for raw_choice in _split_multi_values(raw_operation):
+                operation = _fold_choice(raw_choice)
+                if operation in {'sale', 'بيع', 'for sale'}:
+                    operation = 'sale'
+                    operation_ar, operation_en = 'بيع', 'for sale'
+                elif operation in {'rent', 'rental', 'إيجار', 'تأجير', 'for rent'}:
+                    operation = 'rent'
+                    operation_ar, operation_en = 'إيجار', 'for rent'
+                else:
+                    continue
+                key = f'{kind}:{operation}'
+                if key in seen:
+                    continue
+                seen.add(key)
+                type_ar, type_en = (('سكني', 'residential') if kind == 'residential'
+                                    else ('تجاري', 'commercial'))
+                label, label_en = f'{type_ar} - {operation_ar}', f'{type_en} {operation_en}'
+                search = (f'مشاريع {type_ar} {operation_ar} مسماة'
+                          if kind == 'residential' else
+                          f'مشاريع تجارية {operation_ar} مسماة')
+                normalized.append({
+                    'key': key, 'type': kind, 'base': kind, 'operation': operation,
+                    'stars': '', 'label': label, 'label_en': label_en,
+                    'search': search, 'names': [], 'explicit': True,
+                })
     return normalized
 
 

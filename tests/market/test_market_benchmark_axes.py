@@ -102,6 +102,26 @@ class BenchmarkAxesTests(unittest.TestCase):
         self.assertEqual([axis['key'] for axis in axes],
                          ['hotel:4', 'residential:sale', 'commercial:rent'])
 
+    def test_multiple_values_expand_into_individual_comparison_axes(self):
+        axes = market_study.normalize_comparison_types([
+            {'type': 'hotel', 'stars': ['4', '5']},
+            {'type': 'residential', 'operation': ['sale', 'rent']},
+        ])
+        self.assertEqual([axis['key'] for axis in axes], [
+            'hotel:4', 'hotel:5', 'residential:sale', 'residential:rent',
+        ])
+        selected_rows = [
+            {'project_type': 'فندقي', 'hotel_stars': 4},
+            {'project_type': 'فندقي', 'hotel_stars': 5},
+            {'project_type': 'سكني', 'operation_type': 'بيع'},
+            {'project_type': 'سكني', 'operation_type': 'إيجار'},
+        ]
+        self.assertEqual(
+            [sum(market_study.competitor_matches_comparison_axis(row, axis)
+                 for row in selected_rows) for axis in axes],
+            [1, 1, 1, 1],
+        )
+
     def test_prompt_enforces_selected_axes_location_booking_and_interaction(self):
         payload = {
             'city': 'جدة', 'district': 'الروضة',
