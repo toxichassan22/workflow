@@ -39,8 +39,31 @@ def _visual_plan_site_placement_retry_request(message):
         'مناقشه توزيع', 'اعاده توزيع', 'توزيع parking', 'وزع parking',
         'توزيع المواضع', 'توزيع المساحات', 'يوزعها على الارض',
         'النظام يوزع', 'وزعها على الارض', 'رتب الموقع',
+        'اعاده محاوله', 'اعاده التوزيع', 'وزع المباني', 'توزيع الكتل',
+        'رتب المباني', 'محاوله اخري',
     ))
     return asks_to_place
+
+
+def _visual_plan_site_setback_inquiry(message):
+    text = str(message or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').lower()
+    mentions_setback = any(term in text for term in (
+        'ارتداد', 'ارتدادات', 'حدود', 'شمال', 'جنوب', 'شرق', 'غرب', '3', '5', 'متر',
+    ))
+    asks_or_confirms = any(term in text for term in (
+        'صح', 'مضبوط', 'صحيح', 'ليه', 'سبب', 'المشكله', 'فين', 'ازاي', 'كيف', 'ليه وقف', 'ليش',
+    ))
+    return mentions_setback and asks_or_confirms
+
+
+def _visual_plan_site_footprint_review_request(message):
+    text = str(message or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').lower()
+    return any(term in text for term in (
+        'مساحات بصمات', 'بصمات المباني', 'بصمه المبني', 'مساحه الدور الارضي',
+        'تقليص مساحه', 'مراجعه مساحات', 'مساحات الفلل', 'مساحه المبني',
+    ))
 
 
 def _visual_plan_site_area_value_dispute(message):
@@ -54,7 +77,8 @@ def _visual_plan_site_area_value_dispute(message):
 
 
 def _visual_plan_site_conflict_summary(facts):
-    if facts.get('code') == 'PLANS_SITE_AREA_CONFLICT':
+    code = facts.get('code')
+    if code == 'PLANS_SITE_AREA_CONFLICT':
         failed_item = facts.get('failingSiteItem') or {}
         failed_label = str(failed_item.get('label') or failed_item.get('name') or 'المساحة المعتمدة')
         failed_area = visual_plan_geometry.finite_number(failed_item.get('areaSqm'))
@@ -89,6 +113,25 @@ def _visual_plan_site_conflict_summary(facts):
             parts.append(
                 f'مساحة الأرض المسجلة {_visual_plan_site_area_text(land_area)} م²؛ '
                 f'يوجد فرق {_visual_plan_site_area_text(abs(parcel_area - land_area))} م² عن مساحة الحدود.')
+        return ' '.join(parts)
+
+    if code in ('PLANS_SETBACK_CONFLICT', 'PLANS_FOOTPRINT_OUTSIDE', 'PLANS_BUILDING_OVERLAP',
+                'PLANS_LAYOUT_INVALID', 'PLANS_SITE_ITEMS_MISSING', 'PLANS_SITE_ITEMS_DUPLICATED'):
+        msg = str(facts.get('message') or '').strip()
+        if msg and any(kw in msg for kw in ('ارتداد', 'بصمة', 'بصمات', 'المباني', 'حدود', 'رفض', 'تتجاوز')):
+            return msg
+        parts = ['تعذر اعتماد التوزيع الحالي لأن بصمة أحد المباني تتجاوز حدود الارتداد أو حدود الأرض المسجلة.']
+        setbacks = facts.get('setbacks')
+        if isinstance(setbacks, dict) and setbacks:
+            s_parts = []
+            for d in ('north', 'south', 'east', 'west'):
+                val = setbacks.get(d)
+                d_ar = {'north': 'شمالاً', 'south': 'جنوباً', 'east': 'شرقاً', 'west': 'غرباً'}.get(d, d)
+                if val is not None:
+                    s_parts.append(f"{val}م {d_ar}")
+            if s_parts:
+                parts.append('الارتدادات المطلوبة: (' + '، و'.join(s_parts) + ').')
+        parts.append('يجب تعديل مواضع المباني أو تقليص مساحة بصمة الدور الأرضي لضمان بقائها بالكامل داخل حدود البناء المسموح بها.')
         return ' '.join(parts)
 
     land = facts.get('landAreaSqm')
@@ -141,7 +184,13 @@ def _visual_plan_site_conflict_summary(facts):
 
 
 def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
-    is_site_area_conflict = getattr(error, 'code', '') == 'PLANS_SITE_AREA_CONFLICT'
+    code = getattr(error, 'code', '')
+    is_site_area_conflict = code == 'PLANS_SITE_AREA_CONFLICT'
+    is_setback_conflict = code in (
+        'PLANS_SETBACK_CONFLICT', 'PLANS_FOOTPRINT_OUTSIDE',
+        'PLANS_BUILDING_OVERLAP', 'PLANS_LAYOUT_INVALID',
+        'PLANS_SITE_ITEMS_MISSING', 'PLANS_SITE_ITEMS_DUPLICATED',
+    )
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     previous = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
     contract, context, program = {}, {}, {'buildings': []}
@@ -275,7 +324,13 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         ][:20],
         'financialComponentInputs': component_inputs[:20],
     }
-    if is_site_area_conflict:
+    if is_setback_conflict:
+        facts.update({
+            'setbacks': contract.get('setbacks'),
+            'parcelAreaSqm': round(parcel_area, 2) if parcel_area is not None else None,
+            'directions': contract.get('directions') if isinstance(contract.get('directions'), dict) else {},
+        })
+    elif is_site_area_conflict:
         failing_site_area = (visual_plan_geometry.finite_number(failing_site_item.get('areaSqm'))
                              if isinstance(failing_site_item, dict) else None)
         other_site_area = sum(
@@ -306,7 +361,26 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
             state['answers'] = state['answers'][-100:]
         state['turns'].append({'role': 'user', 'text': message})
 
-    if is_site_area_conflict:
+    if is_setback_conflict:
+        system_prompt = (
+            'You are the site-planning assistant continuing a client conversation in Arabic. '
+            'The automatic placement search could not place the required buildings and elements '
+            'inside the buildable envelope defined by the property boundaries and recorded setbacks. '
+            'The client supplies the setbacks, land boundaries, and building program; the system is '
+            'responsible for placing those items on the land. Never ask the client to arrange or position '
+            'buildings. Only the recorded setbacks, surveyed parcel, and approved program may be used. '
+            'Use only the supplied facts and conversation history. '
+            'If the client states that setbacks are correct, explain that the issue is not that setbacks '
+            'are wrongly entered, but that the required ground-floor building footprints exceed the '
+            'buildable envelope remaining after deducting those setbacks. '
+            'Offer options to review building footprints (reducing ground-floor footprint and offsetting '
+            'with additional floors), review setbacks, or request an automatic placement retry. '
+            'Do not approve or alter project data from chat. Never repeat a generic coverage-limit explanation. '
+            'Do not claim the conflict is resolved, do not set ready, and do not generate a drawing. '
+            'Always return ready=false and generateRequested=false unless an automatic retry is requested. '
+            'Return JSON only: {"ready":false,"generateRequested":false,"question":"","choices":[],"reply":"","memory":""}.'
+        )
+    elif is_site_area_conflict:
         system_prompt = (
             'You are the site-planning assistant continuing a client conversation in Arabic. '
             'The automatic placement search did not find a placement for the approved site area. '
@@ -347,11 +421,15 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
             'Return JSON only: {"ready":false,"generateRequested":false,"question":"",'
             '"choices":[],"reply":"","memory":""}.'
         )
-    conflict_key = 'siteAreaConflict' if is_site_area_conflict else 'coverageConflict'
+    conflict_key = ('setbackConflict' if is_setback_conflict
+                    else ('siteAreaConflict' if is_site_area_conflict else 'coverageConflict'))
     user_packet = {
-        'task': ('explain this exact site-area placement conflict in the context of the latest client message'
-                 if is_site_area_conflict else
-                 'explain this exact coverage conflict in the context of the latest client message'),
+        'task': ('explain this setback and layout placement conflict in the context of the latest client message'
+                 if is_setback_conflict else (
+                     'explain this exact site-area placement conflict in the context of the latest client message'
+                     if is_site_area_conflict else
+                     'explain this exact coverage conflict in the context of the latest client message'
+                 )),
         conflict_key: facts,
         'resolvedAnswers': state['answers'][-8:],
         'sessionMemory': state['summary'],
@@ -363,8 +441,13 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
     source_question = _visual_plan_site_footprint_source_question(message)
     measurement_dispute = _visual_plan_site_measurement_dispute(message)
     area_value_dispute = _visual_plan_site_area_value_dispute(message)
-    placement_retry_request = (_visual_plan_site_placement_retry_request(message)
-                               and facts.get('aggregateAreaSufficient') and not auto_retry_failed)
+    setback_inquiry = _visual_plan_site_setback_inquiry(message)
+    footprint_review = _visual_plan_site_footprint_review_request(message)
+    can_retry_placement = (is_setback_conflict or bool(facts.get('aggregateAreaSufficient'))) and not auto_retry_failed
+    placement_retry_request = (
+        _visual_plan_site_placement_retry_request(message)
+        and can_retry_placement
+    )
     prior_conflict_conversation = bool(previous.get('turns') or previous.get('answers')
                                        or previous.get('pendingQuestion'))
     if placement_retry_request:
@@ -374,6 +457,14 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         )
         parsed = {'ready': True, 'generateRequested': True, 'reply': model_reply,
                   'question': '', 'choices': []}
+    elif auto_retry_failed and is_setback_conflict:
+        model_reply = (
+            'أعدت محاولة التوزيع آليًا مع تثبيت الارتدادات والمدخلات، لكن بصمات المباني لا تزال تتجاوز '
+            'حرم الارتدادات المسموح به للبناء. يرجى اختيار الإجراء المناسب للمتابعة:'
+        )
+        model_question = 'هل تفضل مراجعة بصمات المباني المطلوبة أم مراجعة قيم الارتدادات؟'
+        choices = ['مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
     elif auto_retry_failed and is_site_area_conflict:
         model_reply = (
             'أعدت التوزيع آليًا مع تثبيت المدخلات، لكن المحاولات لم تنتج مشهدًا يجتاز فحوص حدود الأرض '
@@ -382,6 +473,35 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         )
         model_question = ''
         parsed = {'reply': model_reply, 'question': model_question, 'choices': []}
+    elif is_setback_conflict and setback_inquiry:
+        setbacks = facts.get('setbacks') or {}
+        sb_desc = []
+        sb_map = {'north': 'شمالاً', 'south': 'جنوباً', 'east': 'شرقاً', 'west': 'غرباً'}
+        for k, name in sb_map.items():
+            if setbacks.get(k) is not None:
+                sb_desc.append(f"{setbacks.get(k)}م {name}")
+        sb_text = '، و'.join(sb_desc) if sb_desc else 'المسجلة في المشروع'
+        model_reply = (
+            f'الارتدادات المسجلة ({sb_text}) صحيحة وملزمة للنظام أثناء التوزيع الهندسي؛ '
+            'المشكلة ليست في صحة قيم الارتدادات، بل في أن المساحة المتبقية داخل الأرض بعد حسم هذه الارتدادات '
+            '(حرم البناء) لا تتسع لمجموع بصمات المباني المطلوبة في الدور الأرضي دون تجاوز الارتداد أو التداخل.'
+        )
+        model_question = 'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟'
+        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    elif is_setback_conflict and footprint_review:
+        model_reply = (
+            'لإتاحة مساحة كافية داخل حرم البناء مع الالتزام التام بالارتدادات، يمكن تقليل مساحة بصمة '
+            'الدور الأرضي للمباني مع تعويض المساحة الإجمالية بزيادة عدد الأدوار، أو إعادة ضبط أبعاد المبنى في دراسة المشروع.'
+        )
+        model_question = 'هل تريد إعادة محاولة التوزيع بمرونة هندسية أكبر، أم تفضل تعديل مساحات المكونات في المشروع أولاً؟'
+        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة بيانات المكونات والمساحات']
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    elif is_setback_conflict and not prior_conflict_conversation:
+        model_reply = ''
+        model_question = 'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟'
+        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
     elif is_site_area_conflict and not prior_conflict_conversation:
         failed_item = failing_site_item or {}
         failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
@@ -539,9 +659,15 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
     retry_requested = bool(parsed.get('generateRequested') and placement_retry_request)
     informational_only = (is_site_area_conflict and facts.get('aggregateAreaSufficient')
                           and not retry_requested and not source_question and not measurement_dispute
-                          and not area_value_dispute)
+                          and not area_value_dispute and not setback_inquiry)
     if not model_question and not retry_requested and not informational_only:
-        if is_site_area_conflict:
+        if is_setback_conflict:
+            model_question = ('كيف تفضل المتابعة: إعادة التوزيع آليًا، أم مراجعة بصمات المباني أو الارتدادات؟'
+                              if message else
+                              'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟')
+            if not choices:
+                choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
+        elif is_site_area_conflict:
             failed_item = failing_site_item or {}
             failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
             model_question = (f'أي مساحة تريد مراجعتها: «{failed_item_label}» أم بصمات المباني؟'
@@ -550,13 +676,15 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         else:
             model_question = ('ما الرقم الذي ترى أنه غير دقيق؟' if message else
                               'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟')
+    if is_setback_conflict and not retry_requested and not choices:
+        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
     explanation = _visual_plan_site_conflict_summary(facts)
     has_prior_conversation = prior_conflict_conversation
     if informational_only:
         reply = model_reply or explanation
     else:
         reply_parts = [explanation] if not has_prior_conversation and not (
-            source_question or measurement_dispute) else []
+            source_question or measurement_dispute or setback_inquiry or footprint_review) else []
         if model_reply and model_reply != model_question:
             reply_parts.append(model_reply)
         reply_parts.append(model_question)

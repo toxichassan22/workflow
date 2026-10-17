@@ -772,6 +772,18 @@ def _visual_plan_site_edit(data):
             'assistantState': state, 'scene': workflow.get('scene')}
 
 
+_VISUAL_PLAN_SITE_CONFLICT_CODES = (
+    'PLANS_COVERAGE_CONFLICT',
+    'PLANS_SITE_AREA_CONFLICT',
+    'PLANS_SETBACK_CONFLICT',
+    'PLANS_FOOTPRINT_OUTSIDE',
+    'PLANS_BUILDING_OVERLAP',
+    'PLANS_LAYOUT_INVALID',
+    'PLANS_SITE_ITEMS_MISSING',
+    'PLANS_SITE_ITEMS_DUPLICATED',
+)
+
+
 def _visual_plan_site_assistant_execute(data, action):
     automatic_placement_retry = False
     try:
@@ -793,7 +805,7 @@ def _visual_plan_site_assistant_execute(data, action):
         automatic_placement_retry = action != 'generate' and bool(interview.get('generateRequested'))
         return _visual_plan_site_generate(data, interview), 200
     except visual_plan_geometry.PlanGeometryError as error:
-        if error.code not in ('PLANS_COVERAGE_CONFLICT', 'PLANS_SITE_AREA_CONFLICT'):
+        if error.code not in _VISUAL_PLAN_SITE_CONFLICT_CODES:
             raise
         interview = _visual_plan_site_conflict_interview(
             data, error, auto_retry_failed=automatic_placement_retry)
@@ -802,7 +814,7 @@ def _visual_plan_site_assistant_execute(data, action):
             try:
                 return _visual_plan_site_generate(data, interview), 200
             except visual_plan_geometry.PlanGeometryError as retry_error:
-                if retry_error.code not in ('PLANS_COVERAGE_CONFLICT', 'PLANS_SITE_AREA_CONFLICT'):
+                if retry_error.code not in _VISUAL_PLAN_SITE_CONFLICT_CODES:
                     raise
                 return _visual_plan_site_conflict_interview(
                     data, retry_error, auto_retry_failed=True), 200
