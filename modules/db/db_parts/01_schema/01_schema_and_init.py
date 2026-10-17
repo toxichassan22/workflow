@@ -425,6 +425,7 @@ def _create_tables(conn):
     CREATE INDEX IF NOT EXISTS idx_mapimages_tenant ON map_images(tenant_id);
     CREATE INDEX IF NOT EXISTS idx_mapimages_pres ON map_images(presentation_id);
     CREATE INDEX IF NOT EXISTS idx_mapimages_type ON map_images(image_type);
+    CREATE INDEX IF NOT EXISTS idx_mapimages_tenant_pres ON map_images(tenant_id, presentation_id);
 
     CREATE TABLE IF NOT EXISTS project_files (
         id TEXT PRIMARY KEY,

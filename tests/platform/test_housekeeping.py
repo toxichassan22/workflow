@@ -314,5 +314,54 @@ class HousekeepingApiTests(unittest.TestCase):
         self.assertTrue(delivery['sent_at'])
 
 
+class HousekeepingSingleflightTests(unittest.TestCase):
+    """One worker runs the tick while the rest skip it.
+
+    Every gunicorn worker starts its own housekeeping thread; without this
+    lock they all ran the billing claim and the outbox drain at the same
+    minute on one SQLite file, and draft reads queued behind the write lock.
+    """
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_db_path = db.DB_PATH
+        db.DB_PATH = os.path.join(self.temp_dir.name, 'housekeeping-lock.db')
+        db.init_db()
+        import app as application_module
+        self.module = application_module
+        self.lock_path = application_module._housekeeping_lock_path()
+        self.assertTrue(
+            self.lock_path.startswith(self.temp_dir.name), self.lock_path)
+
+    def tearDown(self):
+        try:
+            if os.path.exists(self.lock_path):
+                os.unlink(self.lock_path)
+        except OSError:
+            pass
+        db.DB_PATH = self.original_db_path
+        self.temp_dir.cleanup()
+
+    def test_first_worker_runs_while_second_skips(self):
+        with self.module._housekeeping_tick_singleflight() as first:
+            self.assertTrue(first)
+            self.assertTrue(os.path.exists(self.lock_path))
+            with self.module._housekeeping_tick_singleflight() as second:
+                self.assertFalse(second)
+        self.assertFalse(os.path.exists(self.lock_path))
+        with self.module._housekeeping_tick_singleflight() as again:
+            self.assertTrue(again)
+
+    def test_stale_lock_from_crashed_worker_is_reclaimed(self):
+        import time as _time
+        with open(self.lock_path, 'w') as handle:
+            handle.write('dead-pid')
+        ancient = _time.time() - 100000
+        os.utime(self.lock_path, (ancient, ancient))
+        with self.module._housekeeping_tick_singleflight() as allowed:
+            self.assertTrue(allowed)
+        self.assertFalse(os.path.exists(self.lock_path))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -92,14 +92,19 @@ fi
 
 log "WARN: health check failed on port $PORT; restarting..."
 
-# Stop any old gunicorn, preferring the configured port
-pkill -TERM -f "gunicorn.*:$PORT" 2>/dev/null || true
-for i in $(seq 1 15); do
-  (echo >/dev/tcp/127.0.0.1/$PORT) 2>/dev/null || break
-  sleep 1
-done
-pkill -9 -f "gunicorn.*:$PORT" 2>/dev/null || true
-pkill -9 -f gunicorn 2>/dev/null || true
+# Scoped process match: only this app dir's venv gunicorn, never a neighbor's
+# on shared hosting. The old processes keep serving until the replacement
+# passes health — killing them first is what turned every slow minute into
+# downtime plus a cold boot.
+PROD_GUNICORN_MATCH="$APP_DIR/venv/bin/gunicorn"
+OLD_PIDS="$(pgrep -f "$PROD_GUNICORN_MATCH" || true)"
+if [ -r "$APP_DIR/.prod-gunicorn-$PORT.pid" ]; then
+  read -r old_pid < "$APP_DIR/.prod-gunicorn-$PORT.pid" || old_pid=""
+  if [[ "$old_pid" =~ ^[0-9]+$ ]] && [ "$old_pid" -gt 1 ] \
+    && [ "$(readlink "/proc/$old_pid/cwd" 2>/dev/null)" = "$(cd "$APP_DIR" && pwd -P)" ]; then
+    OLD_PIDS="$old_pid"
+  fi
+fi
 
 # Pick a free port, preferring APP_PORT
 SELECTED_PORT=""
@@ -119,6 +124,7 @@ log "Starting gunicorn on 127.0.0.1:$SELECTED_PORT"
 
 cd "$APP_DIR"
 setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
+  --pid "$APP_DIR/.prod-gunicorn-$SELECTED_PORT.pid" \
   --preload \
   --workers 3 \
   --threads 2 \
@@ -130,20 +136,35 @@ setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --access-logfile "$APP_DIR/server.log" \
   --error-logfile "$APP_DIR/server.log" \
   </dev/null >>"$APP_DIR/boot.log" 2>&1 9>&- &
+NEW_PID=$!
 disown
 
 sleep 3
+log "Startup readiness checks beginning; pid=$NEW_PID port=$SELECTED_PORT boot_wait_seconds=3"
 
-# Expose via Apache immediately using the selected Gunicorn port.
-# This is unconditional so stale/default port numbers (e.g. 3000) cannot linger.
-sed "s/127\\.0\\.0\\.1:[0-9]*/127.0.0.1:$SELECTED_PORT/g" "$APP_DIR/.htaccess_prod" > "$WEB_ROOT/.htaccess"
-log ".htaccess routed to 127.0.0.1:$SELECTED_PORT"
-
-# Final health check with retry loop
+# The old proxy stays active until the new process passes health: traffic never
+# moves to a cold worker, and a failed start leaves the old app untouched.
 HEALTH_OK=0
 for i in $(seq 1 15); do
-  if curl -fsS -m 5 "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}" >/dev/null 2>&1; then
+  if ! kill -0 "$NEW_PID" 2>/dev/null; then
+    log "ERROR: gunicorn exited before readiness probe attempt=$i pid=$NEW_PID port=$SELECTED_PORT"
+    break
+  fi
+  probe_started_ms="$(date +%s%3N)"
+  health_curl_exit=0
+  health_status="$(curl --silent -m 5 -o /dev/null -w '%{http_code}' \
+    "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}")" || {
+      health_curl_exit=$?
+      health_status="000"
+    }
+  probe_finished_ms="$(date +%s%3N)"
+  probe_elapsed_ms=$((probe_finished_ms - probe_started_ms))
+  log "readiness probe run_pid=$$ attempt=$i port=$SELECTED_PORT gunicorn_pid=$NEW_PID status=$health_status curl_exit=$health_curl_exit elapsed_ms=$probe_elapsed_ms"
+  if [ "$health_status" = "200" ]; then
     HEALTH_OK=1
+    break
+  elif [ "$health_status" != "000" ]; then
+    log "ERROR: health returned HTTP $health_status"
     break
   fi
   sleep 1
@@ -151,9 +172,20 @@ done
 
 if [ "$HEALTH_OK" -eq 1 ]; then
   write_deployment_marker
+  HTACCESS_TEMP="$(mktemp "$WEB_ROOT/.htaccess.XXXXXX")"
+  sed "s/127\\.0\\.0\\.1:[0-9]*/127.0.0.1:$SELECTED_PORT/g" "$APP_DIR/.htaccess_prod" > "$HTACCESS_TEMP"
+  chmod 644 "$HTACCESS_TEMP"
+  mv "$HTACCESS_TEMP" "$WEB_ROOT/.htaccess"
+  log ".htaccess routed to 127.0.0.1:$SELECTED_PORT"
+  if [ -n "$OLD_PIDS" ]; then
+    kill -TERM $OLD_PIDS 2>/dev/null || true
+  fi
   log "OK: gunicorn running on port $SELECTED_PORT"
 else
   log "ERROR: gunicorn failed health check on port $SELECTED_PORT"
+  # Never leave a failed replacement bound: it would squat the port and trick
+  # the next watchdog run into proxying traffic at a dead process.
+  kill -TERM "$NEW_PID" 2>/dev/null || true
   tail -n 30 "$APP_DIR/server.log" | tee -a "$WATCHDOG_LOG"
   exit 1
 fi

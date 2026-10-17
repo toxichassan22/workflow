@@ -269,7 +269,13 @@ def _housekeeping_loop():
     while True:
         try:
             with app.app_context():
-                _run_housekeeping_tick()
+                # Single-flight across workers: N gunicorn workers must not run
+                # the billing claim and the outbox drain on one SQLite file at
+                # the same minute — the losers hold the write lock while draft
+                # reads queue behind them and the whole site stalls.
+                with _housekeeping_tick_singleflight() as _may_run:
+                    if _may_run:
+                        _run_housekeeping_tick()
         except Exception as exc:
             print(f'[HOUSEKEEPING] tick failed: {exc}')
         try:

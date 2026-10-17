@@ -474,6 +474,22 @@ class StagingWorkflowTests(unittest.TestCase):
         self.assertIn('--pid "$APP_DIR/.staging-gunicorn-$SELECTED_PORT.pid"', source)
         self.assertIn('readlink "/proc/$old_pid/cwd"', source)
 
+    def test_prod_watchdog_keeps_old_processes_until_replacement_is_healthy(self):
+        # The production watchdog used to pkill -9 every gunicorn on the box on
+        # one slow health check and proxy traffic at a cold worker — every slow
+        # minute became downtime plus a cold boot. It now mirrors staging: the
+        # old processes serve until the replacement passes its readiness probe.
+        source = (ROOT / 'start_server.sh').read_text(encoding='utf-8')
+        self.assertNotIn('pkill -9', source)
+        self.assertIn('--pid "$APP_DIR/.prod-gunicorn-$SELECTED_PORT.pid"', source)
+        self.assertIn('kill -0 "$NEW_PID"', source)
+        self.assertIn('kill -TERM "$NEW_PID"', source)
+        ready = source.index('if [ "$HEALTH_OK" -eq 1 ]; then')
+        switch = source.index('mv "$HTACCESS_TEMP" "$WEB_ROOT/.htaccess"')
+        stop = source.index('kill -TERM $OLD_PIDS')
+        self.assertLess(ready, switch)
+        self.assertLess(switch, stop)
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -82,6 +82,17 @@ class Mission5DbTests(unittest.TestCase):
             with db_driver._SQLITE_WAL_LOCK:
                 db_driver._SQLITE_WAL_DATABASES.discard(key)
 
+    # ── draft-open read path: the map hydration filter must stay indexed ──
+
+    def test_map_images_tenant_presentation_index_exists(self):
+        # get_map_images() filters tenant_id plus presentation_id IN (...);
+        # without the composite index every draft open scans the tenant's map
+        # rows while the housekeeping writer holds the database.
+        row = db.get_db().execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_mapimages_tenant_pres'").fetchone()
+        self.assertIsNotNone(row)
+
     # ── t60: graph model tables and uniqueness ────────────────────────────
 
     def test_mission5_tables_exist_on_existing_database(self):
