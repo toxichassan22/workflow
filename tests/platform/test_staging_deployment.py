@@ -413,12 +413,53 @@ class StagingWorkflowTests(unittest.TestCase):
                  'kill() { return 0; }\n'
                  'curl() { printf "500"; printf "curl-called\\n" >&2; }\n'
                  'sleep() { printf "unexpected-sleep\\n"; }\n'
+                 'log_readiness_probe() { printf "probe %s\\n" "$1"; }\n'
                  'log() { printf "%s\\n" "$1"; }\n')
         result = subprocess.run(['bash', '-s'], input=stubs + readiness, text=True,
                                 capture_output=True, check=True)
         self.assertEqual(result.stderr.count('curl-called'), 1)
         self.assertIn('staging health returned HTTP 500', result.stdout)
         self.assertNotIn('unexpected-sleep', result.stdout)
+
+    def test_staging_readiness_logs_each_probe_result_and_duration(self):
+        source = (ROOT / 'start_server-staging.sh').read_text(encoding='utf-8')
+        probe_helper = re.search(r'(?ms)^log_readiness_probe\(\) \{\n.*?^\}', source).group(0)
+        readiness = source[source.index('HEALTH_OK=0'):source.index('if [ "$HEALTH_OK" -eq 1 ]; then')]
+        stubs = ('WATCHDOG_LOG=/dev/null\nNEW_PID=123\nSELECTED_PORT=8002\nHEALTH_PATH=/health\n'
+                 'kill() { return 0; }\n'
+                 'CURL_STATE="$(mktemp)"\nrm -f "$CURL_STATE"\n'
+                 'trap \'rm -f "$CURL_STATE"\' EXIT\n'
+                 'curl() { if [ ! -f "$CURL_STATE" ]; then : > "$CURL_STATE"; '
+                 'printf "000"; return 7; fi; printf "200"; }\n'
+                 'sleep() { :; }\n')
+        result = subprocess.run(['bash', '-s'], input=probe_helper + '\n' + stubs + readiness,
+                                text=True, capture_output=True, check=True)
+        self.assertRegex(result.stdout,
+                         r'INFO: staging readiness probe run_pid=\d+ attempt=1 port=8002 '
+                         r'gunicorn_pid=123 status=000 curl_exit=7 elapsed_ms=\d+')
+        self.assertRegex(result.stdout,
+                         r'INFO: staging readiness probe run_pid=\d+ attempt=2 port=8002 '
+                         r'gunicorn_pid=123 status=200 curl_exit=0 elapsed_ms=\d+')
+        self.assertEqual(result.stdout.count('INFO: staging readiness probe '), 2)
+
+    def test_deploy_steps_log_elapsed_time_and_preserve_exit_status(self):
+        source = (ROOT / 'deploy-staging.sh').read_text(encoding='utf-8')
+        step_helper = re.search(r'(?ms)^run_deploy_step\(\) \{\n.*?^\}', source).group(0)
+        script = ('set -eo pipefail\nSTEP_LOG=/dev/null\nDEPLOY_STEP=\n'
+                  'write_deploy_status() { :; }\n' + step_helper + '\n'
+                  'run_deploy_step deps requirements bash -c \'printf "pip output\\n"\'\n'
+                  'set +e\nrun_deploy_step migrate database bash -c \'exit 7\'\n'
+                  'exit_code=$?\nprintf "wrapper_exit=%s\\n" "$exit_code"\n')
+        result = subprocess.run(['bash', '-s'], input=script, text=True, capture_output=True, check=True)
+        self.assertRegex(result.stdout,
+                         r'STEP_START step=deps command=requirements at=\d{4}-\d\d-\d\d '
+                         r'\d\d:\d\d:\d\d\.\d{3}')
+        self.assertRegex(result.stdout,
+                         r'STEP_END step=deps command=requirements at=\d{4}-\d\d-\d\d '
+                         r'\d\d:\d\d:\d\d\.\d{3} duration_ms=\d+ exit_code=0')
+        self.assertRegex(result.stdout,
+                         r'STEP_END step=migrate command=database .* duration_ms=\d+ exit_code=7')
+        self.assertIn('wrapper_exit=7', result.stdout)
 
     def test_new_server_is_verified_before_switching_the_proxy_or_stopping_old_processes(self):
         source = (ROOT / 'start_server-staging.sh').read_text(encoding='utf-8')

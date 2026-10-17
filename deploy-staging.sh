@@ -107,9 +107,19 @@ write_deploy_status() {
 }
 run_deploy_step() {
   DEPLOY_STEP="$1"
-  shift
+  local step_name="$1" command_name="$2" step_started_ms step_finished_ms command_exit
+  shift 2
   write_deploy_status running
-  "$@" 2>&1 | tee "$STEP_LOG"
+  step_started_ms="$(date +%s%3N)"
+  printf 'STEP_START step=%s command=%s at=%s\n' "$step_name" "$command_name" \
+    "$(date '+%Y-%m-%d %H:%M:%S.%3N')" | tee -a "$STEP_LOG"
+  command_exit=0
+  "$@" 2>&1 | tee -a "$STEP_LOG" || command_exit=${PIPESTATUS[0]}
+  step_finished_ms="$(date +%s%3N)"
+  printf 'STEP_END step=%s command=%s at=%s duration_ms=%s exit_code=%s\n' \
+    "$step_name" "$command_name" "$(date '+%Y-%m-%d %H:%M:%S.%3N')" \
+    "$((step_finished_ms - step_started_ms))" "$command_exit" | tee -a "$STEP_LOG"
+  return "$command_exit"
 }
 trap 'rc=$?; if [ "$rc" -ne 0 ]; then write_deploy_status failed "$rc" || true; fi' EXIT
 
@@ -139,22 +149,22 @@ if [ "$(git rev-parse --is-bare-repository 2>/dev/null)" = "true" ]; then
 fi
 # GIT_TERMINAL_PROMPT=0: a missing/expired credential must fail fast here —
 # an interactive prompt would hang forever while holding the deploy lock.
-run_deploy_step pull env GIT_TERMINAL_PROMPT=0 git fetch origin "$BRANCH"
+run_deploy_step pull fetch env GIT_TERMINAL_PROMPT=0 git fetch origin "$BRANCH"
 if [ -n "$TARGET_COMMIT" ]; then
   if ! git cat-file -e "${TARGET_COMMIT}^{commit}" 2>/dev/null; then
     echo "ERROR: target deployment commit is not available after fetch: $TARGET_COMMIT"
     exit 1
   fi
-  run_deploy_step pull git reset --hard "$TARGET_COMMIT"
+  run_deploy_step pull reset git reset --hard "$TARGET_COMMIT"
 else
-  run_deploy_step pull git reset --hard "origin/$BRANCH"
+  run_deploy_step pull reset git reset --hard "origin/$BRANCH"
 fi
-GIT_TERMINAL_PROMPT=0 git lfs pull 2>/dev/null || true
+run_deploy_step pull lfs env GIT_TERMINAL_PROMPT=0 git lfs pull || true
 
 DEPLOY_STEP="sync"
 echo "===== 2. Sync to staging app directory ($APP_DIR) ====="
 mkdir -p "$APP_DIR" "$WEB_ROOT"
-run_deploy_step sync rsync -av \
+run_deploy_step sync rsync rsync -av \
   --exclude='.deployed_commit' \
   --exclude='.deploy_status' \
   --exclude='.deploy_runs' \
@@ -176,7 +186,7 @@ run_deploy_step sync rsync -av \
   --exclude='outputs' \
   --exclude='uploads' \
   "$REPO_DIR/" "$APP_DIR/"
-run_deploy_step sync python3 "$APP_DIR/scripts/deploy_runtime.py" prepare \
+run_deploy_step sync prepare python3 "$APP_DIR/scripts/deploy_runtime.py" prepare \
   --repo-dir "$REPO_DIR" --app-dir "$APP_DIR"
 
 echo "===== 3. Ensure scripts are executable ====="
@@ -192,11 +202,11 @@ find . -name '*.pyc' -delete 2>/dev/null || true
 DEPLOY_STEP="deps"
 echo "===== 5. Update dependencies ====="
 if [ ! -d "$APP_DIR/venv" ]; then
-  run_deploy_step deps python3 -m venv "$APP_DIR/venv"
+  run_deploy_step deps venv python3 -m venv "$APP_DIR/venv"
 fi
-run_deploy_step deps "$PIP" install --upgrade pip setuptools wheel
-run_deploy_step deps "$PIP" install -r "$APP_DIR/requirements.txt"
-run_deploy_step deps "$PIP" install gunicorn
+run_deploy_step deps pip-upgrade "$PIP" install --upgrade pip setuptools wheel
+run_deploy_step deps requirements "$PIP" install -r "$APP_DIR/requirements.txt"
+run_deploy_step deps gunicorn "$PIP" install gunicorn
 
 # Headless Chromium for the web_browse search agents — best-effort: an
 # already-installed browser exits fast, and a failed/timed-out install must
@@ -205,12 +215,12 @@ run_deploy_step deps "$PIP" install gunicorn
 # webhook deploys holding this lock.
 pw_install_timeout=""
 command -v timeout >/dev/null 2>&1 && pw_install_timeout="timeout 600"
-$pw_install_timeout "$PYTHON" -m playwright install chromium >>"$STEP_LOG" 2>&1 \
+run_deploy_step deps playwright $pw_install_timeout "$PYTHON" -m playwright install chromium \
   || echo "WARNING: playwright install chromium failed or timed out" | tee -a "$STEP_LOG"
 
 DEPLOY_STEP="migrate"
 echo "===== 6. Run database migrations ====="
-run_deploy_step migrate "$PYTHON" -c "import app; app.db.init_db()"
+run_deploy_step migrate database "$PYTHON" -c "import app; app.db.init_db()"
 
 # The marker reports the commit this deploy was asked to ship — re-reading the
 # clone's HEAD here could record whatever a concurrent operation left behind.
@@ -219,7 +229,7 @@ DEPLOY_STEP="restart"
 echo "===== 7. Start/restart staging application server ====="
 # 9>&-: the lock fd is inheritable — anything the restart chain spawns (the
 # daemon above all) must not carry it or the lock outlives this deploy.
-run_deploy_step restart bash "$APP_DIR/start_server-staging.sh" --force 9>&-
+run_deploy_step restart startup bash "$APP_DIR/start_server-staging.sh" --force 9>&-
 
 if [ -n "$local_commit" ]; then
   printf '{"commit":"%s","deployed_at":"%s","source":"github-staging"}\n' \

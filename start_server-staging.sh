@@ -90,6 +90,10 @@ log() {
   echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$WATCHDOG_LOG"
 }
 
+log_readiness_probe() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S.%3N') INFO: staging readiness probe $1" | tee -a "$WATCHDOG_LOG"
+}
+
 write_deployment_marker() {
   # A watchdog restart is not a deploy: the deploy script owns this marker.
   # Rewriting it from the clone's HEAD on every restart misreported which
@@ -163,15 +167,27 @@ NEW_PID=$!
 disown
 
 sleep 3
+log "Staging startup readiness checks beginning; pid=$NEW_PID port=$SELECTED_PORT boot_wait_seconds=3"
 
 # The old proxy stays active until the new staging process passes health.
 
 # Wait for application readiness before the single traffic switch.
 HEALTH_OK=0
 for i in $(seq 1 15); do
-  kill -0 "$NEW_PID" 2>/dev/null || break
+  if ! kill -0 "$NEW_PID" 2>/dev/null; then
+    log "ERROR: staging gunicorn exited before readiness probe attempt=$i pid=$NEW_PID port=$SELECTED_PORT"
+    break
+  fi
+  probe_started_ms="$(date +%s%3N)"
+  health_curl_exit=0
   health_status="$(curl --silent -m 5 -o /dev/null -w '%{http_code}' \
-    "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}")" || health_status="000"
+    "http://127.0.0.1:${SELECTED_PORT}${HEALTH_PATH}")" || {
+      health_curl_exit=$?
+      health_status="000"
+    }
+  probe_finished_ms="$(date +%s%3N)"
+  probe_elapsed_ms=$((probe_finished_ms - probe_started_ms))
+  log_readiness_probe "run_pid=$$ attempt=$i port=$SELECTED_PORT gunicorn_pid=$NEW_PID status=$health_status curl_exit=$health_curl_exit elapsed_ms=$probe_elapsed_ms"
   if [ "$health_status" = "200" ]; then
     HEALTH_OK=1
     break
