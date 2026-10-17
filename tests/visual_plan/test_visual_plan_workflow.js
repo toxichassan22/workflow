@@ -129,6 +129,7 @@ test('plan notes results list only unresolved findings — مطابق rows never
   });
   const cleanHtml = context.visualConceptPlanNotesResultsHtml(clean);
   assert.ok(cleanHtml.includes('plans-workflow-success'));
+  assert.ok(cleanHtml.includes('نتيجة فحص الملاحظات'));
   assert.ok(!cleanHtml.includes('NOTE_MATCHED_TEXT'));
   assert.ok(!cleanHtml.includes('DETAIL_MATCHED'));
 });
@@ -149,6 +150,7 @@ test('distribution findings list conflicts only and approve no longer waits on n
   }).distribution;
   const html = context.visualConceptDistributionResultsHtml(distribution);
   assert.ok(html.includes('ITEM_CONFLICT'));
+  assert.ok(html.includes('نتيجة فحص التوزيع'));
   assert.ok(!html.includes('ITEM_MATCHED'));
   assert.ok(!html.includes('DETAIL_MATCHED'));
   const button = html.match(/data-plans-workflow-action="approve-distribution"([^>]*)>/);
@@ -349,6 +351,55 @@ function workflowRoot(context) {
   context.document.getElementById = id => (id === 'visualConceptPlansWorkflow' ? root : null);
   return root;
 }
+
+function renderVerificationWorkflow(context, verification) {
+  context.tenantVisualConceptState = { slots: {}, plansWorkflow: context.normalizeVisualConceptPlansWorkflow({ verification }) };
+  context.renderVisualConceptSlot = () => '';
+  context.visualConceptSlotLocked = () => false;
+  const root = workflowRoot(context);
+  context.renderVisualConceptPlansWorkflow();
+  return root.innerHTML;
+}
+
+test('verification shows one clean result and omits the empty findings table', () => {
+  const context = fixture();
+  const clean = renderVerificationWorkflow(context, {
+    canProceed: true, summary: 'تم الفحص', checks: [], issues: []
+  });
+  assert.equal((clean.match(/لا توجد تعارضات مباشرة\./g) || []).length, 1);
+  assert.ok(!clean.includes('plans-check-table'));
+
+  const unchecked = renderVerificationWorkflow(context, {});
+  assert.ok(unchecked.includes('لم يتم فحص التعارضات بعد.'));
+  assert.ok(!unchecked.includes('لا توجد تعارضات مباشرة.'));
+
+  const needsReview = renderVerificationWorkflow(context, {
+    canProceed: true,
+    checks: [{ item: 'الارتداد', result: 'يحتاج تأكيد' }],
+    issues: []
+  });
+  assert.ok(needsReview.includes('plans-check-table'));
+  assert.ok(needsReview.includes('يحتاج تأكيد'));
+});
+
+test('distribution rows are grouped by building and use a contained sticky-header table', () => {
+  const context = fixture();
+  const html = context.visualConceptDistributionEditorHtml({ rows: [
+    { id: 'row_1', building: 'البرج أ', floor_range: '1', component: 'مكاتب' },
+    { id: 'row_2', building: 'البرج ب', floor_range: '1', component: 'مكاتب' },
+    { id: 'row_3', building: 'البرج أ', floor_range: '2', component: 'مكاتب' },
+  ], totals: [] });
+  assert.equal((html.match(/class="plans-distribution-building"/g) || []).length, 2);
+  assert.ok(html.includes('عدد البنود: 2'));
+  assert.ok(html.includes('plans-distribution-table-wrap'));
+  assert.ok(html.indexOf('data-dist-id="row_3"') < html.indexOf('data-dist-id="row_2"'));
+
+  const styles = fs.readFileSync(path.resolve(__dirname,
+    '../../assets/css/project-form/06_visual_concept_plans.css'), 'utf8');
+  assert.match(styles, /\.plans-distribution-table-wrap\s*\{[^}]*overflow:\s*auto/s);
+  assert.match(styles, /\.plans-distribution-table thead th\s*\{[^}]*position:\s*sticky/s);
+  assert.match(styles, /\.plans-workflow-distribution-panel\s*\{[^}]*padding-bottom:\s*72px/s);
+});
 
 function panelsOf(root) {
   root.querySelectorAll('[data-plans-workflow-stage]');

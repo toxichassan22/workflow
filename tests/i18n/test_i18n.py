@@ -49,6 +49,8 @@ FRONTEND_CSS_ORDER = (
     'project-form/02_fields_tables_rail.css',
     'project-form/03_timeline_board.css', 'project-form/04_financial_parking.css',
     'project-form/05_best_use.css', 'project-form/05a_market_summary_chat.css',
+    'project-form/06_visual_concept_plans.css',
+    'project-form/07_section_change_history.css',
 )
 FRONTEND_JS_ORDER = (
     '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',

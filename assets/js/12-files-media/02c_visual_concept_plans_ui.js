@@ -46,8 +46,15 @@
     function visualConceptDistributionEditorHtml(distribution) {
       const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
       const head = '<thead><tr><th>المبنى</th><th>الدور أو نطاق الأدوار</th><th>الاستخدام / المكون</th>' +
-        '<th>عدد الوحدات لكل دور</th><th>مساحة الدور الإجمالية</th><th>الحركة والخدمات ضمن المساحة</th><th></th></tr></thead>';
-      const body = rows.length ? rows.map(row =>
+        '<th>عدد الوحدات لكل دور</th><th>مساحة الدور الإجمالية</th><th>الحركة والخدمات ضمن المساحة</th><th>' +
+        escapeHtml(WFT('plans.action_label', 'إجراء')) + '</th></tr></thead>';
+      const groups = new Map();
+      rows.forEach(row => {
+        const building = String(row.building || '').trim() || WFT('plans.building_unnamed', 'مبنى غير محدد');
+        if (!groups.has(building)) groups.set(building, []);
+        groups.get(building).push(row);
+      });
+      const rowHtml = row =>
         '<tr>' +
         '<td><input data-dist-field="building" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.building) + '"></td>' +
         '<td><input data-dist-field="floor_range" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.floor_range) + '" placeholder="1-4"></td>' +
@@ -56,9 +63,14 @@
         '<td><input data-dist-field="floor_area_sqm" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.floor_area_sqm ?? '') + '"></td>' +
         '<td><input data-dist-field="circulation" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.circulation) + '"></td>' +
         '<td><button type="button" class="btn ghost small" data-dist-remove="' + escapeHtml(row.id) + '">حذف</button></td>' +
-        '</tr>').join('')
+        '</tr>';
+      const body = rows.length ? Array.from(groups.entries()).map(([building, buildingRows]) =>
+        '<tr class="plans-distribution-building"><th colspan="7"><span>' + escapeHtml(building) +
+        '</span><span class="plans-distribution-building-count">' +
+        escapeHtml(WFT('plans.building_items_count', 'عدد البنود: {count}', { count: buildingRows.length })) + '</span></th></tr>' +
+        buildingRows.map(rowHtml).join('')).join('')
         : '<tr><td colspan="7" class="plans-workflow-empty">لم يُقترح توزيع بعد.</td></tr>';
-      return '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-distribution-table">' +
+      return '<div class="plans-workflow-table-wrap plans-distribution-table-wrap"><table class="plans-workflow-table plans-distribution-table">' +
         head + '<tbody>' + body + '</tbody>' +
         '<tfoot data-plans-distribution-totals>' + visualConceptDistributionTotalsRowsHtml(distribution) + '</tfoot>' +
         '</table></div>' +
@@ -84,25 +96,30 @@
     function visualConceptPlanNotesResultsHtml(workflow = visualConceptPlansWorkflowState()) {
       if (!workflow.clientNotes.trim()) return '';
       const review = workflow.notesReview;
+      let result = '';
       if (!review.verified) {
-        return '<p class="tenant-hint">' + escapeHtml(review.acknowledged
+        result = '<p class="tenant-hint">' + escapeHtml(review.acknowledged
           ? WFT('plans.notes_acknowledged', 'الملاحظات معتمدة بإخلاء مسؤولية دون فحص.')
           : WFT('plans.notes_unchecked', 'الملاحظات غير مفحوصة.')) + '</p>';
+      } else {
+        const labels = { 'متعارض': WFT('plans.note_conflict', 'متعارض'),
+          'يحتاج توضيح': WFT('plans.note_unclear', 'يحتاج توضيح') };
+        // Only unresolved findings render — a «مطابق» verdict listed in the
+        // warning box read as a conflict.
+        const pending = review.checks.filter(check => check.result !== 'مطابق');
+        if (!pending.length) {
+          result = '<p class="plans-workflow-success">' + escapeHtml(WFT('plans.notes_clear', 'لا توجد تعارضات في الملاحظات.')) + '</p>';
+        } else {
+          const rows = pending.map(check => '<li><strong>' + escapeHtml(labels[check.result] || check.result) +
+            '</strong>: ' + escapeHtml(check.note || '') + (check.detail ? '<div>' + escapeHtml(check.detail) + '</div>' : '') + '</li>').join('');
+          result = '<div class="plans-workflow-notice"><ul class="plans-issue-list">' + rows + '</ul></div>' +
+            (review.acknowledged
+              ? '<p class="tenant-hint">' + escapeHtml(WFT('plans.notes_acknowledged_conflicts', 'الملاحظات معتمدة بإخلاء مسؤولية رغم التعارضات.')) + '</p>'
+              : '');
+        }
       }
-      const labels = { 'متعارض': WFT('plans.note_conflict', 'متعارض'),
-        'يحتاج توضيح': WFT('plans.note_unclear', 'يحتاج توضيح') };
-      // Only unresolved findings render — a «مطابق» verdict listed in the
-      // warning box read as a conflict.
-      const pending = review.checks.filter(check => check.result !== 'مطابق');
-      if (!pending.length) {
-        return '<p class="plans-workflow-success">' + escapeHtml(WFT('plans.notes_clear', 'لا توجد تعارضات في الملاحظات.')) + '</p>';
-      }
-      const rows = pending.map(check => '<li><strong>' + escapeHtml(labels[check.result] || check.result) +
-        '</strong>: ' + escapeHtml(check.note || '') + (check.detail ? '<div>' + escapeHtml(check.detail) + '</div>' : '') + '</li>').join('');
-      return '<div class="plans-workflow-notice"><ul class="plans-issue-list">' + rows + '</ul></div>' +
-        (review.acknowledged
-          ? '<p class="tenant-hint">' + escapeHtml(WFT('plans.notes_acknowledged_conflicts', 'الملاحظات معتمدة بإخلاء مسؤولية رغم التعارضات.')) + '</p>'
-          : '');
+      return '<div class="plans-workflow-result-block plans-notes-review-result"><h5>' +
+        escapeHtml(WFT('plans.notes_result_heading', 'نتيجة فحص الملاحظات')) + '</h5>' + result + '</div>';
     }
 
     function visualConceptDistributionResultsHtml(distribution) {
@@ -133,7 +150,11 @@
       // them routes via the responsibility warning dialog instead of a dead
       // disabled control.
       const canApprove = rows.length > 0 && reviewed;
-      return findingsHtml +
+      const resultHtml = findingsHtml || rows.length
+        ? '<div class="plans-workflow-result-block plans-distribution-review-result"><h5>' +
+          escapeHtml(WFT('plans.distribution_result_heading', 'نتيجة فحص التوزيع')) + '</h5>' + findingsHtml + '</div>'
+        : '';
+      return resultHtml +
         '<div class="visual-concept-actions">' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +
@@ -164,22 +185,39 @@
         : (requestedStage === 'boundary' && !verified ? 'verify' : requestedStage);
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
       const conflicts = checks.filter(item => item.result === 'متعارض');
+      const checkFindings = checks.filter(item => item && item.result && item.result !== 'مطابق');
+      const verificationIssues = Array.isArray(verification.issues) ? verification.issues : [];
+      const hasVerificationResult = checks.length > 0 || verificationIssues.length > 0
+        || Boolean(verification.summary) || verification.canProceed;
       // Conflicts keep the button live — approving through them routes via the
       // responsibility warning dialog, same as the distribution approval does.
       const canApprove = checks.length > 0 || verification.canProceed
         || (Array.isArray(verification.issues) && verification.issues.length > 0);
-      const checkRows = conflicts.length ? conflicts.map(item =>
+      const checkRows = checkFindings.map(item =>
         '<tr><td>' + escapeHtml(item.item || '') +
         ((item.section || item.field) ? '<div class="plans-conflict-location">' + escapeHtml(item.section || '') + (item.field ? ' — ' + escapeHtml(item.field) : '') + '</div>' : '') +
         '</td><td>' + escapeHtml(item.project || '') + '</td><td>' + escapeHtml(item.regulatory || '') + '</td><td><span class="plans-check-result plans-check-' + escapeHtml(item.result || '') + '">' + escapeHtml(item.result || '') + '</span></td><td>' +
         (Array.isArray(item.issues) && item.issues.length ? '<ul class="plans-issue-list">' + item.issues.map(issue => '<li>' + escapeHtml(issue) + '</li>').join('') + '</ul>' : '') +
         (item.suggestion ? '<div class="plans-conflict-solution"><strong>' + escapeHtml(WFT('plans.proposed_solution', 'الحل المقترح:')) + '</strong> ' + escapeHtml(item.suggestion) + '</div>' : '') +
         escapeHtml(item.action || '') + '</td></tr>'
-      ).join('') : '<tr><td colspan="5" class="plans-workflow-empty plans-workflow-success">' + escapeHtml(WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')) + '</td></tr>';
-      const conflictPoints = conflicts.flatMap(item => Array.isArray(item.issues) ? item.issues : []).filter(Boolean);
-      const issueList = conflictPoints.length
-        ? '<ul class="plans-issue-list plans-issue-summary">' + conflictPoints.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul>'
+      ).join('');
+      const issuePoints = verificationIssues.flatMap(item => {
+        const points = Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''];
+        return points.filter(Boolean).map(point => (item.title ? item.title + ': ' : '') + point);
+      });
+      const issuesHtml = issuePoints.length
+        ? '<div class="plans-workflow-review"><h5>' + escapeHtml(WFT('plans.verification_issues_title', 'ملاحظات التحقق')) +
+          '</h5><ul class="plans-issue-list">' +
+          issuePoints.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>'
         : '';
+      const verificationMessage = conflicts.length
+        ? WFT('plans.conflicts_count', 'عدد التعارضات المباشرة: ') + conflicts.length
+        : (checkFindings.length || verificationIssues.length
+          ? WFT('plans.verification_review_needed', 'لا توجد تعارضات مباشرة. توجد نتائج تحتاج مراجعة.')
+          : (hasVerificationResult ? WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')
+            : WFT('plans.verification_not_run', 'لم يتم فحص التعارضات بعد.')));
+      const verificationMessageClass = conflicts.length || checkFindings.length || verificationIssues.length || !hasVerificationResult
+        ? 'tenant-hint' : 'plans-workflow-success';
       const sitePlan = VISUAL_CONCEPT_PLAN_KINDS.find(item => item.kind === 'site');
       const otherPlans = VISUAL_CONCEPT_PLAN_KINDS.filter(item => item.kind !== 'site');
       const siteHasImage = Boolean(tenantVisualConceptState.slots[sitePlan.id]?.imageUrl);
@@ -202,18 +240,19 @@
         '</ol>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="verify"' + (activeStage !== 'verify' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>التحقق من التضارب</h4><button type="button" class="btn primary small" data-plans-workflow-action="verify">تحقق</button></div>' +
-        '<p class="' + (conflicts.length ? 'tenant-hint' : 'plans-workflow-success') + '" data-plans-verification-summary>' + escapeHtml(conflicts.length ? WFT('plans.conflicts_count', 'عدد التعارضات المباشرة: ') + conflicts.length : WFT('plans.no_conflicts', 'لا توجد تعارضات مباشرة.')) + '</p>' +
-        (issueList ? '<div class="plans-workflow-notice">' + issueList + '</div>' : '') +
-        '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-check-table"><thead><tr><th>البند</th><th>بيانات المشروع</th><th>البيانات الموثقة</th><th>النتيجة</th><th>المشاكل والإجراء</th></tr></thead><tbody>' + checkRows + '</tbody></table></div>' +
+        '<p class="' + verificationMessageClass + '" data-plans-verification-summary>' + escapeHtml(verificationMessage) + '</p>' +
+        issuesHtml +
+        (checkFindings.length ? '<div class="plans-workflow-table-wrap"><table class="plans-workflow-table plans-check-table"><thead><tr><th>البند</th><th>بيانات المشروع</th><th>البيانات الموثقة</th><th>النتيجة</th><th>المشاكل والإجراء</th></tr></thead><tbody>' + checkRows + '</tbody></table></div>' : '') +
         '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!canApprove ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
         '</section>' +
-        '<section class="plans-workflow-panel" data-plans-workflow-stage="boundary"' + (activeStage !== 'boundary' ? ' hidden' : '') + '>' +
+        '<section class="plans-workflow-panel plans-workflow-distribution-panel" data-plans-workflow-stage="boundary"' + (activeStage !== 'boundary' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>توزيع المكونات على الأدوار</h4><button type="button" class="btn primary small" data-plans-workflow-action="propose-distribution">اقتراح التوزيع</button></div>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.distribution_notes_title', 'ملاحظات التوزيع')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
         '<textarea rows="3" maxlength="1000000" data-plans-distribution-notes>' + escapeHtml(workflow.distributionNotes) + '</textarea>' +
         '<div data-plans-distribution-editor>' + visualConceptDistributionEditorHtml(distribution) + '</div>' +
         '<div class="plans-distribution-revise">' +
-        '<input type="text" maxlength="4000" data-plans-distribution-revision value="' + escapeHtml(workflow.distributionRevision || '') + '" placeholder="' + escapeHtml(WFT('plans.dist_revise_placeholder', 'انقل المكاتب من الدور الثالث إلى الخامس')) + '">' +
+        '<label for="plansDistributionRevision">' + escapeHtml(WFT('plans.dist_revise_label', 'طلب تعديل التوزيع')) + '</label>' +
+        '<input id="plansDistributionRevision" type="text" maxlength="4000" data-plans-distribution-revision value="' + escapeHtml(workflow.distributionRevision || '') + '">' +
         '<button type="button" class="btn ghost small" data-plans-workflow-action="revise-distribution"' + ((Array.isArray(distribution.rows) && distribution.rows.length) ? '' : ' disabled') + '>' + escapeHtml(WFT('plans.dist_revise_button', 'تطبيق التعديل')) + '</button>' +
         '</div>' +
         '<div data-plans-distribution-results>' + visualConceptDistributionResultsHtml(distribution) + '</div>' +

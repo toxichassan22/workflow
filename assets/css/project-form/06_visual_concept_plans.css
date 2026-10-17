@@ -1,0 +1,332 @@
+/* Visual concept plan workflow layout */
+    .visual-concept-mode-selector {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px;
+      background: #f1f5f9;
+      padding: 4px;
+      border-radius: 10px;
+      width: fit-content;
+    }
+
+    .visual-concept-mode-btn {
+      border: none;
+      background: transparent;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      color: var(--muted);
+      transition: all .15s ease;
+    }
+
+    .visual-concept-mode-btn.active {
+      background: #fff;
+      color: var(--p);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+    }
+
+    .visual-concept-mode-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .plans-workflow-card {
+      display: grid;
+      gap: 16px;
+    }
+
+    /* Grid children default to min-width:auto and would refuse to shrink below
+       their content — the 980px distribution table then stretches the whole
+       panel past the canvas instead of scrolling inside its wrap. */
+    .visual-concept-page > *,
+    .plans-workflow-card > *,
+    .plans-workflow-panel > *,
+    .plans-boundary-editor > * {
+      min-width: 0;
+    }
+
+    .plans-workflow-steps {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .plans-workflow-steps li {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f7fafc;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .plans-workflow-steps li button {
+      display: block;
+      width: 100%;
+      min-height: 42px;
+      padding: 10px;
+      border: 0;
+      border-radius: 9px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .plans-workflow-steps li button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .plans-workflow-steps li.is-active {
+      border-color: var(--p);
+      background: #eef6ff;
+      color: var(--p);
+    }
+
+    .plans-workflow-steps li.is-complete {
+      border-color: #b9e1d1;
+      background: #edf7f3;
+      color: #126247;
+    }
+
+    .plans-workflow-panel {
+      display: grid;
+      gap: 12px;
+      padding-top: 4px;
+    }
+
+    .plans-workflow-panel[hidden] {
+      display: none !important;
+    }
+
+    .plans-workflow-panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .plans-workflow-panel-head h4 {
+      margin: 0;
+      color: var(--p);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .plans-workflow-table-wrap,
+    .plans-boundary-table-wrap {
+      max-width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+    }
+
+    .plans-workflow-table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+
+    .plans-workflow-table th,
+    .plans-workflow-table td {
+      padding: 8px;
+      border-bottom: 1px solid var(--line);
+      text-align: right;
+      vertical-align: top;
+    }
+
+    .plans-workflow-table th {
+      background: #f7fafc;
+      color: var(--p);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .plans-workflow-table tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .plans-workflow-table input,
+    .plans-workflow-panel textarea {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+    }
+
+    .plans-workflow-empty {
+      padding: 18px !important;
+      color: var(--muted);
+      text-align: center !important;
+    }
+
+    .plans-workflow-notice {
+      padding: 10px 12px;
+      border: 1px solid #efb3b3;
+      border-radius: 10px;
+      background: #fff0f0;
+      color: #9c1d1d;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .plans-workflow-success {
+      color: #166534 !important;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-weight: 700;
+    }
+
+    .plans-distribution-risk {
+      margin: 10px 0 0;
+      color: var(--danger, #b33a3a);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .plans-issue-list {
+      margin: 0;
+      padding-inline-start: 18px;
+      line-height: 1.7;
+    }
+
+    .plans-conflict-location {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .plans-conflict-solution {
+      margin-top: 7px;
+      padding: 7px 9px;
+      border-radius: 8px;
+      background: #f0fdf4;
+      border: 1px solid #bbf7d0;
+      color: #166534;
+      line-height: 1.6;
+    }
+
+    .plans-check-result {
+      display: inline-block;
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      white-space: nowrap;
+    }
+
+    .plans-distribution-revise {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 8px 0;
+    }
+
+    .plans-distribution-revise input {
+      flex: 1;
+    }
+
+    .plans-distribution-revise label {
+      flex: 0 0 auto;
+      color: var(--p);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .plans-distribution-table {
+      min-width: 980px;
+    }
+
+    .plans-distribution-table td {
+      vertical-align: middle;
+    }
+
+    .plans-distribution-table tfoot td {
+      background: #f8fafc;
+      border-top: 2px solid var(--line);
+      font-weight: 700;
+    }
+
+    .plans-distribution-table tfoot .plans-distribution-total-head td {
+      background: #eef2f7;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    @media (max-width: 860px) {
+      .plans-workflow-steps {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .plans-distribution-table-wrap {
+      max-height: min(64vh, 680px);
+      overflow: auto;
+      overscroll-behavior: contain;
+    }
+
+    .plans-distribution-table thead th {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+    }
+
+    .plans-distribution-building th {
+      background: #eef2f7;
+      border-top: 2px solid var(--line);
+      color: var(--p);
+    }
+
+    .plans-distribution-building-count {
+      float: left;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .plans-workflow-result-block {
+      display: grid;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .plans-workflow-result-block h5,
+    .plans-workflow-review h5 {
+      margin: 0;
+      color: var(--p);
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .plans-workflow-review {
+      display: grid;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f7fafc;
+      color: var(--ink);
+      font-size: 12px;
+    }
+
+    .plans-workflow-distribution-panel {
+      padding-bottom: 72px;
+    }
