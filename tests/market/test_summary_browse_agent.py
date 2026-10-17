@@ -44,7 +44,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 'url': url, 'title': 'صفحة بيانات', 'content': 'دليل'} }],
         }}]}
 
-    def test_individual_researcher_uses_argon_playwright_and_only_searxng(self):
+    def test_individual_researcher_uses_haiku_playwright_and_only_searxng(self):
         module = self.module
         captured = {}
 
@@ -63,12 +63,13 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 {'tenant_id': 't1'}, time.time() + 30, on_event=on_event)
 
         self.assertTrue(outcome['searched'])
-        self.assertEqual(captured['model'], module.GEMINI_TEXT_MODEL)
+        self.assertEqual(captured['model'], module._SUMMARY_RESEARCHER_MODEL)
+        self.assertEqual(captured['model'], 'anthropic/claude-haiku-5.5')
         self.assertTrue(captured['local_tools'])
         self.assertEqual(captured['search_provider'], 'searxng')
         self.assertEqual(captured['max_steps'], 100)
         self.assertEqual(captured['search_budget'], 16)
-        self.assertEqual(captured['max_tokens'], 64000)
+        self.assertEqual(captured['max_tokens'], 8000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         self.assertIs(captured['on_event'], on_event)
         self.assertIn('site:rei.rega.gov.sa', captured['prompt'])
@@ -78,6 +79,50 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIn('تستنفد البيانات المتاحة للنطاق', captured['prompt'])
         self.assertIn('الروضة', captured['prompt'])
         self.assertNotIn('server_tools', captured)
+
+    def test_completed_researcher_is_reused_when_resuming(self):
+        module = self.module
+        group = module._SUMMARY_RESEARCH_GROUPS[0]
+        source_map = {item['key']: [] for item in module._SUMMARY_RESEARCH_GROUPS}
+        source_map[group['key']] = ['rega.gov.sa']
+        parsed = {'findings': [{'metric': 'عدد الصفقات', 'value': '12'}],
+                  'coverage': []}
+        reply = {'choices': [{'message': {
+            'content': json.dumps(parsed, ensure_ascii=False),
+            'annotations': [{'url_citation': {
+                'url': 'https://rega.gov.sa/city-data',
+                'title': 'بيانات المدينة', 'content': 'دليل'} }],
+        }}]}
+        researcher_calls = []
+        checkpoints = []
+
+        def fake_researcher(group, hosts, payload, city, district,
+                            usage_ctx, deadline, offer_lang='ar',
+                            cancel_event=None, on_event=None):
+            researcher_calls.append(hosts[0])
+            return {'key': group['key'], 'label': group['label'],
+                    'city': city, 'district': district, 'hosts': hosts,
+                    'result': reply, 'parsed': parsed, 'parse_error': '',
+                    'pages': [], 'searched': True}
+
+        payload = {'city': 'جدة'}
+        with patch.object(module, '_summary_research_sources_by_group',
+                          return_value=source_map), \
+                patch.object(module, '_run_summary_researcher',
+                             side_effect=fake_researcher):
+            first = module._run_market_summary_research(
+                payload, {}, None, time.time() + 30,
+                checkpoint=checkpoints.append)
+            second = module._run_market_summary_research(
+                payload, {}, None, time.time() + 30,
+                resume_state=checkpoints[-1])
+
+        self.assertTrue(first['success'])
+        self.assertTrue(second['success'])
+        self.assertEqual(researcher_calls, ['rega.gov.sa'])
+        self.assertEqual(len(checkpoints), 1)
+        self.assertEqual(len(checkpoints[0]['researchers']), 1)
+        self.assertIn('https://rega.gov.sa/city-data', second['citation_urls'])
 
     def test_research_tasks_cover_each_source_and_scope_in_parallel(self):
         module = self.module
@@ -225,6 +270,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
 
         self.assertIs(result, response)
         self.assertEqual(captured['model'], module.GEMINI_TEXT_MODEL)
+        self.assertEqual(captured['model'], 'google/gemini-4-argon')
         self.assertEqual(captured['reasoning_effort'], 'medium')
         self.assertEqual(captured['max_tokens'], 64000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')

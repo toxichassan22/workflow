@@ -852,6 +852,83 @@ class SummaryChatApiTests(unittest.TestCase):
         self.assertEqual(cons_job.get('kind'), 'summary_consolidate')
         self.assertEqual(cons_job.get('status'), 'completed')
 
+    def test_market_summary_job_resume_route_reuses_saved_checkpoint(self):
+        module = self.application_module
+        job_id = 'jobresume01'
+        resume_state = {'researchers': {'task-1': {'parsed': {'findings': []}}},
+                        'evidencePages': []}
+        module._write_market_job(self.tenant, job_id, {
+            'status': 'failed', 'success': False, 'kind': 'summary',
+            'failureReason': 'insufficient_credit',
+            'payload': {'kind': 'summary', 'data': self._chat_data()},
+            'actor': {'user_id': None, 'user_name': 'مدير',
+                      'user_role': 'company_admin'},
+            'resumeState': resume_state,
+        })
+
+        public = self.client.get(
+            f'/api/market-study/jobs/{job_id}', headers=self.headers)
+        self.assertEqual(public.status_code, 200)
+        self.assertTrue(public.get_json()['canResume'])
+        self.assertNotIn('resumeState', public.get_json())
+
+        with patch.object(module.threading, 'Thread', _InlineThread), \
+                patch.object(module, '_market_job_worker') as worker:
+            response = self.client.post(
+                f'/api/market-study/jobs/{job_id}/resume', headers=self.headers)
+        self.assertEqual(response.status_code, 202, response.get_json())
+        self.assertEqual(response.get_json()['jobId'], job_id)
+        self.assertEqual(worker.call_args.args[2], 'summary')
+        self.assertEqual(worker.call_args.args[3], self._chat_data())
+        self.assertEqual(worker.call_args.args[4], job_id)
+        stored = module._read_market_job(self.tenant, job_id)
+        self.assertEqual(stored.get('status'), 'queued')
+        self.assertEqual(stored.get('resumeState'), resume_state)
+
+    def test_market_summary_resume_route_rejects_non_credit_failures(self):
+        module = self.application_module
+        job_id = 'jobnoretry01'
+        module._write_market_job(self.tenant, job_id, {
+            'status': 'failed', 'success': False, 'kind': 'summary',
+            'failureReason': 'search_not_run',
+            'payload': {'kind': 'summary', 'data': self._chat_data()},
+            'actor': {},
+        })
+        response = self.client.post(
+            f'/api/market-study/jobs/{job_id}/resume', headers=self.headers)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.get_json()['failureReason'], 'job_not_resumable')
+
+    def test_summary_worker_persists_research_checkpoint_for_later_resume(self):
+        module = self.application_module
+        job_id = 'jobcheckpoint01'
+        initial_state = {'researchers': {}, 'evidencePages': []}
+        saved_state = {'researchers': {'task-1': {'parsed': {'findings': []}}},
+                       'evidencePages': []}
+        module._write_market_job(self.tenant, job_id, {
+            'status': 'queued', 'success': True, 'kind': 'summary',
+            'payload': {'kind': 'summary', 'data': self._chat_data()},
+            'actor': {}, 'resumeState': initial_state,
+        })
+
+        def stop_for_credit(_data, tenant_id=None, progress=None,
+                            resume_state=None, checkpoint=None):
+            self.assertEqual(tenant_id, self.tenant)
+            self.assertEqual(resume_state, initial_state)
+            checkpoint(saved_state)
+            return {'success': False, 'failureReason': 'insufficient_credit',
+                    'error': 'رصيد غير كافٍ'}
+
+        with self.app.app_context(), \
+                patch.object(module, '_execute_market_summary', side_effect=stop_for_credit):
+            module._market_job_worker(
+                self.app, self.tenant, 'summary', self._chat_data(), job_id)
+
+        job = module._read_market_job(self.tenant, job_id)
+        self.assertEqual(job.get('status'), 'failed')
+        self.assertEqual(job.get('resumeState'), saved_state)
+        self.assertTrue(module._public_job(job)['canResume'])
+
     def test_redispatch_accepts_new_kinds_and_still_refuses_unknown(self):
         module = self.application_module
         with self.app.app_context(), \

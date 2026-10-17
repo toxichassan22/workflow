@@ -34,6 +34,25 @@
       return WFT('market.job_resumed', 'توجد مهمة قيد التنفيذ — جاري متابعة نتيجتها.');
     }
 
+    function setMarketSummaryResumeAvailable(available) {
+      const button = document.getElementById('marketResumeSummaryBtn');
+      if (button) button.hidden = !available;
+    }
+
+    async function restoreMarketSummaryResumeAction() {
+      const jobId = rememberedMarketJob('summary');
+      if (!jobId) return;
+      try {
+        const job = await api(
+          'GET', '/api/market-study/jobs/' + encodeURIComponent(jobId));
+        setMarketSummaryResumeAvailable(Boolean(
+          job && job.status === 'failed' && job.canResume));
+        if (!job || job.failureReason === 'job_not_found') {
+          rememberMarketJob('summary', '');
+        }
+      } catch (_) { /* the generate action can still reattach when the service returns */ }
+    }
+
     function marketCompetitorOnlyNoEvidenceVerifyFailure(res) {
       const competitors = Array.isArray(res && res.competitors) ? res.competitors : [];
       const failures = competitors.filter(row => String(row && (row.verify_state || row.verifyState) || '') === 'search_not_run');
@@ -77,6 +96,10 @@
       if (!jobId) return null;
       const res = await api('GET', '/api/market-study/jobs/' + encodeURIComponent(jobId));
       const status = String(res && res.status || '');
+      if (status === 'failed' && res && res.canResume) {
+        if (typeof onProgress === 'function') onProgress(res);
+        return res;
+      }
       if (status !== 'running' && status !== 'queued') {
         rememberMarketJob(kind, '');
         return null;
@@ -232,6 +255,7 @@
     async function runMarketSummaryJob() {
       const btn = document.getElementById('marketGenerateSummaryBtn');
       const fail = document.getElementById('marketSummaryFailure');
+      setMarketSummaryResumeAvailable(false);
       if (btn) btn.disabled = true;
       if (fail) fail.textContent = '';
       const scopeCheck = (typeof collectMarketSummaryScope === 'function')
@@ -269,7 +293,8 @@
             res = await pollMarketStudyJob(res.jobId, onProgress);
           }
         }
-        if (marketJobSettled(res)) rememberMarketJob('summary', '');
+        if (marketJobSettled(res) && !(res && res.canResume)) rememberMarketJob('summary', '');
+        setMarketSummaryResumeAvailable(Boolean(res && res.canResume));
         if (marketJobInFlight(res)) {
           const stillRunning = marketJobStillRunningText();
           if (fail) fail.textContent = stillRunning;
@@ -292,8 +317,72 @@
       }
     }
 
+    async function resumeMarketSummaryJob() {
+      const jobId = rememberedMarketJob('summary');
+      const btn = document.getElementById('marketResumeSummaryBtn');
+      const generateBtn = document.getElementById('marketGenerateSummaryBtn');
+      const fail = document.getElementById('marketSummaryFailure');
+      if (!jobId) {
+        setMarketSummaryResumeAvailable(false);
+        return;
+      }
+      if (btn) btn.disabled = true;
+      if (generateBtn) generateBtn.disabled = true;
+      if (fail) fail.textContent = '';
+      const priorState = getMarketStudyState();
+      const currentSummary = marketSummaryState(priorState.summary);
+      const currentSwot = { ...(priorState.swot || {}) };
+      const currentOneBlock = String(priorState.one_block_summary || '').trim();
+      showLoader('استكمال ملخص السوق', 'جاري استكمال مراحل الدراسة المحفوظة...', 12);
+      try {
+        const onProgress = job => {
+          const pct = Number(job && job.progress);
+          updateLoaderProgress(Number.isFinite(pct) && pct > 0 ? Math.min(pct, 99) : 12,
+            (job && job.message) || 'جاري استكمال الملخص...');
+        };
+        let res = await api(
+          'POST', '/api/market-study/jobs/' + encodeURIComponent(jobId) + '/resume', {});
+        if (res && res.jobId && (res.status === 'queued' || res.status === 'running')) {
+          res = await pollMarketStudyJob(jobId, onProgress);
+        }
+        const terminalResumeFailure = res &&
+          ['job_not_resumable', 'job_not_found'].includes(String(res.failureReason || ''));
+        if (terminalResumeFailure) rememberMarketJob('summary', '');
+        if (res && (res.status === 'completed' ||
+            (res.status === 'failed' && !res.canResume)) && !terminalResumeFailure) {
+          rememberMarketJob('summary', '');
+        }
+        setMarketSummaryResumeAvailable(Boolean(res && (res.canResume ||
+          (res.success === false && !terminalResumeFailure))));
+        if (marketJobInFlight(res)) {
+          const stillRunning = marketJobStillRunningText();
+          if (fail) fail.textContent = stillRunning;
+          toast(stillRunning);
+          return;
+        }
+        if (!res || !res.success || !res.summary) {
+          const message = (res && (res.error || res.providerError))
+            || 'تعذر استكمال ملخص السوق. لم يُستبدل النص الحالي.';
+          if (fail) fail.textContent = message;
+          toast(message);
+          return;
+        }
+        finishMarketSummaryJob(res, currentSummary, currentSwot, currentOneBlock);
+        rememberMarketJob('summary', '');
+        setMarketSummaryResumeAvailable(false);
+      } catch (error) {
+        if (fail) fail.textContent = error.message || 'تعذر استكمال ملخص السوق';
+        toast(error.message || 'تعذر استكمال ملخص السوق');
+      } finally {
+        hideLoader();
+        if (btn) btn.disabled = false;
+        if (generateBtn) generateBtn.disabled = false;
+      }
+    }
+
     function finishMarketSummaryJob(res, currentSummary, currentSwot, currentOneBlock) {
       const fail = document.getElementById('marketSummaryFailure');
+      setMarketSummaryResumeAvailable(false);
       const hasCurrent = marketSummaryHasContent(currentSummary)
         || currentOneBlock
         || Object.values(currentSwot).some(value => String(value || '').trim());

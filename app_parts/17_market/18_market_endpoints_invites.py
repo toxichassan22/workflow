@@ -602,7 +602,8 @@ _COMPETITORS_SEARCH_BUDGET = 10
 _COMPETITORS_MAX_STEPS = 20
 
 
-def _execute_market_summary(data, tenant_id=None, progress=None):
+def _execute_market_summary(data, tenant_id=None, progress=None,
+                            resume_state=None, checkpoint=None):
     """Job entry — one evidence pool, one deadline, one shared browser
     session for the source plan and the main browse call, mirroring the
     competitors job's wiring."""
@@ -613,13 +614,15 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
         except Exception:
             tenant_id = None
     evidence_pool = _new_evidence_pool()
-    _preload_failed_run_evidence(tenant_id, 'summary', data, evidence_pool)
+    if not (isinstance(resume_state, dict) and resume_state):
+        _preload_failed_run_evidence(tenant_id, 'summary', data, evidence_pool)
     deadline = time.time() + _SUMMARY_JOB_TIME_BUDGET
     session = _market_browser_session(search_provider='searxng')
     try:
         result = _run_market_summary(
             data, tenant_id=tenant_id, progress=report,
-            evidence_pool=evidence_pool, deadline=deadline, session=session)
+            evidence_pool=evidence_pool, deadline=deadline, session=session,
+            resume_state=resume_state, checkpoint=checkpoint)
     finally:
         if session is not None:
             try:
@@ -630,7 +633,8 @@ def _execute_market_summary(data, tenant_id=None, progress=None):
 
 
 def _run_market_summary(data, tenant_id=None, progress=None,
-                        evidence_pool=None, deadline=None, session=None):
+                        evidence_pool=None, deadline=None, session=None,
+                        resume_state=None, checkpoint=None):
     report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data, tenant_id)
     competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
@@ -665,7 +669,8 @@ def _run_market_summary(data, tenant_id=None, progress=None,
     # catalog and opens only the pages needed for its evidence.
     research = _run_market_summary_research(
         payload, usage_ctx, evidence_pool, deadline, report=report,
-        offer_lang=offer_lang)
+        offer_lang=offer_lang, resume_state=resume_state,
+        checkpoint=checkpoint)
     if not research.get('success'):
         fatal = next((_ai_fatal_error_dict(item.get('result') or {})
                       for item in research.get('outcomes') or []
@@ -782,12 +787,16 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
             g.user_id = actor.get('user_id')
             g.user_name = actor.get('user_name')
             g.user_role = actor.get('user_role')
+        stored_job = _read_market_job(tenant_id, job_id) or {}
+        resume_state = (stored_job.get('resumeState')
+                        if isinstance(stored_job.get('resumeState'), dict) else {})
         _write_market_job(tenant_id, job_id, {
             'status': 'running',
             'success': True,
             'message': 'جاري البحث في المصادر الرسمية وإعداد النتائج...',
             'kind': kind,
             'progress': 8,
+            'resumeState': resume_state,
         })
 
         def report(pct, message):
@@ -803,6 +812,18 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
                 'message': str(message or '').strip() or 'جاري إعداد دراسة السوق...',
             })
 
+        def checkpoint(state):
+            nonlocal resume_state
+            if not isinstance(state, dict):
+                return
+            resume_state = state
+            _write_market_job(tenant_id, job_id, {
+                'status': 'running', 'success': True, 'kind': kind,
+                'progress': 62,
+                'message': 'حُفظ تقدم باحثي السوق المكتمل',
+                'resumeState': resume_state,
+            })
+
         try:
             if kind == 'competitors':
                 payload = _execute_market_competitors(data, tenant_id, progress=report)
@@ -810,6 +831,10 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
                 payload = _execute_market_summary_chat(data, tenant_id, progress=report)
             elif kind == 'summary_consolidate':
                 payload = _execute_market_summary_consolidate(data, tenant_id, progress=report)
+            elif kind == 'summary':
+                payload = _execute_market_summary(
+                    data, tenant_id, progress=report,
+                    resume_state=resume_state, checkpoint=checkpoint)
             else:
                 payload = _execute_market_summary(data, tenant_id, progress=report)
             status = 'completed' if payload.get('success') else 'failed'

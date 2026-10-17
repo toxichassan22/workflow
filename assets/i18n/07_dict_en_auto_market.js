@@ -398,5 +398,13 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "تفاصيل المزود": "Provider details",
   "توجد مهمة قيد التنفيذ — جاري متابعة نتيجتها.": "A task is already running — following its progress.",
   "المهمة ما زالت تعمل في الخلفية.": "The task is still running in the background.",
+  "استكمال المهمة": "Resume task",
+  "استكمال ملخص السوق": "Resume market summary",
+  "استُؤنفت دراسة السوق من آخر مرحلة محفوظة": "Market study resumed from its last saved stage",
+  "جاري استكمال الملخص...": "Resuming summary...",
+  "جاري استكمال مراحل الدراسة المحفوظة...": "Resuming saved study stages...",
+  "حُفظ تقدم باحثي السوق المكتمل": "Completed market-research progress saved",
+  "تعذر استكمال ملخص السوق": "Could not resume market summary",
+  "تعذر استكمال ملخص السوق. لم يُستبدل النص الحالي.": "Could not resume market summary. Current text was kept.",
   "يُقاس على": "Benchmarks"
 }/*I18N_EN_AUTO_END*/);

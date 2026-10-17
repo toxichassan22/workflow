@@ -55,10 +55,12 @@ _SUMMARY_RESEARCH_GROUPS = (
 _SUMMARY_RESEARCH_MAX_WORKERS = 100
 _SUMMARY_RESEARCH_MAX_STEPS = 100
 _SUMMARY_RESEARCH_SEARCH_BUDGET = 16
-# Argon can return up to roughly 66k tokens; keep the request just below that
-# ceiling. Non-fatal output-cap quotes can reduce a request; fatal balance
-# refusals stop the research job immediately.
-_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS = 64000
+# Source researchers do bounded evidence extraction; the Argon aggregator
+# handles the full synthesis after research. Keep each researcher request
+# small so OpenRouter does not reserve an unnecessarily large completion.
+_SUMMARY_RESEARCHER_MODEL = 'anthropic/claude-haiku-5.5'
+_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS = 8000
+_SUMMARY_AGGREGATOR_MAX_OUTPUT_TOKENS = 64000
 _SUMMARY_RESEARCH_REQUIRED_URLS = {
     'rei.rega.gov.sa': [
         'https://rei.rega.gov.sa',
@@ -188,7 +190,7 @@ def _run_summary_researcher(group, hosts, payload, city, district,
                                       offer_lang=offer_lang)
     result = _browse_agent_call(
         'أنت باحث ويب تستخدم أدوات المتصفح المحلي. لا تخترع نتائج ولا تنهِ المهمة قبل فتح صفحات مصادر.',
-        prompt, dict(usage_ctx or {}), model=GEMINI_TEXT_MODEL, evidence_pool=worker_pool,
+        prompt, dict(usage_ctx or {}), model=_SUMMARY_RESEARCHER_MODEL, evidence_pool=worker_pool,
         deadline=deadline, local_tools=True, search_provider='searxng',
         search_budget=_SUMMARY_RESEARCH_SEARCH_BUDGET,
         max_steps=_SUMMARY_RESEARCH_MAX_STEPS,
@@ -206,8 +208,72 @@ def _run_summary_researcher(group, hosts, payload, city, district,
     }
 
 
+def _summary_research_task_id(group, hosts, city, district):
+    return json.dumps([
+        str(group.get('key') or ''), sorted(str(host) for host in (hosts or [])),
+        str(city or ''), str(district or ''),
+    ], ensure_ascii=False, separators=(',', ':'))
+
+
+def _summary_research_checkpoint(outcomes, evidence_pool):
+    """Keep completed researchers and bounded browser evidence for continuation."""
+    researchers = {}
+    for item in outcomes or []:
+        if not isinstance(item, dict) or not item.get('searched'):
+            continue
+        result = item.get('result') if isinstance(item.get('result'), dict) else {}
+        if result.get('error'):
+            continue
+        parsed = item.get('parsed')
+        parsed = parsed if isinstance(parsed, dict) else {}
+        citations = _market_citation_urls(result)
+        researchers[_summary_research_task_id(
+            {'key': item.get('key')}, item.get('hosts'), item.get('city'),
+            item.get('district'))] = {
+                'key': item.get('key'), 'label': item.get('label'),
+                'city': item.get('city'), 'district': item.get('district'),
+                'hosts': list(item.get('hosts') or []), 'parsed': parsed,
+                'rawOutput': _get_chat_response_text(result),
+                'searched': True, 'citationUrls': citations,
+            }
+    return {
+        'researchers': researchers,
+        'evidencePages': _pool_evidence_snapshot(evidence_pool),
+    }
+
+
+def _summary_research_restore(saved):
+    """Rebuild the small response shape used by the synthesis path."""
+    if not isinstance(saved, dict):
+        return None
+    parsed = saved.get('parsed')
+    if not isinstance(parsed, dict) or not saved.get('searched'):
+        return None
+    raw_output = str(saved.get('rawOutput') or '').strip()
+    if not raw_output and not parsed:
+        return None
+    annotations = [
+        {'url_citation': {'url': str(url), 'title': 'مصدر مسترجع', 'content': ''}}
+        for url in (saved.get('citationUrls') or []) if str(url).startswith('http')
+    ]
+    result = {'choices': [{'message': {
+        'content': raw_output or json.dumps(parsed, ensure_ascii=False),
+        'annotations': annotations,
+    }}]}
+    return {
+        'key': str(saved.get('key') or ''),
+        'label': str(saved.get('label') or ''),
+        'city': str(saved.get('city') or ''),
+        'district': str(saved.get('district') or ''),
+        'hosts': list(saved.get('hosts') or []),
+        'result': result, 'parsed': parsed, 'parse_error': '',
+        'pages': [], 'searched': True,
+    }
+
+
 def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
-                                 report=None, offer_lang='ar'):
+                                 report=None, offer_lang='ar',
+                                 resume_state=None, checkpoint=None):
     """Run source-specific Playwright/SearXNG researchers concurrently."""
     report = report if callable(report) else (lambda *_args: None)
     source_map = _summary_research_sources_by_group()
@@ -227,12 +293,44 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                 'outcomes': [], 'citation_urls': []}
     report(12, f'بدء {len(jobs)} مهمة بحث للمصادر، بحد أقصى 100 باحث بالتوازي')
     outcomes = []
+    resume_state = resume_state if isinstance(resume_state, dict) else {}
+    saved_researchers = (resume_state.get('researchers')
+                         if isinstance(resume_state.get('researchers'), dict) else {})
+    saved_pages = resume_state.get('evidencePages')
+    if evidence_pool is not None and isinstance(saved_pages, list):
+        for page in saved_pages:
+            if not isinstance(page, dict):
+                continue
+            url = str(page.get('url') or '').strip()
+            if not url.startswith('http'):
+                continue
+            try:
+                evidence_pool.add_page(
+                    url, title=str(page.get('title') or ''),
+                    content=str(page.get('content') or ''), final_url=url,
+                    via='resumed')
+            except Exception:
+                continue
     progress_lock = threading.Lock()
     worker_progress = [
         {'started': False, 'searches': 0, 'pages': 0, 'current': ''}
         for _ in jobs
     ]
     completed_jobs = set()
+    for job_index, (group, hosts, city, district) in enumerate(jobs):
+        saved = saved_researchers.get(
+            _summary_research_task_id(group, hosts, city, district))
+        restored = _summary_research_restore(saved)
+        if restored is None:
+            continue
+        outcomes.append(restored)
+        completed_jobs.add(job_index)
+        for url in _market_citation_urls(restored['result']):
+            if evidence_pool is not None:
+                try:
+                    evidence_pool.add_page(url, via='resumed')
+                except Exception:
+                    pass
     last_progress = 12
     last_report_at = 0.0
     last_report_pct = 12
@@ -316,8 +414,24 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
         thread_name_prefix='market-research')
     futures = {}
     fatal_found = False
+
+    def persist_checkpoint(force=False):
+        if not callable(checkpoint):
+            return
+        usable = sum(1 for item in outcomes
+                     if item.get('searched')
+                     and not (item.get('result') or {}).get('error'))
+        if not force and usable % 4:
+            return
+        try:
+            checkpoint(_summary_research_checkpoint(outcomes, evidence_pool))
+        except Exception as exc:
+            print(f'[MARKET SUMMARY] researcher checkpoint failed: {exc}')
+
     try:
         for job_index, (group, hosts, city, district) in enumerate(jobs):
+            if job_index in completed_jobs:
+                continue
             on_event = lambda event, index=job_index: report_research_progress(
                 index, event=event)
             future = executor.submit(
@@ -350,17 +464,22 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                 for pending in futures:
                     if pending is not future:
                         pending.cancel()
+                persist_checkpoint(force=True)
                 break
             if evidence_pool is not None:
                 for page in outcome.get('pages') or []:
                     evidence_pool.add_page(page.get('url'), page.get('title'),
                                            page.get('content'), final_url=page.get('url'),
                                            via='parallel_browser')
+            if outcome.get('searched') and not (outcome.get('result') or {}).get('error'):
+                persist_checkpoint()
             report(12 + int(56 * len(outcomes) / max(1, len(jobs))),
                    f"اكتملت مهمة البحث {len(outcomes)} من {len(jobs)}: "
                    f"{outcome['label']} — {city}" + (f' — {district}' if district else ''))
     finally:
         executor.shutdown(wait=not fatal_found, cancel_futures=fatal_found)
+    if not fatal_found:
+        persist_checkpoint(force=True)
     fatal = next((_ai_fatal_error_dict(item.get('result') or {})
                   for item in outcomes
                   if _ai_fatal_error_dict(item.get('result') or {})), None)
@@ -412,6 +531,9 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
         })
         citations.extend(_market_citation_urls(item.get('result') or {}))
         citations.extend(page.get('url') for page in item.get('pages') or [])
+    if evidence_pool is not None:
+        citations.extend(page.get('url') for page in evidence_pool.pages()
+                         if isinstance(page, dict))
     for local_group in ((payload.get('summaryLocalBenchmarks') or {}).get('groups') or []):
         citations.extend(local_group.get('source_urls') or [])
     return {
@@ -429,7 +551,7 @@ def _run_market_summary_aggregator(system_prompt, prompt, usage_ctx,
         remaining = max(1, int(float(deadline) - time.time()))
         if remaining <= 1:
             return {'error': {'message': 'deadline_exceeded'}}
-    cap = min(_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS,
+    cap = min(_SUMMARY_AGGREGATOR_MAX_OUTPUT_TOKENS,
               int(MARKET_STUDY_MAX_TOKENS))
     result = None
     for _attempt in range(4):

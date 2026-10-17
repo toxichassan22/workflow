@@ -1,3 +1,4 @@
+_MARKET_JOB_RESUME_LOCK = threading.Lock()
 
 
 def _job_dir(namespace, tenant_id):
@@ -27,7 +28,7 @@ def _write_job(namespace, tenant_id, job_id, payload):
         except Exception:
             existing = None
         if isinstance(existing, dict):
-            for sticky in ('payload', 'actor', 'agentState'):
+            for sticky in ('payload', 'actor', 'agentState', 'resumeState'):
                 if sticky not in payload and sticky in existing:
                     payload[sticky] = existing[sticky]
     body = json.dumps(payload, ensure_ascii=False)
@@ -210,7 +211,16 @@ def _redispatch_job(namespace, tenant_id, job_id, job):
     return False
 
 
-_JOB_INTERNAL_KEYS = ('payload', 'actor', 'pid', 'evidencePages')
+_JOB_INTERNAL_KEYS = ('payload', 'actor', 'pid', 'evidencePages', 'resumeState')
+
+
+def _market_job_can_resume(job):
+    return bool(
+        isinstance(job, dict)
+        and str(job.get('kind') or '') == 'summary'
+        and str(job.get('status') or '') == 'failed'
+        and str(job.get('failureReason') or '') in (
+            'insufficient_credit', 'billing_refused'))
 
 
 def _public_job(job):
@@ -221,6 +231,7 @@ def _public_job(job):
     state = out.get('agentState')
     if isinstance(state, dict) and 'slides' in state:
         out['agentState'] = {k: v for k, v in state.items() if k != 'slides'}
+    out['canResume'] = _market_job_can_resume(job)
     return out
 
 

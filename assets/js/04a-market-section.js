@@ -97,6 +97,7 @@
           </div>
           <div class="market-actions" style="margin-top:12px">
             <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
+            <button type="button" class="btn ghost" id="marketResumeSummaryBtn" onclick="resumeMarketSummaryJob()" hidden>استكمال المهمة</button>
           </div>
           <div id="marketSummaryFailure"></div>
           <div id="marketSummaryCompare" hidden></div>
@@ -174,6 +175,9 @@
       });
       refreshDynamicI18n(div);
       if (typeof mountMarketSummaryChat === 'function') mountMarketSummaryChat(div);
+      if (typeof restoreMarketSummaryResumeAction === 'function') {
+        restoreMarketSummaryResumeAction();
+      }
     }
 
     function activateMarketStudyTab(root, tabKey) {

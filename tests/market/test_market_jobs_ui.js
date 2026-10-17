@@ -56,6 +56,7 @@ function fixture() {
     marketFillCompetitorsBtn: { disabled: false },
     marketCompetitorsNote: recordingText(),
     marketGenerateSummaryBtn: { disabled: false },
+    marketResumeSummaryBtn: { disabled: false, hidden: true },
     marketSummaryFailure: recordingText(),
     marketSummaryCompare: { hidden: true, innerHTML: '' },
     marketStudyData: { value: '', dataset: { key: 'market_study_data' } },
@@ -451,6 +452,56 @@ test('the summary job re-attaches to its remembered running job', async () => {
   assert.match(inputs.marketSummaryCompare.innerHTML, /تعريف السوق الحالي/);
   assert.equal(context.appliedStates.length, 0);
   assert.equal(context.rememberedMarketJob('summary'), '');
+});
+
+test('a credit-stopped summary keeps its job and can resume that same job', async () => {
+  const { context, inputs } = fixture();
+  context.collectMarketSummaryScope = () => ({ cities: [{ name: 'جدة', districts: [] }] });
+  context.pollMarketStudyJob = async () => ({
+    success: false, status: 'failed', canResume: true,
+    failureReason: 'insufficient_credit', error: 'رصيد غير كافٍ'
+  });
+  context.nextApi = method => method === 'POST'
+    ? { success: true, jobId: 'job-summary-credit', status: 'queued' }
+    : {};
+  await context.runMarketSummaryJob();
+  assert.equal(context.rememberedMarketJob('summary'), 'job-summary-credit');
+  assert.equal(inputs.marketResumeSummaryBtn.hidden, false);
+
+  context.nextApi = (method, endpoint) => {
+    assert.equal(method, 'POST');
+    assert.equal(endpoint, JOB_ENDPOINT('job-summary-credit') + '/resume');
+    return { success: true, jobId: 'job-summary-credit', status: 'queued' };
+  };
+  context.pollMarketStudyJob = async jobId => {
+    assert.equal(jobId, 'job-summary-credit');
+    return {
+      success: true, status: 'completed',
+      summary: { market_definition: 'تعريف مستكمل' }, swot: {}, sources: []
+    };
+  };
+  await context.resumeMarketSummaryJob();
+  assert.equal(context.rememberedMarketJob('summary'), '');
+  assert.equal(inputs.marketResumeSummaryBtn.hidden, true);
+  assert.match(inputs.marketSummaryCompare.innerHTML, /تعريف مستكمل/);
+  assert.equal(postCount(context, '/api/market-study/summary'), 1);
+  assert.equal(postCount(context, JOB_ENDPOINT('job-summary-credit') + '/resume'), 1);
+});
+
+test('the saved resume action returns after reopening the market section', async () => {
+  const { context, inputs } = fixture();
+  const state = context.getMarketStudyState();
+  state.activeMarketJobs = { summary: 'job-summary-credit' };
+  context.setMarketStudyState(state);
+  context.nextApi = (method, endpoint) => {
+    assert.equal(method, 'GET');
+    assert.equal(endpoint, JOB_ENDPOINT('job-summary-credit'));
+    return { success: false, status: 'failed', canResume: true,
+      failureReason: 'insufficient_credit' };
+  };
+  await context.restoreMarketSummaryResumeAction();
+  assert.equal(inputs.marketResumeSummaryBtn.hidden, false);
+  assert.equal(context.rememberedMarketJob('summary'), 'job-summary-credit');
 });
 
 test('still-running and resumed wording carry status, never instructions', () => {

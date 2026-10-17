@@ -112,3 +112,52 @@ def api_market_study_job(job_id):
             'failureReason': 'job_not_found',
         }), 404
     return jsonify(_public_job(job))
+
+
+@app.route('/api/market-study/jobs/<job_id>/resume', methods=['POST'])
+@require_permission('create_presentation')
+def api_resume_market_study_job(job_id):
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
+        return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
+    billing_guard = _require_billing_balance('market_summary')
+    if billing_guard is not None:
+        return billing_guard
+    with _MARKET_JOB_RESUME_LOCK:
+        job = _read_market_job(g.tenant_id, job_id)
+        if not job:
+            return jsonify({
+                'success': False, 'error': 'مهمة دراسة السوق غير موجودة',
+                'failureReason': 'job_not_found',
+            }), 404
+        if not _market_job_can_resume(job):
+            return jsonify({
+                'success': False,
+                'error': 'هذه المهمة غير متاحة للاستكمال',
+                'failureReason': 'job_not_resumable',
+            }), 409
+        stored_payload = job.get('payload') if isinstance(job.get('payload'), dict) else {}
+        data = stored_payload.get('data') if isinstance(stored_payload.get('data'), dict) else {}
+        actor = job.get('actor') if isinstance(job.get('actor'), dict) else {
+            'user_id': getattr(g, 'user_id', None),
+            'user_name': getattr(g, 'user_name', None),
+            'user_role': getattr(g, 'user_role', None),
+        }
+        resumable = {key: job[key] for key in ('payload', 'actor', 'resumeState')
+                     if key in job}
+        _write_market_job(g.tenant_id, job_id, {
+            **resumable,
+            'status': 'queued', 'success': True, 'kind': 'summary',
+            'progress': 0, 'resumed': True,
+            'message': 'استُؤنفت دراسة السوق من آخر مرحلة محفوظة',
+        })
+    threading.Thread(
+        target=_market_job_worker,
+        args=(current_app._get_current_object(), g.tenant_id,
+              'summary', data, job_id),
+        kwargs={'actor': actor}, daemon=True,
+    ).start()
+    return jsonify({
+        'success': True, 'jobId': job_id, 'status': 'queued',
+        'kind': 'summary', 'resumed': True,
+        'message': 'استُؤنفت دراسة السوق من آخر مرحلة محفوظة',
+    }), 202
