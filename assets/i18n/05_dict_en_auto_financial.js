@@ -421,6 +421,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "مساحة الأرض م²": "Land Area sqm",
   "مساحة البدرومات م²": "Basement area sqm",
   "مساحة الوحدة م²": "Unit area sqm",
+  "بصمة الوحدة م²": "Unit footprint sqm",
   "مساهمة الأرض العينية": "In-kind land contribution",
   "مستودع": "Warehouse",
   "مسطحات البناء فوق الأرض م²": "Above-ground built-up area sqm",

@@ -3,6 +3,35 @@ def _visual_plan_site_area_text(value):
     return f'{number:,.2f}'.rstrip('0').rstrip('.') if number is not None else ''
 
 
+def _visual_plan_site_note_aggregate_footprint(notes):
+    text = str(notes or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').lower()
+    patterns = (
+        r'(?:اجمال\w*|مجموع)\D{0,32}(?:بصم\w*|footprint)\D{0,32}([\d][\d,٬]*(?:[.٫][\d]+)?)',
+        r'(?:بصم\w*|footprint)\D{0,32}(?:اجمال\w*|مجموع)\D{0,32}([\d][\d,٬]*(?:[.٫][\d]+)?)',
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return visual_plan_geometry.finite_number(match.group(1).replace(',', '').replace('٬', '').replace('٫', '.'))
+    return None
+
+
+def _visual_plan_site_measurement_dispute(message):
+    text = str(message or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').lower()
+    disputes = ('غير دقيق', 'غير صحيح', 'غير مضبوط', 'غلط', 'incorrect', 'inaccurate', 'wrong')
+    return ('بصم' in text or 'footprint' in text) and any(item in text for item in disputes)
+
+
+def _visual_plan_site_footprint_source_question(message):
+    text = str(message or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').lower()
+    asks_source = any(item in text for item in ('منين', 'مصدر', 'جبت', 'حسبت', 'ازاي', 'كيف', 'where', 'how'))
+    mentions_area = any(item in text for item in ('بصم', 'مساح', 'footprint', 'area'))
+    return asks_source and mentions_area
+
+
 def _visual_plan_site_conflict_summary(facts):
     land = facts.get('landAreaSqm')
     ratio = facts.get('coverageRatioPercent')
@@ -85,6 +114,39 @@ def _visual_plan_site_conflict_interview(data, error):
         row['minFootprintAreaSqm'] = min(row['minFootprintAreaSqm'], area)
         row['maxFootprintAreaSqm'] = max(row['maxFootprintAreaSqm'], area)
 
+    component_inputs = []
+    if context:
+        for component in context.get('components') or []:
+            if not _visual_plan_is_individual_home(component.get('name')):
+                continue
+            units = visual_plan_geometry.finite_number(component.get('units'))
+            unit_footprint = visual_plan_geometry.finite_number(component.get('unitFootprintArea'))
+            notes = str(component.get('notes') or '')[:300]
+            aggregate_note = _visual_plan_site_note_aggregate_footprint(notes)
+            note_unit_footprint = (aggregate_note / units if aggregate_note is not None
+                                   and units is not None and units > 0 else None)
+            component_keys = _visual_plan_component_name_keys(component.get('name'))
+            program_buildings = [item for item in source_buildings.values()
+                                 if component_keys.intersection(
+                                     _visual_plan_component_name_keys(item.get('name')))]
+            program_footprints = [visual_plan_geometry.finite_number(item.get('footprintArea'))
+                                  for item in program_buildings]
+            program_footprints = [value for value in program_footprints if value is not None and value > 0]
+            component_inputs.append({
+                'name': str(component.get('name') or '')[:100],
+                'units': units,
+                'unitAreaSqm': visual_plan_geometry.finite_number(component.get('unitArea')),
+                'builtAreaSqm': visual_plan_geometry.finite_number(component.get('builtArea')),
+                'unitFootprintAreaSqm': unit_footprint,
+                'derivedFootprintPerUnitSqm': program_footprints[0] if program_footprints else None,
+                'levels': visual_plan_geometry.finite_number(
+                    program_buildings[0].get('levels')) if program_buildings else None,
+                'notes': notes,
+                'noteAggregateFootprintSqm': aggregate_note,
+                'noteDerivedFootprintPerUnitSqm': round(note_unit_footprint, 2)
+                if note_unit_footprint is not None else None,
+            })
+
     placed = None
     scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else {}
     if isinstance(scene.get('buildings'), list):
@@ -121,6 +183,7 @@ def _visual_plan_site_conflict_interview(data, error):
              'maxFootprintAreaSqm': round(item['maxFootprintAreaSqm'], 2)}
             for item in buildings_by_name.values()
         ][:20],
+        'financialComponentInputs': component_inputs[:20],
     }
     state = _visual_plan_site_state(data, signature)
     message = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
@@ -140,7 +203,11 @@ def _visual_plan_site_conflict_interview(data, error):
         'Do not repeat the exact figures in reply; the server displays its calculation separately. Ask one '
         'specific follow-up about which source number is disputed. Do not change, approve, or reinterpret '
         'any project input, survey geometry, or approved distribution. Do not claim the conflict is '
-        'resolved, do not set ready, and do not generate a drawing. Always return ready=false and '
+        'Financial component notes and the per-unit footprint field are client-provided facts; '
+        'read them when the client disputes a building footprint, and ask for a precise replacement when '
+        'the correct value is not explicit. Never repeat the full conflict summary after a client reply. '
+        'Do not claim the conflict is resolved, do not set ready, and do not generate a drawing. '
+        'Always return ready=false and '
         'generateRequested=false. '
         'Return JSON only: {"ready":false,"generateRequested":false,"question":"",'
         '"choices":[],"reply":"","memory":""}.'
@@ -155,13 +222,78 @@ def _visual_plan_site_conflict_interview(data, error):
     }
     parsed = {}
     prompt_tokens = 0
-    try:
-        parsed, prompt_tokens = _visual_plan_site_call(
-            system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
-            max_tokens=3000, reasoning_effort='medium')
-    except Exception:
-        # Keep the failed geometry check discussable if the chat provider is unavailable.
-        pass
+    source_question = _visual_plan_site_footprint_source_question(message)
+    measurement_dispute = _visual_plan_site_measurement_dispute(message)
+    if source_question:
+        component = next((item for item in component_inputs
+                          if item.get('derivedFootprintPerUnitSqm') is not None
+                          or item.get('noteDerivedFootprintPerUnitSqm') is not None), None)
+        if component and component.get('unitFootprintAreaSqm') is not None:
+            candidate = component['unitFootprintAreaSqm']
+            model_reply = (f"مساحة بصمة الوحدة جاءت من الحقل المسجل في مكونات الدراسة المالية: "
+                           f"{_visual_plan_site_area_text(candidate)} م² لكل وحدة.")
+        elif component and component.get('derivedFootprintPerUnitSqm') is not None:
+            candidate = component['derivedFootprintPerUnitSqm']
+            levels = component.get('levels') or 1
+            model_reply = (
+                f"قيمة {_visual_plan_site_area_text(candidate)} م² لكل فيلا حُسبت من قسمة المساحة المبنية "
+                f"{_visual_plan_site_area_text(component.get('builtAreaSqm'))} م² على "
+                f"{_visual_plan_site_area_text(component.get('units'))} فيلا وعلى "
+                f"{_visual_plan_site_area_text(levels)} دور.")
+        else:
+            candidate = None
+            model_reply = 'لم أجد في بيانات المكونات قيمة كافية لتحديد مصدر مساحة بصمة الفيلا.'
+        note_candidate = component.get('noteDerivedFootprintPerUnitSqm') if component else None
+        if note_candidate is not None:
+            model_reply += (
+                f" وتذكر ملاحظة المكونات إجمالي بصمة "
+                f"{_visual_plan_site_area_text(component['noteAggregateFootprintSqm'])} م²، "
+                f"أي {_visual_plan_site_area_text(note_candidate)} م² لكل فيلا.")
+            model_question = 'أي قيمة تمثل بصمة الفيلا الواحدة الصحيحة؟'
+            choices = [f"{_visual_plan_site_area_text(note_candidate)} م² حسب الملاحظة",
+                       'سأحدد مساحة أخرى']
+        elif candidate is not None:
+            model_question = 'هل المساحة المبنية وعدد الأدوار المسجلان صحيحان؟'
+            choices = []
+        else:
+            model_question = 'ما مساحة البصمة الصحيحة للفيلا الواحدة بالمتر المربع؟'
+            choices = []
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    elif measurement_dispute:
+        component = next((item for item in component_inputs
+                          if item.get('unitFootprintAreaSqm') is not None
+                          or item.get('noteDerivedFootprintPerUnitSqm') is not None), None)
+        candidate = None
+        source_text = ''
+        if component and component.get('unitFootprintAreaSqm') is not None:
+            candidate = component['unitFootprintAreaSqm']
+            source_text = f"حقل بصمة الوحدة يسجل {_visual_plan_site_area_text(candidate)} م²"
+        elif component and component.get('noteDerivedFootprintPerUnitSqm') is not None:
+            candidate = component['noteDerivedFootprintPerUnitSqm']
+            source_text = (
+                f"الملاحظة تسجل إجمالي بصمة {_visual_plan_site_area_text(component['noteAggregateFootprintSqm'])} م² "
+                f"لعدد {_visual_plan_site_area_text(component['units'])} فيلا"
+            )
+        if candidate is not None and candidate > 0:
+            model_reply = (f"فهمت أن مساحة بصمة الفيلا غير دقيقة. {source_text}، "
+                           f"وهذا يساوي {_visual_plan_site_area_text(candidate)} م² لكل فيلا.")
+            model_question = (f"هل تؤكد أن مساحة البصمة الصحيحة هي "
+                              f"{_visual_plan_site_area_text(candidate)} م² لكل فيلا؟")
+            choices = [f"نعم، {_visual_plan_site_area_text(candidate)} م² لكل فيلا",
+                       'لا، سأحدد مساحة أخرى']
+        else:
+            model_reply = 'فهمت أن مساحة بصمة الفيلا غير دقيقة، ولم أجد قيمة مؤكدة للبصمة في بيانات المكونات.'
+            model_question = 'ما مساحة البصمة الصحيحة للفيلا الواحدة بالمتر المربع؟'
+            choices = []
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    else:
+        try:
+            parsed, prompt_tokens = _visual_plan_site_call(
+                system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
+                max_tokens=3000, reasoning_effort='medium')
+        except Exception:
+            # Keep the failed geometry check discussable if the chat provider is unavailable.
+            pass
 
     model_question = _visual_concept_text(parsed.get('question'), 600)
     model_reply = _visual_concept_text(parsed.get('reply'), 500)
@@ -169,9 +301,13 @@ def _visual_plan_site_conflict_interview(data, error):
                (parsed.get('choices') if isinstance(parsed.get('choices'), list) else [])[:6]
                if str(item).strip()]
     if not model_question:
-        model_question = 'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟'
+        model_question = ('ما الرقم الذي ترى أنه غير دقيق؟' if message else
+                          'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟')
     explanation = _visual_plan_site_conflict_summary(facts)
-    reply_parts = [explanation]
+    has_prior_conversation = bool(previous.get('turns') or previous.get('answers')
+                                  or previous.get('pendingQuestion'))
+    reply_parts = [explanation] if not has_prior_conversation and not (
+        source_question or measurement_dispute) else []
     if model_reply and model_reply != model_question:
         reply_parts.append(model_reply)
     reply_parts.append(model_question)

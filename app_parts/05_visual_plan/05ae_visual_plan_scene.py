@@ -155,7 +155,9 @@ def _visual_plan_program(contract, context):
         if total_area <= 0:
             unit_area = _visual_concept_number(component.get('unitArea'))
             total_area = unit_area * unit_count if unit_area and unit_area > 0 else 0
-        footprint_area = total_area / unit_count / levels if total_area > 0 else 0
+        footprint_area = _visual_concept_number(component.get('unitFootprintArea'))
+        if footprint_area is None or footprint_area <= 0:
+            footprint_area = total_area / unit_count / levels if total_area > 0 else 0
         if footprint_area <= 0:
             raise visual_plan_geometry.PlanGeometryError(
                 'مساحة بصمة الفيلا الواحدة غير مكتملة في المكونات والتوزيع المعتمد.',

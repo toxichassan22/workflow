@@ -58,7 +58,7 @@ function fixture() {
   context.addComponent = component => add(component);
   function add(component) {
     const controls = Object.fromEntries(Object.entries(component).map(([key, value]) => [key, field(value,
-      ['units', 'unitArea', 'builtArea', 'revenueArea'].includes(key) ? 'number' : 'text')]));
+      ['units', 'unitArea', 'unitFootprintArea', 'builtArea', 'revenueArea'].includes(key) ? 'number' : 'text')]));
     const row = { dataset: { componentKey: component.id, parkingPlanId: component.parkingPlanId || '',
       floorRange: component.floorRange || '' },
       querySelector: selector => controls[selector.match(/data-field="([^"]+)"/)?.[1]] || null,
@@ -67,7 +67,7 @@ function fixture() {
     return row;
   }
   add({ id: 'housing', name: 'شقق سكنية', useType: 'residential', units: 100, unitArea: 150,
-    builtArea: 15000, revenueArea: 13000, investmentModel: 'sale' });
+    unitFootprintArea: 105, builtArea: 15000, revenueArea: 13000, investmentModel: 'sale' });
   add({ id: 'retail', name: 'محلات تجارية', useType: 'retail', units: 10, unitArea: 150,
     builtArea: 1500, revenueArea: 1200, investmentModel: 'annualRent' });
   const snapshot = () => plain(context.financialParkingSnapshot());
@@ -93,6 +93,7 @@ test('the proposal snapshot preserves nullable fields and Arabic numeric inputs'
   assert.equal(data.builtUpAreaAbove, 16500);
   assert.equal(data.floorCount, null);
   assert.equal(data.components[0].units, 100);
+  assert.equal(f.context.getComponentRowsData()[0].unitFootprintArea, 105);
   assert.equal(data.components[0].parkingLocation, '');
   assert.equal(f.context.financialParkingNumber(true), null);
   assert.equal(f.context.financialParkingNumber('NaN'), null);
@@ -302,4 +303,19 @@ test('generated-row notes render escaped inside the editable textarea', () => {
     notes: '<script>bad()</script>' });
   assert(element.innerHTML.includes('&lt;script&gt;'));
   assert(!element.innerHTML.includes('<script>'));
+});
+
+test('component rows render and collect the per-unit footprint field', () => {
+  const f = fixture();
+  const controls = Object.fromEntries(Object.entries({ name: 'فلل', units: 100, unitArea: 260,
+    unitFootprintArea: 105, builtArea: 26000, revenueArea: 0, useType: 'residential',
+    investmentModel: 'nonRevenue', notes: '' }).map(([key, value]) => [key, field(value,
+      ['units', 'unitArea', 'unitFootprintArea', 'builtArea', 'revenueArea'].includes(key) ? 'number' : 'text')]));
+  const element = { dataset: {}, innerHTML: '', querySelectorAll: () => [],
+    querySelector: selector => controls[selector.match(/data-field="([^"]+)"/)?.[1]] || null };
+  f.context.document.createElement = () => element;
+  f.realAddComponent({ id: 'villa', name: 'فلل', units: 100, unitArea: 260,
+    unitFootprintArea: 105, builtArea: 26000 });
+  assert.match(element.innerHTML, /data-field="unitFootprintArea"><input type="number" value="105">/);
+  assert.equal(f.context.getComponentRowsData().at(-1).unitFootprintArea, 105);
 });

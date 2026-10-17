@@ -117,6 +117,7 @@
         const name = tr.querySelector('[data-field="name"] input')?.value?.trim() || `مكون ${idx + 1}`;
         const units = parseNumber(tr.querySelector('[data-field="units"] input')?.value);
         const unitArea = parseNumber(tr.querySelector('[data-field="unitArea"] input')?.value);
+        const unitFootprintArea = parseNumber(tr.querySelector('[data-field="unitFootprintArea"] input')?.value);
         const builtArea = parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value);
         const revenueArea = parseNumber(tr.querySelector('[data-field="revenueArea"] input')?.value);
         const useType = tr.querySelector('[data-field="useType"] select')?.value || 'retail';
@@ -128,7 +129,7 @@
           parkingLocation: tr.querySelector('[data-field="parkingLocation"] select')?.value || 'aboveGround',
           parkingPlanId: tr.dataset.parkingPlanId || '', floorRange: tr.dataset.floorRange || ''
         } : {};
-        return { idx, id, name, useType, units, unitArea, builtArea, revenueArea, totalArea: revenueArea, investmentModel, leasable, notes, ...parking };
+        return { idx, id, name, useType, units, unitArea, unitFootprintArea, builtArea, revenueArea, totalArea: revenueArea, investmentModel, leasable, notes, ...parking };
       });
     }
     function updateRevenueComponentOptions() {

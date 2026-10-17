@@ -252,7 +252,7 @@
           <div id="componentsAllowedUsesNote" class="tenant-hint" style="margin:0 0 10px;font-weight:700;line-height:1.7" hidden></div>
           <div class="table-wrap">
             <table id="componentsTable">
-              <thead><tr><th>اسم المكون</th><th>نوع الاستخدام</th><th>عدد الوحدات</th><th>مساحة الوحدة م²</th><th>المساحة المبنية م²</th><th>المساحة البيعية / التأجيرية م²</th><th>نموذج الاستفادة</th><th>الملاحظات</th><th>الناتج</th><th>ترتيب / حذف</th></tr></thead>
+              <thead><tr><th>اسم المكون</th><th>نوع الاستخدام</th><th>عدد الوحدات</th><th>مساحة الوحدة م²</th><th>بصمة الوحدة م²</th><th>المساحة المبنية م²</th><th>المساحة البيعية / التأجيرية م²</th><th>نموذج الاستفادة</th><th>الملاحظات</th><th>الناتج</th><th>ترتيب / حذف</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -596,7 +596,7 @@
     }
 
     function addComponent(d = {}) {
-      const tb = document.querySelector('#componentsTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.componentKey = d.id || ('p_' + Date.now() + '_' + Math.random().toString(16).slice(2)); const units = financialInputNumber(d.units, 1), unitArea = financialInputNumber(d.unitArea, 0), model = d.investmentModel || (d.leasable === 'no' ? 'nonRevenue' : 'operating'); const suggestedArea = units * unitArea; const builtArea = financialInputNumber(d.builtArea ?? d.totalArea, suggestedArea); const revenueArea = financialInputNumber(d.revenueArea, (model === 'nonRevenue' ? 0 : financialInputNumber(d.totalArea, suggestedArea)));
+      const tb = document.querySelector('#componentsTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.componentKey = d.id || ('p_' + Date.now() + '_' + Math.random().toString(16).slice(2)); const units = financialInputNumber(d.units, 1), unitArea = financialInputNumber(d.unitArea, 0), unitFootprintArea = financialInputNumber(d.unitFootprintArea, ''), model = d.investmentModel || (d.leasable === 'no' ? 'nonRevenue' : 'operating'); const suggestedArea = units * unitArea; const builtArea = financialInputNumber(d.builtArea ?? d.totalArea, suggestedArea); const revenueArea = financialInputNumber(d.revenueArea, (model === 'nonRevenue' ? 0 : financialInputNumber(d.totalArea, suggestedArea)));
       tr.dataset.parkingPlanId = d.parkingPlanId || '';
       tr.dataset.floorRange = d.floorRange || '';
       const parkingLocations = [{ v: 'aboveGround', t: 'فوق الأرض' }, { v: 'basement', t: 'بدروم' }, { v: 'surface', t: 'سطحية' }];
@@ -605,6 +605,7 @@
     <td data-field="useType"><select>${selectHtml(useTypes, d.useType || 'retail')}</select><div data-field="parkingLocation" class="financial-parking-location" ${d.useType === 'parking' ? '' : 'hidden'}><label>موقع المواقف</label><select>${selectHtml(parkingLocations, d.parkingLocation || 'aboveGround')}</select></div></td>
     <td data-field="units"><input type="number" value="${units}"></td>
     <td data-field="unitArea"><input type="number" value="${unitArea}"></td>
+    <td data-field="unitFootprintArea"><input type="number" value="${unitFootprintArea}"></td>
     <td data-field="builtArea"><input type="number" value="${builtArea}"><span class="help input miniHelp"></span></td>
     <td data-field="revenueArea"><input type="number" value="${revenueArea}"></td>
     <td data-field="investmentModel"><select>${selectHtml(investmentModels, model)}</select></td>
