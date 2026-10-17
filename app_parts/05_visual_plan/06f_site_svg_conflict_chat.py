@@ -33,6 +33,24 @@ def _visual_plan_site_footprint_source_question(message):
 
 
 def _visual_plan_site_conflict_summary(facts):
+    if facts.get('code') == 'PLANS_SITE_AREA_CONFLICT':
+        failed_item = facts.get('failingSiteItem') or {}
+        failed_label = str(failed_item.get('label') or failed_item.get('name') or 'المساحة المعتمدة')
+        failed_area = visual_plan_geometry.finite_number(failed_item.get('areaSqm'))
+        occupied = facts.get('requiredFootprintTotalSqm')
+        parcel_area = facts.get('parcelAreaSqm') or facts.get('landAreaSqm')
+        parts = [
+            f'سبب توقف المخطط أن المساحة المعتمدة «{failed_label}» لا تتسع داخل حدود الأرض مع البصمات المسجلة.'
+        ]
+        if failed_area is not None:
+            parts.append(f'مساحة «{failed_label}» المسجلة {_visual_plan_site_area_text(failed_area)} م².')
+        if occupied is not None:
+            parts.append(f'إجمالي بصمات المباني المسجلة {_visual_plan_site_area_text(occupied)} م².')
+        if parcel_area is not None:
+            parts.append(f'مساحة الأرض المسجلة {_visual_plan_site_area_text(parcel_area)} م².')
+        parts.append('نحتاج تحديد ما إذا كانت مساحة العنصر أو بصمات المباني أو موضع توزيع المساحة يحتاج مراجعة.')
+        return ' '.join(parts)
+
     land = facts.get('landAreaSqm')
     ratio = facts.get('coverageRatioPercent')
     cap = facts.get('coverageCapSqm')
@@ -83,6 +101,7 @@ def _visual_plan_site_conflict_summary(facts):
 
 
 def _visual_plan_site_conflict_interview(data, error):
+    is_site_area_conflict = getattr(error, 'code', '') == 'PLANS_SITE_AREA_CONFLICT'
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     previous = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
     contract, context, program = {}, {}, {'buildings': []}
@@ -168,6 +187,37 @@ def _visual_plan_site_conflict_interview(data, error):
     coverage_ratio = visual_plan_geometry.finite_number(contract.get('coverageRatio'))
     coverage_percent = (coverage_ratio * 100 if coverage_ratio is not None and coverage_ratio <= 1
                         else coverage_ratio)
+    site_items = []
+    for item in program.get('siteItems', []):
+        if not isinstance(item, dict):
+            continue
+        area = visual_plan_geometry.finite_number(item.get('area'))
+        site_items.append({
+            'id': str(item.get('id') or '')[:120],
+            'label': str(item.get('label') or item.get('name') or item.get('id') or 'مساحة موقع')[:120],
+            'name': str(item.get('name') or '')[:120],
+            'siteType': str(item.get('siteType') or '')[:40],
+            'areaSqm': area,
+        })
+    failed_label_match = re.search(r'«([^»]{1,120})»', str(error))
+    failed_label = failed_label_match.group(1) if failed_label_match else ''
+    failing_site_item = next((item for item in site_items
+                              if failed_label and failed_label.casefold() in
+                              (item['label'] + ' ' + item['name']).casefold()), None)
+    if failing_site_item is None and site_items:
+        failing_site_item = max(site_items, key=lambda item: item.get('areaSqm') or 0)
+    geometry = contract.get('geometry') if isinstance(contract.get('geometry'), dict) else {}
+    parcel_area = 0
+    for parcel in geometry.get('parcels') or []:
+        polygon = parcel.get('polygon') if isinstance(parcel, dict) else parcel
+        if isinstance(polygon, list) and len(polygon) >= 3:
+            try:
+                parcel_area += abs(visual_plan_geometry.signed_area(polygon))
+            except (IndexError, TypeError, ValueError):
+                continue
+    if parcel_area <= 0:
+        parcel_area = visual_plan_geometry.finite_number(contract.get('landArea'))
+
     facts = {
         'code': getattr(error, 'code', 'PLANS_COVERAGE_CONFLICT'),
         'message': str(error)[:500],
@@ -185,6 +235,13 @@ def _visual_plan_site_conflict_interview(data, error):
         ][:20],
         'financialComponentInputs': component_inputs[:20],
     }
+    if is_site_area_conflict:
+        facts.update({
+            'requiredSiteItems': site_items[:20],
+            'requiredSiteAreaTotalSqm': round(sum(item.get('areaSqm') or 0 for item in site_items), 2),
+            'failingSiteItem': failing_site_item,
+            'parcelAreaSqm': round(parcel_area, 2) if parcel_area is not None else None,
+        })
     state = _visual_plan_site_state(data, signature)
     message = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
     if message:
@@ -193,28 +250,46 @@ def _visual_plan_site_conflict_interview(data, error):
             state['answers'] = state['answers'][-100:]
         state['turns'].append({'role': 'user', 'text': message})
 
-    system_prompt = (
-        'You are the site-planning assistant continuing a client conversation in Arabic. '
-        'The validated project inputs currently have a hard building-coverage conflict. '
-        'Use only the supplied conflict facts and conversation history. Respond to the latest client '
-        'message instead of repeating a generic menu. Put a brief direct response in reply, then one '
-        'specific follow-up in question. Acknowledge when the client says they reviewed '
-        'the data or drew the same plan: visual similarity does not remove the numeric coverage limit. '
-        'Do not repeat the exact figures in reply; the server displays its calculation separately. Ask one '
-        'specific follow-up about which source number is disputed. Do not change, approve, or reinterpret '
-        'any project input, survey geometry, or approved distribution. Do not claim the conflict is '
-        'Financial component notes and the per-unit footprint field are client-provided facts; '
-        'read them when the client disputes a building footprint, and ask for a precise replacement when '
-        'the correct value is not explicit. Never repeat the full conflict summary after a client reply. '
-        'Do not claim the conflict is resolved, do not set ready, and do not generate a drawing. '
-        'Always return ready=false and '
-        'generateRequested=false. '
-        'Return JSON only: {"ready":false,"generateRequested":false,"question":"",'
-        '"choices":[],"reply":"","memory":""}.'
-    )
+    if is_site_area_conflict:
+        system_prompt = (
+            'You are the site-planning assistant continuing a client conversation in Arabic. '
+            'The approved site area named in siteAreaConflict.failingSiteItem cannot be placed inside '
+            'the surveyed land together with the recorded building footprints. Use only the supplied '
+            'facts and conversation history. Explain the specific conflict, answer the latest client '
+            'message, then ask one focused question about whether to review the approved site-area value, '
+            'the building footprints, or the placement strategy. Do not claim that total-area subtraction '
+            'proves a shape will fit. Do not change or approve any project input, survey geometry, or '
+            'approved distribution. Never repeat a generic coverage-limit explanation. Do not claim the '
+            'conflict is resolved, do not set ready, and do not generate a drawing. Always return ready=false '
+            'and generateRequested=false. Return JSON only: {"ready":false,"generateRequested":false,'
+            '"question":"","choices":[],"reply":"","memory":""}.'
+        )
+    else:
+        system_prompt = (
+            'You are the site-planning assistant continuing a client conversation in Arabic. '
+            'The validated project inputs currently have a hard building-coverage conflict. '
+            'Use only the supplied conflict facts and conversation history. Respond to the latest client '
+            'message instead of repeating a generic menu. Put a brief direct response in reply, then one '
+            'specific follow-up in question. Acknowledge when the client says they reviewed '
+            'the data or drew the same plan: visual similarity does not remove the numeric coverage limit. '
+            'Do not repeat the exact figures in reply; the server displays its calculation separately. Ask one '
+            'specific follow-up about which source number is disputed. Do not change, approve, or reinterpret '
+            'any project input, survey geometry, or approved distribution. Do not claim the conflict is '
+            'Financial component notes and the per-unit footprint field are client-provided facts; '
+            'read them when the client disputes a building footprint, and ask for a precise replacement when '
+            'the correct value is not explicit. Never repeat the full conflict summary after a client reply. '
+            'Do not claim the conflict is resolved, do not set ready, and do not generate a drawing. '
+            'Always return ready=false and '
+            'generateRequested=false. '
+            'Return JSON only: {"ready":false,"generateRequested":false,"question":"",'
+            '"choices":[],"reply":"","memory":""}.'
+        )
+    conflict_key = 'siteAreaConflict' if is_site_area_conflict else 'coverageConflict'
     user_packet = {
-        'task': 'explain this exact coverage conflict in the context of the latest client message',
-        'coverageConflict': facts,
+        'task': ('explain this exact site-area placement conflict in the context of the latest client message'
+                 if is_site_area_conflict else
+                 'explain this exact coverage conflict in the context of the latest client message'),
+        conflict_key: facts,
         'resolvedAnswers': state['answers'][-8:],
         'sessionMemory': state['summary'],
         'recentTurns': state['turns'][-8:],
@@ -224,7 +299,42 @@ def _visual_plan_site_conflict_interview(data, error):
     prompt_tokens = 0
     source_question = _visual_plan_site_footprint_source_question(message)
     measurement_dispute = _visual_plan_site_measurement_dispute(message)
-    if source_question:
+    prior_conflict_conversation = bool(previous.get('turns') or previous.get('answers')
+                                       or previous.get('pendingQuestion'))
+    if is_site_area_conflict and not prior_conflict_conversation:
+        failed_item = failing_site_item or {}
+        failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
+        model_reply = 'سأبقي القيم المعتمدة كما هي حتى تحدد الجزء الذي تريد مراجعته.'
+        model_question = (f'ما الذي نراجعه أولًا: مساحة «{failed_item_label}»، بصمات المباني، أم طريقة توزيع المساحة؟')
+        choices = [f'مراجعة مساحة {failed_item_label}', 'مراجعة بصمات المباني',
+                   f'مناقشة توزيع {failed_item_label} داخل الأرض']
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    elif is_site_area_conflict and source_question:
+        failed_item = failing_site_item or {}
+        failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
+        failed_item_area = failed_item.get('areaSqm')
+        if failed_item_area is not None:
+            model_reply = (f"مساحة «{failed_item_label}» مأخوذة من المساحة المعتمدة لبندها في التوزيع، "
+                           f"والمسجل {_visual_plan_site_area_text(failed_item_area)} م².")
+            model_question = f'هل قيمة «{failed_item_label}» صحيحة، أم تريد تحديد مساحة أخرى؟'
+            choices = [f'القيمة صحيحة: {_visual_plan_site_area_text(failed_item_area)} م²',
+                       'سأحدد مساحة أخرى']
+        else:
+            model_reply = f'لم أجد قيمة مساحة مسجلة لبند «{failed_item_label}» في بيانات التوزيع.'
+            model_question = f'ما المساحة الصحيحة المعتمدة لـ«{failed_item_label}» بالمتر المربع؟'
+            choices = []
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    elif is_site_area_conflict and any(term in message for term in ('غير دقيق', 'غير دقيقة', 'غير صحيح',
+                                                                    'غير صحيحة', 'غلط', 'راجع مساحة',
+                                                                    'مراجعة مساحة')):
+        failed_item = failing_site_item or {}
+        failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
+        parsed = {
+            'reply': f'فهمت أن مساحة «{failed_item_label}» تحتاج مراجعة. لن أغيّر القيمة المعتمدة من المحادثة.',
+            'question': f'ما المساحة الصحيحة المعتمدة لـ«{failed_item_label}» بالمتر المربع؟',
+            'choices': [],
+        }
+    elif source_question:
         component = next((item for item in component_inputs
                           if item.get('derivedFootprintPerUnitSqm') is not None
                           or item.get('noteDerivedFootprintPerUnitSqm') is not None), None)
@@ -301,11 +411,17 @@ def _visual_plan_site_conflict_interview(data, error):
                (parsed.get('choices') if isinstance(parsed.get('choices'), list) else [])[:6]
                if str(item).strip()]
     if not model_question:
-        model_question = ('ما الرقم الذي ترى أنه غير دقيق؟' if message else
-                          'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟')
+        if is_site_area_conflict:
+            failed_item = failing_site_item or {}
+            failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
+            model_question = (f'أي قيمة تريد مراجعتها: مساحة «{failed_item_label}» أم بصمات المباني؟'
+                              if message else
+                              f'ما الذي تريد مراجعته: مساحة «{failed_item_label}»، بصمات المباني، أم طريقة التوزيع؟')
+        else:
+            model_question = ('ما الرقم الذي ترى أنه غير دقيق؟' if message else
+                              'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟')
     explanation = _visual_plan_site_conflict_summary(facts)
-    has_prior_conversation = bool(previous.get('turns') or previous.get('answers')
-                                  or previous.get('pendingQuestion'))
+    has_prior_conversation = prior_conflict_conversation
     reply_parts = [explanation] if not has_prior_conversation and not (
         source_question or measurement_dispute) else []
     if model_reply and model_reply != model_question:
@@ -323,7 +439,7 @@ def _visual_plan_site_conflict_interview(data, error):
     return {
         'success': True, 'readyForGeneration': False, 'generateRequested': False,
         'needsClarification': True, 'question': reply, 'choices': choices,
-        'reply': reply, 'assistantState': state, 'coverageConflict': facts,
+        'reply': reply, 'assistantState': state, conflict_key: facts,
         'contextChanged': bool(previous.get('inputSignature')
                                and previous.get('inputSignature') != signature),
     }

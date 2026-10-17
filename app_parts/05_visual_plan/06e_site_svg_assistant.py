@@ -791,7 +791,7 @@ def _visual_plan_site_assistant_execute(data, action):
             return interview, 200
         return _visual_plan_site_generate(data, interview), 200
     except visual_plan_geometry.PlanGeometryError as error:
-        if error.code != 'PLANS_COVERAGE_CONFLICT':
+        if error.code not in ('PLANS_COVERAGE_CONFLICT', 'PLANS_SITE_AREA_CONFLICT'):
             raise
         return _visual_plan_site_conflict_interview(data, error), 200
 
