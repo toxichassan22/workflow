@@ -57,9 +57,10 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                      if item['key'] == 'transactions_and_rents')
         with patch.object(module, '_browse_agent_call', side_effect=fake_browse), \
                 patch.object(module, '_new_evidence_pool', return_value=None):
+            on_event = lambda _event: None
             outcome = module._run_summary_researcher(
                 group, ['rei.rega.gov.sa'], {'city': 'جدة'}, 'جدة', 'الروضة',
-                {'tenant_id': 't1'}, time.time() + 30)
+                {'tenant_id': 't1'}, time.time() + 30, on_event=on_event)
 
         self.assertTrue(outcome['searched'])
         self.assertEqual(captured['model'], module.GEMINI_TEXT_MODEL)
@@ -69,6 +70,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(captured['search_budget'], 16)
         self.assertEqual(captured['max_tokens'], 64000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
+        self.assertIs(captured['on_event'], on_event)
         self.assertIn('site:rei.rega.gov.sa', captured['prompt'])
         self.assertIn('https://rei.rega.gov.sa/ar/advanced-search/deals', captured['prompt'])
         self.assertIn('فتح الموقع أو الرابط وحده لا يُعد بحثًا مكتملًا', captured['prompt'])
@@ -92,7 +94,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
 
         def fake_researcher(group, hosts, payload, city, district,
                             usage_ctx, deadline, offer_lang='ar',
-                            cancel_event=None):
+                            cancel_event=None, on_event=None):
             nonlocal active, maximum_active
             with lock:
                 active += 1
@@ -128,6 +130,46 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertTrue(all(item.get('coverage_gap') for item in research['reports']))
         self.assertEqual(module._SUMMARY_RESEARCH_MAX_WORKERS, 100)
 
+    def test_live_browser_events_advance_research_job_progress(self):
+        module = self.module
+        group = module._SUMMARY_RESEARCH_GROUPS[0]
+        source_map = {item['key']: [] for item in module._SUMMARY_RESEARCH_GROUPS}
+        source_map[group['key']] = ['rega.gov.sa']
+        progress = []
+
+        def fake_researcher(group, hosts, payload, city, district,
+                            usage_ctx, deadline, offer_lang='ar',
+                            cancel_event=None, on_event=None):
+            on_event({'phase': 'round', 'step': 1, 'max_steps': 100,
+                      'searches': 0, 'pages': 0})
+            on_event({'phase': 'tool', 'step': 1, 'tool': 'web_search',
+                      'hint': 'site:rega.gov.sa جدة'})
+            on_event({'phase': 'tool_done', 'step': 1, 'tool': 'web_search',
+                      'hint': 'site:rega.gov.sa جدة', 'searches': 1,
+                      'pages': 0, 'ok': True})
+            on_event({'phase': 'tool', 'step': 2, 'tool': 'open_url',
+                      'hint': 'https://rega.gov.sa/city-data'})
+            on_event({'phase': 'tool_done', 'step': 2, 'tool': 'open_url',
+                      'hint': 'https://rega.gov.sa/city-data', 'searches': 1,
+                      'pages': 1, 'ok': True})
+            return {'key': group['key'], 'label': group['label'],
+                    'city': city, 'district': district, 'hosts': hosts,
+                    'result': self._opened_reply(), 'parsed': {},
+                    'parse_error': '', 'pages': [], 'searched': True}
+
+        with patch.object(module, '_summary_research_sources_by_group',
+                          return_value=source_map), \
+                patch.object(module, '_run_summary_researcher',
+                             side_effect=fake_researcher):
+            research = module._run_market_summary_research(
+                {'city': 'جدة'}, {}, None, time.time() + 30,
+                report=lambda pct, message: progress.append((pct, message)))
+
+        self.assertTrue(research['success'])
+        self.assertTrue(any('1 عملية بحث و1 صفحة' in message for _pct, message in progress))
+        self.assertTrue(any(pct > 12 for pct, _message in progress))
+        self.assertTrue(any('اكتمل فتح الصفحة' in message for _pct, message in progress))
+
     def test_fatal_research_credit_error_stops_parallel_research(self):
         module = self.module
         group = module._SUMMARY_RESEARCH_GROUPS[0]
@@ -139,7 +181,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
 
         def fake_researcher(group, hosts, payload, city, district,
                             usage_ctx, deadline, offer_lang='ar',
-                            cancel_event=None):
+                            cancel_event=None, on_event=None):
             started.append(hosts[0])
             if hosts[0] == 'fatal.example':
                 return {'key': group['key'], 'label': group['label'],

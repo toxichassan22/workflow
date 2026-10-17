@@ -182,7 +182,7 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
 
 def _run_summary_researcher(group, hosts, payload, city, district,
                             usage_ctx, deadline, offer_lang='ar',
-                            cancel_event=None):
+                            cancel_event=None, on_event=None):
     worker_pool = _new_evidence_pool()
     prompt = _summary_research_prompt(payload, group, hosts, city, district,
                                       offer_lang=offer_lang)
@@ -193,7 +193,8 @@ def _run_summary_researcher(group, hosts, payload, city, district,
         search_budget=_SUMMARY_RESEARCH_SEARCH_BUDGET,
         max_steps=_SUMMARY_RESEARCH_MAX_STEPS,
         max_tokens=_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS,
-        reasoning_effort='low', cancel_event=cancel_event)
+        reasoning_effort='low', cancel_event=cancel_event,
+        on_event=on_event)
     pages = worker_pool.pages() if worker_pool is not None else []
     parsed, parse_error = _parse_market_model_json(result)
     searched = _market_search_ran(result) or bool(pages)
@@ -226,6 +227,89 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                 'outcomes': [], 'citation_urls': []}
     report(12, f'بدء {len(jobs)} مهمة بحث للمصادر، بحد أقصى 100 باحث بالتوازي')
     outcomes = []
+    progress_lock = threading.Lock()
+    worker_progress = [
+        {'started': False, 'searches': 0, 'pages': 0, 'current': ''}
+        for _ in jobs
+    ]
+    completed_jobs = set()
+    last_progress = 12
+    last_report_at = 0.0
+    last_report_pct = 12
+    reports_open = True
+
+    def report_research_progress(job_index, event=None, completed=False):
+        """Reflect browser activity before each source researcher finishes."""
+        nonlocal last_progress, last_report_at, last_report_pct
+        with progress_lock:
+            if not reports_open:
+                return
+            state = worker_progress[job_index]
+            phase = ''
+            if event:
+                state['started'] = True
+                phase = str(event.get('phase') or '')
+                tool = str(event.get('tool') or '')
+                hint = str(event.get('hint') or '').strip()
+                if phase == 'tool':
+                    activity = {
+                        'web_search': 'يجري البحث',
+                        'open_url': 'يجري فتح صفحة',
+                        'click_element': 'يجري فحص الصفحة',
+                        'type_text': 'يجري إدخال بيانات البحث',
+                        'scroll_page': 'يجري فحص الصفحة',
+                        'inspect_page': 'يجري فحص الصفحة',
+                    }.get(tool, 'يجري تنفيذ خطوة بحث')
+                    state['current'] = f'{activity}: {hint}' if hint else activity
+                elif phase == 'tool_done':
+                    state['searches'] = max(
+                        state['searches'], int(event.get('searches') or 0))
+                    state['pages'] = max(
+                        state['pages'], int(event.get('pages') or 0))
+                    activity = {
+                        'web_search': 'اكتمل البحث',
+                        'open_url': 'اكتمل فتح الصفحة',
+                        'click_element': 'اكتمل فحص الصفحة',
+                        'type_text': 'اكتمل إدخال بيانات البحث',
+                        'scroll_page': 'اكتمل فحص الصفحة',
+                        'inspect_page': 'اكتمل فحص الصفحة',
+                    }.get(tool, 'اكتملت خطوة البحث')
+                    state['current'] = f'{activity}: {hint}' if hint else activity
+                elif phase == 'round':
+                    state['current'] = 'يجري تحليل نتائج البحث'
+            if completed:
+                completed_jobs.add(job_index)
+                state['current'] = ''
+
+            activity_credit = sum(
+                1.0 if index in completed_jobs else
+                min(0.8, 0.1 * min(8, worker['searches'] + worker['pages']))
+                for index, worker in enumerate(worker_progress))
+            pct = 12 + int(56 * activity_credit / max(1, len(jobs)))
+            last_progress = max(last_progress, pct)
+            started = sum(1 for worker in worker_progress if worker['started'])
+            active = max(0, started - len(completed_jobs))
+            searches = sum(worker['searches'] for worker in worker_progress)
+            pages = sum(worker['pages'] for worker in worker_progress)
+            group, _hosts, city, district = jobs[job_index]
+            current = worker_progress[job_index]['current']
+            message = (f'تقدم البحث: اكتملت {len(completed_jobs)} من {len(jobs)} مهمة؛ '
+                       f'{searches} عملية بحث و{pages} صفحة من {active} باحث نشط.')
+            location = f'{group["label"]} — {city}'
+            if district:
+                location += f' — {district}'
+            if current:
+                message += f' {location}: {current}.'
+            should_report = completed or phase in ('tool', 'tool_done')
+            now = time.monotonic()
+            if (not should_report or
+                    (not completed and pct == last_report_pct
+                     and now - last_report_at < 0.5)):
+                return
+            last_report_at = now
+            last_report_pct = last_progress
+            report(last_progress, message)
+
     cancel_event = threading.Event()
     executor = ThreadPoolExecutor(
         max_workers=min(_SUMMARY_RESEARCH_MAX_WORKERS, len(jobs)),
@@ -233,17 +317,19 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
     futures = {}
     fatal_found = False
     try:
-        futures = {
-            executor.submit(_run_summary_researcher, group, hosts, payload,
-                            city, district, usage_ctx, deadline, offer_lang,
-                            cancel_event=cancel_event):
-            (group, hosts, city, district)
-            for group, hosts, city, district in jobs
-        }
+        for job_index, (group, hosts, city, district) in enumerate(jobs):
+            on_event = lambda event, index=job_index: report_research_progress(
+                index, event=event)
+            future = executor.submit(
+                _run_summary_researcher, group, hosts, payload,
+                city, district, usage_ctx, deadline, offer_lang,
+                cancel_event=cancel_event, on_event=on_event)
+            futures[future] = job_index
         for future in as_completed(futures):
             if future.cancelled():
                 continue
-            group, hosts, city, district = futures[future]
+            job_index = futures[future]
+            group, hosts, city, district = jobs[job_index]
             try:
                 outcome = future.result()
             except Exception as exc:
@@ -254,10 +340,13 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                            'parsed': {}, 'parse_error': 'worker_error',
                            'pages': [], 'searched': False}
             outcomes.append(outcome)
+            report_research_progress(job_index, completed=True)
             fatal = _ai_fatal_error_dict(outcome.get('result') or {})
             if fatal is not None:
                 fatal_found = True
                 cancel_event.set()
+                with progress_lock:
+                    reports_open = False
                 for pending in futures:
                     if pending is not future:
                         pending.cancel()
