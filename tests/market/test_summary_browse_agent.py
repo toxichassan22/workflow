@@ -457,6 +457,77 @@ class SummaryBrowseAgentTests(unittest.TestCase):
             ('booking.com', 'جدة', 'الروضة'),
         })
 
+    def test_researcher_jobs_follow_selected_project_activity_sources(self):
+        module = self.module
+        groups = {item['key']: item for item in module._SUMMARY_RESEARCH_GROUPS}
+        source_map = {key: [] for key in groups}
+        source_map['transactions_and_rents'] = [
+            'rei.rega.gov.sa', 'aqar.fm', 'sakani.sa']
+        source_map['hospitality_and_tourism'] = [
+            'mt.gov.sa', 'gaca.gov.sa', 'booking.com']
+        source_map['economy_commercial_industrial'] = [
+            'geo.stats.gov.sa', 'modon.gov.sa']
+        calls = []
+
+        def fake_researcher(group, hosts, payload, city, district,
+                            usage_ctx, deadline, offer_lang='ar',
+                            cancel_event=None, on_event=None):
+            host = hosts[0]
+            calls.append(host)
+            return {'key': group['key'], 'label': group['label'],
+                    'city': city, 'district': district, 'hosts': hosts,
+                    'result': self._opened_reply('https://' + host + '/data'),
+                    'parsed': {}, 'parse_error': '', 'pages': [], 'searched': True}
+
+        payload = {'city': 'جدة', 'projectType': 'سكني',
+                   'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]}}
+        with patch.object(module, '_summary_research_sources_by_group',
+                          return_value=source_map), \
+                patch.object(module, '_run_summary_researcher',
+                             side_effect=fake_researcher):
+            result = module._run_market_summary_research(
+                payload, {}, None, time.time() + 30)
+
+        self.assertTrue(result['success'])
+        self.assertIn('rei.rega.gov.sa', calls)
+        self.assertIn('aqar.fm', calls)
+        self.assertIn('geo.stats.gov.sa', calls)
+        self.assertNotIn('booking.com', calls)
+        self.assertNotIn('gaca.gov.sa', calls)
+        self.assertNotIn('modon.gov.sa', calls)
+
+    def test_resumed_research_identity_includes_selected_project_activity(self):
+        module = self.module
+        group = module._SUMMARY_RESEARCH_GROUPS[0]
+        residential_signature = module._summary_research_activity_signature(
+            {'projectType': 'سكني'})
+        hotel_signature = module._summary_research_activity_signature(
+            {'projectType': 'فندقي'})
+        self.assertNotEqual(residential_signature, hotel_signature)
+        self.assertNotEqual(
+            module._summary_research_task_id(
+                group, ['stats.gov.sa'], 'جدة', '', residential_signature),
+            module._summary_research_task_id(
+                group, ['stats.gov.sa'], 'جدة', '', hotel_signature))
+
+    def test_aqar_listing_urls_use_selected_project_activity_only(self):
+        module = self.module
+        group = module._SUMMARY_RESEARCH_GROUPS[0]
+        prompt = module._summary_research_prompt(
+            {'projectType': 'سكني'}, group, ['aqar.fm'], 'جدة')
+        expected_urls = [url for url, _label in market_study._listing_urls(
+            ['سكني'], {'بيع', 'إيجار'}, 'جدة')]
+        self.assertEqual(len(expected_urls), 6)
+        for url in expected_urls:
+            self.assertIn(url, prompt)
+        for unrelated_kind in ('تجاري', 'فندقي', 'صناعي ولوجستي'):
+            unrelated_urls = [url for url, _label in market_study._listing_urls(
+                [unrelated_kind], {'بيع', 'إيجار'}, 'جدة')]
+            for url in unrelated_urls:
+                self.assertNotIn(url, prompt)
+        self.assertEqual(list(market_study._listing_urls(
+            ['فندقي'], {'بيع', 'إيجار'}, 'جدة')), [])
+
     def test_every_catalog_source_has_a_parallel_research_assignment(self):
         module = self.module
         assigned = {host for hosts in module._summary_research_sources_by_group().values()

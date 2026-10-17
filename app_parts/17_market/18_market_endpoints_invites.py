@@ -649,8 +649,8 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         except Exception:
             tenant_id = None
     system_prompt = market_study.build_consultant_system_prompt(offer_lang=offer_lang)
-    system_prompt += ('\n\nحلل السوق في جميع القطاعات بصرف النظر عن فئة المشروع. '
-                      'استخدم نوع المشروع فقط لتقييمه ومحور المنافسة، وليس لتضييق بقية دراسة السوق.')
+    system_prompt += ('\n\nحلل دراسة السوق وفق الأنشطة والمكونات الاستثمارية المختارة للمشروع فقط. '
+                      'اقصر القطاعات الأخرى على مؤشرات سياقية تخدم نشاطًا مختارًا بوضوح، ولا تنشئ لها تحليلًا مستقلًا.')
     training_context = (db.get_training_context(tenant_id, surface='content', offer_lang=offer_lang)
                         if tenant_id else '')
     if training_context:
@@ -661,12 +661,11 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         return {'success': False,
                 'error': 'حدد مدينة واحدة على الأقل لنطاق ملخص السوق.',
                 'failureReason': 'summary_scope_required'}
-    report(10, 'جاري فحص مصادر السوق في جميع القطاعات — قد يستغرق دقائق...')
+    report(10, 'جاري فحص المصادر المرتبطة بأنشطة المشروع المختارة — قد يستغرق دقائق...')
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
     usage_ctx['billing_flow'] = 'market_summary'
-    # Dispatch independent, geographically scoped browser tasks directly;
-    # each researcher receives its assigned source domains from the full
-    # catalog and opens only the pages needed for its evidence.
+    # Dispatch independent browser tasks for the selected activity and
+    # geography; each researcher opens only its assigned relevant sources.
     research = _run_market_summary_research(
         payload, usage_ctx, evidence_pool, deadline, report=report,
         offer_lang=offer_lang, resume_state=resume_state,

@@ -140,6 +140,35 @@ def _summary_research_catalog_urls_by_host():
     return {host: sorted(urls) for host, urls in urls_by_host.items()}
 
 
+def _summary_research_activity_hosts(payload):
+    """Catalog hosts allowed by the project's explicitly selected activities."""
+    profile = market_study.summary_activity_profile(payload)
+    kinds = profile.get('source_kinds') or []
+    if not kinds:
+        return set()
+    hosts = set()
+    for kind in kinds:
+        for line in market_study.TYPE_SOURCE_PRIORITY.get(kind) or []:
+            hosts.update(market_study._source_host(url)
+                         for url in market_study._catalog_urls(line))
+    # Census is cross-sector context for customer-facing activities, not an
+    # invitation to add a residential-market section to other project types.
+    if profile.get('kinds') and profile['kinds'].intersection(
+            {'residential', 'commercial', 'hospitality', 'entertainment'}):
+        hosts.add('geo.stats.gov.sa')
+    return {host for host in hosts if host}
+
+
+def _summary_research_activity_signature(payload):
+    profile = market_study.summary_activity_profile(payload)
+    if not profile.get('activities'):
+        return ''
+    return json.dumps({
+        'activities': profile.get('activities') or [],
+        'sourceKinds': profile.get('source_kinds') or [],
+    }, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
 def _summary_research_prompt(payload, group, hosts, city, district='',
                              offer_lang='ar'):
     requested_sites = '\n'.join(f'- {host}' for host in hosts) or 'ابحث في المصادر المهنية والرسمية المساندة.'
@@ -157,9 +186,13 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
     site_queries = '، '.join(f'site:{host}' for host in hosts)
     place = f'حي {district}، مدينة {city}' if district else f'مدينة {city} كاملة'
     listing_urls = []
+    activity_profile = market_study.summary_activity_profile(payload)
     if any(market_study._registrable_host(host) == 'aqar.fm' for host in hosts):
-        listing_urls = [url for url, _label in market_study._listing_urls(
-            list(market_study.TYPE_SOURCE_PRIORITY), {'بيع', 'إيجار'}, city)]
+        listing_kinds = activity_profile.get('source_kinds') or []
+        if listing_kinds:
+            operations = market_study._payload_operations(payload) or {'بيع', 'إيجار'}
+            listing_urls = [url for url, _label in market_study._listing_urls(
+                listing_kinds, operations, city)]
     listings_block = ('\nروابط قوائم المدينة للمقارنة في الأسعار المطلوبة:\n'
                       + '\n'.join(f'- {url}' for url in listing_urls)
                       + '\nاستخدم فلتر الحي داخل الصفحة عند تحليل حي محدد.\n'
@@ -239,13 +272,15 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                 'الحجز المحدد والإجمالي المعروض وعدد الليالي وسعر الغرفة للّيلة بعد قسمة إجمالي الليلتين المرصود '
                 'على اثنتين والضرائب والخدمات المشمولة وفئة النجوم وتاريخ الوصول. لا تخلط التواريخ أو العملات أو '
                 'فئات النجوم أو أنواع الغرف أو الشروط المختلفة جوهريًا. إذا قلّت الأسعار القابلة للمقارنة عن ثلاثة، '
-                'اعرض الأسعار الفردية وحجم العينة دون متوسط. سمِّ الناتج «متوسطًا تقريبيًا لأسعار الغرف المعروضة '
+                'اعرض الأسعار الفردية وحجم العينة دون متوسط. سمِّ الناتج «متوسطًا حسابيًا تقريبيًا لأسعار الغرف المعروضة '
                 'في عينة Booking.com لتواريخ الإقامة المحددة»؛ لا تسمّه ADR أو متوسطًا سنويًا أو تاريخيًا أو سعرًا '
-                'معياريًا للسوق.\n')
+                'معياريًا للسوق، ولا تستخدم «وسيط» بمعنى average؛ فالوسيط الإحصائي مقياس مختلف ولا يقال إلا '
+                'إذا حُسب median فعلًا.\n')
     return (
         f"أنت باحث متخصص في {group['label']} ضمن دراسة سوق سعودية مهنية. هذا بحث منفصل عن بقية الباحثين؛ "
         'قدّم أدلة خامًا دقيقة ومهيكلة، ولا تكتب دراسة سوق عامة.\n'
-        f'النطاق الجغرافي الموكّل لهذا البحث فقط: {place}. لا تبحث في مدينة أو حي آخر.\n'
+        + market_study._summary_activity_scope_block(payload, offer_lang)
+        + f'النطاق الجغرافي الموكّل لهذا البحث فقط: {place}. لا تبحث في مدينة أو حي آخر.\n'
         + 'نطاق المهمة: ' + group['focus'] + '\n'
         + scoped_population_rules + scoped_aviation_rules + booking_price_rules
         + 'هذا الباحث مسؤول عن مصدر محدد؛ ابحث داخله أولًا وحاول الوصول إلى صفحة البيانات أو التقرير ذات الصلة، '
@@ -305,7 +340,8 @@ def _run_summary_researcher(group, hosts, payload, city, district,
     }
 
 
-def _summary_research_task_id(group, hosts, city, district):
+def _summary_research_task_id(group, hosts, city, district,
+                              activity_signature=None):
     group_key = str(group.get('key') or '')
     host_names = sorted(str(host) for host in (hosts or []))
     task = [group_key, host_names, str(city or ''), str(district or '')]
@@ -314,6 +350,8 @@ def _summary_research_task_id(group, hosts, city, district):
          for host in host_names), default=1)
     if prompt_version > 1:
         task.append(f'prompt-v{prompt_version}')
+    if activity_signature:
+        task.append('activity-' + str(activity_signature))
     return json.dumps(task, ensure_ascii=False, separators=(',', ':'))
 
 
@@ -331,10 +369,11 @@ def _summary_research_checkpoint(outcomes, evidence_pool):
         citations = _market_citation_urls(result)
         researchers[_summary_research_task_id(
             {'key': item.get('key')}, item.get('hosts'), item.get('city'),
-            item.get('district'))] = {
+            item.get('district'), item.get('activitySignature'))] = {
                 'key': item.get('key'), 'label': item.get('label'),
                 'city': item.get('city'), 'district': item.get('district'),
                 'hosts': list(item.get('hosts') or []), 'parsed': parsed,
+                'activitySignature': item.get('activitySignature') or '',
                 'rawOutput': _get_chat_response_text(result),
                 'searched': True, 'citationUrls': citations,
             }
@@ -368,6 +407,7 @@ def _summary_research_restore(saved):
         'city': str(saved.get('city') or ''),
         'district': str(saved.get('district') or ''),
         'hosts': list(saved.get('hosts') or []),
+        'activitySignature': str(saved.get('activitySignature') or ''),
         'result': result, 'parsed': parsed, 'parse_error': '',
         'pages': [], 'searched': True,
     }
@@ -379,6 +419,10 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
     """Run source-specific Playwright/SearXNG researchers concurrently."""
     report = report if callable(report) else (lambda *_args: None)
     source_map = _summary_research_sources_by_group()
+    allowed_activity_hosts = _summary_research_activity_hosts(payload)
+    activity_profile = market_study.summary_activity_profile(payload)
+    scope_activities_selected = bool(activity_profile.get('source_kinds'))
+    activity_signature = _summary_research_activity_signature(payload)
     scope = market_study.normalize_summary_scope(
         payload.get('summaryScope'), payload.get('city'))
     jobs = []
@@ -389,6 +433,9 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
         for district, city in locations:
             for group in _SUMMARY_RESEARCH_GROUPS:
                 for host in source_map.get(group['key']) or []:
+                    if scope_activities_selected and not market_study._host_in(
+                            host, allowed_activity_hosts):
+                        continue
                     if district and host in {'gaca.gov.sa', 'geo.stats.gov.sa'}:
                         continue
                     jobs.append((group, [host], city, district))
@@ -423,7 +470,8 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
     completed_jobs = set()
     for job_index, (group, hosts, city, district) in enumerate(jobs):
         saved = saved_researchers.get(
-            _summary_research_task_id(group, hosts, city, district))
+            _summary_research_task_id(
+                group, hosts, city, district, activity_signature))
         restored = _summary_research_restore(saved)
         if restored is None:
             continue
@@ -557,6 +605,7 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                            'result': {'error': {'message': str(exc)}},
                            'parsed': {}, 'parse_error': 'worker_error',
                            'pages': [], 'searched': False}
+            outcome['activitySignature'] = activity_signature
             outcomes.append(outcome)
             report_research_progress(job_index, completed=True)
             fatal = _ai_fatal_error_dict(outcome.get('result') or {})

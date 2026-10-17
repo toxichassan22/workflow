@@ -80,15 +80,26 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('نطاق المنافسين يخص جدول المنافسين فقط', block)
         self.assertNotIn('كم', block)
 
-    def test_market_prompt_is_market_wide_and_evidence_only(self):
+    def test_market_prompt_is_project_activity_scoped_and_evidence_only(self):
         prompt = market_study.build_summary_user_prompt(
             {'city': 'جدة', 'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
-             'projectType': 'سكني'}, [])
-        self.assertIn('حلل السوق كله عبر السكني والتجاري والصناعي واللوجستي والفندقي', prompt)
+             'projectType': 'سكني', 'comparisonTypes': ['hotel']}, [])
+        self.assertIn('الأنشطة والمكونات الاستثمارية المحددة: سكني', prompt)
+        self.assertIn('لا تنشئ تحليلًا مستقلًا لقطاعات غير مختارة', prompt)
+        self.assertNotIn('حلل السوق كله عبر السكني والتجاري والصناعي واللوجستي والفندقي', prompt)
+        self.assertNotIn('السوق المحلي كاملًا لا فئة المشروع وحدها', prompt)
         self.assertIn('لا تبحث الآن ولا تستخدم معرفتك السابقة', prompt)
         self.assertIn('المنافسون، لمحور competition فقط', prompt)
         self.assertNotIn('بحث جوجل الأصلي', prompt)
         self.assertNotIn('حيين مجاورين مختلفين ممنوع', prompt)
+
+    def test_summary_activity_profile_ignores_competitor_comparison_types(self):
+        profile = market_study.summary_activity_profile({
+            'projectType': 'سكني', 'comparisonTypes': ['hotel', 'commercial']})
+        self.assertIn('residential', profile['kinds'])
+        self.assertNotIn('hospitality', profile['kinds'])
+        self.assertNotIn('فندقي', profile['source_kinds'])
+        self.assertEqual(profile['source_kinds'], ['سكني'])
 
     def test_market_prompt_surfaces_census_and_airport_indicators_with_limits(self):
         payload = {'summaryScope': {'cities': [
@@ -100,11 +111,14 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('حركة الرحلات الرسمية للمطار', prompt)
         self.assertIn('لا توزع حركة المطار على الأحياء', prompt)
         self.assertIn('مستوى التفصيل الجغرافي الذي تعذر الوصول إليه', prompt)
-        self.assertIn('لا تستخدم أسعار Booking.com إلا كبديل', prompt)
+        self.assertIn('Booking.com إلا كبديل للنشاط الفندقي المختار', prompt)
         self.assertIn('ثلاث منشآت قابلة للمقارنة على الأقل', prompt)
-        self.assertIn('متوسطًا تقريبيًا لأسعار الغرف المعروضة', prompt)
+        self.assertIn('متوسطًا حسابيًا تقريبيًا لأسعار الغرف المعروضة', prompt)
         self.assertIn('اعرض المشاهدات دون متوسط', prompt)
         self.assertIn('لا تسمّه ADR تاريخيًا أو سنويًا', prompt)
+        self.assertIn('لا تستخدم «وسيط» لهذا المعنى', prompt)
+        self.assertIn('«الوسيط الإحصائي» هو median', prompt)
+        self.assertIn('متوسطًا حسابيًا تقريبيًا لأسعار الغرف', prompt)
 
         english = market_study.build_summary_user_prompt(
             {'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': ['Al Rawdah']}]}},
@@ -133,18 +147,21 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('Jeddah', block)
         self.assertIn('city_position always covers the full city', block)
         prompt = market_study.build_summary_user_prompt(
-            {'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': []}]}}, [], offer_lang='en')
-        self.assertIn('regardless of the client project type', prompt)
+            {'projectType': 'residential',
+             'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': []}]}}, [], offer_lang='en')
+        self.assertIn('Selected activities and revenue-bearing components: residential', prompt)
+        self.assertNotIn('regardless of the client project type', prompt)
         self.assertNotIn('native Google search', prompt)
 
     def test_chat_research_prompt_uses_browser_search_and_city_scope(self):
         prompt = market_study.build_summary_chat_research_prompt(
-            {'city': 'جدة', 'summaryScope': {'cities': [
+            {'city': 'جدة', 'projectType': 'سكني', 'summaryScope': {'cities': [
                 {'name': 'جدة', 'districts': ['النرجس']}]}},
             'demand', 'ابحث عن الطلب', [], {}, ['طلب الإيجار'])
         self.assertIn('SearXNG', prompt)
         self.assertIn('type_text', prompt)
         self.assertIn('النرجس', prompt)
+        self.assertIn('الأنشطة والمكونات الاستثمارية المحددة: سكني', prompt)
         self.assertNotIn('بحث جوجل الأصلي', prompt)
 
     def test_project_brief_labels_summary_city_scope(self):

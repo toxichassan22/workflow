@@ -229,7 +229,9 @@ def _listing_urls(kinds, ops, city):
     these needs_browser=True."""
     categories = []
     for kind in kinds or ['_default']:
-        for cat in (_LISTING_CATEGORIES.get(kind) or _LISTING_CATEGORIES['_default']):
+        kind_categories = _LISTING_CATEGORIES.get(
+            kind, _LISTING_CATEGORIES['_default'])
+        for cat in kind_categories:
             if cat not in categories:
                 categories.append(cat)
     for op in sorted(ops):
