@@ -857,7 +857,8 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
                       f"«{row.get('name') or 'منافس'}»: {exc}")
         pending.append(row)
 
-    # Phases 2+3 on the pool — each thread drives its own browser.
+    # Phases 2+3 on the pool — each thread drives its own browser. Large
+    # projects can have many rows, so allow up to 100 targeted checks at once.
     def verify(row):
         try:
             # Pool threads share no Flask context — without one the key gate
@@ -873,5 +874,5 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
 
     if pending:
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=min(4, len(pending))) as workers:
+        with ThreadPoolExecutor(max_workers=min(100, len(pending))) as workers:
             list(workers.map(verify, pending))

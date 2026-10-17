@@ -764,6 +764,7 @@ class VerifyProgressBandTests(_MarketTestBase):
 
 
 from tests.market.test_competitors_evidence_pipeline_parts.banned_listing_portal import BannedListingPortalTests
+from tests.market.test_competitors_evidence_pipeline_parts.parallelism import ParallelismTests
 
 
 if __name__ == '__main__':
