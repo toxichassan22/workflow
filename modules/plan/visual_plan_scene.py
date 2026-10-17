@@ -211,6 +211,10 @@ def _polygon_box(polygon):
     return (min(xs), min(ys), max(xs), max(ys))
 
 
+def _freeze_polygons(polygons):
+    return tuple(tuple(tuple(point) for point in polygon) for polygon in polygons)
+
+
 def _boxes_apart(first, second, tolerance=1e-6):
     """True when two bounding boxes are separated, so their polygons cannot overlap."""
     return (first[2] < second[0] - tolerance or second[2] < first[0] - tolerance
@@ -342,6 +346,25 @@ def _packing_local_bounds(polygon, cosine, sine):
             max(point[0] for point in local), max(point[1] for point in local))
 
 
+def _is_local_box(region, cosine, sine, bounds):
+    """True when the region is exactly its own bounding box in the parcel frame.
+
+    For such a region a candidate rectangle lies inside it exactly when it lies
+    within the bounds, so the costly polygon test can be skipped without any change
+    in the result.
+    """
+    left, bottom, right, top = bounds
+    corners = set()
+    for x, y in region:
+        u, v = x * cosine + y * sine, -x * sine + y * cosine
+        on_u = [edge for edge in (left, right) if abs(u - edge) <= EPSILON]
+        on_v = [edge for edge in (bottom, top) if abs(v - edge) <= EPSILON]
+        if not on_u or not on_v:
+            return False
+        corners.add((on_u[0], on_v[0]))
+    return len(corners) == 4
+
+
 def _packing_world_rectangle(left, bottom, width, height, cosine, sine):
     return [[u * cosine - v * sine, u * sine + v * cosine]
             for u, v in ((left, bottom), (left + width, bottom),
@@ -381,6 +404,8 @@ def _packing_place(free_spaces, allowed_regions, area, cosine, sine, score_mode=
     anchors = (0.0, 1.0) if score_mode in ('tight', 'large_free') else (0.0, 0.5, 1.0)
     region_bounds = {index: _packing_local_bounds(region, cosine, sine)
                      for index, region in allowed_regions.items() if region}
+    box_regions = {index for index, region in allowed_regions.items()
+                   if region and _is_local_box(region, cosine, sine, region_bounds[index])}
     candidates = []
     for parcel_index, left, bottom, right, top in free_spaces:
         if parcel_index not in region_bounds:
@@ -405,8 +430,13 @@ def _packing_place(free_spaces, allowed_regions, area, cosine, sine, score_mode=
                     bounds = (x, y, x + width, y + height)
                     pieces = _packing_split_parts((left, bottom, right, top), bounds)
                     piece_areas = [(x2 - x1) * (y2 - y1) for x1, y1, x2, y2 in pieces]
+                    if parcel_index in box_regions and (
+                            x < region_left - EPSILON or x + width > region_right + EPSILON
+                            or y < region_bottom - EPSILON or y + height > region_top + EPSILON):
+                        continue
                     polygon = _packing_world_rectangle(x, y, width, height, cosine, sine)
-                    if not polygon_inside(polygon, allowed_regions[parcel_index]):
+                    if (parcel_index not in box_regions
+                            and not polygon_inside(polygon, allowed_regions[parcel_index])):
                         continue
                     if score_mode == 'balanced':
                         score = (sum(value * value for value in piece_areas),
@@ -550,6 +580,17 @@ def fallback_scene(contract, program, version=1):
                            for index, parcel in enumerate(contract['geometry']['parcels'])
                            if parcel['id'] in envelope_by_id}
     parcels_by_index = {index: parcel for index, parcel in enumerate(parcels)}
+    # The same (regions, area, blocked, angle) search recurs across strategies and
+    # placement orders; the search is deterministic, so a per-layout memo is exact.
+    search_cache = {}
+
+    def cached_rect_search(regions_arg, area_arg, blocked_arg, angle_arg):
+        key = (_freeze_polygons(regions_arg), area_arg, _freeze_polygons(blocked_arg), angle_arg)
+        if key not in search_cache:
+            search_cache[key] = _rect_search(regions_arg, area_arg, blocked_arg, angle_arg)
+        found = search_cache[key]
+        return [list(point) for point in found] if found is not None else None
+
     buildings = sorted(
         (item for item in program['buildings'] if not item.get('basementOnly')),
         key=lambda item: -(finite_number(item['footprintArea']) or 0))
@@ -597,11 +638,11 @@ def fallback_scene(contract, program, version=1):
             if polygon is None and can_grid_search:
                 polygon = _rect_grid_search(regions, area, occupied, parcel_axis)
             if polygon is None and can_grid_search:
-                polygon = _rect_search(regions, area, occupied, parcel_axis)
+                polygon = cached_rect_search(regions, area, occupied, parcel_axis)
             if polygon is None and can_grid_search and abs(parcel_axis) > 0.01:
                 polygon = _rect_grid_search(regions, area, occupied)
             if polygon is None and can_grid_search and abs(parcel_axis) > 0.01:
-                polygon = _rect_search(regions, area, occupied)
+                polygon = cached_rect_search(regions, area, occupied, 0)
             if (polygon is None and kind == 'site'
                     and _site_area_kind(item) == 'surface_parking'):
                 residual_parking, _remaining_area = _packing_fill_free_area(
