@@ -54,7 +54,6 @@ if _MODULES.is_dir():
     del _dirpath, _dirnames, _filenames
 
 import agent  # noqa: E402  modules/web_browse/agent.py — patched by name
-import browser  # noqa: E402  modules/web_browse/browser.py — faked per test
 import db  # noqa: E402
 import evidence  # noqa: E402  modules/web_browse/evidence.py — real pool
 import market_study  # noqa: E402
@@ -130,17 +129,31 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp_dir.cleanup()
 
+    def setUp(self):
+        self.aggregate_prompts = []
+        self._aggregator_patch = patch.object(
+            self.application_module, '_run_market_summary_aggregator',
+            side_effect=self._fake_aggregator)
+        self._aggregator_patch.start()
+        self.addCleanup(self._aggregator_patch.stop)
+
+    def _fake_aggregator(self, _system, prompt, _usage_ctx, research,
+                         deadline=None):
+        self.aggregate_prompts.append(str(prompt))
+        urls = tuple(research.get('citation_urls') or [])
+        return _agent_reply(urls=urls)
+
     def test_plan_seam_and_session_ownership(self):
         module = self.application_module
         workers = []
         order = []
         plan_calls = {}
-        captured = {}
+        agent_calls = []
         fake_plan = [{'purpose': 'deals',
                       'url': 'https://rei.rega.gov.sa/ar/advanced-search/deals',
                       'tier': 1, 'needs_browser': False, 'label': 'الصفقات'}]
 
-        def fake_worker():
+        def fake_worker(search_provider=None):
             worker = _FakeWorker()
             workers.append(worker)
             return worker
@@ -156,11 +169,12 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
 
         def fake_agent(task, usage_ctx=None, **kwargs):
             order.append('agent')
-            captured.update(kwargs)
+            agent_calls.append(kwargs)
             return _agent_reply()
 
         with self.app.app_context(), \
-                patch.object(browser, 'BrowserWorker', side_effect=fake_worker), \
+                patch.object(module, '_market_browser_session',
+                             side_effect=fake_worker), \
                 patch.object(market_study, 'build_source_plan',
                              return_value=fake_plan) as build_mock, \
                 patch.object(market_study, 'run_source_plan',
@@ -173,23 +187,35 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
             result = module._execute_market_summary({'city': 'جدة'}, tenant_id='t1')
 
         self.assertTrue(result['success'], result)
-        self.assertEqual(order, ['plan', 'agent'])
+        self.assertEqual(order[0], 'plan')
+        self.assertTrue(agent_calls)
+        self.assertTrue(all(event == 'agent' for event in order[1:]))
         build_mock.assert_called_once()
-        # The plan executor gets the pool, the pinned-HTTPS fetcher and the
-        # same session + deadline the browse call receives.
+        # The plan executor gets the job pool, pinned-HTTPS fetcher, and its
+        # sequential-stage browser. Parallel researchers get their own pools,
+        # preloaded with the plan pages, plus the shared deadline.
         self.assertIs(plan_calls['fetch_http'], module._market_source_fetch_http)
-        self.assertIs(plan_calls['pool'], captured.get('evidence_pool'))
-        self.assertIs(plan_calls['session'], captured.get('session'))
+        self.assertIsNotNone(plan_calls['pool'])
+        self.assertIs(plan_calls['session'], workers[0])
+        for call in agent_calls:
+            worker_pool = call.get('evidence_pool')
+            self.assertIsNotNone(worker_pool)
+            self.assertIsNot(worker_pool, plan_calls['pool'])
+            self.assertIn('https://plan.sa/dataset',
+                          [page.get('url') for page in worker_pool.pages()])
+            self.assertNotIn('session', call)
         # The plan stage runs under its own capped sub-deadline
         # (MARKET_SOURCE_PLAN_BUDGET), never the job's full budget — a chain
         # of dead catalog URLs must not eat the whole run.
         plan_deadline = plan_calls['deadline']
         self.assertIsNotNone(plan_deadline)
-        self.assertLessEqual(plan_deadline, captured.get('deadline'))
+        job_deadline = agent_calls[0].get('deadline')
+        self.assertIsNotNone(job_deadline)
+        self.assertLessEqual(plan_deadline, job_deadline)
         self.assertLessEqual(
             plan_deadline, time.time() + module._SOURCE_PLAN_TIME_BUDGET + 5)
         budget = module._SUMMARY_JOB_TIME_BUDGET
-        self.assertTrue(before + budget - 20 < captured.get('deadline')
+        self.assertTrue(before + budget - 20 < job_deadline
                         < before + budget + 20)
         # One lazy session for the job — built un-launched, closed once by
         # the caller (the agent never owns it).
@@ -212,8 +238,6 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
         from memory while attaching URLs post-hoc. Also guards that depth and
         advisory constraints are strictly ordered."""
         module = self.application_module
-        captured_tasks = []
-
         fake_plan = [{'purpose': 'deals',
                       'url': 'https://rei.rega.gov.sa/ar/cities/jeddah',
                       'tier': 1, 'needs_browser': False, 'label': 'صفقات جدة'}]
@@ -235,7 +259,6 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
             return {'fetched': 2, 'skipped': 0, 'failed': 0}
 
         def fake_agent(task, usage_ctx=None, **kwargs):
-            captured_tasks.append(task)
             return _agent_reply()
 
         with self.app.app_context(), \
@@ -246,17 +269,19 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
             result = module._execute_market_summary({'city': 'جدة', 'projectType': 'سكني'}, tenant_id='t1')
 
         self.assertTrue(result['success'], result)
-        self.assertEqual(len(captured_tasks), 1)
-        task_prompt = captured_tasks[0]
+        self.assertEqual(len(self.aggregate_prompts), 1)
+        task_prompt = self.aggregate_prompts[0]
         # Primary source evidence must be present directly in prompt
         self.assertIn('بيانات وحقائق مستخلصة من المصادر الأساسية المعتمدة', task_prompt)
         self.assertIn('https://rei.rega.gov.sa/ar/cities/jeddah', task_prompt)
         self.assertIn('1,420 صفقة بقيمة 2.8 مليار ريال', task_prompt)
         self.assertIn('https://sakani.sa/reports-and-data/rent-index', task_prompt)
         self.assertIn('38,000 ريال سنوياً', task_prompt)
-        # Depth & anti-superficial directives must be present
-        self.assertIn('تحليل استشاري عقاري معمق ومفصل', task_prompt)
-        self.assertIn('يُحظر تمامًا الاختصار المخل', task_prompt)
+        # The synthesizer stays evidence-bound and preserves relevant details.
+        self.assertIn('استخدم فقط الادعاءات التي يسندها الدليل المسترجع أدناه',
+                      task_prompt)
+        self.assertIn('لا تحوّل بيانات المملكة إلى بيانات مدينة', task_prompt)
+        self.assertIn('لا تدمج فئات غرف النوم في متوسط واحد', task_prompt)
 
     def test_format_retrieved_evidence_block_contract(self):
         """Unit test for market_study.format_retrieved_evidence_block across
@@ -469,9 +494,9 @@ class BestUseScanEvidenceSeamTests(unittest.TestCase):
         with self.app.app_context(), \
                 patch.object(module, '_new_evidence_pool',
                              side_effect=counting_pool), \
-                patch.object(browser, 'thread_local_browser',
+                patch.object(module, '_verify_thread_browser',
                              side_effect=fake_thread_browser), \
-                patch.object(browser, 'close_thread_browser',
+                patch.object(module, '_close_verify_thread_browser',
                              side_effect=fake_close_thread_browser), \
                 patch.object(module, '_best_use_price_scan_use',
                              side_effect=fake_use), \
@@ -487,9 +512,10 @@ class BestUseScanEvidenceSeamTests(unittest.TestCase):
             self.assertTrue(before - 1 < kwargs.get('deadline')
                             < before + module._BEST_USE_SCAN_TIME_BUDGET + 1)
             self.assertIn(kwargs.get('session'), created)
-        # 5 uses over ≤4 chunk tasks: each chunk task binds one thread browser
-        # and closes it exactly once at the end — never one browser per call.
-        self.assertEqual(len(closes), 4)
+        # 5 uses over ≤4 chunk tasks: every browser created for a chunk is
+        # closed once, regardless of how many executor threads the scheduler
+        # needed to run those chunks.
+        self.assertEqual(len(closes), len(created))
         self.assertLessEqual(len(created), 4)
         self.assertLess(len(created), len(calls))
         from collections import Counter
@@ -548,6 +574,15 @@ class JobBudgetConstantTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.temp_dir.cleanup()
+
+    def setUp(self):
+        self._aggregator_patch = patch.object(
+            self.application_module, '_run_market_summary_aggregator',
+            side_effect=lambda _system, _prompt, _usage_ctx, research,
+            deadline=None: _agent_reply(
+                urls=tuple(research.get('citation_urls') or [])))
+        self._aggregator_patch.start()
+        self.addCleanup(self._aggregator_patch.stop)
 
     def test_budget_constants_exist_and_floor(self):
         module = self.application_module

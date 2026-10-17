@@ -568,22 +568,36 @@ class ProviderOrderTests(unittest.TestCase):
             providers = browser._providers()
         self.assertEqual(providers[0], 'searxng')
 
-    def test_explicit_searxng_has_no_provider_fallback(self):
-        for env in (
-                {'SEARXNG_URL': 'http://127.0.0.1:8888'},
-                {}):
-            with mock.patch.dict(os.environ, env, clear=True):
-                self.assertEqual(browser._providers('searxng'), ['searxng'])
+    def test_explicit_searxng_keeps_browser_fallbacks(self):
+        with mock.patch.dict(os.environ,
+                             {'SEARXNG_URL': 'http://127.0.0.1:8888'},
+                             clear=True):
+            self.assertEqual(browser._providers('searxng'),
+                             ['searxng', 'brave', 'yahoo', 'bing'])
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(browser._providers('searxng'),
+                             ['brave', 'yahoo', 'bing'])
 
-    def test_forced_worker_searches_only_searxng(self):
+    def test_forced_searxng_search_falls_back_when_local_search_is_empty(self):
         worker = browser.BrowserWorker.__new__(browser.BrowserWorker)
         worker.search_provider = 'searxng'
         calls = []
+
+        def search_once(_self, provider, _query, _cap):
+            calls.append(provider)
+            return ([{'title': 'نتيجة بديلة', 'url': 'https://rega.gov.sa/data',
+                      'snippet': ''}] if provider == 'brave' else [])
+
         with mock.patch.object(browser.BrowserWorker, '_search_once',
-                               lambda self, provider, query, cap:
-                               calls.append(provider) or []):
-            worker.web_search('hotel booking')
-        self.assertEqual(calls, ['searxng'])
+                               search_once), \
+                mock.patch.object(browser.BrowserWorker, '_serp_state',
+                                  return_value=('', False)), \
+                mock.patch.dict(os.environ,
+                                {'SEARXNG_URL': 'http://127.0.0.1:8888'},
+                                clear=True):
+            hits = worker.web_search('site:rega.gov.sa جدة')
+        self.assertEqual(calls, ['searxng', 'brave'])
+        self.assertEqual(hits[0]['url'], 'https://rega.gov.sa/data')
 
     def test_searxng_search_parses_json_results(self):
         payload = {'results': [

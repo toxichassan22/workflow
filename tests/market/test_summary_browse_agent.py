@@ -16,6 +16,7 @@ for _path in (str(ROOT), str(ROOT / 'modules' / 'web_browse')):
         sys.path.insert(0, _path)
 
 import db
+import evidence
 import market_study
 
 
@@ -59,7 +60,11 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 patch.object(module, '_new_evidence_pool', return_value=None):
             on_event = lambda _event: None
             outcome = module._run_summary_researcher(
-                group, ['rei.rega.gov.sa'], {'city': 'جدة'}, 'جدة', 'الروضة',
+                group, ['rei.rega.gov.sa'], {
+                    'city': 'جدة', 'projectType': 'سكني',
+                    'dataPeriodLabel': 'فترة مخصصة من 2025-10-17 إلى 2026-10-17',
+                    'dataPeriodBounds': {'from': '2025-10-17', 'to': '2026-10-17'},
+                }, 'جدة', 'الروضة',
                 {'tenant_id': 't1'}, time.time() + 30, on_event=on_event)
 
         self.assertTrue(outcome['searched'])
@@ -78,7 +83,50 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIn('افحص كل التبويبات والجداول', captured['prompt'])
         self.assertIn('تستنفد البيانات المتاحة للنطاق', captured['prompt'])
         self.assertIn('الروضة', captured['prompt'])
+        self.assertIn('فترة البيانات المطلوبة إلزاميًا: من 2025-10-17 إلى 2026-10-17',
+                      captured['prompt'])
+        self.assertIn('عدد غرف نوم الشقة', captured['prompt'])
+        self.assertIn('أعلى سعر مرصود', captured['prompt'])
         self.assertNotIn('server_tools', captured)
+
+    def test_final_summary_preserves_available_residential_transaction_breakdown(self):
+        prompt = market_study.build_summary_user_prompt(
+            {'city': 'جدة', 'projectType': 'سكني'}, [],
+            retrieved_evidence='صفقات الشقق ذات الغرفتين: العدد 12، المتوسط 900000، الأعلى 1200000.')
+        self.assertIn('أبقِ كل فئة متاحة في sector_performance', prompt)
+        self.assertIn('لا تدمج فئات غرف النوم في متوسط واحد', prompt)
+        self.assertIn('لا تستبدله بأسعار الإعلانات', prompt)
+
+    def test_source_plan_pages_remain_usable_when_browser_research_fails(self):
+        module = self.module
+        group = module._SUMMARY_RESEARCH_GROUPS[0]
+        source_map = {item['key']: [] for item in module._SUMMARY_RESEARCH_GROUPS}
+        source_map[group['key']] = ['rei.rega.gov.sa']
+        pool = evidence.EvidencePool()
+        source_url = 'https://rei.rega.gov.sa/ar/cities/jeddah'
+        pool.add_page(source_url, title='مؤشرات جدة العقارية',
+                      content='عدد الصفقات 120 والقيمة 90 مليون ريال', via='http')
+
+        def failed_researcher(group, hosts, payload, city, district,
+                              usage_ctx, deadline, offer_lang='ar',
+                              cancel_event=None, on_event=None):
+            return {'key': group['key'], 'label': group['label'],
+                    'city': city, 'district': district, 'hosts': hosts,
+                    'result': {'error': {'message': 'browser search unavailable'}},
+                    'parsed': {}, 'parse_error': 'worker_error',
+                    'pages': [], 'searched': False}
+
+        with patch.object(module, '_summary_research_sources_by_group',
+                          return_value=source_map), \
+                patch.object(module, '_run_summary_researcher',
+                             side_effect=failed_researcher):
+            result = module._run_market_summary_research(
+                {'city': 'جدة', 'projectType': 'سكني'}, {}, pool,
+                time.time() + 30)
+
+        self.assertTrue(result['success'], result)
+        self.assertIn(source_url, result['citation_urls'])
+        self.assertEqual(result['reports'][0]['coverage_status'], 'partial')
 
     def test_completed_researcher_is_reused_when_resuming(self):
         module = self.module
@@ -423,11 +471,12 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                             (aviation_group, 'booking.com')):
             task_id = json.loads(module._summary_research_task_id(
                 group, [host], 'جدة', ''))
-            self.assertEqual(task_id[-1], 'prompt-v2')
+            self.assertEqual(task_id[-1], 'prompt-v3')
         ordinary_group = module._SUMMARY_RESEARCH_GROUPS[0]
         ordinary_task_id = json.loads(module._summary_research_task_id(
             ordinary_group, ['rega.gov.sa'], 'جدة', ''))
-        self.assertEqual(len(ordinary_task_id), 4)
+        self.assertEqual(ordinary_task_id[-1], 'prompt-v2')
+        self.assertEqual(len(ordinary_task_id), 5)
 
         source_map = {item['key']: [] for item in module._SUMMARY_RESEARCH_GROUPS}
         source_map[census_group['key']] = ['geo.stats.gov.sa']

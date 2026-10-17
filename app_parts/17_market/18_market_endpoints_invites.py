@@ -664,6 +664,10 @@ def _run_market_summary(data, tenant_id=None, progress=None,
     report(10, 'جاري فحص المصادر المرتبطة بأنشطة المشروع المختارة — قد يستغرق دقائق...')
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
     usage_ctx['billing_flow'] = 'market_summary'
+    # Load known deep links and city datasets before model-led source research.
+    _run_market_source_plan(payload, offer_lang=offer_lang,
+                            evidence_pool=evidence_pool, session=session,
+                            deadline=deadline, report=report)
     # Dispatch independent browser tasks for the selected activity and
     # geography; each researcher opens only its assigned relevant sources.
     research = _run_market_summary_research(

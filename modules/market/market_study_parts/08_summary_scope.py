@@ -139,6 +139,23 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
     swot_keys = [item['key'] for item in SWOT_SECTIONS]
     evidence = str(retrieved_evidence or '').strip() or 'لا توجد صفحات مقروءة بعد.'
     local = payload.get('summaryLocalBenchmarks') or {}
+    activity_kinds = summary_activity_profile(payload).get('kinds') or set()
+    if en:
+        transaction_detail_rules = (
+            'When selected residential or commercial activities have retrieved completed-sale data broken '
+            'down by property type or apartment bedroom count, preserve each available category in '
+            'sector_performance with its transaction count, arithmetic mean, highest observed price, exact '
+            'geography and period. Do not collapse supplied bedroom buckets into one overall average. If the '
+            'official source does not expose the breakdown, state that specific coverage gap; do not replace '
+            'it with advertised prices.\n'
+            if activity_kinds.intersection({'residential', 'commercial'}) else '')
+    else:
+        transaction_detail_rules = (
+            'إذا وفر الدليل صفقات بيع منفذة للنشاط السكني أو التجاري المختار ومقسمة حسب نوع العقار أو عدد '
+            'غرف نوم الشقق، فأبقِ كل فئة متاحة في sector_performance مع عدد الصفقات والمتوسط الحسابي وأعلى '
+            'سعر مرصود والنطاق الجغرافي والفترة. لا تدمج فئات غرف النوم في متوسط واحد. إذا لم يعرض المصدر '
+            'الرسمي هذا التقسيم، فاذكر فجوة التغطية المحددة؛ ولا تستبدله بأسعار الإعلانات.\n'
+            if activity_kinds.intersection({'residential', 'commercial'}) else '')
     if en:
         scope_line = _summary_scope_block(payload, offer_lang)
         activity_scope_line = _summary_activity_scope_block(payload, offer_lang)
@@ -152,7 +169,9 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             '","reliability":"","note":""}],\n"disclaimer":"Preliminary indicative study; not a certified valuation appraisal",\n'
             '"one_block_summary":"One cohesive professional market analysis paragraph"\n}')
         research_rules = (
-            'Parallel Argon researchers have used Playwright with SearXNG and opened assigned source pages. '
+            'Parallel source researchers used Playwright browser search, preferring SearXNG and falling back '
+            'to other browser search providers when needed. Check each research report’s opened_evidence and '
+            'coverage_status; retrieved source-plan pages are evidence but do not prove exhaustive coverage. '
             'You are the evidence synthesis model; do not browse and do not use prior knowledge. Analyze the '
             'local market only for the project activities and revenue-bearing components listed in the binding '
             'activity scope below; do not create standalone analyses of unrelated sectors. Use only claims '
@@ -214,7 +233,9 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             '","reliability":"","note":""}],\n"disclaimer":"هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا",\n'
             '"one_block_summary":"فقرة تحليل سوق متماسكة ومهنية"\n}')
         research_rules = (
-            'نفّذ باحثين متوازيين باستخدام Argon ومتصفح Playwright عبر SearXNG، وقد فتحوا صفحات المصادر الموكلة. '
+            'نفّذ باحثون متوازيون البحث عبر متصفح Playwright مع تفضيل SearXNG واستخدام محركات المتصفح البديلة '
+            'عند تعذره. راجع opened_evidence وcoverage_status في كل تقرير بحث؛ صفحات خطة المصادر دليل مسترجع '
+            'لكنها لا تثبت استنفاد المصدر أو اكتمال تغطيته. '
             'أنت موديل تجميع الأدلة: لا تبحث الآن ولا تستخدم معرفتك السابقة. حلل السوق المحلي للأنشطة والمكونات '
             'الاستثمارية المحددة في نطاق المشروع الملزم أدناه فقط، ولا تنشئ تحليلًا مستقلًا لقطاعات غير مختارة. '
             'استخدم فقط الادعاءات التي يسندها الدليل '
@@ -262,7 +283,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
 
     return (
         f'تاريخ الوصول: {today}\n'
-        + research_rules + local_indicator_rules + activity_scope_line + scope_line
+        + research_rules + local_indicator_rules + transaction_detail_rules
+        + activity_scope_line + scope_line
         + 'المهام المحورية: ' + ', '.join(keys) + '. حللها كلها بعمق وبلا إسقاط لأي محور.\n'
         + narrative_rules + lang + '\n' + decision
         + 'الأدلة وصفحات المصادر المفتوحة من الباحثين:\n' + evidence + '\n\n'
@@ -321,7 +343,8 @@ def build_summary_chat_research_prompt(payload, axis, message, history, state, q
                             if str(query or '').strip()) or 'بحث المحور المحدد'
     if en:
         instructions = (
-            'Use the local Playwright browser tools with SearXNG. Open relevant result pages and interact with '
+            'Use the local Playwright browser search, starting with SearXNG and continuing with the available '
+            'browser search providers if it fails. Open relevant result pages and interact with '
             'site controls when data requires city, district, date, or category selection: inspect the page, '
             'use type_text to enter values, click_element to apply/search, and scroll_page to read results. Do not answer from '
             'snippets alone or memory. Return only evidence-backed claims; report inaccessible data as a gap. '
@@ -329,7 +352,8 @@ def build_summary_chat_research_prompt(payload, axis, message, history, state, q
             'project activities only; other-sector facts are brief context only when they support a selected activity.\n')
     else:
         instructions = (
-            'استخدم أدوات متصفح Playwright المحلي مع SearXNG. افتح صفحات النتائج وتفاعل مع عناصر الموقع عندما '
+            'استخدم بحث متصفح Playwright المحلي مع تفضيل SearXNG، واستمر بمحركات البحث المتاحة إذا تعذر. '
+            'افتح صفحات النتائج وتفاعل مع عناصر الموقع عندما '
             'تتطلب البيانات اختيار مدينة أو حي أو تاريخ أو فئة: افحص الصفحة، واكتب القيم عبر type_text، واضغط '
             'عبر click_element، ومرر الصفحة عبر scroll_page لقراءة النتائج. لا تجب من مقتطفات البحث وحدها أو من الذاكرة. '
             'أعد ادعاءات مسندة فقط، واذكر تعذر البيانات كفجوة. كل مصدر يحتاج رابط صفحة مفتوحة محددة وتاريخ '

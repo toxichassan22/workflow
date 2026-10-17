@@ -105,6 +105,7 @@ class _Fixture:
         self.agent_calls = []
         self.events = []
         self.plan_kwargs = {}
+        self.aggregate_prompts = []
         self._pool_pages = list(pool_pages)
 
     def fake_agent(self, task, usage_ctx=None, **kwargs):
@@ -112,13 +113,35 @@ class _Fixture:
         self.events.append('agent')
         return _reply(self.payload, pages=self.citation_pages)
 
+    def fake_chat(self, _system, _prompt, **_kwargs):
+        return {
+            'choices': [{'finish_reason': 'stop', 'message': {
+                'role': 'assistant',
+                'content': json.dumps(self.payload, ensure_ascii=False),
+            }}],
+            'usage': {'prompt_tokens': 10, 'completion_tokens': 5},
+        }
+
+    def fake_aggregator(self, _system, prompt, _usage_ctx, research,
+                        deadline=None):
+        self.aggregate_prompts.append(str(prompt))
+        result = self.fake_chat('', '')
+        citations = list(research.get('citation_urls') or [])
+        message = result['choices'][0]['message']
+        message['annotations'] = [
+            {'url_citation': {'url': url, 'title': 'مصدر مفتوح', 'content': ''}}
+            for url in citations]
+        result['browse_trace'] = [{'url': url, 'title': '', 'chars': 0}
+                                  for url in citations]
+        return result
+
     payload = {'summary': {'market_definition': 'قراءة السوق'},
                'decision': 'فرصة قوية',
                'sources': [{'name': 'سكني', 'url': 'https://sakani.sa'}]}
     citation_pages = [(_CITED_PAGE, 'تقرير إيجار',
                        'مؤشر سوق الإيجار للربع الثالث')]
 
-    def fake_build_plan(self, payload, offer_lang='ar'):
+    def fake_build_plan(self, payload, offer_lang='ar', market_wide=False):
         self.events.append('build_plan')
         return [{'purpose': 'rent-index', 'url': _POOL_PAGE, 'tier': 1,
                  'needs_browser': False, 'label': 'مؤشر الإيجار'}]
@@ -139,6 +162,9 @@ class _Fixture:
         stack = contextlib.ExitStack()
         stack.enter_context(patch.object(
             agent, 'run_browse_agent', side_effect=self.fake_agent))
+        stack.enter_context(patch.object(
+            module, '_run_market_summary_aggregator',
+            side_effect=self.fake_aggregator))
         stack.enter_context(patch.object(
             market_study, 'build_source_plan', side_effect=self.fake_build_plan,
             create=True))
@@ -205,6 +231,7 @@ class SummaryPoolWiringTests(unittest.TestCase):
         self.assertIn('plan', fx.events)
         self.assertIn('agent', fx.events)
         self.assertLess(fx.events.index('plan'), fx.events.index('agent'))
+        self.assertIn(_POOL_PAGE, fx.aggregate_prompts[-1])
 
     def test_source_plan_runs_on_its_own_stage_budget(self):
         # The serial plan stage must not eat the browse agent's share of the
@@ -223,7 +250,7 @@ class SummaryPoolWiringTests(unittest.TestCase):
         self.assertLessEqual(
             deadline, time.time() + module._SOURCE_PLAN_TIME_BUDGET + 5)
 
-    def test_summary_main_call_carries_pool_deadline_session(self):
+    def test_parallel_summary_calls_carry_pool_and_deadline(self):
         fx = _Fixture()
         module = self.application_module
         with self.app.app_context(), fx.patches(module):
@@ -232,7 +259,7 @@ class SummaryPoolWiringTests(unittest.TestCase):
         self.assertTrue(result['success'], result)
         self.assertTrue(fx.agent_calls)
         for call in fx.agent_calls:
-            _assert_pool_deadline_session(self, call['kwargs'])
+            _assert_pool_deadline_session(self, call['kwargs'], session=False)
 
     def test_summary_sources_union_pool_pages(self):
         fx = _Fixture(pool_pages=[
@@ -405,6 +432,8 @@ class FailedJobResumeTests(unittest.TestCase):
                               content='نص الصفحة المقروء')
             return {'error': {'message': 'deadline_exceeded'}}
         fx.fake_agent = failing_agent
+        fx.fake_aggregator = lambda *_args, **_kwargs: {
+            'error': {'message': 'deadline_exceeded'}}
 
         with patch.object(module, 'UPLOADS_DIR', self.uploads.name), \
                 fx.patches(module):

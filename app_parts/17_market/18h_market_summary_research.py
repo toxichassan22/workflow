@@ -85,9 +85,9 @@ _SUMMARY_RESEARCH_REQUIRED_URLS = {
 }
 
 _SUMMARY_RESEARCH_PROMPT_VERSIONS = {
-    ('hospitality_and_tourism', 'gaca.gov.sa'): 2,
-    ('hospitality_and_tourism', 'booking.com'): 2,
-    ('economy_commercial_industrial', 'geo.stats.gov.sa'): 2,
+    ('hospitality_and_tourism', 'gaca.gov.sa'): 3,
+    ('hospitality_and_tourism', 'booking.com'): 3,
+    ('economy_commercial_industrial', 'geo.stats.gov.sa'): 3,
 }
 
 
@@ -185,6 +185,61 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                        if catalog_urls else '')
     site_queries = '، '.join(f'site:{host}' for host in hosts)
     place = f'حي {district}، مدينة {city}' if district else f'مدينة {city} كاملة'
+    bounds = (payload or {}).get('dataPeriodBounds') or {}
+    period_from = str(bounds.get('from') or '').strip() if isinstance(bounds, dict) else ''
+    period_to = str(bounds.get('to') or '').strip() if isinstance(bounds, dict) else ''
+    if offer_lang == 'en':
+        period_rules = (
+            f'Required data period: {period_from} through {period_to}. '
+            'Search and apply source filters for these dates. For every result, record the actual period '
+            'shown by the source. If the source only exposes a different or default period, label it as '
+            'context and report the requested-period gap; never present it as covering this period. '
+            'Current asking listings are access-date snapshots, not completed historical transactions.\n'
+            if period_from or period_to else
+            'No bounded data period was supplied. Record each source’s actual period and do not imply '
+            'that its latest result covers a specific historical window.\n')
+    else:
+        period_rules = (
+            f'فترة البيانات المطلوبة إلزاميًا: من {period_from or "غير محدد"} إلى {period_to or "غير محدد"}. '
+            'أدخل التاريخين في فلاتر المصدر إن كانت متاحة، وسجّل الفترة الفعلية التي يعرضها المصدر لكل نتيجة. '
+            'إذا لم يعرض المصدر إلا فترة مختلفة أو افتراضية، فاعرضها كسياق مؤرخ وسجّل فجوة الفترة المطلوبة؛ '
+            'لا تنسبها إلى الفترة المطلوبة. إعلانات الطلب الحالية لقطة بتاريخ الوصول وليست صفقات تاريخية منفذة.\n'
+            if period_from or period_to else
+            'لم تُحدد فترة بيانات مقيدة. سجّل الفترة الفعلية لكل مصدر، ولا توحِ بأن أحدث نتيجة تغطي فترة '
+            'تاريخية بعينها.\n')
+    activity_profile = market_study.summary_activity_profile(payload)
+    transaction_detail_rules = ''
+    selected_kinds = activity_profile.get('kinds') or set()
+    if (group.get('key') == 'transactions_and_rents'
+            and selected_kinds.intersection({'residential', 'commercial'})):
+        if offer_lang == 'en':
+            bedroom_axis = (
+                ' and by apartment bedroom count (studio, 1, 2, 3, 4, and 5+ bedrooms)'
+                if 'residential' in selected_kinds else '')
+            transaction_detail_rules = (
+                'For selected residential or commercial activities, exhaust every available transaction '
+                'breakdown in the assigned source, not only its headline total. For completed sales, capture '
+                'count, total value, arithmetic mean price, highest observed price, and price per sqm when '
+                'published, split by property type' + bedroom_axis +
+                ' whenever the source exposes those dimensions. Return a separate finding for each '
+                'metric and category and record the exact city/district, requested and actual period, record '
+                'count, and whether the source exposed all matching records or only a paginated/sample view. '
+                'Never calculate a city-wide total from a partial page, and never substitute asking listings '
+                'for completed transactions. If a breakdown is not exposed or is behind Nafath, identify the '
+                'specific missing fields and access barrier in coverage and coverage_gaps.\n')
+        else:
+            bedroom_axis = (
+                ' وعدد غرف نوم الشقة (استوديو، غرفة، غرفتان، 3، 4، و5 فأكثر)'
+                if 'residential' in selected_kinds else '')
+            transaction_detail_rules = (
+                'للأنشطة السكنية أو التجارية المختارة، استنفد كل تقسيم للصفقات يعرضه المصدر الموكّل، ولا '
+                'تكتفِ برقم إجمالي العنوان. في الصفقات المنفذة استخرج العدد والقيمة الإجمالية والمتوسط الحسابي '
+                'للسعر وأعلى سعر مرصود وسعر المتر المربع عند نشره، وافصل حسب نوع العقار' + bedroom_axis +
+                ' متى عرض المصدر هذا التقسيم. أعد نتيجة مستقلة لكل '
+                'مقياس وفئة، وسجّل المدينة/الحي والفترة المطلوبة والفعلية وعدد السجلات، وهل أتاح المصدر جميع '
+                'السجلات المطابقة أم صفحة أو عينة فقط. لا تحسب إجماليًا للمدينة من صفحة جزئية، ولا تستبدل '
+                'الإعلانات بطلبات البيع محل الصفقات المنفذة. إذا لم يعرض المصدر التقسيم أو كان خلف نفاذ، '
+                'فاذكر الحقول التي تعذر الوصول إليها وحاجز الوصول في التغطية وفجواتها.\n')
     listing_urls = []
     activity_profile = market_study.summary_activity_profile(payload)
     if any(market_study._registrable_host(host) == 'aqar.fm' for host in hosts):
@@ -281,6 +336,7 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         'قدّم أدلة خامًا دقيقة ومهيكلة، ولا تكتب دراسة سوق عامة.\n'
         + market_study._summary_activity_scope_block(payload, offer_lang)
         + f'النطاق الجغرافي الموكّل لهذا البحث فقط: {place}. لا تبحث في مدينة أو حي آخر.\n'
+        + period_rules + transaction_detail_rules
         + 'نطاق المهمة: ' + group['focus'] + '\n'
         + scoped_population_rules + scoped_aviation_rules + booking_price_rules
         + 'هذا الباحث مسؤول عن مصدر محدد؛ ابحث داخله أولًا وحاول الوصول إلى صفحة البيانات أو التقرير ذات الصلة، '
@@ -296,7 +352,7 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         'لا تكتفِ بالمقتطفات أو أول صفحة ولا تنتقِ رقمًا واحدًا إذا كان المصدر يعرض مؤشرات أخرى. '
         'سجّل كل المؤشرات والتقسيمات ذات الصلة، والفترة وعدد السجلات أو الصفحات التي ظهرت. إذا تعذّر '
         'استنفاد النتائج أو تصديرها، حدّد ما جُمِع وما بقي غير متاح بدل ادعاء اكتمال المصدر. '
-        'عند البحث عبر SearXNG قيّد الاستعلام بواحد من هذه النطاقات: ' + site_queries + '. لا تدّعِ '
+        'في كل محرك بحث قيّد الاستعلام بواحد من هذه النطاقات: ' + site_queries + '. لا تدّعِ '
         'استخراج نتائج من لوحة لم تعرضها الصفحة فعلًا. ابدأ بالصفحات الحكومية والمصدر الأصلي، واستخدم مصدرًا '
         'مهنيًا أو إعلانًا فقط لقياس النوع الذي يتيحه.\n'
         + 'لكل دليل أعد: القيمة كما ظهرت، الوحدة، المدينة والحي أو المستوى الجغرافي، الفترة، تاريخ البيانات، '
@@ -306,7 +362,8 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         + 'أرجع JSON فقط: {"group":"' + group['key'] + '","coverage":[{"url":"",'
         '"interaction_steps":[],"datasets_opened":[],"records_or_pages_seen":"",'
         '"completeness":"complete|partial|unavailable","gaps":""}],"findings":[{"metric":"","value":"",'
-        '"unit":"","city":"","district":"","period":"","data_date":"","source_name":"",'
+        '"unit":"","property_type":"","bedroom_count":"","sample_size":"",'
+        '"city":"","district":"","period":"","data_date":"","source_name":"",'
         '"source_url":"","reliability":"","limitations":""}],"sources":[{"name":"","url":"",'
         '"data_date":"","reliability":"","note":""}],"coverage_gaps":[]}\n'
         + ("Write the JSON text values in English. Search around " + place + '.\n'
@@ -318,6 +375,18 @@ def _run_summary_researcher(group, hosts, payload, city, district,
                             usage_ctx, deadline, offer_lang='ar',
                             cancel_event=None, on_event=None):
     worker_pool = _new_evidence_pool()
+    shared_pages = (payload or {}).get('_summaryEvidencePages') or []
+    if worker_pool is not None:
+        for page in shared_pages:
+            if not isinstance(page, dict) or not page.get('url'):
+                continue
+            try:
+                worker_pool.add_page(
+                    page.get('url'), title=page.get('title') or '',
+                    content=page.get('content') or '',
+                    final_url=page.get('url'), via='job_evidence')
+            except Exception:
+                continue
     prompt = _summary_research_prompt(payload, group, hosts, city, district,
                                       offer_lang=offer_lang)
     result = _browse_agent_call(
@@ -346,8 +415,8 @@ def _summary_research_task_id(group, hosts, city, district,
     host_names = sorted(str(host) for host in (hosts or []))
     task = [group_key, host_names, str(city or ''), str(district or '')]
     prompt_version = max(
-        (_SUMMARY_RESEARCH_PROMPT_VERSIONS.get((group_key, host), 1)
-         for host in host_names), default=1)
+        (_SUMMARY_RESEARCH_PROMPT_VERSIONS.get((group_key, host), 2)
+         for host in host_names), default=2)
     if prompt_version > 1:
         task.append(f'prompt-v{prompt_version}')
     if activity_signature:
@@ -581,13 +650,16 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
             print(f'[MARKET SUMMARY] researcher checkpoint failed: {exc}')
 
     try:
+        researcher_payload = dict(payload or {})
+        researcher_payload['_summaryEvidencePages'] = (
+            evidence_pool.pages() if evidence_pool is not None else [])
         for job_index, (group, hosts, city, district) in enumerate(jobs):
             if job_index in completed_jobs:
                 continue
             on_event = lambda event, index=job_index: report_research_progress(
                 index, event=event)
             future = executor.submit(
-                _run_summary_researcher, group, hosts, payload,
+                _run_summary_researcher, group, hosts, researcher_payload,
                 city, district, usage_ctx, deadline, offer_lang,
                 cancel_event=cancel_event, on_event=on_event)
             futures[future] = job_index
@@ -645,8 +717,34 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
          if group['key'] == item['key']), len(_SUMMARY_RESEARCH_GROUPS)))
     opened = [item for item in outcomes if item.get('searched')]
     if not opened:
-        return {'success': False, 'error': 'لم ينجح أي مسار في فتح دليل ويب',
-                'outcomes': outcomes, 'citation_urls': []}
+        planned_pages = [page for page in (evidence_pool.pages()
+                                           if evidence_pool is not None else [])
+                         if isinstance(page, dict) and page.get('url')]
+        if not planned_pages:
+            return {'success': False, 'error': 'لم ينجح أي مسار في فتح دليل ويب',
+                    'outcomes': outcomes, 'citation_urls': []}
+        # The catalog fetch is real retrieved evidence even when every
+        # browser researcher fails. Synthesis can use those pages while
+        # reporting that interactive source coverage is still partial.
+        plan_report = {
+            'research_group': 'source_plan',
+            'source_hosts': [],
+            'city': '',
+            'district': '',
+            'opened_evidence': True,
+            'coverage_status': 'partial',
+            'research_output': 'صفحات جرى استرجاعها من خطة المصادر المعتمدة.',
+            'coverage_gap': ('تعذر على الباحثين فتح صفحات تفاعلية؛ الأدلة المتاحة هنا مقتصرة على '
+                             'الصفحات التي استرجعتها خطة المصادر، ولا تثبت اكتمال النتائج أو تفاصيلها.'),
+        }
+        return {
+            'success': True,
+            'outcomes': outcomes,
+            'reports': [plan_report],
+            'citation_urls': list(dict.fromkeys(
+                str(page.get('url') or '').strip() for page in planned_pages
+                if str(page.get('url') or '').strip())),
+        }
     reports = []
     citations = []
     for item in outcomes:

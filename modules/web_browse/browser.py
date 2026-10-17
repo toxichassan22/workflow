@@ -299,7 +299,12 @@ def _searxng_search(query, cap):
 def _providers(search_provider=None):
     forced = str(search_provider or '').strip().lower()
     if forced:
-        return [forced] if forced == 'searxng' and _searxng_base() else [forced]
+        if forced == 'searxng':
+            # A dead or empty local endpoint must not turn every market search
+            # into a miss. Keep the query and continue through browser SERPs.
+            preferred = ['searxng'] if _searxng_base() else []
+            return preferred + list(_DEFAULT_ORDER)
+        return [forced]
     pinned = (os.environ.get('BROWSER_SEARCH_PROVIDER') or '').strip().lower()
     order = list(_DEFAULT_ORDER)
     if _searxng_base():
