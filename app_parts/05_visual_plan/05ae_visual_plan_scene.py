@@ -256,7 +256,8 @@ def _visual_plan_create_scene(data, context=None):
     for attempt in range(2):
         response = call_openrouter_chat(
             system_prompt, user_prompt + feedback, temperature=None, max_tokens=cap,
-            model=GEMINI_TEXT_MODEL, reasoning_effort='high', timeout=1200,
+            model=GEMINI_TEXT_MODEL, reasoning_effort='high',
+            timeout=_visual_plan_job_call_timeout(1200),
             response_format={'type': 'json_object'},
             image_references=references or None, usage_ctx=_usage_ctx('image', data))
         fatal = _ai_fatal_error_dict(response)
@@ -379,6 +380,7 @@ def _visual_plan_illustrate(prompt, contract, data, base_image='', extra_refs=No
         + 'The attached outline is the true surveyed parcel boundary — trace it exactly and '
         'draw only the buildings, entries and open areas the prompt describes, nothing else.')
     image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
+                            timeout=_visual_plan_job_call_timeout(180),
                             usage_ctx=_usage_ctx('image', data))
     if image:
         return image, len(references)
@@ -485,7 +487,7 @@ def _visual_plan_render_site_svg(prompt, contract, data, base_image='', extra_re
 
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=65536,
-        model=model, reasoning_effort='high', timeout=1200,
+        model=model, reasoning_effort='high', timeout=_visual_plan_job_call_timeout(1200),
         image_references=references or None, usage_ctx=usage_ctx)
 
     if isinstance(response, dict) and response.get('error'):
@@ -566,6 +568,7 @@ def _visual_plan_edit_scene(data, slot_id):
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=4000,
         model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium', response_format={'type': 'json_object'},
+        timeout=_visual_plan_job_call_timeout(300),
         image_references=references or None, usage_ctx=_usage_ctx('image', data))
     fatal = _ai_fatal_error_dict(response)
     if fatal is not None:

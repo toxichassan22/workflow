@@ -594,19 +594,44 @@ class VisualPlanContractTests(MeetingRequirementsTests):
                     copy.deepcopy(data), 'plan_' + kind, require_distribution=True)
                 self.assertIsNone(error)
 
-    def test_visual_plan_jobs_can_run_for_two_hours(self):
+    def test_visual_plan_jobs_fail_after_the_bounded_deadline(self):
         module = self.application_module
-        self.assertEqual(module._VISUAL_PLAN_JOB_TIMEOUT_SECONDS, 7200)
+        self.assertEqual(module._VISUAL_PLAN_JOB_TIMEOUT_SECONDS, 600)
         client = self.app.test_client()
+        now = module.time.time()
         running = {'status': 'running', 'success': True,
-                   'updatedAt': module.time.time() - 300, 'progress': 45,
+                   'createdAt': now - 599, 'deadlineAt': now + 1,
+                   'updatedAt': now, 'progress': 45,
                    'todos': module._visual_plan_job_todos('render')}
         with patch.object(module, '_read_job', return_value=running):
-            response = client.get('/api/visual-concept/plans-jobs/long-job',
+            response = client.get('/api/visual-concept/plans-jobs/active-job',
                                   headers=self._headers(self.token_a))
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['status'], 'running')
         self.assertEqual(response.get_json()['todos'][1]['status'], 'active')
+
+        expired = {**running, 'deadlineAt': now - 1,
+                   'payload': {'kind': 'site_chat'}}
+        with patch.object(module, '_read_job', return_value=expired), \
+                patch.object(module, '_write_job') as write_job:
+            response = client.get('/api/visual-concept/plans-jobs/expired-job',
+                                  headers=self._headers(self.token_a))
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json()['status'], 'failed')
+        self.assertEqual(response.get_json()['result']['error_code'], 'PLANS_JOB_EXPIRED')
+        self.assertEqual(response.get_json()['todos'][0]['status'], 'failed')
+        write_job.assert_called_once()
+
+    def test_visual_plan_provider_calls_obey_the_job_deadline(self):
+        module = self.application_module
+        with self.app.test_request_context('/'):
+            module.g.visual_plan_job_deadline = 105
+            with patch.object(module.time, 'time', return_value=100):
+                self.assertEqual(module._visual_plan_job_call_timeout(1200), 5)
+            with patch.object(module.time, 'time', return_value=105):
+                with self.assertRaises(module.visual_plan_geometry.PlanGeometryError) as raised:
+                    module._visual_plan_job_call_timeout(1200)
+        self.assertEqual(raised.exception.code, 'PLANS_JOB_EXPIRED')
 
     def test_site_chat_progress_names_the_work_actually_in_progress(self):
         module = self.application_module

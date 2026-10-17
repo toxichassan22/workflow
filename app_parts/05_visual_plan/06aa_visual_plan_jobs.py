@@ -1,5 +1,19 @@
 _VISUAL_PLAN_JOB_NAMESPACE = '.visual_plan_jobs'
-_VISUAL_PLAN_JOB_TIMEOUT_SECONDS = 7200
+_VISUAL_PLAN_JOB_TIMEOUT_SECONDS = 600
+
+
+def _visual_plan_job_call_timeout(default=1200):
+    """Keep provider requests inside their job's absolute deadline."""
+    if not has_request_context():
+        return default
+    deadline = getattr(g, 'visual_plan_job_deadline', None)
+    if deadline is None:
+        return default
+    remaining = deadline - time.time()
+    if remaining <= 0:
+        raise visual_plan_geometry.PlanGeometryError(
+            'انتهت مهلة معالجة المخطط الهندسي.', 'PLANS_JOB_EXPIRED')
+    return max(1, min(int(default), int(remaining)))
 
 
 def _visual_plan_job_todos(kind, state='running', active_index=None):
@@ -87,7 +101,8 @@ def _visual_plan_execute(kind, data, slot_id=''):
             return {'success': False, 'error_code': 'PLANS_OPERATION_INVALID'}, 400
         return result, 200
     except visual_plan_geometry.PlanGeometryError as error:
-        status = 503 if error.code in ('PLANS_NOTES_CHECK_FAILED', 'PLANS_PROVIDER_FAILED') else 400
+        status = 503 if error.code in ('PLANS_NOTES_CHECK_FAILED', 'PLANS_PROVIDER_FAILED',
+                                       'PLANS_JOB_EXPIRED') else 400
         return {'success': False, 'error': str(error), 'error_code': error.code}, status
     except (TypeError, ValueError) as error:
         app.logger.warning('Visual plan data refused: %s', type(error).__name__)
@@ -106,7 +121,11 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
     with flask_app.test_request_context('/api/visual-concept/plans-jobs/' + job_id, method='POST', json=data):
         for key, value in actor.items():
             setattr(g, key, value)
-        g.visual_plan_job_deadline = time.time() + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
+        initial_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+        try:
+            g.visual_plan_job_deadline = float(initial_job.get('deadlineAt'))
+        except (TypeError, ValueError):
+            g.visual_plan_job_deadline = time.time() + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
         g.visual_plan_job_kind = kind
         def report_progress(progress, todos=None, checkpoint=None):
             try:
@@ -137,9 +156,24 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
             else:
                 _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id,
                            {'status': 'running', 'success': True, 'progress': 20,
+                            'createdAt': initial_job.get('createdAt'),
+                            'deadlineAt': g.visual_plan_job_deadline,
+                            'timeoutSeconds': initial_job.get('timeoutSeconds', _VISUAL_PLAN_JOB_TIMEOUT_SECONDS),
                             'todos': _visual_plan_job_todos(kind)})
-                result, status = _visual_plan_execute(kind, data, slot_id)
+                if time.time() >= g.visual_plan_job_deadline:
+                    result, status = {'success': False, 'error': 'انتهت مهلة معالجة المخطط الهندسي.',
+                                      'error_code': 'PLANS_JOB_EXPIRED'}, 503
+                else:
+                    result, status = _visual_plan_execute(kind, data, slot_id)
+            if time.time() >= g.visual_plan_job_deadline:
+                result, status = {'success': False, 'error': 'انتهت مهلة معالجة المخطط الهندسي.',
+                                  'error_code': 'PLANS_JOB_EXPIRED'}, 503
             final_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+            existing_result = final_job.get('result') if isinstance(final_job.get('result'), dict) else {}
+            if final_job.get('status') == 'failed' and existing_result.get('error_code') == 'PLANS_JOB_EXPIRED':
+                if not flask_app.config.get('TESTING'):
+                    _bill_tenant_unbilled_usage_async(tenant_id)
+                return
             result_state = 'completed' if result.get('success') else 'failed'
             active_index = next((index for index, item in enumerate(final_job.get('todos') or [])
                                  if isinstance(item, dict) and item.get('status') == 'active'), None)
@@ -153,13 +187,20 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
         except Exception as error:
             app.logger.warning('Visual plan worker failed: %s', type(error).__name__)
             failed_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+            existing_result = failed_job.get('result') if isinstance(failed_job.get('result'), dict) else {}
+            if failed_job.get('status') == 'failed' and existing_result.get('error_code') == 'PLANS_JOB_EXPIRED':
+                return
             active_index = next((index for index, item in enumerate(failed_job.get('todos') or [])
                                  if isinstance(item, dict) and item.get('status') == 'active'), None)
+            expired = time.time() >= g.visual_plan_job_deadline
             failed_job.update({'status': 'failed', 'success': False, 'progress': 100,
                                'todos': _visual_plan_job_todos(kind, 'failed', active_index=active_index),
                                'httpStatus': 503,
-                               'result': {'success': False, 'error': 'تعذرت معالجة المخطط الهندسي.',
-                                          'error_code': 'PLANS_PROVIDER_FAILED'}})
+                               'result': {'success': False,
+                                          'error': ('انتهت مهلة معالجة المخطط الهندسي.' if expired
+                                                    else 'تعذرت معالجة المخطط الهندسي.'),
+                                          'error_code': ('PLANS_JOB_EXPIRED' if expired
+                                                         else 'PLANS_PROVIDER_FAILED')}})
             _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, failed_job)
 
 
@@ -168,16 +209,21 @@ def _visual_plan_dispatch(kind, data, slot_id=''):
         result, status = _visual_plan_execute(kind, data, slot_id)
         return jsonify(result), status
     job_id = _uuid.uuid4().hex
+    created_at = time.time()
+    deadline_at = created_at + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
     actor = {key: getattr(g, key, None) for key in
              ('tenant_id', 'user_id', 'user_name', 'user_role', 'is_admin', 'token_payload')}
     _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id,
                {'status': 'queued', 'success': True, 'progress': 5, 'actor': actor,
+                'createdAt': created_at, 'deadlineAt': deadline_at,
+                'timeoutSeconds': _VISUAL_PLAN_JOB_TIMEOUT_SECONDS,
                 'todos': _visual_plan_job_todos(kind, 'queued'),
                 'payload': {'data': data, 'kind': kind, 'slotId': slot_id}})
     threading.Thread(target=_visual_plan_job_worker,
                      args=(current_app._get_current_object(), actor, data, kind, slot_id, job_id),
                      daemon=True).start()
-    return jsonify({'success': True, 'jobId': job_id, 'status': 'queued', 'progress': 5}), 202
+    return jsonify({'success': True, 'jobId': job_id, 'status': 'queued', 'progress': 5,
+                    'timeoutSeconds': _VISUAL_PLAN_JOB_TIMEOUT_SECONDS}), 202
 
 
 @app.route('/api/visual-concept/plans-notes-check', methods=['POST'])
@@ -223,7 +269,11 @@ def api_visual_concept_plan_job(job_id):
         job = None
     if not job:
         return jsonify({'success': False, 'error': 'مهمة المخططات غير موجودة.', 'error_code': 'JOB_NOT_FOUND'}), 404
-    if job.get('status') in ('queued', 'running') and time.time() - job.get('updatedAt', 0) > _VISUAL_PLAN_JOB_TIMEOUT_SECONDS:
+    try:
+        deadline_at = float(job.get('deadlineAt'))
+    except (TypeError, ValueError):
+        deadline_at = float(job.get('createdAt') or job.get('updatedAt') or time.time()) + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
+    if job.get('status') in ('queued', 'running') and time.time() >= deadline_at:
         kind = ((job.get('payload') or {}).get('kind') or 'render')
         job = {'status': 'failed', 'success': False, 'progress': 100, 'httpStatus': 503,
                'todos': _visual_plan_job_todos(kind, 'failed'),
@@ -231,4 +281,5 @@ def api_visual_concept_plan_job(job_id):
                           'error_code': 'PLANS_JOB_EXPIRED'}}
         _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id, job)
     return jsonify({key: job[key] for key in
-                    ('status', 'success', 'progress', 'todos', 'checkpoint', 'result', 'httpStatus') if key in job})
+                    ('status', 'success', 'progress', 'todos', 'checkpoint', 'result', 'httpStatus',
+                     'timeoutSeconds') if key in job})

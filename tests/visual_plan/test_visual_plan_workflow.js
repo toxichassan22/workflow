@@ -778,9 +778,56 @@ test('stage three ignores a second chat send while its current request is active
   assert.equal(apiCalls, 0);
 });
 
-test('visual plan job polling allows the requested two-hour generation window', () => {
-  const actions = fs.readFileSync(path.join(dir, '02d_visual_concept_plan_actions.js'), 'utf8');
-  assert.match(actions, /Date\.now\(\) \+ 7200000/);
+test('visual plan polling bounds status requests and surfaces a stalled poll', async () => {
+  const context = fixture();
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({
+    slots: {}, plansWorkflow: { jobTodos: [
+      { id: '1', label: 'تجهيز المشهد الهندسي', status: 'active' },
+      { id: '2', label: 'تحليل المتطلبات', status: 'pending' },
+    ] },
+  });
+  context.setTimeout = callback => { callback(); return 1; };
+  let pollTimeout;
+  context.api = async () => ({ jobId: 'job-1', status: 'queued', timeoutSeconds: 600 });
+  context.apiWithTimeout = async (method, path, body, timeoutMs) => {
+    assert.equal(method, 'GET');
+    assert.match(path, /plans-jobs\/job-1$/);
+    pollTimeout = timeoutMs;
+    return { success: false, error: 'تعذر الاتصال بحالة المهمة', error_code: 'CLIENT_REQUEST_TIMEOUT' };
+  };
+
+  const result = await context.visualConceptPlanJobApi('POST', '/api/visual-concept/site-plan-assistant', {});
+
+  assert.equal(pollTimeout, 15000);
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'CLIENT_REQUEST_TIMEOUT');
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.jobTodos[0].status, 'failed');
+  assert.doesNotMatch(source, /Date\.now\(\) \+ 7200000/);
+});
+
+test('visual plan polling ends at the server-provided job deadline', async () => {
+  const context = fixture();
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({
+    slots: {}, plansWorkflow: { jobTodos: [
+      { id: '1', label: 'تجهيز المشهد الهندسي', status: 'active' },
+    ] },
+  });
+  let now = 100000;
+  context.Date = class extends Date { static now() { return now; } };
+  context.setTimeout = (callback, delay) => { now += delay; callback(); return 1; };
+  context.api = async () => ({ jobId: 'job-2', status: 'queued', timeoutSeconds: 2 });
+  let polls = 0;
+  context.apiWithTimeout = async () => {
+    polls += 1;
+    return { status: 'running', success: true };
+  };
+
+  const result = await context.visualConceptPlanJobApi('POST', '/api/visual-concept/site-plan-assistant', {});
+
+  assert.equal(result.success, false);
+  assert.equal(result.error_code, 'PLANS_JOB_EXPIRED');
+  assert.ok(polls <= 8, `unexpected status poll count: ${polls}`);
+  assert.equal(context.tenantVisualConceptState.plansWorkflow.jobTodos[0].status, 'failed');
 });
 
 test('the AI primary facade has its own external slot while legacy moodboard angles keep their order', () => {

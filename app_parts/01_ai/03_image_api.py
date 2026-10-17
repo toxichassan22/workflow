@@ -717,7 +717,7 @@ def _normalize_image_references(references, tenant_id=None):
     return prepared
 
 
-def call_images_api(prompt, references=None, usage_ctx=None, model=None):
+def call_images_api(prompt, references=None, usage_ctx=None, model=None, timeout=180):
     """Generate an image through OpenRouter's dedicated /images endpoint.
 
     Image-only models (e.g. gpt-image-2.5-*) reject /chat/completions and take
@@ -753,7 +753,7 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None):
                 {'type': 'image_url', 'image_url': {'url': ref}}
                 for ref in prepared[:16]
             ]
-        response = requests.post(f'{OPENROUTER_BASE}/images', headers=headers, json=payload, timeout=180)
+        response = requests.post(f'{OPENROUTER_BASE}/images', headers=headers, json=payload, timeout=timeout)
         data = response.json()
         generation_id, img_usage = _extract_openrouter_usage(data)
         _settle_ai_attempt_record(

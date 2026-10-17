@@ -58,6 +58,20 @@
       }
     }
 
+    function failVisualConceptPlanJobUi() {
+      const workflow = visualConceptPlansWorkflowState();
+      const todos = Array.isArray(workflow.jobTodos) ? workflow.jobTodos : [];
+      let failedActive = false;
+      const failedTodos = todos.map(item => {
+        if (!failedActive && (item.status === 'active' || item.status === 'pending')) {
+          failedActive = true;
+          return { ...item, status: 'failed' };
+        }
+        return item;
+      });
+      if (failedTodos.length) updateVisualConceptPlanJobUi({ status: 'failed', todos: failedTodos });
+    }
+
     function visualConceptPlanActionBusy(action, busy) {
       if (busy) {
         if (visualConceptPlanRequests.has(action)) return false;
@@ -76,17 +90,32 @@
     async function visualConceptPlanJobApi(method, path, body) {
       const initial = await api(method, path, body);
       if (!initial || !initial.jobId) return initial;
-      const deadline = Date.now() + 7200000;
+      const timeoutSeconds = Number(initial.timeoutSeconds);
+      const jobWindowMs = Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
+        ? timeoutSeconds * 1000 : 600000;
+      const deadline = Date.now() + jobWindowMs + 10000;
+      const timeoutMessage = WFT('plans.job_timeout', 'انتهت مهلة معالجة المخطط الهندسي.');
       let job = initial;
       updateVisualConceptPlanJobUi(job);
-      while (job && (job.status === 'queued' || job.status === 'running') && Date.now() < deadline) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        job = await api('GET', '/api/visual-concept/plans-jobs/' + encodeURIComponent(initial.jobId));
+      while (job && (job.status === 'queued' || job.status === 'running')) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        await new Promise(resolve => setTimeout(resolve, Math.min(1500, remaining)));
+        const requestTimeout = Math.min(15000, deadline - Date.now());
+        if (requestTimeout <= 0) break;
+        job = await apiWithTimeout(
+          'GET', '/api/visual-concept/plans-jobs/' + encodeURIComponent(initial.jobId),
+          null, requestTimeout, WFT('plans.job_status_timeout', 'تعذر الاتصال بحالة معالجة المخطط.'));
         updateVisualConceptPlanJobUi(job);
+        if (job?.error && !job?.result) {
+          failVisualConceptPlanJobUi();
+          return { success: false, error: job.error, error_code: job.error_code };
+        }
       }
       if (job && job.result && typeof job.result === 'object') return job.result;
       if (job && job.error) return { success: false, error: job.error, error_code: job.error_code };
-      return { success: false, error: WFT('plans.job_failed', 'تعذرت معالجة المخطط الهندسي.') };
+      failVisualConceptPlanJobUi();
+      return { success: false, error: timeoutMessage, error_code: 'PLANS_JOB_EXPIRED' };
     }
 
     async function collectVisualConceptPlansWorkflowPayload() {

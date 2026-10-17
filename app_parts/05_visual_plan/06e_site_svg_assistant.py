@@ -175,13 +175,7 @@ def _visual_plan_site_packet(data):
 
 
 def _visual_plan_site_call(system_prompt, user_prompt, data=None, max_tokens=12000):
-    timeout = 1200
-    deadline = getattr(g, 'visual_plan_job_deadline', None)
-    if deadline is not None:
-        remaining = deadline - time.time()
-        if remaining <= 0:
-            raise visual_plan_geometry.PlanGeometryError('انتهت مهلة معالجة المخطط الهندسي.', 'PLANS_JOB_EXPIRED')
-        timeout = min(timeout, max(1, int(remaining)))
+    timeout = _visual_plan_job_call_timeout(1200)
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=max_tokens,
         model=GEMINI_TEXT_MODEL, reasoning_effort='high', timeout=timeout,
