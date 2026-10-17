@@ -589,12 +589,12 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     }
 
 
-# The whole summary job — source plan plus the one wide browse call — spends
-# the same wall-clock minutes; env-overridable like _MARKET_JOB_TIME_BUDGET.
+# The whole summary job — source plan, parallel browser work and synthesis —
+# gets three hours by default, with an environment override.
 try:
-    _SUMMARY_JOB_TIME_BUDGET = max(60, int(os.environ.get('SUMMARY_JOB_TIME_BUDGET') or 420))
+    _SUMMARY_JOB_TIME_BUDGET = max(60, int(os.environ.get('SUMMARY_JOB_TIME_BUDGET') or 10800))
 except (TypeError, ValueError):
-    _SUMMARY_JOB_TIME_BUDGET = 420
+    _SUMMARY_JOB_TIME_BUDGET = 10800
 
 # The competitors sweep is wider still: roughly one search per plausible rival
 # plus the market-level listings, each paired with page opens.
@@ -603,7 +603,8 @@ _COMPETITORS_MAX_STEPS = 20
 
 
 def _execute_market_summary(data, tenant_id=None, progress=None,
-                            resume_state=None, checkpoint=None):
+                            resume_state=None, checkpoint=None,
+                            trace_writer=None):
     """Job entry — one evidence pool, one deadline, one shared browser
     session for the source plan and the main browse call, mirroring the
     competitors job's wiring."""
@@ -622,19 +623,26 @@ def _execute_market_summary(data, tenant_id=None, progress=None,
         result = _run_market_summary(
             data, tenant_id=tenant_id, progress=report,
             evidence_pool=evidence_pool, deadline=deadline, session=session,
-            resume_state=resume_state, checkpoint=checkpoint)
+            resume_state=resume_state, checkpoint=checkpoint,
+            trace_writer=trace_writer)
     finally:
         if session is not None:
             try:
                 session.close()
             except Exception:
                 pass
-    return _attach_failure_evidence(result, evidence_pool)
+    result = _attach_failure_evidence(result, evidence_pool)
+    if callable(trace_writer):
+        trace_writer({'event': 'summary_result', 'success': bool(result.get('success')),
+                      'summary': result.get('summary'), 'sources': result.get('sources'),
+                      'error': result.get('error'),
+                      'failure_reason': result.get('failureReason')})
+    return result
 
 
 def _run_market_summary(data, tenant_id=None, progress=None,
                         evidence_pool=None, deadline=None, session=None,
-                        resume_state=None, checkpoint=None):
+                        resume_state=None, checkpoint=None, trace_writer=None):
     report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data, tenant_id)
     competitors = data.get('competitors') if isinstance(data.get('competitors'), list) else []
@@ -673,7 +681,7 @@ def _run_market_summary(data, tenant_id=None, progress=None,
     research = _run_market_summary_research(
         payload, usage_ctx, evidence_pool, deadline, report=report,
         offer_lang=offer_lang, resume_state=resume_state,
-        checkpoint=checkpoint)
+        checkpoint=checkpoint, trace_writer=trace_writer)
     if not research.get('success'):
         fatal = next((_ai_fatal_error_dict(item.get('result') or {})
                       for item in research.get('outcomes') or []
@@ -846,9 +854,19 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
             elif kind == 'summary_consolidate':
                 payload = _execute_market_summary_consolidate(data, tenant_id, progress=report)
             elif kind == 'summary':
+                try:
+                    trace_writer = _market_research_trace_writer(tenant_id, job_id)
+                except Exception as exc:
+                    trace_writer = lambda *_args, **_kwargs: None
+                    print(f'[MARKET SUMMARY] research trace unavailable: {exc}')
+                trace_writer({
+                    'event': 'market_study_job_started', 'job_id': job_id,
+                    'resumed': bool(resume_state), 'started_at_epoch': time.time(),
+                })
                 payload = _execute_market_summary(
                     data, tenant_id, progress=report,
-                    resume_state=resume_state, checkpoint=checkpoint)
+                    resume_state=resume_state, checkpoint=checkpoint,
+                    trace_writer=trace_writer)
             else:
                 payload = _execute_market_summary(data, tenant_id, progress=report)
             status = 'completed' if payload.get('success') else 'failed'

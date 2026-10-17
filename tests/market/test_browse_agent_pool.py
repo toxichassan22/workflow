@@ -343,6 +343,11 @@ class ProgressEventTests(unittest.TestCase):
                          ['web_search', 'open_url'])
         self.assertEqual(tool_events[0]['hint'], 'منافس تجريبي')
         self.assertEqual(tool_events[1]['hint'], _PAGE_URL)
+        done_events = [event for event in events
+                       if event.get('phase') == 'tool_done']
+        self.assertEqual(done_events[0]['arguments']['query'], 'منافس تجريبي')
+        self.assertTrue(done_events[0]['result']['results'])
+        self.assertEqual(done_events[1]['result']['url'], _PAGE_URL)
         done = events[-1]
         self.assertTrue(done.get('ok'))
         self.assertGreaterEqual(done.get('searches') or 0, 1)
@@ -361,6 +366,57 @@ class ProgressEventTests(unittest.TestCase):
             result = agent.run_browse_agent('task', max_steps=4, on_event=boom)
         self.assertNotIn('error', result)
         self.assertEqual(result['choices'][0]['message']['content'], _FINAL_TEXT)
+
+    def test_allowed_sources_scope_search_and_block_external_pages(self):
+        worker = _FakeWorker(web_search=lambda _query: [
+            {'title': 'مصدر مسموح', 'url': 'https://www.aqar.fm/data',
+             'snippet': 'نتيجة مسموحة'},
+            {'title': 'مصدر خارج القائمة', 'url': 'https://outside.example/data',
+             'snippet': 'نتيجة محظورة'},
+        ])
+        state = {'count': 0, 'budget': 5}
+        search = agent._run_web_search(
+            worker, {'query': 'صفقات جدة'}, state,
+            allowed_hosts=['aqar.fm'])
+        self.assertIn('site:aqar.fm', worker.searches[0])
+        self.assertEqual(len(search['results']), 1)
+        self.assertEqual(search['filtered_outside_allowed_sources'], 1)
+
+        trace, pages = [], {}
+        blocked = agent._run_open_url(
+            worker, {'url': 'https://outside.example/data'}, trace, pages,
+            allowed_hosts=['aqar.fm'])
+        self.assertEqual(blocked['error'], 'outside_allowed_sources')
+        self.assertEqual(worker.opened, [])
+
+        worker._open_url = lambda url: {
+            'url': url, 'final_url': 'https://outside.example/redirected',
+            'title': 'خارج القائمة', 'text': 'يجب ألا يصل هذا النص إلى النموذج'}
+        redirected = agent._run_open_url(
+            worker, {'url': 'https://aqar.fm/start'}, trace, pages,
+            allowed_hosts=['aqar.fm'])
+        self.assertEqual(redirected['error'], 'redirected_outside_allowed_sources')
+        self.assertEqual(pages, {})
+        self.assertNotIn('https://outside.example/redirected', pages)
+
+        class ActionWorker:
+            def click_element(self, _index):
+                return {'url': 'https://outside.example/after-click',
+                        'text': 'محتوى محظور'}
+
+            def inspect_page(self, _url):
+                raise AssertionError('outside page must not be inspected')
+
+        action_state = {'current_url': 'https://aqar.fm/data'}
+        action = agent._execute_tool(
+            ActionWorker(), 'click_element', {'index': 1}, trace, pages,
+            action_state, allowed_hosts=['aqar.fm'])
+        self.assertEqual(action['error'], 'navigated_outside_allowed_sources')
+        inspected = agent._run_inspect_page(
+            ActionWorker(), {'url': 'https://outside.example/data'}, trace,
+            pages, allowed_hosts=['aqar.fm'])
+        self.assertEqual(inspected['error'], 'outside_allowed_sources')
+        self.assertEqual(pages, {})
 
     def test_tool_done_marks_a_failed_open(self):
         worker = _FakeWorker(open_url=lambda url: {

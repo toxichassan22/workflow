@@ -100,6 +100,7 @@
             <button type="button" class="btn ghost" id="marketResumeSummaryBtn" onclick="resumeMarketSummaryJob()" hidden>استكمال المهمة</button>
           </div>
           <div id="marketSummaryFailure"></div>
+          <button type="button" class="btn ghost" id="marketSummaryTraceBtn" hidden>تنزيل سجل البحث</button>
           <div id="marketSummaryCompare" hidden></div>
           <div id="marketSummaryFields"></div>
           <h4 style="margin-top:18px">تحليل SWOT</h4>

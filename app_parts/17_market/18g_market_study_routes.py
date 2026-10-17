@@ -111,7 +111,35 @@ def api_market_study_job(job_id):
             'error': 'مهمة دراسة السوق غير موجودة',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(_public_job(job))
+    public_job = _public_job(job)
+    public_job['jobId'] = job_id
+    if str(job.get('kind') or '') == 'summary':
+        public_job['researchTraceUrl'] = f'/api/market-study/jobs/{job_id}/trace'
+    return jsonify(public_job)
+
+
+@app.route('/api/market-study/jobs/<job_id>/trace', methods=['GET'])
+@require_auth
+def api_market_study_research_trace(job_id):
+    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
+        return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
+    job = _read_market_job(g.tenant_id, job_id)
+    if not job or str(job.get('kind') or '') != 'summary':
+        return jsonify({
+            'success': False,
+            'error': 'سجل بحث دراسة السوق غير موجود',
+            'failureReason': 'job_not_found',
+        }), 404
+    trace_path = _market_research_trace_path(g.tenant_id, job_id)
+    if not os.path.isfile(trace_path):
+        return jsonify({
+            'success': False,
+            'error': 'لم يبدأ سجل البحث بعد',
+            'failureReason': 'trace_not_started',
+        }), 404
+    return send_file(
+        trace_path, mimetype='application/x-ndjson', as_attachment=True,
+        download_name=f'market-research-{job_id}.jsonl', conditional=True)
 
 
 @app.route('/api/market-study/jobs/<job_id>/resume', methods=['POST'])

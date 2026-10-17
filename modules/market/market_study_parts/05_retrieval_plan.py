@@ -403,6 +403,11 @@ def _store_browser_page(pool, url, session, deadline, spa_target):
     text = str(result.get('text') or '').strip()
     if len(text) >= _THIN_TEXT_CHARS:
         final_url = str(result.get('final_url') or result.get('url') or url).strip() or url
+        requested_host = _source_host(url)
+        final_host = _source_host(final_url)
+        if not _host_in(final_host, {requested_host}):
+            pool.mark_failed(url, 'redirected_outside_configured_source')
+            return 'redirected_outside_configured_source'
         pool.add_page(url, title=str(result.get('title') or ''), content=text,
                       final_url=final_url, via='browser')
         return ''

@@ -110,14 +110,15 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('كل حي مدخل منفصلًا', prompt)
         self.assertIn('حركة الرحلات الرسمية للمطار', prompt)
         self.assertIn('لا توزع حركة المطار على الأحياء', prompt)
-        self.assertIn('مستوى التفصيل الجغرافي الذي تعذر الوصول إليه', prompt)
-        self.assertIn('Booking.com إلا كبديل للنشاط الفندقي المختار', prompt)
+        self.assertIn('احذف تفاصيل الحي غير المنشورة دون ذكر تعذر الوصول إليها', prompt)
+        self.assertIn('للشقق المخدومة والشقق والفلل المعروضة للإقامة القصيرة', prompt)
+        self.assertIn('إيجاراتها طويلة الأجل', prompt)
         self.assertIn('ثلاث منشآت قابلة للمقارنة على الأقل', prompt)
         self.assertIn('متوسطًا حسابيًا تقريبيًا لأسعار الغرف المعروضة', prompt)
         self.assertIn('اعرض المشاهدات دون متوسط', prompt)
         self.assertIn('لا تسمّه ADR تاريخيًا أو سنويًا', prompt)
-        self.assertIn('لا تستخدم «وسيط» لهذا المعنى', prompt)
-        self.assertIn('«الوسيط الإحصائي» هو median', prompt)
+        self.assertIn('لا تكتب كلمة «وسيط» في أي نص ظاهر للمستخدم', prompt)
+        self.assertIn('أسقط قيمة المقياس الآخر بدل إعادة تسميتها متوسطًا', prompt)
         self.assertIn('متوسطًا حسابيًا تقريبيًا لأسعار الغرف', prompt)
 
         english = market_study.build_summary_user_prompt(
@@ -126,7 +127,7 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('official Saudi Census 2022', english)
         self.assertIn('airport passenger and flight-movement figures', english)
         self.assertIn('never allocate airport traffic to districts', english)
-        self.assertIn('Booking.com observations', english)
+        self.assertIn('Booking.com prices for bookable serviced apartments', english)
         self.assertIn('at least three comparable properties', english)
         self.assertIn('Keep it separate from official ADR', english)
 

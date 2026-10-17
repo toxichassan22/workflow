@@ -4,7 +4,8 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                      max_tokens=None, reasoning_effort=None, model=None,
                      evidence_pool=None, deadline=None, session=None,
                      on_event=None, server_tools=None, local_tools=True,
-                     tool_choice=None, search_provider=None, cancel_event=None):
+                     tool_choice=None, search_provider=None, cancel_event=None,
+                     research_mode=False, allowed_hosts=None):
     """Drive one OpenRouter tool-call loop against a real browser session.
 
     ``model`` is the caller's own task model — the same model that would have
@@ -93,14 +94,15 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
         return deadline is not None and time.time() >= deadline
 
     messages = [
-        {'role': 'system', 'content': _agent_preamble(budget) if local_tools else _NATIVE_PREAMBLE},
+        {'role': 'system', 'content': _agent_preamble(
+            budget, research_mode=research_mode) if local_tools else _NATIVE_PREAMBLE},
         {'role': 'user', 'content': str(task or '')},
     ]
-    request_tools = list(server_tools or [])
+    request_tools = [] if allowed_hosts is not None else list(server_tools or [])
     if local_tools:
         request_tools = list(_BROWSER_TOOLS) + request_tools
     session_cm = None
-    search_state = {'count': 0, 'budget': budget}
+    search_state = {'count': 0, 'budget': budget, 'current_url': None}
 
     def _emit(event):
         if not callable(on_event):
@@ -275,18 +277,23 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                     error = {'message': 'deadline_exceeded'}
                     break
                 args = call['arguments']
-                hint = str(args.get('url') or args.get('query') or '')[:120]
+                hint = str(args.get('purpose') or args.get('url') or args.get('query')
+                           or args.get('text') or args.get('direction') or '')[:120]
                 _log_step(step + 1, call['name'] or '?', hint)
                 _emit({'phase': 'tool', 'step': step + 1, 'max_steps': max_steps,
                        'tool': call['name'] or '', 'hint': hint,
+                       'arguments': dict(args),
                        'searches': search_state['count'], 'pages': len(pages)})
                 result = _execute_tool(session, call['name'], args,
                                        trace, pages, search_state,
-                                       evidence_pool)
+                                       evidence_pool,
+                                       allowed_hosts=allowed_hosts)
                 _emit({'phase': 'tool_done', 'step': step + 1,
                        'max_steps': max_steps, 'tool': call['name'] or '',
                        'hint': hint, 'searches': search_state['count'],
                        'pages': len(pages),
+                       'arguments': dict(args),
+                       'result': result,
                        'ok': not bool((result or {}).get('error'))})
                 messages.append(_tool_message(call, result))
             if error is not None:
@@ -323,6 +330,8 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
         _cit = _ann.get('url_citation')
         _cit = _cit if isinstance(_cit, dict) else {}
         _url = str(_cit.get('url') or _ann.get('url') or '').strip()
+        if allowed_hosts is not None and not _source_url_allowed(_url, allowed_hosts):
+            continue
         if _url and _url not in _seen_urls:
             _seen_urls.add(_url)
             annotations.append({'url_citation': {

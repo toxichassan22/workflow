@@ -67,21 +67,27 @@ def _tool_callable(session, name):
         return None
 
 
-def _run_web_search(session, args, search_state, evidence_pool=None):
+def _run_web_search(session, args, search_state, evidence_pool=None,
+                    allowed_hosts=None):
     query = str(args.get('query') or '').strip()
     if not query:
         return {'error': 'empty_query'}
-    cached = _pool_query(evidence_pool, query)
+    scoped_query = _source_scoped_query(query, allowed_hosts)
+    if not scoped_query:
+        return {'error': 'allowed_sources_required'}
+    cached = _pool_query(evidence_pool, scoped_query)
     if cached is not None:
         # A pooled answer costs no search — it does not consume the budget.
-        _log_line(f'[BROWSE AGENT] pool hit query={query[:120]}')
-        if cached:
+        _log_line(f'[BROWSE AGENT] pool hit query={scoped_query[:120]}')
+        allowed_cached = [item for item in cached if isinstance(item, dict)
+                          and _source_url_allowed(item.get('url'), allowed_hosts)]
+        if allowed_cached:
             search_state['had_results'] = True
         return {'results': [
             {'title': str(item.get('title') or ''),
              'url': str(item.get('url') or ''),
              'snippet': str(item.get('snippet') or '')}
-            for item in cached if isinstance(item, dict)]}
+            for item in allowed_cached]}
     if search_state['count'] >= search_state.get('budget', _SEARCH_BUDGET):
         return dict(_SEARCH_BUDGET_REFUSAL)
     search_state['count'] += 1
@@ -93,15 +99,20 @@ def _run_web_search(session, args, search_state, evidence_pool=None):
     except (TypeError, ValueError):
         max_results = 0
     try:
-        results = fn(query, max_results=max_results) if max_results > 0 else fn(query)
+        results = (fn(scoped_query, max_results=max_results)
+                   if max_results > 0 else fn(scoped_query))
     except TypeError:
         # Older/narrower signature without max_results.
-        results = fn(query)
+        results = fn(scoped_query)
     except Exception as exc:
         return {'error': str(exc) or exc.__class__.__name__}
     compact = []
+    blocked = 0
     for item in results or []:
         if not isinstance(item, dict):
+            continue
+        if not _source_url_allowed(item.get('url'), allowed_hosts):
+            blocked += 1
             continue
         compact.append({'title': str(item.get('title') or ''),
                         'url': str(item.get('url') or ''),
@@ -110,14 +121,19 @@ def _run_web_search(session, args, search_state, evidence_pool=None):
         search_state['had_results'] = True
     # A real execution is recorded — an errored search is not, so a later
     # stage may retry a transiently failed lookup.
-    _pool_store_query(evidence_pool, query, compact)
-    return {'results': compact}
+    _pool_store_query(evidence_pool, scoped_query, compact)
+    return {'results': compact, 'filtered_outside_allowed_sources': blocked}
 
 
-def _run_open_url(session, args, trace, pages, evidence_pool=None):
+def _run_open_url(session, args, trace, pages, evidence_pool=None,
+                  allowed_hosts=None):
     url = str(args.get('url') or '').strip()
     if not url:
         return {'error': 'empty_url'}
+    if not _source_url_allowed(url, allowed_hosts):
+        trace.append({'url': url, 'title': '', 'chars': 0,
+                      'error': 'outside_allowed_sources'})
+        return {'url': url, 'error': 'outside_allowed_sources'}
     dead = _dead_url_shape(url)
     if dead:
         trace.append({'url': url, 'title': '', 'chars': 0, 'error': dead})
@@ -136,6 +152,11 @@ def _run_open_url(session, args, trace, pages, evidence_pool=None):
         content = str(pooled.get('content') or '')
         final_url = (str(pooled.get('final_url') or pooled.get('url')
                          or url).strip() or url)
+        if not _source_url_allowed(final_url, allowed_hosts):
+            trace.append({'url': final_url, 'title': title, 'chars': 0,
+                          'error': 'redirected_outside_allowed_sources',
+                          'pool': True})
+            return {'url': url, 'error': 'redirected_outside_allowed_sources'}
         trace.append({'url': final_url, 'title': title,
                       'chars': len(content), 'pool': True})
         if final_url not in pages:
@@ -163,6 +184,10 @@ def _run_open_url(session, args, trace, pages, evidence_pool=None):
         _pool_mark_failed(evidence_pool, url, str(error))
         return {'url': url, 'error': str(error)}
     final_url = str(result.get('final_url') or result.get('url') or url).strip() or url
+    if not _source_url_allowed(final_url, allowed_hosts):
+        trace.append({'url': final_url, 'title': title, 'chars': 0,
+                      'error': 'redirected_outside_allowed_sources'})
+        return {'url': url, 'error': 'redirected_outside_allowed_sources'}
     trace.append({'url': final_url, 'title': title, 'chars': len(text)})
     if final_url not in pages:
         pages[final_url] = {'title': title, 'content': text[:_PAGE_TEXT_CITATION_CAP]}

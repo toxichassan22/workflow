@@ -126,7 +126,8 @@ class BuildSourcePlanTests(unittest.TestCase):
                     entry['url'])
             purposes = {entry['purpose'] for entry in plan}
             self.assertIn('dataset', purposes)
-            self.assertIn('listing', purposes)
+            if payload['projectType'] != 'فندقي':
+                self.assertIn('listing', purposes)
 
     def test_dataset_expansion_entries_are_browser_bound(self):
         plan = market_study.build_source_plan(
@@ -254,6 +255,23 @@ class RunSourcePlanTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(session.opened, ['https://aqar.fm/listings'])
         self.assertEqual(pool.added[0]['via'], 'browser')
+
+    def test_browser_redirect_outside_catalog_host_is_not_evidence(self):
+        pool = _FakePool()
+        session = _FakeBrowser({
+            'https://sakani.sa/reports-and-data': {
+                'url': 'https://sakani.sa/reports-and-data',
+                'final_url': 'https://outside.example/copied-report',
+                'title': 'صفحة محولة', 'text': _big_text(), 'error': None,
+            },
+        })
+        counts = market_study.run_source_plan(
+            [_entry('https://sakani.sa/reports-and-data', needs_browser=True)],
+            pool, lambda _url: ('', ''), session=session)
+        self.assertEqual(counts, {'fetched': 0, 'skipped': 0, 'failed': 1})
+        self.assertEqual(pool.page_failed('https://sakani.sa/reports-and-data'),
+                         'redirected_outside_configured_source')
+        self.assertEqual(pool.pages(), [])
 
     def test_thin_http_text_falls_back_to_the_browser(self):
         pool = _FakePool()

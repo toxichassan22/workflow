@@ -28,9 +28,10 @@ _SUMMARY_RESEARCH_GROUPS = (
         'hosts': {'mt.gov.sa', 'str.com', 'costar.com', 'gaca.gov.sa', 'booking.com'},
         'focus': ('Ministry of Tourism and GASTAT performance reports, visitor flows and seasonality, '
                   'airport passenger and flight movement, licensed establishments, rooms, occupancy, ADR and RevPAR when '
-                  'published; city-level tourism events and hotel supply. If official hotel-rate reports are '
-                  'unavailable or gated, use Booking.com only for a comparable, date-specific sample of '
-                  'currently advertised room prices; never present it as annual ADR.'),
+                  'published; city-level tourism events and hotel supply. Always use Booking.com for a '
+                  'date-specific sample of currently advertised hotel and, when relevant to the selected '
+                  'activity, serviced-apartment or short-stay apartment/villa prices. Keep accommodation '
+                  'types separate; never present booking prices as annual ADR or long-term residential rent.'),
     },
     {
         'key': 'economy_commercial_industrial',
@@ -53,9 +54,8 @@ _SUMMARY_RESEARCH_GROUPS = (
     },
 )
 
-_SUMMARY_RESEARCH_MAX_WORKERS = 100
-_SUMMARY_RESEARCH_MAX_STEPS = 100
-_SUMMARY_RESEARCH_SEARCH_BUDGET = 16
+_SUMMARY_RESEARCH_MAX_STEPS = 1000
+_SUMMARY_RESEARCH_SEARCH_BUDGET = 1000
 # Source researchers return the complete evidence they opened. The aggregator
 # handles synthesis separately; do not truncate source findings at a small cap.
 _SUMMARY_RESEARCHER_MODEL = 'anthropic/claude-haiku-5.5'
@@ -84,9 +84,11 @@ _SUMMARY_RESEARCH_REQUIRED_URLS = {
 }
 
 _SUMMARY_RESEARCH_PROMPT_VERSIONS = {
-    ('hospitality_and_tourism', 'gaca.gov.sa'): 3,
-    ('hospitality_and_tourism', 'booking.com'): 3,
-    ('economy_commercial_industrial', 'geo.stats.gov.sa'): 3,
+    ('hospitality_and_tourism', 'gaca.gov.sa'): 4,
+    ('hospitality_and_tourism', 'booking.com'): 4,
+    ('transactions_and_rents', 'sakani.sa'): 4,
+    ('economy_commercial_industrial', 'stats.gov.sa'): 4,
+    ('economy_commercial_industrial', 'geo.stats.gov.sa'): 4,
 }
 
 
@@ -155,6 +157,8 @@ def _summary_research_activity_hosts(payload):
     if profile.get('kinds') and profile['kinds'].intersection(
             {'residential', 'commercial', 'hospitality', 'entertainment'}):
         hosts.add('geo.stats.gov.sa')
+    if (profile.get('kinds') or set()).intersection({'hospitality', 'residential'}):
+        hosts.add('booking.com')
     return {host for host in hosts if host}
 
 
@@ -254,6 +258,23 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                       + '\nاستخدم فلتر الحي داخل الصفحة عند تحليل حي محدد.\n'
                       if listing_urls else '')
     scoped_population_rules = ''
+    scoped_demographic_growth_rules = ''
+    if ('residential' in selected_kinds and 'stats.gov.sa' in hosts):
+        if offer_lang == 'en':
+            scoped_demographic_growth_rules = (
+                'For a selected residential activity, search GASTAT for the newest city-level time series '
+                'and official projections on population and household growth, household formation, age '
+                'structure, and housing units or permits where published. Record the year, geography, '
+                'definition, and whether each value is observed or projected. Relate demand to verified '
+                'residential supply, completions, and pipeline from the assigned official sources; do not '
+                'derive housing demand from population growth alone or treat a national rate as a Jeddah rate.\n')
+        else:
+            scoped_demographic_growth_rules = (
+                'للنشاط السكني المختار، ابحث في الهيئة العامة للإحصاء عن أحدث سلسلة زمنية وتوقعات رسمية '
+                'لنمو سكان المدينة والأسر، وتكوّن الأسر، والتركيب العمري، والوحدات السكنية أو الرخص عند '
+                'نشرها. سجّل السنة والنطاق الجغرافي وتعريف المؤشر وهل الرقم مرصود أم متوقع. اربط الطلب '
+                'بالمعروض السكني المنفذ والمكتمل والمخطط الذي تثبته المصادر الرسمية الموكلة؛ لا تستنتج '
+                'الطلب السكني من نمو السكان وحده ولا تنقل معدلًا وطنيًا إلى جدة.\n')
     if 'geo.stats.gov.sa' in hosts:
         summary_scope = market_study.normalize_summary_scope(
             (payload or {}).get('summaryScope'), (payload or {}).get('city'))
@@ -276,6 +297,24 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                 'استخرج عدد السكان والأسر ومتوسط حجم الأسرة والمساكن المشغولة حيث تنشرها الخريطة. '
                 'اذكر سنة التعداد 2022 والدقة الجغرافية الفعلية. لا تستبدل رقم المنطقة أو المدينة '
                 'برقم الحي؛ سجّل عدم التوفر إذا لم تعرض الخريطة ذلك النطاق.\n')
+    sakani_rules = ''
+    if 'sakani.sa' in hosts and selected_kinds.intersection(
+            {'residential', 'commercial'}):
+        if offer_lang == 'en':
+            sakani_rules = (
+                'Treat Sakani reports and data as a required primary source. Open every assigned report/data '
+                'page, inspect its tables and controls, select the requested city, district, period, property '
+                'use and transaction/rent type, and apply filters. For commercial activity, inspect the '
+                'commercial-unit rental tables explicitly; for residential activity, inspect residential '
+                'unit and bedroom breakdowns where offered. Capture all visible matching rows, pagination, '
+                'totals, averages, maxima, and record counts.\n')
+        else:
+            sakani_rules = (
+                'منصة سكني مصدر أساسي إلزامي لهذه الدراسة. افتح كل صفحة تقارير وبيانات موكلة، وافحص '
+                'الجداول وعناصر التصفية، وحدد المدينة والحي والفترة ونوع الاستخدام ونوع العملية ثم طبّق '
+                'الفلاتر. في النشاط التجاري افحص جداول إيجار الوحدات التجارية تحديدًا؛ وفي السكني افحص '
+                'تقسيم الوحدات السكنية وغرف النوم حيث يظهر. اجمع كل الصفوف المطابقة الظاهرة وصفحاتها '
+                'وإجمالياتها ومتوسطاتها وأعلى قيمها وأعداد سجلاتها.\n')
     scoped_aviation_rules = ''
     if 'gaca.gov.sa' in hosts:
         if offer_lang == 'en':
@@ -297,15 +336,31 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                 'اعرض أحدث فترة أقدم كسياق مؤرخ وسجّل فجوة الفترة المطلوبة.\n')
     booking_price_rules = ''
     if 'booking.com' in hosts:
+        has_hospitality = 'hospitality' in selected_kinds
+        has_residential = 'residential' in selected_kinds
+        if has_hospitality and has_residential:
+            booking_target_en = ('hotels plus separate samples of serviced apartments and bookable '
+                                'short-stay apartments/villas')
+            booking_target_ar = ('الفنادق، مع عينات منفصلة للشقق المخدومة والشقق/الفلل '
+                                'المعروضة للإقامة القصيرة')
+        elif has_residential:
+            booking_target_en = 'bookable serviced apartments and short-stay apartments/villas'
+            booking_target_ar = 'الشقق المخدومة والشقق/الفلل المعروضة للإقامة القصيرة'
+        else:
+            booking_target_en = 'hotels'
+            booking_target_ar = 'الفنادق'
         today = market_study.date.today()
         check_in = market_study.date.fromordinal(today.toordinal() + 14)
         check_out = market_study.date.fromordinal(check_in.toordinal() + 2)
         if offer_lang == 'en':
             booking_price_rules = (
-                'Use Booking.com only as a fallback when official hotel-rate reports are unavailable or gated. '
-                'These are current advertised rates, not official operating data. Search the exact same stay '
+                'Booking.com research is mandatory when hospitality or residential is selected, even when official '
+                'operating reports are available; official indicators and booking observations answer different '
+                'questions and must both be reported separately. These are current advertised rates, not official '
+                'operating data. Search the exact same stay '
                 f'for every property: check-in {check_in.isoformat()}, check-out {check_out.isoformat()}, one room, '
-                'two adults, no children, and SAR display currency. Target five hotels in this assigned city or '
+                'two adults, no children, and SAR display currency. Target five comparable properties for each '
+                f'applicable type ({booking_target_en}) in this assigned city or '
                 'district; calculate an arithmetic mean only from at least three comparable available properties '
                 'in the same geographic scope and, when shown, the same star class. Keep room type and visible '
                 'meal/cancellation terms comparable; prefer a standard double/twin room and do not mix suites, '
@@ -314,18 +369,22 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                 'included services, star class, and the source publication/data date when available. If the page '
                 'shows a non-SAR price, convert it to SAR using a verified rate for the source data date; keep the '
                 'original amount and conversion rate in internal evidence fields only. Do not mix dates, currencies, star classes, room '
-                'types, or materially different terms. If fewer than three comparable rates are visible, report the '
+                'types, or materially different terms. Keep each applicable accommodation type in its own '
+                'comparable sample; never mix hotels, serviced apartments, apartments, or villas with one another '
+                'or with sale/annual-rent evidence. If fewer than three comparable rates are visible, report the '
                 'individual observations and sample size without an average. Call a computed result the approximate '
                 'average advertised room rate for this Booking.com sample and exact stay dates; never call it ADR, '
                 'an annual average, a historical rate, or the market standard.\n')
         else:
             booking_price_rules = (
-                'استخدم Booking.com كبديل فقط عندما تكون تقارير أسعار الفنادق الرسمية غير متاحة أو محجوبة؛ '
-                'فهذه أسعار طلب معروضة حاليًا وليست بيانات تشغيل رسمية. ابحث عن الإقامة نفسها لكل فندق: '
+                'استخدام Booking.com إلزامي عند اختيار نشاط فندقي أو سكني حتى عند توفر التقارير الرسمية؛ فالمؤشرات '
+                'التشغيلية الرسمية وأسعار الحجز تقيسان أمرين مختلفين ويجب عرضهما منفصلين. هذه أسعار طلب '
+                'معروضة حاليًا وليست بيانات تشغيل رسمية. ابحث عن الإقامة نفسها لكل منشأة: '
                 f'الدخول {check_in.isoformat()} والخروج {check_out.isoformat()}، غرفة واحدة، بالغان، دون أطفال، '
-                'والعملة المطلوبة ريال سعودي. إذا عرض الموقع السعر بعملة أخرى فحوّله إلى الريال بسعر صرف موثق '
-                'لتاريخ البيانات، واحتفظ بالعملة الأصلية وسعر التحويل في حقول الدليل الداخلية فقط. استهدف خمسة '
-                'فنادق داخل المدينة أو الحي المكلّف، ولا تحسب متوسطًا '
+                'والعملة المطلوبة ريال سعودي. استهدف خمسة عقارات قابلة للمقارنة لكل نوع مناسب '
+                f'({booking_target_ar}) داخل المدينة أو الحي المكلّف؛ لا تخلط أنواع الإقامة ببعضها أو بصفقات البيع '
+                'والإيجار السكني السنوي. إذا عرض الموقع السعر بعملة أخرى فحوّله إلى الريال بسعر صرف موثق '
+                'لتاريخ البيانات، واحتفظ بالعملة الأصلية وسعر التحويل في حقول الدليل الداخلية فقط. ولا تحسب متوسطًا '
                 'حسابيًا إلا من ثلاث منشآت متاحة قابلة للمقارنة على الأقل ضمن النطاق الجغرافي نفسه، ومن فئة النجوم '
                 'نفسها متى ظهرت. اعتمد غرفة قياسية مزدوجة/توأم، ولا تخلط الأجنحة أو الشقق المخدومة أو الغرف '
                 'العائلية في العينة. وحّد شروط الوجبات والإلغاء الظاهرة قدر الإمكان. سجّل اسم الفندق ورابط '
@@ -352,7 +411,8 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
            'verified, omit the amount. Do not put a foreign currency in any summary-ready value.\n')
         + period_rules + transaction_detail_rules
         + 'نطاق المهمة: ' + group['focus'] + '\n'
-        + scoped_population_rules + scoped_aviation_rules + booking_price_rules
+        + scoped_population_rules + scoped_demographic_growth_rules
+        + scoped_aviation_rules + sakani_rules + booking_price_rules
         + 'هذا الباحث مسؤول عن مصدر محدد؛ ابحث داخله أولًا وحاول الوصول إلى صفحة البيانات أو التقرير ذات الصلة، '
         'ولا تكتفِ بالصفحة الرئيسية. إذا لم يعرض المصدر بيانات لهذا المكان أو الفترة فسجّل فجوة تغطية.\n'
         'المصدر الموكّل لهذا الباحث:\n' + requested_sites + '\n'
@@ -395,6 +455,8 @@ def _run_summary_researcher(group, hosts, payload, city, district,
         for page in shared_pages:
             if not isinstance(page, dict) or not page.get('url'):
                 continue
+            if not _summary_source_url_allowed(page.get('url'), hosts):
+                continue
             try:
                 worker_pool.add_page(
                     page.get('url'), title=page.get('title') or '',
@@ -411,16 +473,20 @@ def _run_summary_researcher(group, hosts, payload, city, district,
         search_budget=_SUMMARY_RESEARCH_SEARCH_BUDGET,
         max_steps=_SUMMARY_RESEARCH_MAX_STEPS,
         max_tokens=_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS,
-        reasoning_effort='low', cancel_event=cancel_event,
+        reasoning_effort='low', cancel_event=cancel_event, research_mode=True,
+        allowed_hosts=hosts,
         on_event=on_event)
     pages = worker_pool.pages() if worker_pool is not None else []
     parsed, parse_error = _parse_market_model_json(result)
+    parsed, filtered_sources = _summary_restrict_research_result(parsed, hosts)
+    pages = [page for page in pages if _summary_source_url_allowed(
+        page.get('url'), hosts)]
     searched = _market_search_ran(result) or bool(pages)
     return {
         'key': group['key'], 'label': group['label'], 'city': city,
         'district': district, 'hosts': list(hosts), 'result': result,
         'parsed': parsed, 'parse_error': parse_error, 'pages': pages,
-        'searched': searched,
+        'filtered_sources': filtered_sources, 'searched': searched,
     }
 
 
@@ -430,8 +496,8 @@ def _summary_research_task_id(group, hosts, city, district,
     host_names = sorted(str(host) for host in (hosts or []))
     task = [group_key, host_names, str(city or ''), str(district or '')]
     prompt_version = max(
-        (_SUMMARY_RESEARCH_PROMPT_VERSIONS.get((group_key, host), 2)
-         for host in host_names), default=2)
+        (_SUMMARY_RESEARCH_PROMPT_VERSIONS.get((group_key, host), 3)
+         for host in host_names), default=3)
     if prompt_version > 1:
         task.append(f'prompt-v{prompt_version}')
     if activity_signature:
@@ -499,7 +565,8 @@ def _summary_research_restore(saved):
 
 def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                                  report=None, offer_lang='ar',
-                                 resume_state=None, checkpoint=None):
+                                 resume_state=None, checkpoint=None,
+                                 trace_writer=None):
     """Run source-specific Playwright/SearXNG researchers concurrently."""
     report = report if callable(report) else (lambda *_args: None)
     source_map = _summary_research_sources_by_group()
@@ -526,7 +593,11 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
     if not jobs:
         return {'success': False, 'error': 'summary_scope_required',
                 'outcomes': [], 'citation_urls': []}
-    report(12, f'بدء {len(jobs)} مهمة بحث للمصادر، بحد أقصى 100 باحث بالتوازي')
+    report(12, f'بدء {len(jobs)} مهمة بحث للمصادر بالتوازي؛ باحث مستقل لكل مصدر ونطاق')
+    if callable(trace_writer):
+        trace_writer({'event': 'research_started', 'researcher_count': len(jobs),
+                      'sources_by_group': source_map,
+                      'cities': scope.get('cities') or []})
     outcomes = []
     resume_state = resume_state if isinstance(resume_state, dict) else {}
     saved_researchers = (resume_state.get('researchers')
@@ -645,8 +716,11 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
             report(last_progress, message)
 
     cancel_event = threading.Event()
+    source_worker_count = len({
+        host for _group, hosts, _city, _district in jobs for host in hosts
+    })
     executor = ThreadPoolExecutor(
-        max_workers=min(_SUMMARY_RESEARCH_MAX_WORKERS, len(jobs)),
+        max_workers=max(1, source_worker_count),
         thread_name_prefix='market-research')
     futures = {}
     fatal_found = False
@@ -671,8 +745,16 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
         for job_index, (group, hosts, city, district) in enumerate(jobs):
             if job_index in completed_jobs:
                 continue
-            on_event = lambda event, index=job_index: report_research_progress(
-                index, event=event)
+            def on_event(event, index=job_index, group=group, hosts=hosts,
+                         city=city, district=district):
+                report_research_progress(index, event=event)
+                if callable(trace_writer):
+                    trace_writer({
+                        'event': 'browser_step', 'researcher': group['key'],
+                        'label': group['label'], 'hosts': hosts,
+                        'city': city, 'district': district,
+                        **(event if isinstance(event, dict) else {}),
+                    })
             future = executor.submit(
                 _run_summary_researcher, group, hosts, researcher_payload,
                 city, district, usage_ctx, deadline, offer_lang,
@@ -694,6 +776,19 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
                            'pages': [], 'searched': False}
             outcome['activitySignature'] = activity_signature
             outcomes.append(outcome)
+            if callable(trace_writer):
+                trace_writer({
+                    'event': 'researcher_result', 'researcher': group['key'],
+                    'label': group['label'], 'hosts': hosts, 'city': city,
+                    'district': district, 'searched': outcome.get('searched'),
+                    'parsed': outcome.get('parsed'),
+                    'parse_error': outcome.get('parse_error'),
+                    'filtered_sources': outcome.get('filtered_sources', 0),
+                    'error': (outcome.get('result') or {}).get('error'),
+                    'opened_pages': outcome.get('pages') or [],
+                    'citation_urls': _market_citation_urls(
+                        outcome.get('result') or {}),
+                })
             report_research_progress(job_index, completed=True)
             fatal = _ai_fatal_error_dict(outcome.get('result') or {})
             if fatal is not None:
@@ -780,6 +875,9 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
         elif coverage_status == 'partial':
             coverage_gap = ('لم يثبت الباحث استنفاد البيانات المرتبطة بالمهمة داخل المصدر؛ '
                             'تحقق من تفاصيل التغطية والفجوات.')
+        if item.get('parse_error'):
+            coverage_gap = (coverage_gap + ' ' if coverage_gap else '') + (
+                'تعذر تحليل نتيجة الباحث المهيكلة؛ لم تُستخدم نتيجة غير قابلة للتحقق.')
         if incomplete or declared_gaps:
             details = [str(row.get('gaps') or '').strip() for row in incomplete
                        if isinstance(row, dict) and str(row.get('gaps') or '').strip()]
@@ -792,7 +890,10 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
             'city': item.get('city'), 'district': item.get('district'),
             'opened_evidence': bool(item.get('searched')),
             'coverage_status': coverage_status,
-            'research_output': parsed or _get_chat_response_text(item.get('result') or {}),
+            'research_output': parsed or {
+                'coverage': [], 'findings': [], 'sources': [],
+                'coverage_gaps': ['تعذر تحليل نتيجة الباحث المهيكلة.'],
+            },
             'coverage_gap': coverage_gap,
         })
         citations.extend(_market_citation_urls(item.get('result') or {}))

@@ -4,7 +4,8 @@
 // (assets/js/05a-market-jobs.js + the callers in 05-market-competitors.js and
 // 05a-market-summary-chat.js). Contracts under test:
 //
-// - MARKET_JOB_POLL_LIMIT_MS is 40 minutes — the job budget, not a guess at
+// - MARKET_JOB_POLL_LIMIT_MS is three hours — the study's configured budget.
+// - The research trace remains downloadable after a job settles.
 //   how long a generation takes.
 // - A generate click re-attaches to the remembered running job in
 //   state.activeMarketJobs instead of posting a duplicate; a settled
@@ -57,6 +58,7 @@ function fixture() {
     marketCompetitorsNote: recordingText(),
     marketGenerateSummaryBtn: { disabled: false },
     marketResumeSummaryBtn: { disabled: false, hidden: true },
+    marketSummaryTraceBtn: { hidden: true, onclick: null },
     marketSummaryFailure: recordingText(),
     marketSummaryCompare: { hidden: true, innerHTML: '' },
     marketCompetitorPriceBenchmarks: { hidden: false, innerHTML: '' },
@@ -277,10 +279,39 @@ test('competitor table keeps blank type cells aligned and compacts comparison ch
   assert.deepEqual(JSON.parse(JSON.stringify(context.marketSelectedBenchmarkValues(row))), ['سكني - بيع']);
 });
 
-test('poll budget constant is 40 minutes', () => {
+test('poll budget constant is three hours', () => {
   const { context } = fixture();
-  assert.equal(vm.runInContext('MARKET_JOB_POLL_LIMIT_MS', context), 40 * 60 * 1000);
+  assert.equal(vm.runInContext('MARKET_JOB_POLL_LIMIT_MS', context), 3 * 60 * 60 * 1000);
   assert.equal(vm.runInContext('MARKET_JOB_POLL_INTERVAL_MS', context), 2500);
+});
+
+test('the summary research trace downloads with the tenant token', async () => {
+  const { context, inputs } = fixture();
+  const calls = [];
+  context.URL = class extends URL {
+    static createObjectURL() { return 'blob:market-trace'; }
+    static revokeObjectURL() {}
+  };
+  context.Blob = Blob;
+  context.getTenantToken = () => 'tenant-token';
+  context.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, blob: async () => new Blob(['trace']) };
+  };
+  context.document.createElement = tag => ({
+    tagName: tag,
+    click() { context.downloadedTrace = this; }
+  });
+
+  context.setMarketResearchTraceJob('job-trace-1');
+  assert.equal(inputs.marketSummaryTraceBtn.hidden, false);
+  await inputs.marketSummaryTraceBtn.onclick();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, '/api/market-study/jobs/job-trace-1/trace');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer tenant-token');
+  assert.equal(context.downloadedTrace.download, 'market-research-job-trace-1.jsonl');
+  assert.equal(context.downloadedTrace.href, 'blob:market-trace');
 });
 
 test('pollMarketStudyJob polls until the job completes', async () => {
@@ -459,6 +490,7 @@ test('the summary job re-attaches to its remembered running job', async () => {
   assert.deepEqual(context.requests.map(req => req.endpoint), [JOB_ENDPOINT('job-s1')]);
   assert.deepEqual(notesWhilePolling, ['توجد مهمة قيد التنفيذ — جاري متابعة نتيجتها.']);
   assert.equal(inputs.marketSummaryFailure.textContent, '');
+  assert.equal(inputs.marketSummaryTraceBtn.hidden, false);
   // An existing summary shows the compare surface — never auto-applied.
   assert.match(inputs.marketSummaryCompare.innerHTML, /تعريف جديد/);
   assert.match(inputs.marketSummaryCompare.innerHTML, /تعريف السوق الحالي/);
@@ -478,6 +510,7 @@ test('a credit-stopped summary keeps its job and can resume that same job', asyn
     : {};
   await context.runMarketSummaryJob();
   assert.equal(context.rememberedMarketJob('summary'), 'job-summary-credit');
+  assert.equal(inputs.marketSummaryTraceBtn.hidden, false);
   assert.equal(inputs.marketResumeSummaryBtn.hidden, false);
 
   context.nextApi = (method, endpoint) => {

@@ -72,8 +72,10 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(captured['model'], 'anthropic/claude-haiku-5.5')
         self.assertTrue(captured['local_tools'])
         self.assertEqual(captured['search_provider'], 'searxng')
-        self.assertEqual(captured['max_steps'], 100)
-        self.assertEqual(captured['search_budget'], 16)
+        self.assertEqual(captured['max_steps'], 1000)
+        self.assertEqual(captured['search_budget'], 1000)
+        self.assertTrue(captured['research_mode'])
+        self.assertEqual(captured['allowed_hosts'], ['rei.rega.gov.sa'])
         self.assertEqual(captured['max_tokens'], 66000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         self.assertIs(captured['on_event'], on_event)
@@ -214,6 +216,13 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         active = 0
         maximum_active = 0
         captured = []
+        observed_workers = []
+        real_executor = module.ThreadPoolExecutor
+
+        class RecordingExecutor(real_executor):
+            def __init__(self, max_workers=None, *args, **kwargs):
+                observed_workers.append(max_workers)
+                super().__init__(max_workers=max_workers, *args, **kwargs)
 
         def fake_researcher(group, hosts, payload, city, district,
                             usage_ctx, deadline, offer_lang='ar',
@@ -237,7 +246,8 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         with patch.object(module, '_summary_research_sources_by_group',
                           return_value=source_map), \
                 patch.object(module, '_run_summary_researcher',
-                             side_effect=fake_researcher):
+                             side_effect=fake_researcher), \
+                patch.object(module, 'ThreadPoolExecutor', RecordingExecutor):
             research = module._run_market_summary_research(
                 payload, {}, None, time.time() + 30)
 
@@ -251,7 +261,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertTrue(all(item['coverage_status'] == 'partial'
                             for item in research['reports']))
         self.assertTrue(all(item.get('coverage_gap') for item in research['reports']))
-        self.assertEqual(module._SUMMARY_RESEARCH_MAX_WORKERS, 100)
+        self.assertEqual(observed_workers, [3])
 
     def test_live_browser_events_advance_research_job_progress(self):
         module = self.module
@@ -460,6 +470,75 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertNotIn('بحث جوجل الأصلي', prompt)
         self.assertNotIn('openrouter:web_search', prompt)
 
+    def test_research_result_keeps_only_findings_from_assigned_sources(self):
+        module = self.module
+        parsed, removed = module._summary_restrict_research_result({
+            'group': 'transactions_and_rents',
+            'coverage': [
+                {'url': 'https://sakani.sa/reports-and-data',
+                 'completeness': 'complete'},
+                {'url': 'https://unknown.example/report',
+                 'completeness': 'complete'},
+            ],
+            'findings': [
+                {'metric': 'متوسط الإيجار', 'value': '1000',
+                 'source_url': 'https://www.sakani.sa/reports-and-data'},
+                {'metric': 'صفقة', 'value': '999',
+                 'source_url': 'https://unknown.example/report'},
+            ],
+            'sources': [
+                {'url': 'https://sakani.sa/reports-and-data'},
+                {'url': 'https://unknown.example/report'},
+            ],
+            'coverage_gaps': [],
+        }, ['sakani.sa'])
+        self.assertEqual(removed, 3)
+        self.assertEqual(len(parsed['coverage']), 1)
+        self.assertEqual(len(parsed['findings']), 1)
+        self.assertEqual(len(parsed['sources']), 1)
+        self.assertEqual(parsed['filtered_outside_source_rows'], 3)
+
+    def test_market_research_trace_persists_sanitized_browser_events(self):
+        module = self.module
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                patch.object(module, 'UPLOADS_DIR', temp_dir):
+            writer = module._market_research_trace_writer('tenant-a', 'jobtrace123')
+            writer({
+                'event': 'browser_step', 'tool': 'type_text',
+                'purpose': 'تحديد المدينة والفترة',
+                'arguments': {
+                    'text': 'جدة 2025-10-17 إلى 2026-10-17',
+                    'password': 'private-password',
+                    'email': 'owner@example.test',
+                    'phone': '0551234567',
+                },
+                'result': {'url': 'https://sakani.sa/reports-and-data',
+                           'text': 'ظهرت بيانات السوق'},
+            })
+            path = module._market_research_trace_path('tenant-a', 'jobtrace123')
+            with open(path, encoding='utf-8') as handle:
+                record = json.loads(handle.readline())
+
+        self.assertEqual(record['purpose'], 'تحديد المدينة والفترة')
+        self.assertIn('ظهرت بيانات السوق', record['result']['text'])
+        self.assertEqual(record['arguments']['password'], '[redacted]')
+        self.assertEqual(record['arguments']['email'], '[redacted]')
+        self.assertEqual(record['arguments']['phone'], '[redacted]')
+        self.assertIn('2025-10-17', record['arguments']['text'])
+        self.assertNotIn('owner@example.test', json.dumps(record))
+
+    def test_market_research_trace_marks_its_size_limit(self):
+        module = self.module
+        with tempfile.TemporaryDirectory() as temp_dir, \
+                patch.object(module, 'UPLOADS_DIR', temp_dir), \
+                patch.object(module, '_MARKET_TRACE_MAX_BYTES', 1):
+            writer = module._market_research_trace_writer('tenant-a', 'jobtrace124')
+            writer({'event': 'browser_step', 'tool': 'open_url'})
+            path = module._market_research_trace_path('tenant-a', 'jobtrace124')
+            with open(path, encoding='utf-8') as handle:
+                record = json.loads(handle.readline())
+        self.assertEqual(record['event'], 'trace_limit_reached')
+
     def test_official_census_and_air_traffic_research_is_city_scoped_and_resumable(self):
         module = self.module
         census_group = next(item for item in module._SUMMARY_RESEARCH_GROUPS
@@ -476,6 +555,17 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIn('تعداد السعودية 2022', census_prompt)
         self.assertIn('الروضة', census_prompt)
         self.assertIn('الدقة الجغرافية الفعلية', census_prompt)
+
+        residential_payload = {'city': 'جدة', 'projectType': 'سكني'}
+        demographics_prompt = module._summary_research_prompt(
+            residential_payload, census_group, ['stats.gov.sa'], 'جدة')
+        self.assertIn('نمو سكان المدينة والأسر', demographics_prompt)
+        self.assertIn('الوحدات السكنية أو الرخص', demographics_prompt)
+        sakani_prompt = module._summary_research_prompt(
+            {'city': 'جدة', 'projectType': 'تجاري'},
+            module._SUMMARY_RESEARCH_GROUPS[0], ['sakani.sa'], 'جدة')
+        self.assertIn('منصة سكني مصدر أساسي إلزامي', sakani_prompt)
+        self.assertIn('جداول إيجار الوحدات التجارية', sakani_prompt)
 
         aviation_prompt = module._summary_research_prompt(
             payload, aviation_group, ['gaca.gov.sa'], 'جدة')
@@ -495,17 +585,19 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIn('غرفة واحدة، بالغان، دون أطفال', booking_prompt)
         self.assertIn('ثلاث منشآت متاحة قابلة للمقارنة على الأقل', booking_prompt)
         self.assertIn('لا تسمّه ADR أو متوسطًا سنويًا', booking_prompt)
+        self.assertIn('إلزامي عند اختيار نشاط فندقي أو سكني', booking_prompt)
+        self.assertNotIn('كبديل فقط', booking_prompt)
 
         for group, host in ((census_group, 'geo.stats.gov.sa'),
                             (aviation_group, 'gaca.gov.sa'),
                             (aviation_group, 'booking.com')):
             task_id = json.loads(module._summary_research_task_id(
                 group, [host], 'جدة', ''))
-            self.assertEqual(task_id[-1], 'prompt-v3')
+            self.assertEqual(task_id[-1], 'prompt-v4')
         ordinary_group = module._SUMMARY_RESEARCH_GROUPS[0]
         ordinary_task_id = json.loads(module._summary_research_task_id(
             ordinary_group, ['rega.gov.sa'], 'جدة', ''))
-        self.assertEqual(ordinary_task_id[-1], 'prompt-v2')
+        self.assertEqual(ordinary_task_id[-1], 'prompt-v3')
         self.assertEqual(len(ordinary_task_id), 5)
 
         source_map = {item['key']: [] for item in module._SUMMARY_RESEARCH_GROUPS}
@@ -571,9 +663,16 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIn('rei.rega.gov.sa', calls)
         self.assertIn('aqar.fm', calls)
         self.assertIn('geo.stats.gov.sa', calls)
-        self.assertNotIn('booking.com', calls)
+        self.assertIn('booking.com', calls)
         self.assertNotIn('gaca.gov.sa', calls)
         self.assertNotIn('modon.gov.sa', calls)
+
+    def test_hospitality_and_residential_always_include_booking_source(self):
+        for project_type in ('فندقي', 'سكني'):
+            with self.subTest(project_type=project_type):
+                hosts = self.module._summary_research_activity_hosts(
+                    {'projectType': project_type})
+                self.assertIn('booking.com', hosts)
 
     def test_resumed_research_identity_includes_selected_project_activity(self):
         module = self.module

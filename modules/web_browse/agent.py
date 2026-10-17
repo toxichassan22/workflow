@@ -23,6 +23,7 @@ import os
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 
 _DEFAULT_MAX_STEPS = 10
@@ -78,22 +79,68 @@ def _search_count_phrase(count):
     return f'{count} عمليات بحث'
 
 
-def _agent_preamble(budget):
+def _agent_preamble(budget, research_mode=False):
     # The advertised cap keeps one grace search below the hard budget, so a
     # model that genuinely needs its last lookup is not slapped by the
     # refusal — at the default budget this reads «عمليتي بحث», unchanged.
     advertised = max(1, budget - 1)
-    return (
+    common = (
         'أنت وكيل تصفّح ويب. أدواتك: web_search تُرجع عناوين وروابط ومقتطفات، '
         'و open_url تقرأ نص الصفحة الفعلي، و inspect_page تعرض عناصر الصفحة '
         'التفاعلية مرقّمة، و click_element و type_text و scroll_page تنفّذ عليها '
         '(أرقام العناصر تخص آخر نتيجة فقط). استخدم open_url للقراءة المباشرة، '
         'وأدوات التفاعل فقط حين تحتاج الصفحة إدخالًا أو ضغطًا أو تمريرًا. نفّذ '
-        + _search_count_phrase(advertised) +
-        ' كحد أقصى طوال المهمة، ثم افتح أقرب نتيجة للمطلوب — ويمكنك فتح أكثر من رابط '
-        'في الخطوة نفسها — وأجِب بما طُلب منك فقط دون شرح خطواتك. لا تُعِد البحث بنفس '
-        'الغرض: إن شحّت النتائج فافتح أفضل ما وجدت أو أجب بما لديك.\n\n'
+        + _search_count_phrase(advertised) + ' كحد أقصى طوال المهمة. '
     )
+    if research_mode:
+        return common + (
+            'هذه مهمة بحث سوق شاملة: افتح الروابط المحددة للمصدر، ثم واصل البحث داخل '
+            'الموقع والتفاعل مع الحقول والفلاتر والأزرار والتبويبات والجداول والصفحات '
+            'والتمرير حتى تستنفد النتائج ذات الصلة أو تنتهي المهلة. لا تعتبر فتح الصفحة أو '
+            'قراءة مقتطف أو أول نتيجة إنجازًا. التزم بمضيفي المصادر الموكلة ولا تستخدم أو '
+            'تنقل أي معلومة من خارجها؛ أدوات المتصفح ستحجب الروابط والنتائج خارجها. '
+            'لكل استدعاء أداة أرسل purpose بوصف قصير '
+            'للإجراء المقصود، دون سرد استدلالك الداخلي. إذا تعذر الوصول إلى البيانات '
+            'فسجّل العائق وما أمكن استخراجه، ولا تدّعِ اكتمال التغطية.\n\n')
+    return common + (
+        'افتح أقرب نتيجة للمطلوب — ويمكنك فتح أكثر من رابط في الخطوة نفسها — وأجب بما '
+        'طُلب منك فقط دون شرح خطواتك. لا تُعِد البحث بالغرض نفسه: إن شحّت النتائج '
+        'فافتح أفضل ما وجدت أو أجب بما لديك.\n\n')
+
+
+def _source_url_allowed(url, allowed_hosts):
+    """True when a browser URL belongs to an explicitly allowed source host."""
+    if allowed_hosts is None:
+        return True
+    try:
+        parsed = urlsplit(str(url or '').strip())
+        if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname:
+            return False
+        host = parsed.hostname.lower().rstrip('.').removeprefix('www.')
+    except Exception:
+        return False
+    for allowed in allowed_hosts:
+        try:
+            allowed_text = str(allowed or '').strip().lower()
+            if '://' in allowed_text:
+                allowed_text = urlsplit(allowed_text).hostname or ''
+            allowed_text = allowed_text.rstrip('.').removeprefix('www.')
+            if host == allowed_text or host.endswith('.' + allowed_text):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _source_scoped_query(query, allowed_hosts):
+    if allowed_hosts is None:
+        return query
+    hosts = [str(host).strip().removeprefix('www.') for host in allowed_hosts
+             if str(host or '').strip()]
+    if not hosts:
+        return ''
+    scope = ' OR '.join(f'site:{host}' for host in hosts)
+    return f'({scope}) {query}'
 
 
 # The preamble budgets searches; the tool grants one grace call, then refuses —
@@ -134,6 +181,8 @@ _BROWSER_TOOLS = [
                     'query': {'type': 'string', 'description': 'Search query text'},
                     'max_results': {'type': 'integer',
                                     'description': 'Maximum results to return (default 8)'},
+                    'purpose': {'type': 'string',
+                                'description': 'Brief action intent for the audit trace; no private reasoning'},
                 },
                 'required': ['query'],
             },
@@ -148,6 +197,8 @@ _BROWSER_TOOLS = [
                 'type': 'object',
                 'properties': {
                     'url': {'type': 'string', 'description': 'Absolute page URL'},
+                    'purpose': {'type': 'string',
+                                'description': 'Brief action intent for the audit trace; no private reasoning'},
                 },
                 'required': ['url'],
             },
@@ -170,6 +221,8 @@ _BROWSER_TOOLS = [
                 'properties': {
                     'url': {'type': 'string',
                             'description': 'Absolute page URL to open first (optional)'},
+                    'purpose': {'type': 'string',
+                                'description': 'Brief action intent for the audit trace; no private reasoning'},
                 },
             },
         },
@@ -186,6 +239,8 @@ _BROWSER_TOOLS = [
                 'properties': {
                     'index': {'type': 'integer',
                               'description': 'Element number from the latest element list'},
+                    'purpose': {'type': 'string',
+                                'description': 'Brief action intent for the audit trace; no private reasoning'},
                 },
                 'required': ['index'],
             },
@@ -206,6 +261,8 @@ _BROWSER_TOOLS = [
                     'text': {'type': 'string', 'description': 'Text to type'},
                     'submit': {'type': 'boolean',
                                'description': 'Press Enter after typing (default false)'},
+                    'purpose': {'type': 'string',
+                                'description': 'Brief action intent for the audit trace; no private reasoning'},
                 },
                 'required': ['index', 'text'],
             },
@@ -222,6 +279,8 @@ _BROWSER_TOOLS = [
                 'type': 'object',
                 'properties': {
                     'direction': {'type': 'string', 'enum': ['down', 'up']},
+                    'purpose': {'type': 'string',
+                                'description': 'Brief action intent for the audit trace; no private reasoning'},
                 },
             },
         },
@@ -553,11 +612,18 @@ def _absorb_state(result, url, trace, pages, evidence_pool=None,
     return out
 
 
-def _run_inspect_page(session, args, trace, pages, evidence_pool=None):
+def _run_inspect_page(session, args, trace, pages, evidence_pool=None,
+                     allowed_hosts=None, current_url=None):
     """The interactive open: numbered elements + text. A URL the pool marked
     'needs_interaction'/'thin_content' is exactly what this tool exists for —
     those soft failures are bypassed; hard failures still short-circuit."""
-    url = str(args.get('url') or '').strip()
+    url = str(args.get('url') or current_url or '').strip()
+    if ((allowed_hosts is not None and not url)
+            or not _source_url_allowed(url, allowed_hosts)):
+        trace.append({'url': url, 'title': '', 'chars': 0,
+                      'error': 'outside_allowed_sources' if url else 'no_allowed_page_open'})
+        return {'url': url, 'error': 'outside_allowed_sources' if url
+                else 'no_allowed_page_open'}
     if url:
         dead = _dead_url_shape(url)
         if dead:
@@ -584,12 +650,23 @@ def _run_inspect_page(session, args, trace, pages, evidence_pool=None):
             return {'error': str(exc) or exc.__class__.__name__}
     except Exception as exc:
         return {'error': str(exc) or exc.__class__.__name__}
+    result_data = result if isinstance(result, dict) else {}
+    result_url = str(result_data.get('final_url')
+                     or result_data.get('url') or url).strip() or url
+    if not _source_url_allowed(result_url, allowed_hosts):
+        trace.append({'url': result_url, 'title': '', 'chars': 0,
+                      'error': 'redirected_outside_allowed_sources',
+                      'action': 'inspect_page'})
+        return {'url': url, 'error': 'redirected_outside_allowed_sources'}
     return _absorb_state(result, url, trace, pages, evidence_pool,
                          action='inspect_page' if url else None)
 
 
-def _run_page_action(session, name, args, trace, pages, evidence_pool=None):
+def _run_page_action(session, name, args, trace, pages, evidence_pool=None,
+                     allowed_hosts=None, current_url=None):
     """click_element / type_text / scroll_page on the worker's live page."""
+    if not _source_url_allowed(current_url, allowed_hosts):
+        return {'url': current_url or '', 'error': 'no_allowed_page_open'}
     fn = _tool_callable(session, name)
     if fn is None:
         return {'error': f'{name}_unavailable'}
@@ -607,25 +684,49 @@ def _run_page_action(session, name, args, trace, pages, evidence_pool=None):
         return {'error': 'invalid_arguments'}
     except Exception as exc:
         return {'error': str(exc) or exc.__class__.__name__}
+    result_data = result if isinstance(result, dict) else {}
+    result_url = str(result_data.get('final_url')
+                     or result_data.get('url') or current_url).strip() or current_url
+    if not _source_url_allowed(result_url, allowed_hosts):
+        trace.append({'url': result_url, 'title': '', 'chars': 0,
+                      'error': 'navigated_outside_allowed_sources',
+                      'action': name})
+        return {'url': current_url, 'error': 'navigated_outside_allowed_sources'}
     return _absorb_state(result, '', trace, pages, evidence_pool,
                          action=name)
 
 
 def _execute_tool(session, name, args, trace, pages, search_state,
-                  evidence_pool=None):
+                  evidence_pool=None, allowed_hosts=None):
     """Dispatch one model tool call. Returns the compact tool-result payload —
     errors are data, never exceptions."""
     name = str(name or '').strip()
     args = args if isinstance(args, dict) else {}
     if name == 'web_search':
-        return _run_web_search(session, args, search_state, evidence_pool)
+        return _run_web_search(session, args, search_state, evidence_pool,
+                               allowed_hosts=allowed_hosts)
     if name == 'open_url':
-        return _run_open_url(session, args, trace, pages, evidence_pool)
+        result = _run_open_url(session, args, trace, pages, evidence_pool,
+                               allowed_hosts=allowed_hosts)
+        if not result.get('error'):
+            search_state['current_url'] = result.get('url')
+        return result
     if name == 'inspect_page':
-        return _run_inspect_page(session, args, trace, pages, evidence_pool)
+        result = _run_inspect_page(
+            session, args, trace, pages, evidence_pool,
+            allowed_hosts=allowed_hosts,
+            current_url=search_state.get('current_url'))
+        if not result.get('error'):
+            search_state['current_url'] = result.get('url')
+        return result
     if name in _ACTION_TOOLS:
-        return _run_page_action(session, name, args, trace, pages,
-                                evidence_pool)
+        result = _run_page_action(
+            session, name, args, trace, pages, evidence_pool,
+            allowed_hosts=allowed_hosts,
+            current_url=search_state.get('current_url'))
+        if not result.get('error'):
+            search_state['current_url'] = result.get('url') or search_state.get('current_url')
+        return result
     return {'error': 'unknown_tool'}
 
 

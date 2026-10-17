@@ -5,7 +5,7 @@
        outlives the poll budget is reported as still running, never as a retry
        instruction. */
 
-    const MARKET_JOB_POLL_LIMIT_MS = 40 * 60 * 1000;
+    const MARKET_JOB_POLL_LIMIT_MS = 3 * 60 * 60 * 1000;
     const MARKET_JOB_POLL_INTERVAL_MS = 2500;
 
     async function pollMarketStudyJob(jobId, onProgress, pollOpts) {
@@ -39,8 +39,40 @@
       if (button) button.hidden = !available;
     }
 
+    function setMarketResearchTraceJob(jobId) {
+      const button = document.getElementById('marketSummaryTraceBtn');
+      if (!button) return;
+      const id = String(jobId || getLastMarketResearchTraceJob() || '').trim();
+      button.hidden = !id;
+      if (!id) return;
+      try { localStorage.setItem('landloom_market_research_trace_job', id); } catch (_) {}
+      button.onclick = async () => {
+        if (!id) return;
+        const token = getTenantToken();
+        const headers = token ? { Authorization: 'Bearer ' + token } : {};
+        const response = await fetch(
+          '/api/market-study/jobs/' + encodeURIComponent(id) + '/trace', { headers });
+        if (!response.ok) {
+          toast('تعذر تنزيل سجل البحث');
+          return;
+        }
+        const url = URL.createObjectURL(await response.blob());
+        const download = document.createElement('a');
+        download.href = url;
+        download.download = 'market-research-' + id + '.jsonl';
+        download.click();
+        URL.revokeObjectURL(url);
+      };
+    }
+
+    function getLastMarketResearchTraceJob() {
+      try { return String(localStorage.getItem('landloom_market_research_trace_job') || '').trim(); }
+      catch (_) { return ''; }
+    }
+
     async function restoreMarketSummaryResumeAction() {
       const jobId = rememberedMarketJob('summary');
+      setMarketResearchTraceJob(jobId);
       if (!jobId) return;
       try {
         const job = await api(
@@ -258,6 +290,7 @@
       setMarketSummaryResumeAvailable(false);
       if (btn) btn.disabled = true;
       if (fail) fail.textContent = '';
+      setMarketResearchTraceJob(rememberedMarketJob('summary'));
       const scopeCheck = (typeof collectMarketSummaryScope === 'function')
         ? collectMarketSummaryScope()
         : { cities: [] };
@@ -288,6 +321,7 @@
           const payload = collectMarketStudyRequestPayload();
           res = await api('POST', '/api/market-study/summary', payload);
           if (res && res.jobId && !res.summary) {
+            setMarketResearchTraceJob(res.jobId);
             rememberMarketJob('summary', res.jobId);
             updateLoaderProgress(10, res.message || 'بدأت المهمة في الخلفية...');
             res = await pollMarketStudyJob(res.jobId, onProgress);
@@ -326,6 +360,7 @@
         setMarketSummaryResumeAvailable(false);
         return;
       }
+      setMarketResearchTraceJob(jobId);
       if (btn) btn.disabled = true;
       if (generateBtn) generateBtn.disabled = true;
       if (fail) fail.textContent = '';
