@@ -24,6 +24,7 @@ const root = path.resolve(__dirname, '..', '..');
 const files = [
   'assets/js/03-executive-classification.js',
   'assets/js/04-market.js',
+  'assets/js/04a-market-section.js',
   'assets/js/05-market-competitors.js',
   'assets/js/05a-market-jobs.js',
   'assets/js/05a-market-summary-chat.js'
@@ -132,6 +133,52 @@ function postCount(context, endpoint) {
   return context.requests.filter(
     req => req.method === 'POST' && req.endpoint === endpoint).length;
 }
+
+test('market study separates competitors and market into accessible tabs', () => {
+  const ui = fs.readFileSync(
+    path.join(root, 'assets/js/04a-market-section.js'), 'utf8');
+  assert.match(ui, /data-market-study-tab="competitors"[^>]*>المنافسون<\/button>/);
+  assert.match(ui, /data-market-study-tab="market"[^>]*>السوق<\/button>/);
+  assert.match(ui, /data-market-study-panel="competitors"/);
+  assert.match(ui, /data-market-study-panel="market"/);
+
+  const { context } = fixture();
+  const makeControl = (field, key, classes = '') => {
+    const classNames = new Set(classes.split(/\s+/).filter(Boolean));
+    return {
+      dataset: { [field]: key },
+      classList: {
+        contains: name => classNames.has(name),
+        toggle(name, force) {
+          if (force) classNames.add(name);
+          else classNames.delete(name);
+        }
+      },
+      attributes: {}, handlers: {}, tabIndex: 0,
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+      setAttribute(name, value) { this.attributes[name] = value; }
+    };
+  };
+  const tabs = [makeControl('marketStudyTab', 'competitors', 'active'), makeControl('marketStudyTab', 'market')];
+  const panels = [makeControl('marketStudyPanel', 'competitors'), makeControl('marketStudyPanel', 'market', 'market-study-tab-panel-off')];
+  const bar = { querySelectorAll: () => tabs };
+  const rootElement = {
+    querySelector: selector => selector === '#marketStudyTabs' ? bar : null,
+    querySelectorAll: selector => selector === '.market-study-tab-panel' ? panels : tabs
+  };
+
+  context.setupMarketStudyTabs(rootElement);
+  assert.equal(tabs[0].attributes['aria-selected'], 'true');
+  assert.equal(tabs[1].attributes['aria-selected'], 'false');
+  assert.equal(panels[0].attributes['aria-hidden'], 'false');
+  assert.equal(panels[1].attributes['aria-hidden'], 'true');
+
+  tabs[1].handlers.click();
+  assert.equal(tabs[0].attributes['aria-selected'], 'false');
+  assert.equal(tabs[1].attributes['aria-selected'], 'true');
+  assert.equal(panels[0].attributes['aria-hidden'], 'true');
+  assert.equal(panels[1].attributes['aria-hidden'], 'false');
+});
 
 test('poll budget constant is 40 minutes', () => {
   const { context } = fixture();

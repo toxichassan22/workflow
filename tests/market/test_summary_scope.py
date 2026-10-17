@@ -269,6 +269,20 @@ class SummaryScopeFrontendTests(unittest.TestCase):
         self.assertLess(scope_at, generate_at)
         self.assertGreater(scope_at, competitors_at)
 
+    def test_market_study_splits_competitors_and_summary_tabs(self):
+        text = self.frontend
+        competitor_panel = text.index(
+            'id="marketCompetitorsPanel" data-market-study-panel="competitors"')
+        market_panel = text.index(
+            'id="marketMarketPanel" data-market-study-panel="market"')
+        table_at = text.index('id="marketCompetitorsTable"')
+        scope_at = text.index('marketSummaryScopeMode')
+        self.assertIn('data-market-study-tab="competitors"', text)
+        self.assertIn('data-market-study-tab="market"', text)
+        self.assertGreater(table_at, competitor_panel)
+        self.assertLess(table_at, market_panel)
+        self.assertGreater(scope_at, market_panel)
+
     def test_summary_generation_refuses_an_empty_listed_scope(self):
         # A city/district mode with no names cannot bind any figure — the
         # run is refused in the browser before any request is sent.

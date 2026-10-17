@@ -13,6 +13,7 @@ const root = path.resolve(__dirname, '..', '..');
 const source = [
   'assets/js/03-executive-classification.js',
   'assets/js/04-market.js',
+  'assets/js/04a-market-section.js',
   'assets/js/05-market-competitors.js',
   'assets/js/05a-market-jobs.js',
   'assets/js/05a-market-summary-chat.js'

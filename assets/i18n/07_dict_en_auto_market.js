@@ -144,6 +144,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "المنافس": "Competitor",
   "المنافسة": "Competition",
   "المنافسون": "Competitors",
+  "السوق": "Market",
   "المنشآت الصغيرة": "Small Businesses",
   "المنشآت المتوسطة": "Medium Enterprises (SMEs)",
   "الموثوقية": "Reliability",

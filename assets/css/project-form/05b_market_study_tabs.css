@@ -1,0 +1,49 @@
+/* Market study's top-level tabs, matching the financial study's tab layout. */
+
+#section-market-study .market-study-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px 12px;
+  margin: 0 0 6px;
+  border-bottom: 1px solid var(--line, #e8eef4);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--white, #FFFFFF);
+  scrollbar-width: thin;
+}
+
+#section-market-study .market-study-tab {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 0;
+  border: 1px solid var(--line, #e8eef4);
+  border-radius: 999px;
+  background: var(--white, #FFFFFF);
+  color: var(--navy, #07182C);
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+#section-market-study .market-study-tab.active {
+  border-color: var(--navy, #07182C);
+  background: var(--navy, #07182C);
+  color: var(--white, #FFFFFF);
+}
+
+#section-market-study .market-study-tab:focus-visible {
+  outline: 2px solid var(--teal-bright, #17C8E3);
+  outline-offset: 2px;
+}
+
+#section-market-study .market-study-tab-panel-off {
+  display: none;
+}
