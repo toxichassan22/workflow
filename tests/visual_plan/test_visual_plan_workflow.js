@@ -781,7 +781,7 @@ test('the site plan chat can start before a scene exists and offers an explicit 
   assert.match(activeCard, /data-visual-action="restart-site-plan"[^>]*>البدء من جديد/);
 });
 
-test('starting the site plan over clears analyses, approvals, assistant memory, and generated plans but preserves project facts and boundary points', () => {
+test('starting the site plan over clears only the chat memory and keeps analysis, approvals, project facts, and generated plans', async () => {
   const context = fixture(true);
   context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {
     plan_site: { imageUrl: 'site.svg', approvedImageUrl: 'site.svg', svgCode: '<svg/>', chat: [{ role: 'user', text: 'old turn' }] },
@@ -800,35 +800,39 @@ test('starting the site plan over clears analyses, approvals, assistant memory, 
   context.tenantProjectData = { land_area: 5000, financial_study_model: { components: [{ name: 'Villa' }] } };
   context.hasPermission = () => true;
   context.confirm = () => true;
+  let started = 0;
   let dirty = 0;
   let rendered = 0;
   context.markVisualConceptDirty = () => { dirty += 1; };
   context.renderVisualConceptPage = () => { rendered += 1; };
   context.toast = () => {};
+  context.startVisualConceptSiteChat = async () => { started += 1; };
 
-  assert.equal(context.restartVisualConceptSitePlan(), true);
+  assert.equal(await context.restartVisualConceptSitePlan(), true);
   const workflow = context.tenantVisualConceptState.plansWorkflow;
-  assert.equal(workflow.verification.approved, false);
-  assert.deepEqual(plain(workflow.verification.checks), []);
-  assert.equal(workflow.boundary.approved, false);
+  assert.equal(workflow.verification.approved, true);
+  assert.deepEqual(plain(workflow.verification.checks), [{ item: 'Old check' }]);
+  assert.equal(workflow.boundary.approved, true);
   assert.deepEqual(plain(workflow.boundary.points), [{ parcel_id: '', point: '1', eastings: 10, northings: 20, source: '' }]);
-  assert.deepEqual(plain(workflow.distribution.rows), []);
-  assert.equal(workflow.clientNotes, '');
-  assert.equal(workflow.scene, null);
+  assert.equal(workflow.distribution.approved, true);
+  assert.deepEqual(plain(workflow.distribution.rows), [{ id: 'old-row', building: '', floor_range: '', component: 'Old component', units_per_floor: '', floor_area_sqm: '', circulation: '' }]);
+  assert.equal(workflow.clientNotes, 'Old instruction');
+  assert.equal(workflow.scene.token, 'old-scene');
   assert.equal(workflow.siteAssistant.turns.length, 0);
   assert.equal(workflow.siteAssistant.answers.length, 0);
-  for (const id of ['plan_site', 'plan_uses', 'plan_massing']) {
-    assert.equal(context.tenantVisualConceptState.slots[id].imageUrl, '');
-    assert.equal(context.tenantVisualConceptState.slots[id].approvedImageUrl, '');
-    assert.equal(context.tenantVisualConceptState.slots[id].status, 'pending');
-  }
-  assert.equal(context.tenantVisualConceptState.slots.plan_site.svgCode, '');
+  assert.deepEqual(plain(context.tenantVisualConceptState.slots.plan_site.chat), []);
+  assert.equal(context.tenantVisualConceptState.slots.plan_site.imageUrl, 'site.svg');
+  assert.equal(context.tenantVisualConceptState.slots.plan_site.approvedImageUrl, 'site.svg');
+  assert.equal(context.tenantVisualConceptState.slots.plan_site.svgCode, '<svg/>');
+  assert.equal(context.tenantVisualConceptState.slots.plan_uses.imageUrl, 'uses.png');
+  assert.equal(context.tenantVisualConceptState.slots.plan_massing.imageUrl, 'massing.png');
   assert.deepEqual(plain(context.tenantProjectData), { land_area: 5000, financial_study_model: { components: [{ name: 'Villa' }] } });
+  assert.equal(started, 1);
   assert.equal(dirty, 1);
   assert.equal(rendered, 1);
 });
 
-test('site plan reset leaves the workflow unchanged when the client cancels', () => {
+test('site plan reset leaves the workflow unchanged when the client cancels', async () => {
   const context = fixture(true);
   context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {
     siteAssistant: { turns: [{ role: 'assistant', text: 'keep this' }] },
@@ -836,11 +840,11 @@ test('site plan reset leaves the workflow unchanged when the client cancels', ()
   context.hasPermission = () => true;
   context.confirm = () => false;
   context.markVisualConceptDirty = () => assert.fail('cancel must not save a reset');
-  assert.equal(context.restartVisualConceptSitePlan(), false);
+  assert.equal(await context.restartVisualConceptSitePlan(), false);
   assert.equal(context.tenantVisualConceptState.plansWorkflow.siteAssistant.turns[0].text, 'keep this');
 });
 
-test('site plan reset refuses to run while a plan job is active', () => {
+test('site plan reset refuses to run while a plan job is active', async () => {
   const context = fixture(true);
   context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {
   }, plansWorkflow: {} });
@@ -848,7 +852,7 @@ test('site plan reset refuses to run while a plan job is active', () => {
   context.hasPermission = () => true;
   context.confirm = () => assert.fail('an active job must block the reset before confirmation');
   context.toast = () => {};
-  assert.equal(context.restartVisualConceptSitePlan(), false);
+  assert.equal(await context.restartVisualConceptSitePlan(), false);
   assert.equal(context.tenantVisualConceptState.slots.plan_site.status, 'generating');
 });
 

@@ -187,23 +187,13 @@
         escapeHtml(assistantProgressLabel) + '</div>';
       const assistantBusy = typeof visualConceptSiteAssistantBusy !== 'undefined'
         && visualConceptSiteAssistantBusy;
-      const conversationStarted = Boolean((assistant.turns || []).length || chatMessages.length || slot.svgCode);
-      const hasPlanWork = Boolean(
-        conversationStarted || (assistant.answers || []).length || assistant.summary || assistant.pendingQuestion
-        || Object.keys(assistant.checkpoints || {}).length || workflow.verification?.approved
-        || (workflow.verification?.checks || []).length || (workflow.verification?.issues || []).length
-        || (workflow.boundary?.points || []).length || workflow.boundary?.approved
-        || (workflow.distribution?.rows || []).length || workflow.distribution?.approved
-        || workflow.clientNotes || workflow.distributionNotes || workflow.notesReview?.verified
-        || workflow.scene || workflow.promptReady || (workflow.jobTodos || []).length
-        || VISUAL_CONCEPT_PLAN_KINDS.some(item => {
-          const planSlot = tenantVisualConceptState.slots[item.id] || {};
-          return Boolean(planSlot.imageUrl || planSlot.approvedImageUrl || planSlot.prompt);
-        })
-      );
+      const conversationStarted = Boolean((assistant.turns || []).length || chatMessages.length);
+      const hasConversation = Boolean(conversationStarted || (assistant.answers || []).length
+        || assistant.summary || assistant.pendingQuestion || assistant.generateRequested
+        || assistant.designSpec || Object.keys(assistant.checkpoints || {}).length);
       const resetBusy = typeof visualConceptPlansResetBusy === 'function'
         && visualConceptPlansResetBusy();
-      const restart = hasPlanWork
+      const restart = hasConversation
         ? '<div class="visual-plan-site-controls"><button type="button" class="btn ghost small" data-visual-action="restart-site-plan" data-visual-slot="plan_site" ' +
           (assistantBusy || resetBusy || locked ? 'disabled' : '') + '>البدء من جديد</button></div>'
         : '';
