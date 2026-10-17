@@ -63,6 +63,15 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'annual hotel ADR/occupancy. An inaccessible, gated, missing, or stale source is a coverage gap, '
             'not permission to estimate. Do not turn national data into city data or a sampled sheet into a '
             'complete city census. Cite each used specific page in sources; never use a homepage as evidence.\n')
+        local_indicator_rules = (
+            'When official Saudi Census 2022 evidence is present, include the city population and household '
+            'figures in city_position with the census year and exact geography; include each selected district '
+            'separately only when the source reports it at district resolution. Use household counts as a '
+            'residential-demand indicator, not as proof of transactions. In demand (and hospitality where '
+            'relevant), use official airport passenger and flight-movement figures only as city/airport-level '
+            'context, with airport and period; never allocate airport traffic to districts or describe passenger '
+            'counts as ticket bookings. If any of these indicators was assigned but unavailable, state the '
+            'specific source, period, or geographic-resolution gap. Do not omit a returned supported indicator.\n')
         local_data_rules = (
             'For reference transactions from the supplied files, use the source names exactly as listed in each '
             'group’s sources field, such as Ministry of Justice. Attribute each figure to its listed source. '
@@ -100,6 +109,14 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'المصدر المتعذر أو المحجوب أو الغائب أو القديم فجوة تغطية، وليس مبررًا للتقدير. لا تحوّل بيانات المملكة '
             'إلى بيانات مدينة، ولا تجعل شيتًا محدودًا تعدادًا كاملًا للمدينة. أدرج في sources كل صفحة محددة استُخدمت؛ '
             'الصفحة الرئيسية وحدها ليست دليلًا.\n')
+        local_indicator_rules = (
+            'إذا ظهر دليل رسمي من تعداد السعودية 2022، فأدرج عدد سكان المدينة والأسر في city_position مع سنة '
+            'التعداد والنطاق الجغرافي الدقيق؛ وأدرج كل حي مدخل منفصلًا فقط إذا نشر المصدر رقمًا على مستوى الحي. '
+            'استخدم عدد الأسر مؤشرًا مساعدًا للطلب السكني لا دليلًا على الصفقات. وفي demand (والضيافة عند الصلة)، '
+            'استخدم أعداد المسافرين وحركة الرحلات الرسمية للمطار كسياق على مستوى المدينة/المطار فقط، مع اسم المطار '
+            'والفترة؛ لا توزع حركة المطار على الأحياء ولا تسمِّ المسافرين حجوزات تذاكر. إذا تعذر أي مؤشر مكلّف به، '
+            'فاذكر المصدر أو الفترة أو مستوى التفصيل الجغرافي الذي تعذر الوصول إليه. لا تسقط مؤشرًا مسندًا موجودًا '
+            'في الأدلة.\n')
         local_data_rules = (
             'انسب صفقات الملفات إلى أسماء المصادر كما تظهر حرفيًا في حقل sources لكل مجموعة؛ إذا ظهر «وزارة العدل» '
             'فسمّها «صفقات وزارة العدل». هذه سجلات مرجعية محدودة بالأحياء والفئات والتواريخ الموجودة في الملفات، '
@@ -118,7 +135,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
 
     return (
         f'تاريخ الوصول: {today}\n'
-        + research_rules + scope_line
+        + research_rules + local_indicator_rules + scope_line
         + 'المهام المحورية: ' + ', '.join(keys) + '. حللها كلها بعمق وبلا إسقاط لأي محور.\n'
         + narrative_rules + lang + '\n' + decision
         + 'الأدلة وصفحات المصادر المفتوحة من الباحثين:\n' + evidence + '\n\n'

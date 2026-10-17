@@ -382,6 +382,66 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertNotIn('بحث جوجل الأصلي', prompt)
         self.assertNotIn('openrouter:web_search', prompt)
 
+    def test_official_census_and_air_traffic_research_is_city_scoped_and_resumable(self):
+        module = self.module
+        census_group = next(item for item in module._SUMMARY_RESEARCH_GROUPS
+                            if item['key'] == 'economy_commercial_industrial')
+        aviation_group = next(item for item in module._SUMMARY_RESEARCH_GROUPS
+                              if item['key'] == 'hospitality_and_tourism')
+        payload = {'city': 'جدة', 'summaryScope': {'cities': [
+            {'name': 'جدة', 'districts': ['الروضة']} ]}}
+
+        census_prompt = module._summary_research_prompt(
+            payload, census_group, ['geo.stats.gov.sa'], 'جدة')
+        self.assertIn('https://geo.stats.gov.sa/portal/apps/experiencebuilder/experience/?id=64be425670be40c5881b37ee7ee5cf17&page=Population', census_prompt)
+        self.assertIn('https://geo.stats.gov.sa/portal/apps/experiencebuilder/experience/?id=814450be664242f0be3d6da1f906024f&page=Household', census_prompt)
+        self.assertIn('تعداد السعودية 2022', census_prompt)
+        self.assertIn('الروضة', census_prompt)
+        self.assertIn('الدقة الجغرافية الفعلية', census_prompt)
+
+        aviation_prompt = module._summary_research_prompt(
+            payload, aviation_group, ['gaca.gov.sa'], 'جدة')
+        self.assertIn('https://www.gaca.gov.sa/ar/Open-Data/OpenDataLibrary', aviation_prompt)
+        self.assertIn('https://gaca.gov.sa/en/Reports-Categories/Air-Traffic-Reports?pageIndex=0', aviation_prompt)
+        self.assertIn('أعداد المسافرين وحركات الرحلات', aviation_prompt)
+        self.assertIn('لا تستنتجها من المسافرين', aviation_prompt)
+
+        for group, host in ((census_group, 'geo.stats.gov.sa'),
+                            (aviation_group, 'gaca.gov.sa')):
+            task_id = json.loads(module._summary_research_task_id(
+                group, [host], 'جدة', ''))
+            self.assertEqual(task_id[-1], 'prompt-v2')
+        ordinary_group = module._SUMMARY_RESEARCH_GROUPS[0]
+        ordinary_task_id = json.loads(module._summary_research_task_id(
+            ordinary_group, ['rega.gov.sa'], 'جدة', ''))
+        self.assertEqual(len(ordinary_task_id), 4)
+
+        source_map = {item['key']: [] for item in module._SUMMARY_RESEARCH_GROUPS}
+        source_map[census_group['key']] = ['geo.stats.gov.sa']
+        source_map[aviation_group['key']] = ['gaca.gov.sa']
+        calls = []
+
+        def fake_researcher(group, hosts, payload, city, district,
+                            usage_ctx, deadline, offer_lang='ar',
+                            cancel_event=None, on_event=None):
+            calls.append((hosts[0], city, district))
+            return {'key': group['key'], 'label': group['label'],
+                    'city': city, 'district': district, 'hosts': hosts,
+                    'result': self._opened_reply('https://' + hosts[0] + '/data'),
+                    'parsed': {}, 'parse_error': '', 'pages': [], 'searched': True}
+
+        with patch.object(module, '_summary_research_sources_by_group',
+                          return_value=source_map), \
+                patch.object(module, '_run_summary_researcher',
+                             side_effect=fake_researcher):
+            research = module._run_market_summary_research(
+                payload, {}, None, time.time() + 30)
+        self.assertTrue(research['success'])
+        self.assertEqual(set(calls), {
+            ('geo.stats.gov.sa', 'جدة', ''),
+            ('gaca.gov.sa', 'جدة', ''),
+        })
+
     def test_every_catalog_source_has_a_parallel_research_assignment(self):
         module = self.module
         assigned = {host for hosts in module._summary_research_sources_by_group().values()

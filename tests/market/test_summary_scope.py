@@ -90,6 +90,24 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertNotIn('بحث جوجل الأصلي', prompt)
         self.assertNotIn('حيين مجاورين مختلفين ممنوع', prompt)
 
+    def test_market_prompt_surfaces_census_and_airport_indicators_with_limits(self):
+        payload = {'summaryScope': {'cities': [
+            {'name': 'جدة', 'districts': ['الروضة']}]} }
+        prompt = market_study.build_summary_user_prompt(payload, [])
+        self.assertIn('تعداد السعودية 2022', prompt)
+        self.assertIn('عدد سكان المدينة والأسر في city_position', prompt)
+        self.assertIn('كل حي مدخل منفصلًا', prompt)
+        self.assertIn('حركة الرحلات الرسمية للمطار', prompt)
+        self.assertIn('لا توزع حركة المطار على الأحياء', prompt)
+        self.assertIn('مستوى التفصيل الجغرافي الذي تعذر الوصول إليه', prompt)
+
+        english = market_study.build_summary_user_prompt(
+            {'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': ['Al Rawdah']}]}},
+            [], offer_lang='en')
+        self.assertIn('official Saudi Census 2022', english)
+        self.assertIn('airport passenger and flight-movement figures', english)
+        self.assertIn('never allocate airport traffic to districts', english)
+
     def test_market_prompt_attributes_uploaded_transactions_to_their_named_source(self):
         prompt = market_study.build_summary_user_prompt({
             'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},

@@ -27,7 +27,7 @@ _SUMMARY_RESEARCH_GROUPS = (
         'label': 'السياحة والفنادق والضيافة',
         'hosts': {'mt.gov.sa', 'str.com', 'costar.com', 'gaca.gov.sa'},
         'focus': ('Ministry of Tourism and GASTAT performance reports, visitor flows and seasonality, '
-                  'airport traffic, licensed establishments, rooms, occupancy, ADR and RevPAR when '
+                  'airport passenger and flight movement, licensed establishments, rooms, occupancy, ADR and RevPAR when '
                   'published; city-level tourism events and hotel supply. Booking pages may compare a '
                   'specific date and property only, never annual performance.'),
     },
@@ -72,6 +72,19 @@ _SUMMARY_RESEARCH_REQUIRED_URLS = {
         'https://rei.rega.gov.sa/ar/advanced-search/ads-supply-market',
     ],
     'sakani.sa': ['https://sakani.sa/reports-and-data'],
+    'geo.stats.gov.sa': [
+        'https://geo.stats.gov.sa/portal/apps/experiencebuilder/experience/?id=64be425670be40c5881b37ee7ee5cf17&page=Population',
+        'https://geo.stats.gov.sa/portal/apps/experiencebuilder/experience/?id=814450be664242f0be3d6da1f906024f&page=Household',
+    ],
+    'gaca.gov.sa': [
+        'https://www.gaca.gov.sa/ar/Open-Data/OpenDataLibrary',
+        'https://gaca.gov.sa/en/Reports-Categories/Air-Traffic-Reports?pageIndex=0',
+    ],
+}
+
+_SUMMARY_RESEARCH_PROMPT_VERSIONS = {
+    ('hospitality_and_tourism', 'gaca.gov.sa'): 2,
+    ('economy_commercial_industrial', 'geo.stats.gov.sa'): 2,
 }
 
 
@@ -102,7 +115,8 @@ def _summary_research_sources_by_group():
     result['hospitality_and_tourism'] = sorted(set(
         result['hospitality_and_tourism'] + ['mt.gov.sa', 'stats.gov.sa', 'gaca.gov.sa']))
     result['economy_commercial_industrial'] = sorted(set(
-        result['economy_commercial_industrial'] + ['stats.gov.sa', 'open.data.gov.sa']))
+        result['economy_commercial_industrial'] +
+        ['stats.gov.sa', 'geo.stats.gov.sa', 'open.data.gov.sa']))
     return result
 
 
@@ -146,11 +160,54 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                       + '\n'.join(f'- {url}' for url in listing_urls)
                       + '\nاستخدم فلتر الحي داخل الصفحة عند تحليل حي محدد.\n'
                       if listing_urls else '')
+    scoped_population_rules = ''
+    if 'geo.stats.gov.sa' in hosts:
+        summary_scope = market_study.normalize_summary_scope(
+            (payload or {}).get('summaryScope'), (payload or {}).get('city'))
+        city_scope = next((item for item in summary_scope['cities']
+                           if item.get('name') == city), {})
+        districts = city_scope.get('districts') or []
+        districts_text = '، '.join(districts) if districts else 'لا توجد أحياء محددة'
+        if offer_lang == 'en':
+            scoped_population_rules = (
+                'Open the official Saudi Census 2022 population and household maps listed above. '
+                f'Report {city} and, when available at the map resolution, each selected district: '
+                f'{districts_text}. Capture population, households, average household size, and '
+                'occupied housing units where published. State the census year (2022) and the exact '
+                'geographic resolution. Do not substitute regional or city totals for district values; '
+                'mark unavailable when the official map does not expose the requested geography.\n')
+        else:
+            scoped_population_rules = (
+                'افتح خريطتي تعداد السعودية 2022 الرسميتين للسكان والأسر الواردتين أعلاه، وافحص '
+                f'مدينة {city} وكل حي محدد إذا كان متاحًا بمستوى الخريطة: {districts_text}. '
+                'استخرج عدد السكان والأسر ومتوسط حجم الأسرة والمساكن المشغولة حيث تنشرها الخريطة. '
+                'اذكر سنة التعداد 2022 والدقة الجغرافية الفعلية. لا تستبدل رقم المنطقة أو المدينة '
+                'برقم الحي؛ سجّل عدم التوفر إذا لم تعرض الخريطة ذلك النطاق.\n')
+    scoped_aviation_rules = ''
+    if 'gaca.gov.sa' in hosts:
+        if offer_lang == 'en':
+            scoped_aviation_rules = (
+                'For the city airport, extract the latest official airport-level passenger totals and '
+                'flight movements, arrivals/departures, and routes when published, preserving period '
+                'and airport. Search the GACA air-traffic open-data library and reports above. These are '
+                'airport/city indicators, never neighborhood counts. Report ticket bookings or tickets '
+                'sold only when an official source explicitly publishes those counts; never infer them '
+                'from passengers, flights, seats, schedules, or hotel bookings. If the requested period '
+                'has no publication, give the latest older period only as labeled context and record the gap.\n')
+        else:
+            scoped_aviation_rules = (
+                f'ابحث عن أحدث بيانات رسمية لمطار مدينة {city} في مكتبة بيانات وتقارير الحركة الجوية '
+                'للهيئة أعلاه: أعداد المسافرين وحركات الرحلات والقدوم والمغادرة والمسارات عند نشرها، '
+                'مع تثبيت اسم المطار والفترة. هذه مؤشرات للمطار والمدينة وليست أعدادًا للأحياء. لا تذكر '
+                'حجوزات أو تذاكر مباعة إلا إذا نشر مصدر رسمي عددها صراحة؛ لا تستنتجها من المسافرين أو '
+                'الرحلات أو المقاعد أو الجداول أو حجوزات الفنادق. إذا لم تنشر بيانات للفترة المطلوبة، '
+                'اعرض أحدث فترة أقدم كسياق مؤرخ وسجّل فجوة الفترة المطلوبة.\n')
     return (
         f"أنت باحث متخصص في {group['label']} ضمن دراسة سوق سعودية مهنية. هذا بحث منفصل عن بقية الباحثين؛ "
         'قدّم أدلة خامًا دقيقة ومهيكلة، ولا تكتب دراسة سوق عامة.\n'
         f'النطاق الجغرافي الموكّل لهذا البحث فقط: {place}. لا تبحث في مدينة أو حي آخر.\n'
         + 'نطاق المهمة: ' + group['focus'] + '\n'
+        + scoped_population_rules + scoped_aviation_rules
         + 'هذا الباحث مسؤول عن مصدر محدد؛ ابحث داخله أولًا وحاول الوصول إلى صفحة البيانات أو التقرير ذات الصلة، '
         'ولا تكتفِ بالصفحة الرئيسية. إذا لم يعرض المصدر بيانات لهذا المكان أو الفترة فسجّل فجوة تغطية.\n'
         'المصدر الموكّل لهذا الباحث:\n' + requested_sites + '\n'
@@ -209,10 +266,15 @@ def _run_summary_researcher(group, hosts, payload, city, district,
 
 
 def _summary_research_task_id(group, hosts, city, district):
-    return json.dumps([
-        str(group.get('key') or ''), sorted(str(host) for host in (hosts or [])),
-        str(city or ''), str(district or ''),
-    ], ensure_ascii=False, separators=(',', ':'))
+    group_key = str(group.get('key') or '')
+    host_names = sorted(str(host) for host in (hosts or []))
+    task = [group_key, host_names, str(city or ''), str(district or '')]
+    prompt_version = max(
+        (_SUMMARY_RESEARCH_PROMPT_VERSIONS.get((group_key, host), 1)
+         for host in host_names), default=1)
+    if prompt_version > 1:
+        task.append(f'prompt-v{prompt_version}')
+    return json.dumps(task, ensure_ascii=False, separators=(',', ':'))
 
 
 def _summary_research_checkpoint(outcomes, evidence_pool):
@@ -287,6 +349,8 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
         for district, city in locations:
             for group in _SUMMARY_RESEARCH_GROUPS:
                 for host in source_map.get(group['key']) or []:
+                    if district and host in {'gaca.gov.sa', 'geo.stats.gov.sa'}:
+                        continue
                     jobs.append((group, [host], city, district))
     if not jobs:
         return {'success': False, 'error': 'summary_scope_required',
