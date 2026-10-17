@@ -90,6 +90,7 @@ class _FakePage:
             raise self._net['goto_error']
         self.url = url
         self._net['visited'].append(url)
+        return _FakeResponse((self._net.get('goto_status') or {}).get(url))
 
     def wait_for_timeout(self, *_a, **_kw):
         pass
@@ -269,6 +270,13 @@ class _FakePWManager:
         pass
 
 
+class _FakeResponse:
+    """goto() result carrying only the HTTP status the test configured."""
+
+    def __init__(self, status):
+        self.status = status
+
+
 class _FakeTimeoutError(Exception):
     pass
 
@@ -287,6 +295,7 @@ def _new_net():
         ],
         'visited': [],
         'goto_error': None,
+        'goto_status': {},
         'launch_error': None,
         'launched': False,
         'browser_closed': False,
@@ -393,6 +402,7 @@ class OpenUrlContractTests(unittest.TestCase):
     def setUp(self):
         _NET['visited'] = []
         _NET['goto_error'] = None
+        _NET['goto_status'] = {}
         _NET['launch_error'] = None
         _NET['cdp_endpoint'] = None
         self._pw_patch = mock.patch.object(
@@ -429,6 +439,64 @@ class OpenUrlContractTests(unittest.TestCase):
         self.assertIn(_NET['cdp_endpoint'], ('ws://127.0.0.1:9222', None))
         if _NET['cdp_endpoint'] is None:
             self.assertTrue(_NET['launched'])
+
+
+class Http403FallbackTests(unittest.TestCase):
+    """http_403 earns one www<->apex sibling retry; nothing else does."""
+
+    def setUp(self):
+        _NET['visited'] = []
+        _NET['goto_error'] = None
+        _NET['goto_status'] = {}
+        _NET['launch_error'] = None
+        self._pw_patch = mock.patch.object(
+            browser, 'sync_playwright', _MANAGER, create=True)
+        self._pw_patch.start()
+        self.addCleanup(self._pw_patch.stop)
+
+    def test_apex_403_falls_back_to_www(self):
+        _NET['goto_status'] = {'https://nhc.sa': 403}
+        result = _open_url('https://nhc.sa')
+        self.assertFalse(result.get('error'))
+        self.assertEqual(_NET['visited'],
+                         ['https://nhc.sa', 'https://www.nhc.sa'])
+
+    def test_www_403_falls_back_to_apex(self):
+        _NET['goto_status'] = {'https://www.ejar.sa': 403}
+        result = _open_url('https://www.ejar.sa')
+        self.assertFalse(result.get('error'))
+        self.assertEqual(_NET['visited'],
+                         ['https://www.ejar.sa', 'https://ejar.sa'])
+
+    def test_403_on_both_forms_returns_error(self):
+        _NET['goto_status'] = {'https://nhc.sa': 403,
+                               'https://www.nhc.sa': 403}
+        result = _open_url('https://nhc.sa')
+        self.assertEqual(result.get('error'), 'http_403')
+        self.assertEqual(len(_NET['visited']), 2)
+
+    def test_non_403_status_never_falls_back(self):
+        _NET['goto_status'] = {'https://www.nhc.sa/old': 404}
+        result = _open_url('https://www.nhc.sa/old')
+        self.assertEqual(result.get('error'), 'http_404')
+        self.assertEqual(_NET['visited'], ['https://www.nhc.sa/old'])
+
+    def test_success_never_falls_back(self):
+        result = _open_url('https://sa.aqar.fm/')
+        self.assertFalse(result.get('error'))
+        self.assertEqual(_NET['visited'], ['https://sa.aqar.fm/'])
+
+    def test_fallback_helper_shapes(self):
+        self.assertEqual(browser._apex_www_fallback('https://nhc.sa'),
+                         'https://www.nhc.sa')
+        self.assertEqual(
+            browser._apex_www_fallback('https://www.ejar.sa/ar'),
+            'https://ejar.sa/ar')
+        self.assertIsNone(browser._apex_www_fallback('not a url'))
+
+    def test_request_headers_look_like_a_real_tab(self):
+        self.assertIn('Accept', browser._EXTRA_HEADERS)
+        self.assertIn('Sec-Fetch-Site', browser._EXTRA_HEADERS)
 
 
 class WebSearchContractTests(unittest.TestCase):

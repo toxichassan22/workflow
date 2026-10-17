@@ -38,6 +38,22 @@ USER_AGENT = (
 ACCEPT_LANGUAGE = 'ar-SA,ar;q=0.9,en-US;q=0.8,en;q=0.7'
 VIEWPORT = {'width': 1366, 'height': 900}
 
+# Full browser-like request headers. The context used to send only
+# Accept-Language — many Saudi gov portals and Cloudflare-fronted hosts
+# (http_403 in the market-study audit: sakani, ejar, mt, costar, str, jll)
+# reject the bare automation profile, so every navigation carries the same
+# header set a real Chromium tab would send on a top-level document load.
+_EXTRA_HEADERS = {
+    'Accept': ('text/html,application/xhtml+xml,application/xml;q=0.9,'
+               'image/avif,image/webp,*/*;q=0.8'),
+    'Accept-Language': ACCEPT_LANGUAGE,
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+}
+
 _BLOCKED_TYPES = {'image', 'media', 'font'}
 _STRIP_SELECTOR = 'script,style,nav,footer,header,form,noscript,iframe'
 # SERP endpoints. Verified on this repo's dev box (2026-10): DDG's html/lite
@@ -190,6 +206,31 @@ def _launch_reason(exc):
 
 def _result(url):
     return {'url': url, 'final_url': url, 'title': '', 'text': '', 'error': None}
+
+
+def _apex_www_fallback(url):
+    """The www<->apex sibling of `url`, or None when it has no such form.
+
+    Measured in the market-study audit: nhc.sa answers http_403 while
+    www.nhc.sa serves the same content — one host form rejecting automation
+    does not mean its sibling does, so a 403 earns one sibling retry."""
+    try:
+        parsed = urlparse(str(url or '').strip())
+        host = (parsed.hostname or '').lower()
+        if not host or parsed.scheme.lower() not in ('http', 'https'):
+            return None
+        sibling = host[4:] if host.startswith('www.') else 'www.' + host
+        netloc = sibling
+        if parsed.port:
+            netloc += f':{parsed.port}'
+        if parsed.username:
+            auth = parsed.username
+            if parsed.password:
+                auth += f':{parsed.password}'
+            netloc = f'{auth}@{netloc}'
+        return parsed._replace(netloc=netloc).geturl()
+    except Exception:
+        return None
 
 
 def _unwrap_ddg(href):
@@ -362,7 +403,7 @@ class BrowserWorker:
             self._context = self._browser.new_context(
                 user_agent=USER_AGENT, locale='ar-SA', viewport=VIEWPORT,
                 bypass_csp=False,
-                extra_http_headers={'Accept-Language': ACCEPT_LANGUAGE})
+                extra_http_headers=dict(_EXTRA_HEADERS))
         except Exception:
             # Some CDP endpoints only expose their default context.
             self._context = (self._browser.contexts or [None])[0]
@@ -406,17 +447,11 @@ class BrowserWorker:
         self.start()
         return self._page
 
-    def open_url(self, url, timeout=DEFAULT_TIMEOUT):
-        """Load `url` and extract readable text; never raises."""
+    def _open_url_once(self, page, url, timeout):
+        """One goto+extract attempt; never raises."""
         result = _result(url)
         try:
-            page = self._ensure_page()
-        except Exception as exc:
-            result['error'] = _launch_reason(exc)
-            return result
-        response = None
-        try:
-            page.set_extra_http_headers({'Accept-Language': ACCEPT_LANGUAGE})
+            page.set_extra_http_headers(dict(_EXTRA_HEADERS))
         except Exception:
             pass
         try:
@@ -434,11 +469,32 @@ class BrowserWorker:
             result['text'] = _clean_text(page.evaluate(_EXTRACT_JS))
         except Exception:
             pass
-        status = response.status if response is not None else None
+        status = getattr(response, 'status', None)
         if status is not None and status >= 400:
             result['error'] = f'http_{status}'
         elif _looks_blocked(result['title'], result['text']):
             result['error'] = 'blocked'
+        return result
+
+    def open_url(self, url, timeout=DEFAULT_TIMEOUT):
+        """Load `url` and extract readable text; never raises.
+
+        On http_403 exactly, one retry goes to the www<->apex sibling before
+        giving up — a host form rejecting automation does not condemn its
+        sibling, and the sibling answer is pooled upstream like any page.
+        """
+        result = _result(url)
+        try:
+            page = self._ensure_page()
+        except Exception as exc:
+            result['error'] = _launch_reason(exc)
+            return result
+        result = self._open_url_once(page, url, timeout)
+        if result.get('error') == 'http_403':
+            fallback = _apex_www_fallback(url)
+            if fallback and fallback != url:
+                _browser_log(f'[BROWSER] http_403, retrying sibling host: {fallback}')
+                result = self._open_url_once(page, fallback, timeout)
         return result
 
     def web_search(self, query, max_results=MAX_RESULTS):
