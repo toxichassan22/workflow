@@ -33,6 +33,12 @@
       const markup = visualConceptPlanTodoMarkup(workflow.jobTodos);
       const panel = document.querySelector('[data-plans-workflow-todos]');
       if (panel) panel.innerHTML = markup;
+      const siteStatus = document.querySelector('[data-site-chat-status]');
+      if (siteStatus) {
+        const active = workflow.jobTodos.find(item => item.status === 'active');
+        siteStatus.textContent = 'المرحلة الحالية: ' +
+          (active?.label || 'تجهيز المخطط وتحليل متطلباته');
+      }
       const loader = document.getElementById('globalLoader');
       const card = loader?.querySelector('.global-loader-card');
       if (card) {

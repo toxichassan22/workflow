@@ -179,7 +179,12 @@
       const status = approved ? 'معتمد' : slot.status === 'generating' ? 'قيد التوليد'
         : slot.status === 'review' ? 'مسودة - جاهزة للاعتماد' : 'مسودة';
       const chatMessages = slot.chat || [];
-      const assistant = visualConceptPlansWorkflowState().siteAssistant || {};
+      const workflow = visualConceptPlansWorkflowState();
+      const assistant = workflow.siteAssistant || {};
+      const activeProgress = (workflow.jobTodos || []).find(item => item.status === 'active');
+      const assistantProgressLabel = activeProgress?.label || 'تجهيز المخطط وتحليل متطلباته';
+      const assistantProgressMarkup = '<div class="tenant-hint visual-plan-site-assistant-status" data-site-chat-status>المرحلة الحالية: ' +
+        escapeHtml(assistantProgressLabel) + '</div>';
       const assistantBusy = typeof visualConceptSiteAssistantBusy !== 'undefined'
         && visualConceptSiteAssistantBusy;
       const conversationStarted = Boolean((assistant.turns || []).length || chatMessages.length || slot.svgCode);
@@ -194,12 +199,12 @@
         return '<article class="visual-plan-site-message ' + (isUser ? 'is-user' : 'is-assistant') + '">' +
           '<div class="visual-plan-site-message-text">' + escapeHtml(item.text || '') + '</div>' + choices + '</article>';
       }).join('') || (assistantBusy
-        ? '<div class="tenant-hint visual-plan-site-assistant-status">جاري مراجعة بيانات المخطط...</div>'
+        ? assistantProgressMarkup
         : '<div class="tenant-hint visual-plan-site-empty-chat"><p>لا توجد رسائل بعد.</p>' +
           (!conversationStarted ? '<button type="button" class="btn primary small" data-visual-action="start-site-chat" data-visual-slot="plan_site" ' +
             (locked ? 'disabled' : '') + '>بدء المحادثة</button>' : '') + '</div>');
       const assistantStatus = assistantBusy
-        ? (chatMessages.length ? '<div class="tenant-hint visual-plan-site-assistant-status">جاري مراجعة بيانات المخطط...</div>' : '') : '';
+        ? (chatMessages.length ? assistantProgressMarkup : '') : '';
       const preview = image
         ? '<div class="visual-plan-site-preview" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '"><img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '"><button type="button" class="visual-concept-zoom-btn" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">تكبير</button></div>'
         : '<div class="visual-plan-site-preview-empty">لا توجد معاينة بعد.</div>';

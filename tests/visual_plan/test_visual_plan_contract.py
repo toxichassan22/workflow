@@ -608,6 +608,26 @@ class VisualPlanContractTests(MeetingRequirementsTests):
         self.assertEqual(response.get_json()['status'], 'running')
         self.assertEqual(response.get_json()['todos'][1]['status'], 'active')
 
+    def test_site_chat_progress_names_the_work_actually_in_progress(self):
+        module = self.application_module
+        todos = module._visual_plan_job_todos('site_chat', active_index=3)
+        self.assertEqual([item['label'] for item in todos], [
+            'فحص بيانات الأرض والتوزيع', 'تجهيز المشهد الهندسي',
+            'مراجعة الإجابات السابقة', 'تحليل المتطلبات وتحديد السؤال',
+        ])
+        self.assertEqual([item['status'] for item in todos], ['done', 'done', 'done', 'active'])
+        self.assertNotIn('تحميل بيانات', ' '.join(item['label'] for item in todos))
+        failed = module._visual_plan_job_todos('site_chat', state='failed', active_index=3)
+        self.assertEqual(failed[3]['status'], 'failed')
+        self.assertEqual(failed[0]['status'], 'pending')
+        reported = []
+        with self.app.test_request_context('/'):
+            module.g.visual_plan_job_kind = 'site_chat'
+            module.g.visual_plan_job_progress = lambda **kwargs: reported.append(kwargs)
+            module._visual_plan_report_site_chat_progress(3, 82)
+        self.assertEqual(reported[0]['progress'], 82)
+        self.assertEqual(reported[0]['todos'][3]['status'], 'active')
+
     def test_temporary_svg_model_comparison_route_is_retired(self):
         module = self.application_module
         routes = {rule.rule for rule in module.app.url_map.iter_rules()}

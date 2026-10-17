@@ -151,11 +151,14 @@ def _visual_plan_site_projected_layout(scene, contract, program):
 
 def _visual_plan_site_packet(data):
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    _visual_plan_report_site_chat_progress(0, 22)
     if 'scene' not in workflow or workflow.get('scene') is None:
         scene, _context, _reference_url = _visual_plan_create_scene(data)
         workflow = dict(workflow)
         workflow['scene'] = scene
         data['plansWorkflow'] = workflow
+    else:
+        _visual_plan_report_site_chat_progress(1, 35)
     scene, contract, context, program = _visual_plan_scene_from_request(data)
     signature = _visual_plan_input_signature(data, context)
     clean_scene = {key: value for key, value in scene.items() if key not in ('token', 'inputSignature')}
@@ -167,6 +170,7 @@ def _visual_plan_site_packet(data):
         'drawingLayout': _visual_plan_site_projected_layout(scene, contract, program),
         'financialComponents': context.get('components') or [],
     }
+    _visual_plan_report_site_chat_progress(2, 68)
     return packet, contract, context, signature
 
 
@@ -236,6 +240,7 @@ def _visual_plan_site_interview(data, action='chat'):
         'latestClientMessage': message,
         'compactContext': compact_mode,
     }
+    _visual_plan_report_site_chat_progress(3, 82)
     parsed, prompt_tokens = _visual_plan_site_call(
         system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data, max_tokens=12000)
     question = _visual_concept_text(parsed.get('question'), 800)

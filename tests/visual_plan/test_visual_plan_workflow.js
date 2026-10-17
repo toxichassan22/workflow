@@ -578,14 +578,16 @@ test('site plan chat input, send action, and choices stay locked while the assis
     plan_site: { chat: [{ role: 'assistant', text: 'ما جهة المدخل الرئيسي؟', choices: ['الغرب'] }] },
   }, plansWorkflow: { siteAssistant: {
     turns: [{ role: 'assistant', text: 'ما جهة المدخل الرئيسي؟', choices: ['الغرب'] }],
-  } } });
+  }, jobTodos: [
+    { id: '1', label: 'تجهيز المشهد الهندسي', status: 'active' },
+  ] } });
   vm.runInContext('visualConceptSiteAssistantBusy = true', context);
 
   const card = context.renderVisualConceptSitePlanCard();
   assert.match(card, /data-visual-chat="plan_site"[^>]*disabled/);
   assert.match(card, /data-visual-action="chat"[^>]*disabled>إرسال/);
   assert.match(card, /data-visual-action="chat-choice"[^>]*disabled>الغرب/);
-  assert.match(card, /جاري مراجعة بيانات المخطط/);
+  assert.match(card, /المرحلة الحالية: تجهيز المشهد الهندسي/);
 });
 
 test('starting the site plan chat submits analysis without a message from the client', async () => {
@@ -613,7 +615,31 @@ test('starting the site plan chat submits analysis without a message from the cl
   assert.equal(request.path, '/api/visual-concept/site-plan-assistant');
   assert.equal(request.payload.planAssistantAction, 'chat');
   assert.equal(Object.hasOwn(request.payload, 'message'), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    context.tenantVisualConceptState.plansWorkflow.jobTodos.map(item => item.label))), [
+    'فحص بيانات الأرض والتوزيع', 'تجهيز المشهد الهندسي',
+    'مراجعة الإجابات السابقة', 'تحليل المتطلبات وتحديد السؤال',
+  ]);
   assert.equal(vm.runInContext('visualConceptSiteAssistantBusy', context), false);
+});
+
+test('site plan status follows the active backend progress step', () => {
+  const context = fixture();
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {} });
+  const status = { textContent: '' };
+  const todoPanel = { innerHTML: '' };
+  context.document.querySelector = selector => selector === '[data-site-chat-status]'
+    ? status : selector === '[data-plans-workflow-todos]' ? todoPanel : null;
+  context.document.getElementById = () => null;
+
+  context.updateVisualConceptPlanJobUi({ status: 'running', progress: 82, todos: [
+    { id: '1', label: 'فحص بيانات الأرض والتوزيع', status: 'done' },
+    { id: '2', label: 'تجهيز المشهد الهندسي', status: 'done' },
+    { id: '3', label: 'مراجعة الإجابات السابقة', status: 'done' },
+    { id: '4', label: 'تحليل المتطلبات وتحديد السؤال', status: 'active' },
+  ] });
+
+  assert.equal(status.textContent, 'المرحلة الحالية: تحليل المتطلبات وتحديد السؤال');
 });
 
 test('stage three ignores a second chat send while its current request is active', async () => {

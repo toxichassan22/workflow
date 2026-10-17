@@ -367,9 +367,10 @@
       visualConceptSiteAssistantBusy = true;
       const workflow = visualConceptPlansWorkflowState();
       workflow.jobTodos = [
-        { id: '1', label: 'قراءة بيانات الأرض والتوزيع', status: 'active' },
-        { id: '2', label: 'تحليل متطلبات المخطط', status: 'pending' },
-        { id: '3', label: 'تحديد نقطة التوضيح التالية', status: 'pending' },
+        { id: '1', label: 'فحص بيانات الأرض والتوزيع', status: 'active' },
+        { id: '2', label: 'تجهيز المشهد الهندسي', status: 'pending' },
+        { id: '3', label: 'مراجعة الإجابات السابقة', status: 'pending' },
+        { id: '4', label: 'تحليل المتطلبات وتحديد السؤال', status: 'pending' },
       ];
       markVisualConceptDirty();
       renderVisualConceptPage();

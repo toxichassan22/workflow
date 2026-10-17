@@ -2,7 +2,7 @@ _VISUAL_PLAN_JOB_NAMESPACE = '.visual_plan_jobs'
 _VISUAL_PLAN_JOB_TIMEOUT_SECONDS = 7200
 
 
-def _visual_plan_job_todos(kind, state='running'):
+def _visual_plan_job_todos(kind, state='running', active_index=None):
     """Small real-work checklist exposed while a visual-plan job is active."""
     labels = {
         'prepare': ['قراءة بيانات الموقع والتوزيع', 'تكوين المشهد الهندسي', 'تجهيز بيانات المخطط'],
@@ -10,11 +10,13 @@ def _visual_plan_job_todos(kind, state='running'):
         'edit': ['قراءة طلب التعديل والمخطط الحالي', 'تعديل الجزء المحدد', 'فحص SVG وتجهيز المعاينة'],
         'prompt': ['قراءة بيانات المخطط', 'تجهيز وصف التوليد'],
         'notes': ['مراجعة ملاحظات التوليد', 'تجهيز نتيجة الفحص'],
-        'site_chat': ['تحميل بيانات الأرض والتوزيع', 'مراجعة الإجابات السابقة', 'تحديد السؤال التالي'],
+        'site_chat': ['فحص بيانات الأرض والتوزيع', 'تجهيز المشهد الهندسي',
+                      'مراجعة الإجابات السابقة', 'تحليل المتطلبات وتحديد السؤال'],
         'site_generate': ['تأكيد اكتمال المتطلبات', 'كتابة أقسام كود SVG', 'فحص المخطط وتجهيز المعاينة'],
         'site_edit': ['قراءة كود SVG والطلب', 'تعديل القسم المستهدف', 'فحص المخطط وتجهيز المعاينة'],
     }.get(kind, ['معالجة المخطط'])
-    active = {'prepare': 0, 'render': 1, 'edit': 1, 'prompt': 1, 'notes': 0}.get(kind, 0)
+    active = (active_index if active_index is not None else
+              {'prepare': 0, 'render': 1, 'edit': 1, 'prompt': 1, 'notes': 0}.get(kind, 0))
     rows = []
     for index, label in enumerate(labels):
         if state == 'completed' or state == 'running' and index < active:
@@ -27,6 +29,15 @@ def _visual_plan_job_todos(kind, state='running'):
             status = 'pending'
         rows.append({'id': str(index + 1), 'label': label, 'status': status})
     return rows
+
+
+def _visual_plan_report_site_chat_progress(active_index, progress):
+    if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') != 'site_chat':
+        return
+    callback = getattr(g, 'visual_plan_job_progress', None)
+    if callable(callback):
+        callback(progress=progress,
+                 todos=_visual_plan_job_todos('site_chat', active_index=active_index))
 
 
 def _visual_plan_execute(kind, data, slot_id=''):
@@ -96,6 +107,7 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
         for key, value in actor.items():
             setattr(g, key, value)
         g.visual_plan_job_deadline = time.time() + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
+        g.visual_plan_job_kind = kind
         def report_progress(progress, todos=None, checkpoint=None):
             try:
                 current = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
@@ -128,9 +140,12 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                             'todos': _visual_plan_job_todos(kind)})
                 result, status = _visual_plan_execute(kind, data, slot_id)
             final_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+            result_state = 'completed' if result.get('success') else 'failed'
+            active_index = next((index for index, item in enumerate(final_job.get('todos') or [])
+                                 if isinstance(item, dict) and item.get('status') == 'active'), None)
             final_job.update({'status': 'completed' if result.get('success') else 'failed',
                               'success': bool(result.get('success')), 'progress': 100,
-                              'todos': _visual_plan_job_todos(kind, 'completed' if result.get('success') else 'failed'),
+                              'todos': _visual_plan_job_todos(kind, result_state, active_index=active_index),
                               'result': result, 'httpStatus': status})
             _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, final_job)
             if not flask_app.config.get('TESTING'):
@@ -138,8 +153,11 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
         except Exception as error:
             app.logger.warning('Visual plan worker failed: %s', type(error).__name__)
             failed_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+            active_index = next((index for index, item in enumerate(failed_job.get('todos') or [])
+                                 if isinstance(item, dict) and item.get('status') == 'active'), None)
             failed_job.update({'status': 'failed', 'success': False, 'progress': 100,
-                               'todos': _visual_plan_job_todos(kind, 'failed'), 'httpStatus': 503,
+                               'todos': _visual_plan_job_todos(kind, 'failed', active_index=active_index),
+                               'httpStatus': 503,
                                'result': {'success': False, 'error': 'تعذرت معالجة المخطط الهندسي.',
                                           'error_code': 'PLANS_PROVIDER_FAILED'}})
             _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, failed_job)
