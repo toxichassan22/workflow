@@ -71,7 +71,16 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'relevant), use official airport passenger and flight-movement figures only as city/airport-level '
             'context, with airport and period; never allocate airport traffic to districts or describe passenger '
             'counts as ticket bookings. If any of these indicators was assigned but unavailable, state the '
-            'specific source, period, or geographic-resolution gap. Do not omit a returned supported indicator.\n')
+            'specific source, period, or geographic-resolution gap. Do not omit a returned supported indicator. '
+            'For hotel rates, prefer official data. Use Booking.com as a fallback only when official reports are '
+            'unavailable or gated; if Booking.com observations were retrieved, calculate an arithmetic average only from at least three comparable '
+            'properties in the same city/district, with identical stay dates and currency, comparable room and '
+            'guest counts, and the same star class when available. Normalize each observed stay total by its '
+            'number of nights and keep materially different meal/cancellation terms separate. Label the result '
+            'an approximate average of advertised room rates in the Booking.com sample; state exact stay dates, '
+            'access date, sample size, currency, and tax/inclusion basis. Keep it separate from official ADR. '
+            'With fewer than three comparable observations, report the sample without an average. Never call '
+            'this a historical or annual ADR, or a city-wide market standard.\n')
         local_data_rules = (
             'For reference transactions from the supplied files, use the source names exactly as listed in each '
             'group’s sources field, such as Ministry of Justice. Attribute each figure to its listed source. '
@@ -116,7 +125,15 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'استخدم أعداد المسافرين وحركة الرحلات الرسمية للمطار كسياق على مستوى المدينة/المطار فقط، مع اسم المطار '
             'والفترة؛ لا توزع حركة المطار على الأحياء ولا تسمِّ المسافرين حجوزات تذاكر. إذا تعذر أي مؤشر مكلّف به، '
             'فاذكر المصدر أو الفترة أو مستوى التفصيل الجغرافي الذي تعذر الوصول إليه. لا تسقط مؤشرًا مسندًا موجودًا '
-            'في الأدلة.\n')
+            'في الأدلة. بالنسبة لأسعار الفنادق، فضّل البيانات الرسمية. إذا تعذرت التقارير الرسمية أو حُجبت فلا '
+            'تستخدم أسعار Booking.com إلا كبديل؛ وإذا توفرت أسعار منها فاحسب متوسطًا حسابيًا فقط من ثلاث منشآت '
+            'قابلة للمقارنة على الأقل في المدينة/الحي '
+            'نفسه وبتواريخ إقامة وعملة واحدة وعدد غرف ونزلاء ونوع غرفة متقارب، ومن فئة النجوم نفسها عند توفرها. '
+            'وحّد السعر بقسمة إجمالي الإقامة المرصود على عدد الليالي، وافصل شروط الوجبات أو الإلغاء المختلفة جوهريًا. '
+            'سمّه «متوسطًا تقريبيًا لأسعار الغرف المعروضة في عينة Booking.com»، واذكر تواريخ الإقامة وتاريخ الوصول '
+            'وحجم العينة والعملة وأساس احتساب الضرائب والخدمات. اعرضه منفصلًا عن ADR الرسمي. إذا قلّت العينة عن '
+            'ثلاث أسعار قابلة للمقارنة، اعرض المشاهدات دون متوسط. لا تسمّه ADR تاريخيًا أو سنويًا أو معيارًا للسوق '
+            'كله.\n')
         local_data_rules = (
             'انسب صفقات الملفات إلى أسماء المصادر كما تظهر حرفيًا في حقل sources لكل مجموعة؛ إذا ظهر «وزارة العدل» '
             'فسمّها «صفقات وزارة العدل». هذه سجلات مرجعية محدودة بالأحياء والفئات والتواريخ الموجودة في الملفات، '

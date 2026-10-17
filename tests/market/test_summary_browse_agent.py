@@ -406,8 +406,21 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIn('أعداد المسافرين وحركات الرحلات', aviation_prompt)
         self.assertIn('لا تستنتجها من المسافرين', aviation_prompt)
 
+        booking_prompt = module._summary_research_prompt(
+            payload, aviation_group, ['booking.com'], 'جدة')
+        check_in = market_study.date.fromordinal(
+            market_study.date.today().toordinal() + 14)
+        check_out = market_study.date.fromordinal(check_in.toordinal() + 2)
+        self.assertIn('https://www.booking.com/', booking_prompt)
+        self.assertIn(check_in.isoformat(), booking_prompt)
+        self.assertIn(check_out.isoformat(), booking_prompt)
+        self.assertIn('غرفة واحدة، بالغان، دون أطفال', booking_prompt)
+        self.assertIn('ثلاث منشآت متاحة قابلة للمقارنة على الأقل', booking_prompt)
+        self.assertIn('لا تسمّه ADR أو متوسطًا سنويًا', booking_prompt)
+
         for group, host in ((census_group, 'geo.stats.gov.sa'),
-                            (aviation_group, 'gaca.gov.sa')):
+                            (aviation_group, 'gaca.gov.sa'),
+                            (aviation_group, 'booking.com')):
             task_id = json.loads(module._summary_research_task_id(
                 group, [host], 'جدة', ''))
             self.assertEqual(task_id[-1], 'prompt-v2')
@@ -418,7 +431,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
 
         source_map = {item['key']: [] for item in module._SUMMARY_RESEARCH_GROUPS}
         source_map[census_group['key']] = ['geo.stats.gov.sa']
-        source_map[aviation_group['key']] = ['gaca.gov.sa']
+        source_map[aviation_group['key']] = ['gaca.gov.sa', 'booking.com']
         calls = []
 
         def fake_researcher(group, hosts, payload, city, district,
@@ -440,6 +453,8 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(set(calls), {
             ('geo.stats.gov.sa', 'جدة', ''),
             ('gaca.gov.sa', 'جدة', ''),
+            ('booking.com', 'جدة', ''),
+            ('booking.com', 'جدة', 'الروضة'),
         })
 
     def test_every_catalog_source_has_a_parallel_research_assignment(self):

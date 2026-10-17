@@ -25,11 +25,12 @@ _SUMMARY_RESEARCH_GROUPS = (
     {
         'key': 'hospitality_and_tourism',
         'label': 'السياحة والفنادق والضيافة',
-        'hosts': {'mt.gov.sa', 'str.com', 'costar.com', 'gaca.gov.sa'},
+        'hosts': {'mt.gov.sa', 'str.com', 'costar.com', 'gaca.gov.sa', 'booking.com'},
         'focus': ('Ministry of Tourism and GASTAT performance reports, visitor flows and seasonality, '
                   'airport passenger and flight movement, licensed establishments, rooms, occupancy, ADR and RevPAR when '
-                  'published; city-level tourism events and hotel supply. Booking pages may compare a '
-                  'specific date and property only, never annual performance.'),
+                  'published; city-level tourism events and hotel supply. If official hotel-rate reports are '
+                  'unavailable or gated, use Booking.com only for a comparable, date-specific sample of '
+                  'currently advertised room prices; never present it as annual ADR.'),
     },
     {
         'key': 'economy_commercial_industrial',
@@ -80,10 +81,12 @@ _SUMMARY_RESEARCH_REQUIRED_URLS = {
         'https://www.gaca.gov.sa/ar/Open-Data/OpenDataLibrary',
         'https://gaca.gov.sa/en/Reports-Categories/Air-Traffic-Reports?pageIndex=0',
     ],
+    'booking.com': ['https://www.booking.com/'],
 }
 
 _SUMMARY_RESEARCH_PROMPT_VERSIONS = {
     ('hospitality_and_tourism', 'gaca.gov.sa'): 2,
+    ('hospitality_and_tourism', 'booking.com'): 2,
     ('economy_commercial_industrial', 'geo.stats.gov.sa'): 2,
 }
 
@@ -113,7 +116,8 @@ def _summary_research_sources_by_group():
     result['development_and_supply'] = sorted(set(
         result['development_and_supply'] + ['red.rega.gov.sa', 'nhc.sa', 'momah.gov.sa']))
     result['hospitality_and_tourism'] = sorted(set(
-        result['hospitality_and_tourism'] + ['mt.gov.sa', 'stats.gov.sa', 'gaca.gov.sa']))
+        result['hospitality_and_tourism'] +
+        ['mt.gov.sa', 'stats.gov.sa', 'gaca.gov.sa', 'booking.com']))
     result['economy_commercial_industrial'] = sorted(set(
         result['economy_commercial_industrial'] +
         ['stats.gov.sa', 'geo.stats.gov.sa', 'open.data.gov.sa']))
@@ -202,12 +206,48 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                 'حجوزات أو تذاكر مباعة إلا إذا نشر مصدر رسمي عددها صراحة؛ لا تستنتجها من المسافرين أو '
                 'الرحلات أو المقاعد أو الجداول أو حجوزات الفنادق. إذا لم تنشر بيانات للفترة المطلوبة، '
                 'اعرض أحدث فترة أقدم كسياق مؤرخ وسجّل فجوة الفترة المطلوبة.\n')
+    booking_price_rules = ''
+    if 'booking.com' in hosts:
+        today = market_study.date.today()
+        check_in = market_study.date.fromordinal(today.toordinal() + 14)
+        check_out = market_study.date.fromordinal(check_in.toordinal() + 2)
+        if offer_lang == 'en':
+            booking_price_rules = (
+                'Use Booking.com only as a fallback when official hotel-rate reports are unavailable or gated. '
+                'This is a live asking-price snapshot, not official operating data. Search the exact same stay '
+                f'for every property: check-in {check_in.isoformat()}, check-out {check_out.isoformat()}, one room, '
+                'two adults, no children, and SAR display currency. Target five hotels in this assigned city or '
+                'district; calculate an arithmetic mean only from at least three comparable available properties '
+                'in the same geographic scope and, when shown, the same star class. Keep room type and visible '
+                'meal/cancellation terms comparable; prefer a standard double/twin room and do not mix suites, '
+                'serviced apartments, or family rooms into that sample. Capture property name, exact booking URL, displayed total, '
+                'nights, normalized SAR per room per night (divide the observed two-night total by two), taxes and '
+                'included services, star class, and access date. Do not mix dates, currencies, star classes, room '
+                'types, or materially different terms. If fewer than three comparable rates are visible, report the '
+                'individual observations and sample size without an average. Call a computed result the approximate '
+                'average advertised room rate for this Booking.com sample and exact stay dates; never call it ADR, '
+                'an annual average, a historical rate, or the market standard.\n')
+        else:
+            booking_price_rules = (
+                'استخدم Booking.com كبديل فقط عندما تكون تقارير أسعار الفنادق الرسمية غير متاحة أو محجوبة؛ '
+                'فهذه لقطة لأسعار طلب معروضة حاليًا وليست بيانات تشغيل رسمية. ابحث عن الإقامة نفسها لكل فندق: '
+                f'الدخول {check_in.isoformat()} والخروج {check_out.isoformat()}، غرفة واحدة، بالغان، دون أطفال، '
+                'والعملة المعروضة ريال سعودي. استهدف خمسة فنادق داخل المدينة أو الحي المكلّف، ولا تحسب متوسطًا '
+                'حسابيًا إلا من ثلاث منشآت متاحة قابلة للمقارنة على الأقل ضمن النطاق الجغرافي نفسه، ومن فئة النجوم '
+                'نفسها متى ظهرت. اعتمد غرفة قياسية مزدوجة/توأم، ولا تخلط الأجنحة أو الشقق المخدومة أو الغرف '
+                'العائلية في العينة. وحّد شروط الوجبات والإلغاء الظاهرة قدر الإمكان. سجّل اسم الفندق ورابط '
+                'الحجز المحدد والإجمالي المعروض وعدد الليالي وسعر الغرفة للّيلة بعد قسمة إجمالي الليلتين المرصود '
+                'على اثنتين والضرائب والخدمات المشمولة وفئة النجوم وتاريخ الوصول. لا تخلط التواريخ أو العملات أو '
+                'فئات النجوم أو أنواع الغرف أو الشروط المختلفة جوهريًا. إذا قلّت الأسعار القابلة للمقارنة عن ثلاثة، '
+                'اعرض الأسعار الفردية وحجم العينة دون متوسط. سمِّ الناتج «متوسطًا تقريبيًا لأسعار الغرف المعروضة '
+                'في عينة Booking.com لتواريخ الإقامة المحددة»؛ لا تسمّه ADR أو متوسطًا سنويًا أو تاريخيًا أو سعرًا '
+                'معياريًا للسوق.\n')
     return (
         f"أنت باحث متخصص في {group['label']} ضمن دراسة سوق سعودية مهنية. هذا بحث منفصل عن بقية الباحثين؛ "
         'قدّم أدلة خامًا دقيقة ومهيكلة، ولا تكتب دراسة سوق عامة.\n'
         f'النطاق الجغرافي الموكّل لهذا البحث فقط: {place}. لا تبحث في مدينة أو حي آخر.\n'
         + 'نطاق المهمة: ' + group['focus'] + '\n'
-        + scoped_population_rules + scoped_aviation_rules
+        + scoped_population_rules + scoped_aviation_rules + booking_price_rules
         + 'هذا الباحث مسؤول عن مصدر محدد؛ ابحث داخله أولًا وحاول الوصول إلى صفحة البيانات أو التقرير ذات الصلة، '
         'ولا تكتفِ بالصفحة الرئيسية. إذا لم يعرض المصدر بيانات لهذا المكان أو الفترة فسجّل فجوة تغطية.\n'
         'المصدر الموكّل لهذا الباحث:\n' + requested_sites + '\n'

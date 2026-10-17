@@ -100,6 +100,11 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('حركة الرحلات الرسمية للمطار', prompt)
         self.assertIn('لا توزع حركة المطار على الأحياء', prompt)
         self.assertIn('مستوى التفصيل الجغرافي الذي تعذر الوصول إليه', prompt)
+        self.assertIn('لا تستخدم أسعار Booking.com إلا كبديل', prompt)
+        self.assertIn('ثلاث منشآت قابلة للمقارنة على الأقل', prompt)
+        self.assertIn('متوسطًا تقريبيًا لأسعار الغرف المعروضة', prompt)
+        self.assertIn('اعرض المشاهدات دون متوسط', prompt)
+        self.assertIn('لا تسمّه ADR تاريخيًا أو سنويًا', prompt)
 
         english = market_study.build_summary_user_prompt(
             {'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': ['Al Rawdah']}]}},
@@ -107,6 +112,9 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('official Saudi Census 2022', english)
         self.assertIn('airport passenger and flight-movement figures', english)
         self.assertIn('never allocate airport traffic to districts', english)
+        self.assertIn('Booking.com observations', english)
+        self.assertIn('at least three comparable properties', english)
+        self.assertIn('Keep it separate from official ADR', english)
 
     def test_market_prompt_attributes_uploaded_transactions_to_their_named_source(self):
         prompt = market_study.build_summary_user_prompt({
