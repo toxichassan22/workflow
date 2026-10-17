@@ -47,3 +47,38 @@
 #section-market-study .market-study-tab-panel-off {
   display: none;
 }
+
+#section-market-study .market-comparison-types {
+  display: grid;
+  gap: 8px;
+}
+
+#section-market-study .market-comparison-type-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 1fr)) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line, #d8e0e8);
+  border-inline-start: 3px solid var(--teal-bright, #17C8E3);
+  border-radius: 12px;
+  background: var(--white, #FFFFFF);
+}
+
+#section-market-study .market-comparison-type-row [hidden] {
+  display: none !important;
+}
+
+#section-market-study .market-transaction-benchmarks {
+  margin-top: 18px;
+}
+
+#section-market-study .market-transaction-benchmarks h4 {
+  margin: 0 0 8px;
+}
+
+@media (max-width: 760px) {
+  #section-market-study .market-comparison-type-row {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+}

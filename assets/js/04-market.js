@@ -2,8 +2,11 @@
 
     function collectMarketStudyFromDom() {
       const state = getMarketStudyState();
-      state.competitor_radius = document.getElementById('marketCompetitorRadius')?.value || state.competitor_radius;
-      state.competitor_radius_custom_km = document.getElementById('marketCompetitorRadiusCustom')?.value || '';
+      state.competitor_scope = {
+        mode: document.getElementById('marketCompetitorScopeMode')?.value === 'city' ? 'city' : 'district'
+      };
+      state.comparison_types = typeof collectMarketComparisonTypes === 'function'
+        ? collectMarketComparisonTypes() : (state.comparison_types || []);
       state.data_period = document.getElementById('marketDataPeriod')?.value || state.data_period;
       state.data_period_from = document.getElementById('marketDataPeriodFrom')?.value || '';
       state.data_period_to = document.getElementById('marketDataPeriodTo')?.value || '';
@@ -34,11 +37,8 @@
     }
 
     function updateMarketStudyFieldVisibility() {
-      const radius = document.getElementById('marketCompetitorRadius')?.value;
       const period = document.getElementById('marketDataPeriod')?.value;
-      const radiusWrap = document.getElementById('marketCustomRadiusWrap');
       const periodWrap = document.getElementById('marketCustomPeriodWrap');
-      if (radiusWrap) radiusWrap.hidden = radius !== 'custom';
       if (periodWrap) periodWrap.hidden = period !== 'custom';
       syncMarketSummaryScopeUI();
     }

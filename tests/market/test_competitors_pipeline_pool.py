@@ -68,13 +68,17 @@ _WAJHA_PAGE = 'https://sa.aqar.fm/projects/wajha-tower'
 _LU2_PAGE = 'https://lu2.dev.sa/lu2-residence'
 
 _MAIN_COMPETITORS = [
-    {'name': ROAFED, 'district': 'النرجس', 'operation_type': 'بيع',
+    {'name': ROAFED, 'city': 'جدة', 'project_type': 'سكني',
+     'district': 'النرجس', 'operation_type': 'بيع',
      'distance_km': '2', 'benchmarks': ['سكني']},
-    {'name': WAJHA, 'district': 'الروضة', 'operation_type': 'إيجار',
+    {'name': WAJHA, 'city': 'جدة', 'project_type': 'سكني',
+     'district': 'النرجس', 'operation_type': 'إيجار',
      'distance_km': '5', 'benchmarks': ['سكني']},
-    {'name': LU2, 'district': 'السلامة', 'operation_type': 'بيع',
+    {'name': LU2, 'city': 'جدة', 'project_type': 'سكني',
+     'district': 'النرجس', 'operation_type': 'بيع',
      'distance_km': '8', 'benchmarks': ['سكني']},
-    {'name': WAHA, 'district': 'الصفا', 'operation_type': 'بيع',
+    {'name': WAHA, 'city': 'جدة', 'project_type': 'سكني',
+     'district': 'النرجس', 'operation_type': 'بيع',
      'distance_km': '9', 'benchmarks': ['سكني']},
 ]
 
@@ -169,7 +173,7 @@ class PipelineFixture:
                         'لا يذكر اسم المشروع المطلوب')])
         if 'الموقع الرسمي والشعار' in task:
             return _reply({'results': []})
-        if 'ابحث في الويب عن:' in task:
+        if 'ابحث عبر SearXNG عن:' in task:
             # Expansion round — finds nothing new.
             return _reply({'competitors': []}, pages=[
                 ('https://aqar.fm/market/jeddah', 'سوق جدة العقاري',
@@ -261,12 +265,15 @@ class PipelineFixture:
         return out
 
     def expansion_calls(self):
-        return self.tasks_containing('ابحث في الويب عن:')
+        return self.tasks_containing('ابحث عبر SearXNG عن:')
 
 
 class CompetitorsPipelinePoolTests(unittest.TestCase):
     PAYLOAD = {'city': 'جدة', 'district': 'النرجس', 'projectType': 'سكني',
-               'competitorRadius': '10'}
+               'competitorScope': {'mode': 'district'},
+               'comparisonTypes': [
+                   {'type': 'residential', 'operation': 'sale'},
+                   {'type': 'residential', 'operation': 'rent'}]}
 
     @classmethod
     def setUpClass(cls):
@@ -366,14 +373,16 @@ class CompetitorsPipelinePoolTests(unittest.TestCase):
 
     def test_expansion_calls_carry_the_deadline(self):
         fx = PipelineFixture()
-        result = self._run(fx)
+        with patch.object(self.application_module, '_pool_covers_angle',
+                          return_value=False):
+            result = self._run(fx)
         self.assertTrue(result['success'], result)
-        # 4 rows < COMPETITOR_MIN_DIRECT on the residential axis — one
+        # Four rows leave the selected sale axis short of five — an
         # expansion round fires and must carry the job deadline.
         self.assertTrue(fx.expansion_calls())
         import time
         for call in fx.agent_calls:
-            if 'ابحث في الويب عن:' in call['task']:
+            if 'ابحث عبر SearXNG عن:' in call['task']:
                 self.assertIsInstance(call['kwargs'].get('deadline'),
                                       (int, float), call['kwargs'])
                 self.assertGreater(call['kwargs']['deadline'],

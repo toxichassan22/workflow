@@ -628,6 +628,7 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
         market_study.build_consultant_system_prompt(), prompt,
         _usage_ctx('market', data, tenant_id=tenant_id),
         evidence_pool=evidence_pool, deadline=deadline, session=session,
+        model=GEMINI_TEXT_MODEL, search_provider='searxng',
         search_budget=max(3, len(batch)), max_steps=16, max_tokens=4000,
         on_event=_market_agent_progress(report, 82, 86,
                                         'البحث عن الشعارات الرسمية'))

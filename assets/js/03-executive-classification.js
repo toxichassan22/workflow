@@ -809,8 +809,9 @@
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => { summary[item.key] = ''; });
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => { swot[item.key] = ''; });
       return {
-        competitor_radius: '10',
-        competitor_radius_custom_km: '',
+        competitor_scope: { mode: 'district' },
+        comparison_types: [],
+        transaction_benchmarks: null,
         summary_scope: { mode: 'distance', distance: '10', distance_custom_km: '', places: [] },
         data_period: '12m',
         data_period_from: '',

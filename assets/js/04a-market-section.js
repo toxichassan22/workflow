@@ -33,15 +33,11 @@
           <h4>نطاق الدراسة</h4>
           <div class="market-grid">
             <div><label>نطاق المنافسين</label>
-              <select id="marketCompetitorRadius">
-                <option value="3">3 كم</option>
-                <option value="5">5 كم</option>
-                <option value="10" selected>10 كم</option>
-                <option value="city">كامل المدينة</option>
-                <option value="custom">نطاق مخصص</option>
+              <select id="marketCompetitorScopeMode">
+                <option value="district" selected>الحي</option>
+                <option value="city">المدينة</option>
               </select>
             </div>
-            <div id="marketCustomRadiusWrap" hidden><label>النطاق المخصص (كم)</label><input id="marketCompetitorRadiusCustom" type="number" min="1" step="0.1"></div>
             <div><label>فترة البيانات</label>
               <select id="marketDataPeriod">
                 <option value="12m">آخر 12 شهرًا</option>
@@ -62,6 +58,13 @@
           </div>
         </div>
         <div class="market-block">
+          <h4>اختيارات المقارنة</h4>
+          <div id="marketComparisonTypes" class="market-comparison-types"></div>
+          <div class="market-actions" style="margin-top:8px">
+            <button type="button" class="btn ghost" id="marketAddComparisonTypeBtn" onclick="addMarketComparisonType()">إضافة نوع مقارنة</button>
+          </div>
+        </div>
+        <div class="market-block">
           <h4>المنافسون</h4>
           <div class="market-actions">
             <button type="button" class="btn ghost" onclick="addMarketCompetitorRow()">إضافة منافس</button>
@@ -72,12 +75,13 @@
           <div class="table-wrap">
             <table id="marketCompetitorsTable">
               <thead><tr>
-                <th>اسم المشروع</th><th>الشعار</th><th>النوع</th><th>التصنيف</th><th data-benchmarks-col>يُقاس على</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
+                <th>اسم المشروع</th><th>الشعار</th><th>النوع</th><th>النجوم</th><th>التصنيف</th><th data-benchmarks-col>يُقاس على</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
                 <th>نوع العملية</th><th>نوع السعر</th><th>القيمة (ر.س)</th><th></th>
               </tr></thead>
               <tbody></tbody>
             </table>
           </div>
+          <div id="marketCompetitorPriceBenchmarks" hidden></div>
         </div>
         </div>
         <div class="market-study-tab-panel market-study-tab-panel-off" id="marketMarketPanel" data-market-study-panel="market" role="tabpanel" aria-labelledby="marketMarketTab" aria-hidden="true">
@@ -164,19 +168,26 @@
           '<textarea id="marketSwot_' + item.key + '" rows="4"></textarea></div>'
         ).join('');
       }
-      ['marketCompetitorRadius', 'marketDataPeriod', 'marketSummaryScopeMode', 'marketSummaryScopeDistance'].forEach(id => {
+      ['marketCompetitorScopeMode', 'marketDataPeriod', 'marketSummaryScopeMode', 'marketSummaryScopeDistance'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', () => {
           updateMarketStudyFieldVisibility();
           persistMarketStudyFromDom();
         });
       });
-      ['marketCompetitorRadiusCustom', 'marketSummaryScopeCustomKm', 'marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
+      ['marketSummaryScopeCustomKm', 'marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
         .forEach(id => document.getElementById(id)?.addEventListener('input', persistMarketStudyFromDom));
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
         document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
         document.getElementById('marketSwot_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
+      });
+      document.getElementById('marketComparisonTypes')?.addEventListener('change', event => {
+        if (event.target?.dataset?.comparisonField === 'type') {
+          const row = event.target.closest('[data-comparison-row]');
+          if (row) syncMarketComparisonRow(row);
+        }
+        persistMarketStudyFromDom();
       });
       refreshDynamicI18n(div);
       if (typeof mountMarketSummaryChat === 'function') mountMarketSummaryChat(div);
@@ -208,4 +219,104 @@
       });
       const active = tabs.find(button => button.classList.contains('active'));
       activateMarketStudyTab(root, active?.dataset.marketStudyTab || 'competitors');
+    }
+
+    function readMarketComparisonRows() {
+      return Array.from(document.querySelectorAll('#marketComparisonTypes [data-comparison-row]'))
+        .map(row => ({
+          type: row.querySelector('[data-comparison-field="type"]')?.value || '',
+          operation: row.querySelector('[data-comparison-field="operation"]')?.value || '',
+          stars: row.querySelector('[data-comparison-field="stars"]')?.value || ''
+        }));
+    }
+
+    function collectMarketComparisonTypes() {
+      return readMarketComparisonRows().filter(row =>
+        row.type === 'hotel' ? /^[1-5]$/.test(row.stars)
+          : ['residential', 'commercial'].includes(row.type)
+            && ['sale', 'rent'].includes(row.operation)
+      );
+    }
+
+    function marketComparisonTypeRowHtml(item = {}) {
+      const type = ['hotel', 'residential', 'commercial'].includes(item.type) ? item.type : '';
+      const operation = ['sale', 'rent'].includes(item.operation) ? item.operation : '';
+      const stars = /^[1-5]$/.test(String(item.stars || '')) ? String(item.stars) : '';
+      const typeOptions = [
+        '<option value="">--</option>',
+        '<option value="hotel"' + (type === 'hotel' ? ' selected' : '') + '>فندقي</option>',
+        '<option value="residential"' + (type === 'residential' ? ' selected' : '') + '>سكني</option>',
+        '<option value="commercial"' + (type === 'commercial' ? ' selected' : '') + '>تجاري</option>'
+      ].join('');
+      const operationOptions = [
+        '<option value="">--</option>',
+        '<option value="sale"' + (operation === 'sale' ? ' selected' : '') + '>بيعي</option>',
+        '<option value="rent"' + (operation === 'rent' ? ' selected' : '') + '>تأجيري</option>'
+      ].join('');
+      const starOptions = ['<option value="">--</option>']
+        .concat([1, 2, 3, 4, 5].map(value =>
+          '<option value="' + value + '"' + (stars === String(value) ? ' selected' : '') + '>' + value + ' نجوم</option>'
+        )).join('');
+      return '<div class="market-comparison-type-row" data-comparison-row>' +
+        '<div><label>نوع المقارنة</label><select data-comparison-field="type">' + typeOptions + '</select></div>' +
+        '<div data-comparison-operation' + (type === 'residential' || type === 'commercial' ? '' : ' hidden') + '><label>نوع العملية</label><select data-comparison-field="operation">' + operationOptions + '</select></div>' +
+        '<div data-comparison-stars' + (type === 'hotel' ? '' : ' hidden') + '><label>تصنيف الفندق</label><select data-comparison-field="stars">' + starOptions + '</select></div>' +
+        '<button type="button" class="btn ghost small" data-remove-comparison-type>حذف</button>' +
+        '</div>';
+    }
+
+    function renderMarketComparisonTypes(items) {
+      const host = document.getElementById('marketComparisonTypes');
+      if (!host) return;
+      const rows = Array.isArray(items) ? items : [];
+      host.innerHTML = rows.map(marketComparisonTypeRowHtml).join('') ||
+        '<div class="tenant-hint">لا توجد أنواع مقارنة محددة</div>';
+      host.querySelectorAll('[data-comparison-row]').forEach(row => {
+        row.querySelector('[data-remove-comparison-type]')?.addEventListener('click', () => {
+          row.remove();
+          persistMarketStudyFromDom();
+          if (!host.querySelector('[data-comparison-row]')) renderMarketComparisonTypes([]);
+        });
+      });
+      refreshDynamicI18n(host);
+    }
+
+    function syncMarketComparisonRow(row) {
+      const type = row.querySelector('[data-comparison-field="type"]')?.value || '';
+      const operation = row.querySelector('[data-comparison-operation]');
+      const stars = row.querySelector('[data-comparison-stars]');
+      if (operation) operation.hidden = type !== 'residential' && type !== 'commercial';
+      if (stars) stars.hidden = type !== 'hotel';
+    }
+
+    function addMarketComparisonType() {
+      const rows = readMarketComparisonRows();
+      rows.push({ type: '', operation: '', stars: '' });
+      renderMarketComparisonTypes(rows);
+      persistMarketStudyFromDom();
+    }
+
+    function renderMarketTransactionBenchmarks(data) {
+      const host = document.getElementById('marketCompetitorPriceBenchmarks');
+      if (!host) return;
+      const benchmark = data && typeof data === 'object' ? data : null;
+      const groups = Array.isArray(benchmark?.groups) ? benchmark.groups : [];
+      host.hidden = !groups.length;
+      if (!groups.length) {
+        host.innerHTML = '';
+        return;
+      }
+      const format = value => value === null || value === undefined || value === ''
+        ? 'غير متاح' : new Intl.NumberFormat('ar-SA', { maximumFractionDigits: 0 }).format(Number(value));
+      host.innerHTML = '<div class="market-transaction-benchmarks"><h4>صفقات مرجعية مجهولة الهوية</h4>' +
+        '<div class="tenant-hint">' + escapeHtml(benchmark.note || '') + '</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>الحي</th><th>نوع الوحدة</th><th>عدد الصفقات</th><th>وسيط سعر المتر</th><th>وسيط قيمة الصفقة</th><th>الفترة</th></tr></thead><tbody>' +
+        groups.map(item => '<tr><td>' + escapeHtml(item.district || '') + '</td><td>' + escapeHtml(item.unit_type || '') + '</td>' +
+          '<td>' + format(item.deal_count) + '</td><td>' + format(item.median_price_sqm_sar) + ' ر.س</td>' +
+          '<td>' + format(item.median_deal_value_sar) + ' ر.س</td><td>' +
+          escapeHtml([item.period_from, item.period_to].filter(Boolean).join(' إلى ')) + '</td></tr>').join('') +
+        '</tbody></table></div><div class="tenant-hint">' + escapeHtml(benchmark.source || '') +
+        (benchmark.source_url ? ' — <a href="' + escapeHtml(benchmark.source_url) + '" target="_blank" rel="noopener noreferrer">المصدر</a>' : '') +
+        '</div></div>';
+      refreshDynamicI18n(host);
     }

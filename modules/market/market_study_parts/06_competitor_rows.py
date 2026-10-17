@@ -102,6 +102,10 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'id': _norm(row.get('id')) or str(uuid.uuid4()),
         'name': name,
         'project_type': project_type,
+        'comparison_type': _norm(row.get('comparison_type') or row.get('comparisonType')),
+        'hotel_stars': _clean_numeric(
+            row.get('hotel_stars') or row.get('hotelStars')
+            or row.get('star_rating') or row.get('stars')),
         'area_mode': area_mode,
         'area_sqm': area_sqm if area_mode == 'fixed' else '',
         'area_from': area_from if area_mode == 'range' else '',
@@ -115,6 +119,7 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'logo_url': logo_url,
         'logo_source_url': logo_source_url,
         'district': district,
+        'city': _norm(row.get('city') or row.get('location_city')),
         'distance_km': distance_km,
         'lat': lat,
         'lng': lng,

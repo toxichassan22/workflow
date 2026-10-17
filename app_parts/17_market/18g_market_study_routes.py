@@ -45,6 +45,7 @@ def api_market_study_competitor_logo():
         response = _browse_agent_call(
             market_study.build_consultant_system_prompt(), discovery_prompt,
             _usage_ctx('market', data),
+            model=GEMINI_TEXT_MODEL, search_provider='searxng',
             search_budget=3, max_steps=8, max_tokens=1600,
             reasoning_effort='low')
         provider_error = _chat_error_message(response) if response.get('error') else ''
@@ -71,6 +72,7 @@ def api_market_study_competitor_logo():
         response = _browse_agent_call(
             market_study.build_consultant_system_prompt(), prompt,
             _usage_ctx('market', data),
+            model=GEMINI_TEXT_MODEL, search_provider='searxng',
             search_budget=2, max_steps=6, max_tokens=1200,
             reasoning_effort='low')
         provider_error = _chat_error_message(response) if response.get('error') else ''

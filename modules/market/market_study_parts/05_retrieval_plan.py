@@ -71,9 +71,9 @@ _USE_TO_SOURCE_KIND = {
 # Listing category slug per source kind on aqar.fm — the only classifieds
 # portal planned; its paths are Arabic ({cat}-للبيع/{city}).
 _LISTING_CATEGORIES = {
-    'سكني': ['شقق'],
+    'سكني': ['فلل', 'شقق', 'أدوار'],
     'تجاري': ['مكاتب', 'محلات'],
-    'فندقي': ['شقق'],
+    'فندقي': [],
     'صناعي ولوجستي': ['مستودعات'],
     '_default': ['شقق'],
 }
@@ -148,6 +148,17 @@ def _payload_operations(payload):
     """{'بيع','إيجار'} — the transaction kinds this project actually trades.
     Empty means unknown; callers treat it as both."""
     ops = set()
+    if 'comparisonTypes' in (payload or {}) or 'comparison_types' in (payload or {}):
+        selected = (payload.get('comparisonTypes') if 'comparisonTypes' in payload
+                    else payload.get('comparison_types'))
+        selected_specs = normalize_comparison_types(selected)
+        for spec in selected_specs:
+            if spec.get('operation') == 'sale':
+                ops.add('بيع')
+            elif spec.get('operation') == 'rent':
+                ops.add('إيجار')
+        if selected_specs:
+            return ops
     for component in _iter_payload_components(payload):
         model = _fold_choice(
             component.get('investmentModel') or component.get('investment_model'))
@@ -174,6 +185,18 @@ def _payload_source_kinds(payload):
     analysis kinds folded onto the catalog keys, then the structured
     components' useType, then the main type itself."""
     kinds = []
+
+    if 'comparisonTypes' in (payload or {}) or 'comparison_types' in (payload or {}):
+        selected = (payload.get('comparisonTypes') if 'comparisonTypes' in payload
+                    else payload.get('comparison_types'))
+        mapping = {'hotel': 'فندقي', 'residential': 'سكني', 'commercial': 'تجاري'}
+        selected_specs = normalize_comparison_types(selected)
+        for spec in selected_specs:
+            _kind = mapping.get(spec.get('type'))
+            if _kind and _kind not in kinds:
+                kinds.append(_kind)
+        if selected_specs:
+            return kinds
 
     def _add(kind):
         kind = {'مكاتب': 'تجاري', 'تجزئة': 'تجاري'}.get(kind, kind)
@@ -278,7 +301,12 @@ def build_source_plan(payload, offer_lang='ar'):
     # 3) City-scoped pages: the indicators portal's public city page carries
     #    deal counts and values (its advanced-search grids are Nafath-gated),
     #    then classifieds listings for current asking prices.
-    ops = _payload_operations(payload) or {'بيع', 'إيجار'}
+    ops = _payload_operations(payload)
+    explicit_scope = bool(normalize_comparison_types(
+        payload.get('comparisonTypes') if 'comparisonTypes' in payload
+        else payload.get('comparison_types')))
+    if not ops and not explicit_scope:
+        ops = {'بيع', 'إيجار'}
     city = _norm(payload.get('city'))
     if city:
         _add(f'https://rei.rega.gov.sa/ar/cities/{quote(city)}', 'dataset',

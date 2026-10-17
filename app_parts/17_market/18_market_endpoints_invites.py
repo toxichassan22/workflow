@@ -49,11 +49,6 @@ def _market_project_facts(data, tenant_id=None):
 
 def _prepare_market_payload(data, tenant_id=None):
     payload = dict(data or {})
-    radius_value = payload.get('competitorRadius') or payload.get('competitor_radius') or '10'
-    custom_km = payload.get('competitorRadiusCustomKm') or payload.get('competitor_radius_custom_km')
-    resolved = market_study.resolve_competitor_radius_km(radius_value, custom_km)
-    payload['resolvedRadiusKm'] = resolved
-    payload['competitorRadiusLabel'] = _market_radius_label(payload, resolved)
     payload['dataPeriodLabel'] = _market_period_label(payload)
     payload['dataPeriodBounds'] = market_study.data_period_bounds(
         payload.get('dataPeriod') or payload.get('data_period'),
@@ -62,6 +57,20 @@ def _prepare_market_payload(data, tenant_id=None):
     )
     mixed = payload.get('projectComponents') or payload.get('project_mixed_components') or payload.get('project_components')
     payload['projectComponents'] = mixed
+    raw_scope = payload.get('competitorScope') or payload.get('competitor_scope')
+    if isinstance(raw_scope, str):
+        try:
+            raw_scope = json.loads(raw_scope)
+        except (TypeError, ValueError):
+            raw_scope = {}
+    raw_scope = raw_scope if isinstance(raw_scope, dict) else {}
+    payload['competitorScope'] = {
+        'mode': 'city' if str(raw_scope.get('mode') or '').strip().lower() == 'city'
+        else 'district'
+    }
+    raw_comparisons = (payload.get('comparisonTypes')
+                       if 'comparisonTypes' in payload else payload.get('comparison_types'))
+    payload['comparisonTypes'] = market_study.normalize_comparison_types(raw_comparisons)
     payload['summaryScope'] = market_study.normalize_summary_scope(
         payload.get('summaryScope') or payload.get('summary_scope'))
     payload['projectFacts'] = _market_project_facts(data, tenant_id)
@@ -102,7 +111,7 @@ def _new_evidence_pool():
         return None
 
 
-def _market_browser_session():
+def _market_browser_session(search_provider=None):
     """The job's shared browser for the sequential stages (source plan, main
     and expansion calls, logo discovery). A BrowserWorker is lazy: building it
     is free and Chromium launches on the first real tool call — nothing
@@ -111,7 +120,7 @@ def _market_browser_session():
     try:
         import browser as _browser_module
         worker_cls = getattr(_browser_module, 'BrowserWorker', None)
-        return worker_cls() if worker_cls is not None else None
+        return worker_cls(search_provider=search_provider) if worker_cls is not None else None
     except Exception:
         return None
 
@@ -233,7 +242,7 @@ def _execute_market_competitors(data, tenant_id=None, progress=None):
     evidence_pool = _new_evidence_pool()
     _preload_failed_run_evidence(tenant_id, 'competitors', data, evidence_pool)
     deadline = time.time() + _MARKET_JOB_TIME_BUDGET
-    session = _market_browser_session()
+    session = _market_browser_session(search_provider='searxng')
     try:
         result = _run_market_competitors(
             data, tenant_id=tenant_id, progress=report,
@@ -252,6 +261,15 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data, tenant_id)
     offer_lang = slide_engine.resolve_offer_lang(data)
+    axes = market_study.project_competitor_axes(payload)
+    if not axes or not any(axis.get('explicit') for axis in axes):
+        return {
+            'success': False,
+            'error': 'لا توجد اختيارات مقارنة صالحة.',
+            'failureReason': 'comparison_scope_required',
+        }
+    payload['transactionBenchmarks'] = market_study.build_transaction_price_benchmarks(
+        payload, axes)
     existing = data.get('competitors') if isinstance(data.get('competitors'), list) else []
     mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
     if tenant_id is None:
@@ -278,6 +296,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     res = _browse_agent_call(
         system_prompt, user_prompt,
         _usage_ctx('market', data, tenant_id=tenant_id),
+        model=GEMINI_TEXT_MODEL,
+        search_provider='searxng',
         evidence_pool=evidence_pool, deadline=deadline, session=session,
         search_budget=_COMPETITORS_SEARCH_BUDGET,
         max_steps=_COMPETITORS_MAX_STEPS,
@@ -323,28 +343,10 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
 
     _collect_citations(res)
     generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
-    dropped_far = []
-    try:
-        _radius_limit = float(payload.get('resolvedRadiusKm') or 0)
-    except (TypeError, ValueError):
-        _radius_limit = 0
-    # Flagging keeps borderline rows for review, but a competitor hundreds of
-    # kilometres away is noise, not a choice — drop it before counting, so a
-    # list padded with far cities still triggers the expansion pass. Whole-city
-    # scope has no km bound, yet a row claiming another region is still noise:
-    # cap it at 100 km.
-    cutoff = (max(_radius_limit * 3, 60) if _radius_limit > 0
-              else (100 if payload.get('resolvedRadiusKm') is None else 0))
-    if cutoff:
-        generated = [row for row in generated if isinstance(row, dict)]
-        _kept = []
-        for row in generated:
-            distance = market_study._number_in_text(row.get('distance_km'))
-            if distance is not None and distance > cutoff:
-                dropped_far.append(str(row.get('name') or '').strip())
-                continue
-            _kept.append(row)
-        generated = _kept
+    generated = market_study.filter_and_cap_competitors(
+        generated, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
+        offer_lang=offer_lang, scope=payload.get('competitorScope'),
+        city=payload.get('city'), district=payload.get('district'))
     named_generated = [row for row in generated
                        if isinstance(row, dict) and str(row.get('name') or '').strip()]
     # Expansion passes: a thin list usually means the model settled for the
@@ -374,18 +376,13 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         return [axis for axis in axes if counts[axis['key']] < min_per_axis]
 
     axis_queries = {
-        axis['key']: f'{axis["search"]} في {_city} قرب {_district or "موقع المشروع"}'
-        for axis in axes if axis['key'] != 'general'}
-    generic_angles = [
-        f'قوائم وأخبار أفضل المشاريع العقارية في {_city} قرب {_district or "موقع المشروع"}',
-        f'مشاريع عقارية مسماة (كمبوند، برج، مجمع، مخطط، وجهة سكنية) في أحياء {_city} المجاورة لـ {_district or "موقع المشروع"}',
-        f'مشاريع كبار المطورين العقاريين في {_city} — قائمة أو تحت الإنشاء',
-    ]
+        axis['key']: f'{axis["search"]} داخل {_scope} في {_city}'
+        + (' عبر Booking.com' if axis.get('type') == 'hotel' else '')
+        for axis in axes}
     seen_names = {market_study._fold_choice(row.get('name')) for row in named_generated}
     tried_axes = set()
-    generic_round = 0
     round_no = 0
-    max_rounds = len(axis_queries) + len(generic_angles)
+    max_rounds = max(1, len(axis_queries))
     while mode != 'fill' and _market_search_ran(res) and round_no < max_rounds:
         # Near the job's deadline the loop stops so verify and logos keep
         # their share of the budget — an expansion answer that arrives after
@@ -398,22 +395,14 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         deficit_labels = '، '.join(
             market_study.benchmark_axis_label(axis, offer_lang) for axis in deficits)
         target = next((axis for axis in deficits
-                       if axis['key'] in axis_queries and axis['key'] not in tried_axes), None)
-        if target is not None:
-            tried_axes.add(target['key'])
-            angle = axis_queries[target['key']]
-            priority = (
-                'أولوية هذه الجولة منافسو محور '
-                f'«{market_study.benchmark_axis_label(target, offer_lang)}» — '
-                'علّمهم في benchmarks بقيمة المحور نفسه.')
-        elif generic_round < len(generic_angles):
-            angle = generic_angles[generic_round]
-            generic_round += 1
-            priority = (
-                f'المحاور الناقصة حاليًا: {deficit_labels} — أعطها الأولوية وعلّم كل '
-                'منافس بقيمة محوره في benchmarks.' if multi_axis else '')
-        else:
+                       if axis['key'] not in tried_axes), None)
+        if target is None:
             break
+        tried_axes.add(target['key'])
+        angle = axis_queries[target['key']]
+        target_label = market_study.benchmark_axis_label(target, offer_lang)
+        priority = (f'أولوية هذه الجولة اختيار العميل «{target_label}» فقط. '
+                    'لا تضف أنواعًا أو عمليات أخرى.')
         if _pool_covers_angle(evidence_pool, angle):
             # The corpus already holds this angle — the same query ran before
             # or stored pages carry its tokens, so a fresh browse call would
@@ -430,14 +419,15 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             f'نُجري دراسة سوق لمشروع {_ptype} في {_city}'
             + (f' — {_district}' if _district else '')
             + f'. نطاق المنافسين: {_scope}.\n'
+            + 'انسخ city وdistrict حرفيًا من بيانات المشروع؛ في نطاق الحي لا تذكر حيًا آخر.\n'
             + f'المنافسون المسجلون حتى الآن: {known}.\n'
-            + f'ابحث في الويب عن: {angle} — مشاريع مسماة '
-              'حقيقية لم ترد في القائمة. يجوز إدراج مشاريع أبعد قليلًا مع '
-              'distance_km الحقيقية، ولا تُدرج صفحات مؤشرات أو إحصاءات كمنافس.\n'
+            + f'ابحث عبر SearXNG عن: {angle} — مشاريع مسماة '
+              'حقيقية لم ترد في القائمة. لا تُدرج صفحات مؤشرات أو إحصاءات كمنافس.\n'
             + (priority + '\n' if priority else '')
             + (f'قيم benchmarks المسموحة حصرًا: {axis_label_list}.\n'
                if needs_benchmarks else '')
-            + 'أعد JSON فقط: {"competitors":[{"name":"","district":"","distance_km":"",'
+            + 'أعد JSON فقط: {"competitors":[{"name":"","city":"انسخ المدينة من بيانات المشروع حرفيًا",'
+              '"district":"","hotel_stars":"",'
               '"benchmarks":[],"operation_type":"","price_type":"","price_currency":"",'
               '"price":"","source_urls":[]}]} '
               'مع بقية الحقول المعتادة عند توفرها.'
@@ -448,6 +438,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         res2 = _browse_agent_call(
             system_prompt, expansion_prompt,
             _usage_ctx('market', data, tenant_id=tenant_id),
+            model=GEMINI_TEXT_MODEL,
+            search_provider='searxng',
             evidence_pool=evidence_pool, deadline=deadline, session=session,
             search_budget=4, max_steps=10, max_tokens=14000,
             reasoning_effort='low',
@@ -459,22 +451,16 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         _collect_citations(res2)
         parsed2, _parse_err2 = _parse_market_model_json(res2)
         more = parsed2.get('competitors') if isinstance(parsed2, dict) else []
-        added_this_round = 0
-        if isinstance(more, list):
-            for row in more:
-                if not isinstance(row, dict):
-                    continue
-                key = market_study._fold_choice(row.get('name'))
-                if not key or key in seen_names:
-                    continue
-                distance = market_study._number_in_text(row.get('distance_km'))
-                if cutoff and distance is not None and distance > cutoff:
-                    dropped_far.append(str(row.get('name') or '').strip())
-                    continue
-                seen_names.add(key)
-                generated.append(row)
-                named_generated.append(row)
-                added_this_round += 1
+        candidates = market_study.filter_and_cap_competitors(
+            generated + (more if isinstance(more, list) else []), axes,
+            limit_per_axis=min_per_axis, offer_lang=offer_lang,
+            scope=payload.get('competitorScope'), city=payload.get('city'),
+            district=payload.get('district'))
+        candidate_names = {market_study._fold_choice(row.get('name')) for row in candidates}
+        added_this_round = len(candidate_names - seen_names)
+        generated = candidates
+        named_generated = [row for row in generated if str(row.get('name') or '').strip()]
+        seen_names = candidate_names
         round_no += 1
         if not added_this_round and not _parse_err2:
             # A clean response with no new rows means retrieval is exhausted;
@@ -482,6 +468,11 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             break
     merged, added, updated = market_study.merge_generated_competitors(
         existing, generated, mode=mode, offer_lang=offer_lang)
+    if mode != 'fill':
+        merged = market_study.filter_and_cap_competitors(
+            merged, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
+            offer_lang=offer_lang, scope=payload.get('competitorScope'),
+            city=payload.get('city'), district=payload.get('district'))
     # The pool's pages are a superset of the citation list once the agent
     # layer records into it — union rather than assume, so matching works on
     # either side of that landing.
@@ -527,7 +518,6 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         for row in merged:
             if (row.get('row_source') or 'ai') == 'ai':
                 market_study.flag_unverified_competitor_sources(row)
-    out_of_radius = market_study.flag_out_of_radius(merged, payload.get('resolvedRadiusKm'))
     report(74, 'استيراد شعارات المنافسين من مواقعها الرسمية...')
     _auto_import_competitor_logos(
         merged, payload, data, tenant_id=tenant_id, progress=report,
@@ -537,9 +527,6 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     notes = str(parsed.get('notes') or '').strip()
-    if dropped_far:
-        far_note = 'أُسقطت من الجدول مشاريع بعيدة جدًا عن النطاق: ' + '، '.join(dropped_far)
-        notes = f'{notes} — {far_note}' if notes else far_note
     expansion_note = str(parsed.get('expansionNote') or parsed.get('notes') or '').strip()
     if round_no:
         rounds_note = ('أُجريت جولة بحث إضافية واحدة عن مشاريع أخرى' if round_no == 1
@@ -576,12 +563,14 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         'partial': partial,
         'providerError': provider_error or None,
-        'outOfRadiusCount': out_of_radius,
         'noEvidenceCount': no_evidence,
         'searchNotRunCount': search_not_run,
         'missingPriceCount': missing_prices,
         'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
         'searchExpanded': bool(parsed.get('searchExpanded')) or round_no > 0,
+        'comparisonTypes': payload.get('comparisonTypes') or [],
+        'competitorScope': payload.get('competitorScope') or {},
+        'transactionBenchmarks': payload.get('transactionBenchmarks') or {},
         'expansionNote': expansion_note,
         'notes': notes,
     }

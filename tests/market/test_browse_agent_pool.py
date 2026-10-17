@@ -568,6 +568,23 @@ class ProviderOrderTests(unittest.TestCase):
             providers = browser._providers()
         self.assertEqual(providers[0], 'searxng')
 
+    def test_explicit_searxng_has_no_provider_fallback(self):
+        for env in (
+                {'SEARXNG_URL': 'http://127.0.0.1:8888'},
+                {}):
+            with mock.patch.dict(os.environ, env, clear=True):
+                self.assertEqual(browser._providers('searxng'), ['searxng'])
+
+    def test_forced_worker_searches_only_searxng(self):
+        worker = browser.BrowserWorker.__new__(browser.BrowserWorker)
+        worker.search_provider = 'searxng'
+        calls = []
+        with mock.patch.object(browser.BrowserWorker, '_search_once',
+                               lambda self, provider, query, cap:
+                               calls.append(provider) or []):
+            worker.web_search('hotel booking')
+        self.assertEqual(calls, ['searxng'])
+
     def test_searxng_search_parses_json_results(self):
         payload = {'results': [
             {'url': 'https://a.sa/x', 'title': 'نتيجة أولى', 'content': 'مقتطف'},

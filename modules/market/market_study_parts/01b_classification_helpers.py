@@ -715,14 +715,13 @@ def _source_host(url):
     return (urlsplit(str(url or '')).netloc or '').lower().removeprefix('www.')
 
 
-# Classifieds/booking portals banned as competitor evidence — the owner rule:
-# aqar.fm is the only classifieds portal a row may cite, and trivago is the
-# only booking platform, allowed on hotel-operation rows alone. Every other
-# portal link is stripped from the row: no source, no field link, no price.
+# Classifieds/booking portals banned as competitor evidence. Aqar is the only
+# classifieds portal for residential/commercial rows; Booking.com is allowed
+# for hotel rows alone. Every other portal link is stripped from the row.
 _BANNED_LISTING_HOST_TOKENS = (
     'bayut.', 'wasalt.', 'dealapp.', 'dealmap', 'dubizzle', 'propertyfinder',
     'opensooq', 'haraj', 'lamudi', 'exxl', 'estater', 'muqawil', 'eqqar',
-    'aqaar.', 'aqarmap', 'booking.', 'airbnb.', 'hotels.', 'expedia.',
+    'aqaar.', 'aqarmap', 'trivago.', 'airbnb.', 'hotels.', 'expedia.',
     'agoda.', 'vrbo', 'tripadvisor.',
     # Social networks are never competitor evidence — a bio or a reel caption
     # carries an unverifiable figure, and an Instagram profile's title IS the
@@ -734,7 +733,7 @@ _BANNED_LISTING_HOST_TOKENS = (
     '=youtu.be', '=snapchat.com', '=pinterest.com', '=threads.net',
     '=t.me', '=telegram.me', '=wa.me', '=whatsapp.com', '=linkedin.com',
 )
-_HOTEL_LISTING_HOST_TOKENS = ('trivago.',)
+_HOTEL_LISTING_HOST_TOKENS = ('=booking.com',)
 
 
 def _banned_listing_host_token(host, token):
@@ -747,14 +746,15 @@ def _banned_listing_host_token(host, token):
 def banned_competitor_listing_host(url, operation=''):
     """True when a URL lives on a banned classifieds/booking portal.
 
-    aqar.fm passes for every operation; trivago passes only on hotel-operation
-    rows. Foreign-market pages are the separate concern of
+    aqar.fm passes for every operation; Booking.com passes only on hotel rows.
+    Foreign-market pages are the separate concern of
     _foreign_market_host — this list is the Saudi-market complement.
     """
     host = _source_host(url)
     if not host:
         return False
-    if any(token in host for token in _HOTEL_LISTING_HOST_TOKENS):
+    if any(_banned_listing_host_token(host, token)
+           for token in _HOTEL_LISTING_HOST_TOKENS):
         op = _fold_choice(operation)
         return 'فندقي' not in op and 'hotel' not in op
     return any(_banned_listing_host_token(host, token)

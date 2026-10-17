@@ -122,6 +122,7 @@
         }
         const state = getMarketStudyState();
         state.competitors = res.competitors || state.competitors;
+        state.transaction_benchmarks = res.transactionBenchmarks || null;
         state.sources = mergeMarketSourceRows(
           state.sources,
           res.sources || buildMarketCompetitorSourceRows(state.competitors)
@@ -139,7 +140,6 @@
           note.textContent = doneNote +
             (conflictCount ? WFT('market.note_conflicts_kept', ' — تم الإبقاء على {n} قيمة حالية متعارضة', { n: conflictCount }) : '') +
             (res.searchVerified === false ? WFT('market.note_search_not_run', ' — لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة') : '') +
-            ((res.outOfRadiusCount || 0) ? WFT('market.note_out_of_radius', ' — {n} منافس خارج النطاق المحدد', { n: res.outOfRadiusCount }) : '') +
             ((res.noEvidenceCount || 0) ? WFT('market.note_no_evidence', ' — {n} منافس لم تظهر أسماؤهم في نتائج البحث', { n: res.noEvidenceCount }) : '') +
             ((res.searchNotRunCount || 0) ? WFT('market.note_search_failed', ' — تعذر تنفيذ البحث عن {n} منافس', { n: res.searchNotRunCount }) : '') +
             ((res.missingPriceCount || 0) ? WFT('market.note_missing_price', ' — {n} منافس بلا سعر موثق', { n: res.missingPriceCount }) : '') +

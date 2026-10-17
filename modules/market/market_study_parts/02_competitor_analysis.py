@@ -178,17 +178,18 @@ def build_consultant_system_prompt(offer_lang=None):
         '1. أبق كل صف موجود كما هو ولا تضف منافسًا جديدًا ولا تحذف أحدًا.\n'
         '2. املأ الحقول الناقصة فقط من مصادر موثوقة.\n'
         'إذا طُلب توليد المنافسين بالذكاء الاصطناعي:\n'
-        '1. ابحث عن قائمة منافسين جديدة كاملة داخل النطاق المحدد.\n'
+        '1. ابحث عن المنافسين داخل الحي أو المدينة المختارة وبالأنواع والعمليات التي اختارها العميل فقط.\n'
         '2. أعد قائمة جديدة تحل محل الجدول الحالي بالكامل.\n'
         '3. اختر المنافسين الأقرب من حيث: نوع الاستخدام، مستوى المشروع، الموقع، المساحات، الأسعار، حالة المشروع.\n'
-        f'4. حاول توفير {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل إذا كانوا متاحين.\n'
-        '   وللمشروع متعدد المحاور يكون هذا الحد لكل محور من محاور مكوناته على حدة، مع تعليم كل منافس بالمحور الذي يقيسه.\n'
-        '5. إذا لم يتوفر العدد الكافي وسّع نطاق البحث تدريجيًا مع توضيح ذلك.\n'
-        '6. صنّف المنافسين إلى: منافس مباشر، منافس غير مباشر، مشروع مرجعي.\n'
-        '7. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n'
-        '8. لكل منافس أعد جميع روابط الصفحات التي استخدمت منها البيانات في source_urls، وليس رابطًا واحدًا فقط.\n'
-        '9. مساحة الوحدة تكون area_mode=fixed مع area_sqm عندما يثبت المصدر قيمة واحدة، أو area_mode=range مع area_from وarea_to عندما يثبت المصدر نطاقًا؛ ولا تستخدم مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
-        '10. في الفندق استخدم مساحة الغرفة أو الجناح أو الشقة الفندقية، وإذا لم توجد مساحة وحدة موثوقة اترك area_sqm فارغة ولا تستخدم Tower GFA أو Gross Floor Area.\n'
+        f'4. حاول توفير حتى {COMPETITOR_MIN_DIRECT} منافسين لكل اختيار مقارنة عند توافرهم، ولا تتجاوز هذا العدد.\n'
+        '   لا تضف قطاعًا أو عملية بيع/إيجار أو تصنيف نجوم لم يختره العميل، ولا توسع النطاق من الحي إلى المدينة.\n'
+        '5. عند اختيار الفندق طابق عدد النجوم المحدد، واستخدم Booking.com لقراءة السعر من صفحة الحجز نفسها.\n'
+        '6. صفقات الأسعار المجهولة الهوية مرجع للمعايرة فقط؛ لا تحولها إلى مشاريع منافسة مسماة.\n'
+        '7. صنّف المنافسين إلى: منافس مباشر، منافس غير مباشر، مشروع مرجعي.\n'
+        '8. اذكر سبب اختيار كل منافس داخليًا في التحليل حتى لو لم يظهر عمود السبب في الجدول.\n'
+        '9. لكل منافس أعد جميع روابط الصفحات التي استخدمت منها البيانات في source_urls، وليس رابطًا واحدًا فقط.\n'
+        '10. مساحة الوحدة تكون area_mode=fixed مع area_sqm عندما يثبت المصدر قيمة واحدة، أو area_mode=range مع area_from وarea_to عندما يثبت المصدر نطاقًا؛ ولا تستخدم مساحة الأرض أو المبنى أو البرج أو المشروع الكلية.\n'
+        '11. في الفندق استخدم مساحة الغرفة أو الجناح أو الشقة الفندقية، وإذا لم توجد مساحة وحدة موثوقة اترك area_sqm فارغة ولا تستخدم Tower GFA أو Gross Floor Area.\n'
         'إذا كان الطلب تحليلًا أو ملخصًا والسوق يعتمد على جدول المنافسين الحالي:\n'
         '1. اعتمد قائمة المنافسين الموجودة في الجدول ولا تحذف أي منافس منها.\n'
         '2. استخدم البيانات التي أدخلها العميل أو وُلدت سابقًا كأساس للتحليل.\n\n'
@@ -441,12 +442,31 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
     language_directive = (
         'OUTPUT LANGUAGE: this project is English. Author EVERY field value in '
         'professional English — status/classification/operation_type/price_type '
-        'use exactly the allowed English values below; district, source, notes, '
-        'data_date and expansionNote are written in English. Keep the competitor '
-        'name verbatim in its source spelling.\n\n'
+        'use exactly the allowed English values below; source, notes, data_date '
+        'and expansionNote are written in English. Copy city and district exactly '
+        'as written in project data without translation. Keep the competitor name '
+        'verbatim in its source spelling.\n\n'
         if en else ''
     )
+    scope = payload.get('competitorScope') or payload.get('competitor_scope') or {}
+    scope = scope if isinstance(scope, dict) else {}
+    scope_mode = scope.get('mode') if scope.get('mode') in ('district', 'city') else 'district'
+    city_name = _norm(payload.get('city'))
+    district_name = _norm(payload.get('district'))
+    if en:
+        scope_label = (f'the whole city of {city_name}' if scope_mode == 'city'
+                       else f'district {district_name} in {city_name}')
+    else:
+        scope_label = ('كامل المدينة ' + city_name if scope_mode == 'city'
+                       else 'حي ' + district_name + ' في ' + city_name)
+    selected_scope_text = '، '.join(axis_labels) or 'لا توجد اختيارات صالحة'
+    transaction_benchmarks = payload.get('transactionBenchmarks')
+    transaction_benchmarks = (transaction_benchmarks
+                              if isinstance(transaction_benchmarks, dict) else {})
     benchmark_directive = (
+        f'لكل صف اكتب اختيارًا واحدًا فقط في benchmarks من القائمة: {axis_list}. '
+        'لا تسند الصف إلى اختيار آخر غير مطابق لنوعه وعملية تشغيله ونجوم الفندق. '
+        if axes and any(axis.get('explicit') for axis in axes) else
         f'لكل منافس املأ benchmarks بقيمة أو أكثر حصرًا من محاور مشروعنا: {axis_list} — '
         'المحور الذي يقيسه المنافس من مكونات مشروعنا، والمنافس متعدد الاستخدامات يحمل أكثر من قيمة. '
         if needs_benchmarks else ''
@@ -460,10 +480,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         )
     else:
         axis_requirement = (
-            f'المشروع متعدد المحاور — أرجع {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل '
-            f'لكل محور ({"، ".join(f"{label}: {COMPETITOR_MIN_DIRECT}" for label in axis_labels)}) إن أمكن. '
-            if multi_axis else
-            f'أرجع {COMPETITOR_MIN_DIRECT} منافسين مباشرين على الأقل إن أمكن. '
+            f'الاختيارات الملزمة: {selected_scope_text}. حاول الوصول إلى '
+            f'{COMPETITOR_MIN_DIRECT} منافسين موثقين لكل اختيار عند توافرهم، ولا تتجاوز '
+            f'{COMPETITOR_MIN_DIRECT} لأي اختيار. لا تضف نوعًا أو عملية أو تصنيف نجوم غير مختار، '
+            'ولا تعوّض نقص اختيار بمنافس من اختيار آخر. '
         )
         task = (
             'ولّد قائمة منافسين جديدة كاملة تحل محل الجدول الحالي. '
@@ -471,8 +491,8 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
             'اقتصر على مشاريع مذكورة بالاسم في صفحات نتائج البحث المسترجعة — ابحث عن قوائم '
             'ومقالات وصفحات مطوّرين تسمّي مجمعات ومشاريع حقيقية في المدينة، ولا تكتب اسمًا '
             'من ذاكرتك: كل صف يُفحص آليًا، وأي اسم لا يظهر في أي صفحة مسترجعة يُعلَّم '
-            'كغير موثق ولا يُعتمد. إن لم يكفِ العدد داخل النطاق، وسّع البحث تدريجيًا '
-            'واذكر ذلك في notes. صنف كل منافس: مباشر أو غير مباشر أو مرجعي.'
+            'كغير موثق ولا يُعتمد. إذا لم يتوفر العدد داخل النطاق المختار، وضح النقص في notes '
+            'ولا تتوسع خارج الحي أو المدينة المحددة. صنف كل منافس: مباشر أو غير مباشر أو مرجعي.'
         )
     price_types = '\n'.join(
         f'- {operation}: ' + ', '.join(options)
@@ -482,16 +502,17 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
     )
     search_protocol = (
         'بروتوكول البحث الإلزامي:\n'
-        '1. ابحث أولًا عن قائمة المنافسين في المدينة والنطاق المطلوب — صفحات القوائم '
-        'ومقالات «أفضل المجمعات/المشاريع» ومواقع المطوّرين هي التي تسمّي المشاريع '
+        '1. ابحث أولًا عبر SearXNG عن قائمة المنافسين داخل النطاق الجغرافي المحدد فقط: '
+        f'{scope_label}. ابحث في الأنواع المختارة فقط: {selected_scope_text}. '
+        'صفحات القوائم ومقالات «أفضل المجمعات/المشاريع» ومواقع المطوّرين هي التي تسمّي المشاريع '
         'بأسمائها. اسم كل منافس يجب أن يظهر حرفيًا في صفحة مسترجعة، ورابط تلك الصفحة '
         'يوضع في source_urls للصف.\n'
-        '2. ثم نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي '
+        '2. استخدم SearXNG وحده للبحث. ثم نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي '
         '(سعر البيع أو المتر أو الإيجار أو سعر الليلة أو ADR حسب نوع التشغيل) '
         'باستخدام اسم المنافس مع المدينة. أي صفحة مسترجعة تذكر المنافس بالاسم '
         'وتحمل بياناته مصدر مقبول لصفّه — موقع المطور أو المشغل، إعلان على منصة '
-        'عقار (sa.aqar.fm) — وهي منصة الإعلانات الوحيدة المقبولة — أو تريفاجو '
-        'للمنافس الفندقي، والأخبار والتقارير — ولا يُشترط مصدر رسمي لكل حقل. '
+        'عقار (sa.aqar.fm) للسكني والتجاري، أو Booking.com للفنادق المطابقة لاختيار العميل، '
+        'والأخبار والتقارير — ولا يُشترط مصدر رسمي لكل حقل. '
         'روابط منصات الإعلانات الأخرى (bayut.sa، wasalt.sa، dealapp.sa، dubizzle '
         'وغيرها) ممنوعة وتُسقط آليًا من الصف، وكذلك روابط التواصل الاجتماعي '
         '(إنستغرام، فيسبوك، تيك توك، إكس، يوتيوب وغيرها) — ليست مصدرًا للمنافس '
@@ -505,21 +526,23 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'مع بيان ما بحثت عنه في notes. الصف الناقص السعر مقبول؛ الرقم المختلق مرفوض.\n'
         '6. املأ price_type من القائمة المسموحة لنوع التشغيل، واستخدم price_from و price_to لأنواع النطاق '
         f'({", ".join(sorted(RANGE_PRICE_TYPES_EN) if en else sorted(RANGE_PRICE_TYPES))}) و price_value لغيرها.\n'
+        'إذا كان المنافس فندقًا، ابحث عن الفندق على Booking.com. إذا لم يظهر السعر أو عدد النجوم '
+        'في نتيجة البحث، افتح Booking.com في المتصفح التفاعلي، واستخدم inspect_page لمعرفة عناصر '
+        'النموذج، ثم type_text لكتابة المدينة والحي في خانة الوجهة وclick_element لتنفيذ البحث '
+        'وفتح صفحة الفندق. اقرأ السعر وعدد النجوم من الصفحة نفسها، واستخدم التمرير أو الضغط على '
+        'عناصر الصفحة عند الحاجة للوصول إلى تفاصيل الغرف والأسعار. '
+        'لا تعتمد على مقتطف نتيجة البحث وحده، ولا تخترع السعر أو تواريخ الإقامة؛ سجّل التواريخ '
+        'الظاهرة على الصفحة في notes وdata_date.\n'
         'اكتب في price_currency عملة السعر كما ظهرت في الصفحة (SAR للريال): إذا سعّرت '
         'الصفحة بعملة أخرى — كأسعار منصات الحجز باليورو أو الدولار — اكتب رمزها في '
         'price_currency ولا تحوّلها ولا تسقط السعر لأجل عملته؛ وسعر ليلة معروض على '
-        'تريفاجو — منصة الحجز الوحيدة المقبولة — يُقبل لنوع تشغيل فندقي مع ذكر '
+        'Booking.com — منصة الحجز المقبولة للفنادق — يُقبل لنوع تشغيل فندقي مع ذكر '
         'المصدر والتاريخ في notes.\n'
-        '7. النطاق الجغرافي ملزم: ابحث عن منافسين داخل النطاق المكتوب في بيانات المشروع فقط. '
-        'لكل منافس اكتب حيه في district ومسافته التقريبية من موقع المشروع بالكيلومتر في distance_km '
-        'وإحداثياته في lat وlng إن ظهرت في المصدر. '
-        'district وdistance_km وlat وlng تقديرات جغرافية تكتبها أنت من اسم المنافس وحيه — '
-        'لا تُشترط صفحة تذكر المسافة أو الإحداثيات حرفيًا، فنادرًا ما تُكتب في المصادر. '
-        'مشروع مسمّى داخل حي المشروع أو حي مجاور يُحسب داخل النطاق، وإن قدّرت مسافته أكبر '
-        'من النطاق فأدرجه مع المسافة الحقيقية بدل حذفه — الصفوف الخارجة تُعلَّم للمراجعة '
-        'ولا يُحذف منافس لأن مصدره لم يكتب مسافة. '
-        'إن لم يكفِ عدد المنافسين داخل النطاق وسّع البحث تدريجيًا وفعّل searchExpanded '
-        'واذكر أقصى مسافة وصلت إليها في expansionNote.\n'
+        '7. النطاق الجغرافي ملزم: في نمط الحي لا تُدرج إلا منافسًا داخل الحي '
+        f'{_norm(payload.get("district"))} في مدينة {_norm(payload.get("city"))}. '
+        f'وفي نمط المدينة لا تُدرج إلا منافسًا داخل مدينة {_norm(payload.get("city"))}. '
+        'اكتب اسم الحي في district عندما يظهر في المصدر. لا تستخدم المسافة بالكيلومتر '
+        'لتوسيع النطاق، ولا تُدرج مدينة أو حيًا خارج النطاق المختار.\n'
         '8. فترة البيانات الملزمة مكتوبة في بيانات المشروع: ارفض أي سعر أو مساحة مصدرها أقدم من '
         'بداية الفترة، واكتب تاريخ البيانات التي وجدتها لكل صف داخل notes.\n'
         '9. مصادر المؤشرات الرسمية إلزامية عند الارتباط: إن كان المشروع أو أي من منافسيه '
@@ -530,11 +553,11 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'وقيمتها والحي الأكثر نشاطًا — صفحات البحث المتقدم في المنصة تتطلب دخول '
         'نفاذ فلا تعتمد عليها. هذه المرجعية '
         'لسياق السوق؛ أما مصادر صفوف المنافسين فيقبل فيها أي موقع يذكر المشروع '
-        'بالاسم — إعلانًا تفصيليًا على عقار أو تريفاجو للفندقي، خبرًا أو تقريرًا '
+        'بالاسم — إعلانًا تفصيليًا على عقار أو Booking.com للفندقي، خبرًا أو تقريرًا '
         'أو موقع مطوّر — ولا يقبل فيها إعلان على أي منصة أخرى.\n'
-        '10. طبيعة الإيرادات في بيانات المشروع ملزمة ولا تخمَّن: المشروع البيعي يقارَن بمنافسين '
-        'بيعيين (سعر وحدة/متر)، والتأجيري بتأجيريين (إيجار/ليلة/ADR حسب نموذج الاستفادة)، '
-        'والمختلط يقارَن بالنوعين مع مطابقة كل منافس لنموذج استفادة مكوّنه.\n'
+        '10. نوع المقارنة الذي اختاره العميل هو الحاكم: للسكني والتجاري طابق عملية البيع أو الإيجار '
+        'المحددة بالضبط، وللفندق طابق عدد النجوم المختار. لا تستبدل اختيار العميل بنموذج الإيراد '
+        'المسجل للمشروع ولا تضف عملية أو فئة أخرى.\n'
         '11. المنافس مشروع حقيقي مسمّى (برج، مجمع سكني، مشروع مطوّر معلن). صفحات المؤشرات '
         'الرسمية (سكني، شبكة إيجار، منصة المؤشرات العقارية) ومواقع البيانات الإجمالية ليست '
         'منافسين: استخدمها مصدرَ سعر داخل source_urls للصفوف الحقيقية وفي مصادر الملخص، '
@@ -544,6 +567,12 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'أنواع السعر المسموحة حسب نوع التشغيل:\n'
         f'{price_types}\n'
     )
+    hotel_stars_shape = ('hotel star rating from 1 to 5, or blank for non-hotels'
+                         if en else 'عدد النجوم من 1 إلى 5 أو فارغ لغير الفندق')
+    competitor_city_shape = ('copy the project city exactly, without translation'
+                             if en else 'انسخ المدينة كما وردت في بيانات المشروع دون ترجمة')
+    competitor_district_shape = ('copy the selected district exactly, or the source district in city mode'
+                                 if en else 'انسخ الحي المختار حرفيًا، أو حي المصدر في نطاق المدينة')
     return (
         language_directive +
         f'تاريخ اليوم: {today}\n'
@@ -551,6 +580,11 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         f'{search_protocol}\n'
         'بيانات المشروع:\n'
         f'{_project_input_block(payload)}\n\n'
+        f'اختيارات العميل الملزمة للمقارنة: {selected_scope_text}.\n'
+        f'النطاق الجغرافي للمنافسين: {scope_label}.\n'
+        'البيانات التالية صفقات مجهولة الهوية لمعايرة الأسعار فقط؛ ليست مشاريع منافسة مسماة، '
+        'ولا تنشئ منها صفوف منافسين ولا تنسب أي سعر منها إلى مشروع مسمى.\n'
+        f'{json.dumps(transaction_benchmarks, ensure_ascii=False, indent=2)}\n\n'
         + (
             'المنافسون الحاليون (أبقهم جميعًا واملأ الناقص فقط):\n'
             if mode == 'fill' else
@@ -566,6 +600,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "id": "أبق المعرف إن وُجد وإلا اتركه فارغًا",\n'
         '      "name": "",\n'
         f'      "project_type": "{enum["project_type"]}",\n'
+        f'      "hotel_stars": "{hotel_stars_shape}",\n'
         '      "area_mode": "fixed أو range حسب المصدر",\n'
         '      "area_sqm": "القيمة الثابتة أو فارغ للنطاق",\n'
         '      "area_from": "بداية النطاق أو فارغ للقيمة الثابتة",\n'
@@ -582,8 +617,8 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "source": "",\n'
         '      "source_url": "",\n'
         '      "source_urls": [],\n'
-        '      "district": "حي المشروع المنافس",\n'
-        '      "distance_km": "المسافة التقريبية من موقع المشروع بالكيلومتر — رقم",\n'
+        f'      "city": "{competitor_city_shape}",\n'
+        f'      "district": "{competitor_district_shape}",\n'
         '      "lat": "خط العرض أو فارغ",\n'
         '      "lng": "خط الطول أو فارغ",\n'
         '      "logo_url": "رابط صورة الشعار من الموقع الرسمي فقط أو فارغ",\n'
@@ -604,7 +639,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'في source_urls ضع كل روابط الصفحات التي قرأتها واستخدمت منها أي معلومة لهذا المنافس، رابطًا لكل صفحة، '
         'ولا تكتف برابط واحد إذا استخدمت أكثر من صفحة. اجعل source_url هو الرابط الأهم للتوافق مع البيانات القديمة. '
         'في field_sources اربط كل حقل أعدت له قيمة بروابط الصفحات التي تثبته، وبالأخص area_sqm، area_from، area_to، status، classification، operation_type، price_type، price_value، price_from، price_to، وlogo_url. '
-        'أما district وdistance_km وlat وlng فهي تقديراتك الجغرافية — اربطها بالصفحة التي تسمّي المنافس إن وُجدت وإلا اتركها بلا رابط، ولا ترفض صفًا لأن المسافة أو الإحداثيات بلا مصدر مكتوب. '
+        'اكتب district كما يظهر في مصدر المنافس، وانسخ المدينة والحي المختارين حرفيًا دون ترجمة. لا تخمّن district أو distance_km أو lat أو lng؛ اترك الإحداثيات والمسافة فارغة إذا لم يذكرها مصدر موثوق، ولا تستخدمها لتوسيع النطاق الجغرافي. '
         'logo_url مقبول فقط عندما يكون logo_source_url صفحة رسمية للمشروع أو المطور، وإلا اترك الحقلين فارغين. '
         'اجعل source_urls اتحاد جميع روابط field_sources. '
         'في source_url وsource_urls ضع روابط الصفحات المحددة من نتائج البحث، وليس رابط الصفحة الرئيسية للموقع. '
@@ -615,11 +650,11 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
 
 def _summary_scope_block(payload, offer_lang=None):
     """The binding geographic frame of the market summary, per its own scope
-    mode — separate from the competitors radius. 'distance' binds to the
+    mode — separate from the competitors scope. 'distance' binds to the
     summary's own distance setting (district plus that distance); 'city' /
     'district' bind the analysis to the user-entered place list instead,
     with the same listed-only discipline and no invented substitutes. The
-    competitors radius never widens the summary frame."""
+    competitors scope never widens the summary frame."""
     en = (offer_lang == 'en')
     scope = normalize_summary_scope(
         (payload or {}).get('summaryScope') or (payload or {}).get('summary_scope'))
@@ -638,7 +673,7 @@ def _summary_scope_block(payload, offer_lang=None):
                 f'any other place is excluded. Do not analyze unlisted {unit} and do not '
                 f'invent substitutes — if a {single} has no data for an axis, write that '
                 f'the data is unavailable. This rule overrides any axis hint about the project district, '
-                f'the competitors radius, or a single nearest-district fallback. In market_definition, '
+                f'the competitors scope, or a single nearest-district fallback. In market_definition, '
                 f'state these {unit} by name as the market and never cite the competitors scope there. '
                 f'Country-level figures may appear only as '
                 f'clearly-labeled background, never as the basis of a judgment on '

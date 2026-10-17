@@ -133,18 +133,29 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. '
         'السعر بعملة غير الريال (كيورو منصات الحجز) مقبول — اكتب العملة في '
         'price.currency ولا تحوّلها ولا تسقط السعر لأجلها. ')
+    folded_operation = market_study._fold_choice(operation)
+    hotel_rule = ''
+    if any(token in folded_operation for token in ('فندقي', 'فندق', 'hotel', 'hospitality')):
+        stars = str(row.get('hotel_stars') or '').strip()
+        hotel_rule = (
+            f'تحقق من الفندق على Booking.com وطابق تصنيف {stars} نجوم المختار. '
+            'إذا لم يظهر السعر أو النجوم في النتائج، افتح Booking.com بأدوات المتصفح '
+            'التفاعلية، وافحص عناصر الصفحة ثم اكتب المدينة والحي في خانة الوجهة ونفّذ '
+            'البحث بالضغط على العنصر المناسب. اقرأ السعر والتصنيف من صفحة الفندق نفسها، '
+            'ولا تخمّن السعر أو تواريخ الإقامة. ')
     prompt = (
         f'ابحث في الويب عن المشروع العقاري «{name}» في مدينة {city} بالسعودية.\n'
         'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع الرسمي '
         'للمشروع أو مطوّره إن وُجدت", "summary": "سطر واحد عن المشروع", '
         + price_shape + '}.\n' + price_rule +
         'أي صفحة مسترجعة تذكر المشروع بالاسم تُحتسب دليلًا — موقع المطور أو '
-        'إعلانًا على منصة عقار (sa.aqar.fm) أو تريفاجو لمنافس فندقي أو خبرًا، '
+        'إعلانًا على منصة عقار (sa.aqar.fm) أو Booking.com للفندق أو خبرًا، '
         'وليس شرطًا أن تكون رسمية — وروابط منصات الإعلانات الأخرى '
         '(bayut، wasalt، dealapp…) ممنوعة ولا تُعتمد، وكذلك كل روابط '
         'التواصل الاجتماعي (إنستغرام، فيسبوك، تيك توك، إكس، يوتيوب…) — '
         'ليست دليلًا ولا مصدرًا للأسعار فلا تفتحها. '
-        'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
+        + hotel_rule
+        + 'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
     )
     tokens = _competitor_name_tokens(name)
     if not tokens:
@@ -160,7 +171,9 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     # is search_not_run, never proof the name is fabricated.
     response = _browse_agent_call(
         market_study.build_consultant_system_prompt(offer_lang), prompt,
-        usage_ctx, evidence_pool=evidence_pool, deadline=deadline,
+        usage_ctx, model=GEMINI_TEXT_MODEL,
+        search_provider='searxng',
+        evidence_pool=evidence_pool, deadline=deadline,
         session=session, reasoning_effort='low', on_event=on_event)
     last_error = _chat_error_message(response)
     search_ran_any = False
@@ -417,7 +430,7 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     title or URL may yield a price — an index page that drops the name once
     among a hundred listings would otherwise stamp the portal's whole-stock
     median on every competitor it mentions. Banned classifieds hosts (all
-    but aqar.fm, and trivago for hotel rows) never feed a row at all.
+    but aqar.fm and Booking.com for hotel rows) never feed a row at all.
     The median of the mentions becomes a «متوسط» price; a single mention
     keeps its own type. price_listed flags it as listing evidence, not an
     officially documented tariff. A row with no project-specific page keeps
@@ -639,7 +652,7 @@ def _verify_row_from_pool(row, payload, data, evidence_pool):
     return True
 
 
-def _verify_bind_browser(browser_module):
+def _verify_bind_browser(browser_module, search_provider='searxng'):
     """Bind this pool thread's BrowserWorker once — the module-level helpers
     then reuse it for every fetch instead of paying a Chromium launch per
     call. No-op where the thread-local helper hasn't landed; the helpers
@@ -647,12 +660,12 @@ def _verify_bind_browser(browser_module):
     getter = getattr(browser_module, 'thread_local_browser', None)
     if callable(getter):
         try:
-            getter()
+            getter(search_provider=search_provider)
         except Exception:
             pass
 
 
-def _verify_thread_browser():
+def _verify_thread_browser(search_provider='searxng'):
     """The calling thread's own BrowserWorker — Playwright's sync API is
     one-worker-per-thread, so verify-pool threads never share the job
     session. None until the thread-local helper exists."""
@@ -660,7 +673,7 @@ def _verify_thread_browser():
         import browser as _browser_module
         getter = getattr(_browser_module, 'thread_local_browser', None)
         if callable(getter):
-            worker = getter()
+            worker = getter(search_provider=search_provider)
             if worker is not None:
                 return worker
     except Exception:
@@ -679,7 +692,7 @@ def _verify_agent_session():
             return None
     except Exception:
         return None
-    return _verify_thread_browser()
+    return _verify_thread_browser(search_provider='searxng')
 
 
 def _close_verify_thread_browser():
@@ -724,7 +737,7 @@ def _verify_row_deterministic(row, payload, data, evidence_pool, deadline):
     def _bind():
         if not bound[0]:
             bound[0] = True
-            _verify_bind_browser(_browser_module)
+            _verify_bind_browser(_browser_module, search_provider='searxng')
 
     city = str(payload.get('city') or '').strip() or 'السعودية'
     query = f'«{name}» {city}'

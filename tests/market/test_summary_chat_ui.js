@@ -15,6 +15,7 @@ const source = [
   'assets/js/04-market.js',
   'assets/js/04a-market-section.js',
   'assets/js/05-market-competitors.js',
+  'assets/js/05-market-competitors/01_project_data_snapshot.js',
   'assets/js/05a-market-jobs.js',
   'assets/js/05a-market-summary-chat.js'
 ].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
@@ -51,8 +52,8 @@ function fixture() {
     marketStudyData: { value: '', dataset: { key: 'market_study_data' } },
     marketStudyOneBlockSummary: { value: 'ملخص قائم', closest: () => null },
     marketDisclaimer: { value: '' },
-    marketCompetitorRadius: { value: '10' },
-    marketCompetitorRadiusCustom: { value: '' },
+    marketCompetitorScopeMode: { value: 'district' },
+    marketComparisonTypes: { querySelectorAll: () => [] },
     marketDataPeriod: { value: '' },
     marketDataPeriodFrom: { value: '' },
     marketDataPeriodTo: { value: '' },

@@ -261,10 +261,10 @@ class SummaryScopeFrontendTests(unittest.TestCase):
         # Owner rule: the scope picker belongs to the executive-summary
         # block, not to the competitors scope block at the top.
         text = self.frontend
-        scope_at = text.index('marketSummaryScopeMode')
+        scope_at = text.index('id="marketSummaryScopeMode"')
         summary_at = text.index('الملخص التنفيذي لسوق المشروع')
         generate_at = text.index('marketGenerateSummaryBtn')
-        competitors_at = text.index('marketCompetitorRadius')
+        competitors_at = text.index('marketCompetitorScopeMode')
         self.assertGreater(scope_at, summary_at)
         self.assertLess(scope_at, generate_at)
         self.assertGreater(scope_at, competitors_at)
@@ -276,7 +276,7 @@ class SummaryScopeFrontendTests(unittest.TestCase):
         market_panel = text.index(
             'id="marketMarketPanel" data-market-study-panel="market"')
         table_at = text.index('id="marketCompetitorsTable"')
-        scope_at = text.index('marketSummaryScopeMode')
+        scope_at = text.index('id="marketSummaryScopeMode"')
         self.assertIn('data-market-study-tab="competitors"', text)
         self.assertIn('data-market-study-tab="market"', text)
         self.assertGreater(table_at, competitor_panel)

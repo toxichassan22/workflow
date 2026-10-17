@@ -26,6 +26,7 @@ const files = [
   'assets/js/04-market.js',
   'assets/js/04a-market-section.js',
   'assets/js/05-market-competitors.js',
+  'assets/js/05-market-competitors/01_project_data_snapshot.js',
   'assets/js/05a-market-jobs.js',
   'assets/js/05a-market-summary-chat.js'
 ];
@@ -63,8 +64,8 @@ function fixture() {
     marketSummaryChatResearch: { checked: true, disabled: false, addEventListener() {} },
     marketSummaryChatLog: { scrollTop: 0, scrollHeight: 10 },
     marketDisclaimer: { value: '' },
-    marketCompetitorRadius: { value: '10' },
-    marketCompetitorRadiusCustom: { value: '' },
+    marketCompetitorScopeMode: { value: 'district' },
+    marketComparisonTypes: { querySelectorAll: () => [] },
     marketDataPeriod: { value: '12m' },
     marketDataPeriodFrom: { value: '' },
     marketDataPeriodTo: { value: '' },
@@ -141,6 +142,13 @@ test('market study separates competitors and market into accessible tabs', () =>
   assert.match(ui, /data-market-study-tab="market"[^>]*>السوق<\/button>/);
   assert.match(ui, /data-market-study-panel="competitors"/);
   assert.match(ui, /data-market-study-panel="market"/);
+  assert.match(ui, /id="marketCompetitorScopeMode"/);
+  assert.match(ui, /id="marketComparisonTypes"/);
+  assert.match(ui, /id="marketAddComparisonTypeBtn"/);
+  assert.match(ui, /data-comparison-field="stars"/);
+  assert.match(ui, /إضافة نوع مقارنة/);
+  assert.doesNotMatch(ui, /marketCompetitorRadius/);
+  assert.doesNotMatch(source, /outOfRadiusCount/);
 
   const { context } = fixture();
   const makeControl = (field, key, classes = '') => {

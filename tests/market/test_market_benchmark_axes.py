@@ -91,22 +91,91 @@ class BenchmarkAxesTests(unittest.TestCase):
         self.assertEqual(axes[0]['key'], 'general')
         self.assertEqual(market_study.competitor_row_axis_keys({'name': 'x'}, axes), {'general'})
 
-    def test_multi_axis_prompt_demands_the_minimum_per_axis(self):
-        prompt = market_study.build_competitors_user_prompt(_mixed_payload(), [], mode='generate')
-        self.assertIn('متعدد المحاور', prompt)
-        self.assertIn('سكني: 5', prompt)
-        self.assertIn('فندقي: 5', prompt)
-        self.assertIn('تجزئة ومحلات: 5', prompt)
-        self.assertIn('"benchmarks"', prompt)
-        self.assertIn('سكني', prompt.split('benchmarks')[0] or 'سكني')
+    def test_explicit_comparison_axes_use_only_client_selections(self):
+        axes = market_study.project_competitor_axes({
+            'comparisonTypes': [
+                {'type': 'hotel', 'stars': '4'},
+                {'type': 'residential', 'operation': 'sale'},
+                {'type': 'commercial', 'operation': 'rent'},
+                {'type': 'hotel', 'stars': '9'},
+            ]})
+        self.assertEqual([axis['key'] for axis in axes],
+                         ['hotel:4', 'residential:sale', 'commercial:rent'])
 
-    def test_single_axis_prompt_keeps_the_flat_minimum(self):
-        payload = {'components': [
-            {'name': 'شقق', 'useType': 'residential', 'investmentModel': 'sale'}]}
+    def test_prompt_enforces_selected_axes_location_booking_and_interaction(self):
+        payload = {
+            'city': 'جدة', 'district': 'الروضة',
+            'competitorScope': {'mode': 'district'},
+            'comparisonTypes': [
+                {'type': 'hotel', 'stars': '4'},
+                {'type': 'residential', 'operation': 'sale'}],
+        }
         prompt = market_study.build_competitors_user_prompt(payload, [], mode='generate')
-        self.assertNotIn('متعدد المحاور', prompt)
-        self.assertIn('منافسين مباشرين على الأقل', prompt)
+        self.assertIn('فندقي - 4 نجوم', prompt)
+        self.assertIn('سكني - بيع', prompt)
+        self.assertIn('لا تضف نوعًا أو عملية أو تصنيف نجوم غير مختار', prompt)
+        self.assertIn('حي الروضة في جدة', prompt)
+        self.assertIn('Booking.com', prompt)
+        self.assertIn('inspect_page', prompt)
+        self.assertIn('type_text', prompt)
+        self.assertIn('click_element', prompt)
+        self.assertIn('انسخ المدينة كما وردت في بيانات المشروع دون ترجمة', prompt)
         self.assertIn('"benchmarks"', prompt)
+
+    def test_rent_operation_matches_arabic_and_english_values(self):
+        axis = market_study.normalize_comparison_types([
+            {'type': 'residential', 'operation': 'rent'}])[0]
+        for operation in ('إيجار', 'تأجير', 'Rent', 'Rental'):
+            self.assertTrue(market_study.competitor_matches_comparison_axis(
+                {'project_type': 'سكني', 'operation_type': operation}, axis), operation)
+
+    def test_explicit_filter_enforces_selection_location_stars_and_five_row_cap(self):
+        axes = market_study.normalize_comparison_types([
+            {'type': 'hotel', 'stars': 4},
+            {'type': 'residential', 'operation': 'sale'},
+        ])
+        rows = [
+            {'name': f'فندق جدة {n}', 'project_type': 'فندقي', 'hotel_stars': 4,
+             'operation_type': 'تشغيل فندقي', 'city': 'جدة', 'district': 'الروضة'}
+            for n in range(6)
+        ] + [
+            {'name': 'فندق خمس نجوم', 'project_type': 'فندقي', 'hotel_stars': 5,
+             'operation_type': 'تشغيل فندقي', 'city': 'جدة', 'district': 'الروضة'},
+            {'name': 'سكني إيجار', 'project_type': 'سكني', 'operation_type': 'إيجار',
+             'city': 'جدة', 'district': 'الروضة'},
+            {'name': 'سكني مدينة أخرى', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'الرياض', 'district': 'الروضة'},
+            {'name': 'سكني حي آخر', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'جدة', 'district': 'السلامة'},
+        ] + [
+            {'name': f'فيلا جدة {n}', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'جدة', 'district': 'الروضة'}
+            for n in range(6)
+        ]
+        accepted = market_study.filter_and_cap_competitors(
+            rows, axes, scope={'mode': 'district'}, city='جدة', district='الروضة')
+        self.assertEqual(len(accepted), 10)
+        self.assertEqual(sum(row['comparison_type'] == 'hotel' for row in accepted), 5)
+        self.assertEqual(sum(row['comparison_type'] == 'residential' for row in accepted), 5)
+        self.assertFalse(any('خمس نجوم' in row['name'] for row in accepted))
+        self.assertFalse(any('إيجار' in row['name'] for row in accepted))
+        self.assertFalse(any('مدينة أخرى' in row['name'] or 'حي آخر' in row['name']
+                             for row in accepted))
+
+    def test_city_scope_allows_other_neighborhoods_in_selected_city_only(self):
+        axis = market_study.normalize_comparison_types(
+            [{'type': 'residential', 'operation': 'sale'}])
+        rows = [
+            {'name': 'حي أول', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'جدة', 'district': 'الروضة'},
+            {'name': 'حي ثان', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'جدة', 'district': 'السلامة'},
+            {'name': 'مدينة ثانية', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'الرياض', 'district': 'الروضة'},
+        ]
+        accepted = market_study.filter_and_cap_competitors(
+            rows, axis, scope={'mode': 'city'}, city='جدة', district='الروضة')
+        self.assertEqual([row['name'] for row in accepted], ['حي أول', 'حي ثان'])
 
     def test_fill_mode_asks_to_tag_missing_benchmarks(self):
         payload = _mixed_payload()
@@ -120,6 +189,29 @@ class BenchmarkAxesTests(unittest.TestCase):
         row = market_study.normalize_competitor_row(
             {'name': 'منافس', 'benchmarks': 'سكني، فندقي'})
         self.assertEqual(row['benchmarks'], ['سكني', 'فندقي'])
+
+    def test_uploaded_transactions_are_anonymous_and_match_neighborhood(self):
+        axis = market_study.normalize_comparison_types(
+            [{'type': 'residential', 'operation': 'sale'}])[0]
+        data = market_study.build_transaction_price_benchmarks({
+            'city': 'جدة', 'district': 'الروضة',
+            'competitorScope': {'mode': 'district'},
+        }, [axis])
+        self.assertTrue(data['available'])
+        self.assertGreater(data['groups'][0]['deal_count'], 0)
+        self.assertEqual({group['district'] for group in data['groups']}, {'الروضة'})
+        self.assertNotIn('name', data['groups'][0])
+        self.assertIn('مجهولة الهوية', data['note'])
+
+    def test_uploaded_transactions_are_not_used_for_rental_comparisons(self):
+        axis = market_study.normalize_comparison_types(
+            [{'type': 'residential', 'operation': 'rent'}])[0]
+        data = market_study.build_transaction_price_benchmarks({
+            'city': 'جدة', 'district': 'الروضة',
+            'competitorScope': {'mode': 'district'},
+        }, [axis])
+        self.assertFalse(data['available'])
+        self.assertEqual(data['groups'], [])
 
 
 class BenchmarkExpansionTests(unittest.TestCase):
@@ -156,10 +248,14 @@ class BenchmarkExpansionTests(unittest.TestCase):
     def test_deficient_axis_gets_its_own_search_round(self):
         module = self.application_module
         residential = [
-            {'name': f'برج سكني {index}', 'project_type': 'سكني', 'benchmarks': ['سكني']}
+            {'name': f'برج سكني {index}', 'project_type': 'سكني',
+             'operation_type': 'بيع', 'city': 'الرياض', 'district': 'النرجس',
+             'benchmarks': ['سكني - بيع']}
             for index in range(5)
         ]
-        hotel = [{'name': 'فندق المدينة', 'project_type': 'فندقي', 'benchmarks': ['فندقي']}]
+        hotel = [{'name': 'فندق المدينة', 'project_type': 'فندقي', 'hotel_stars': 4,
+                  'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
+                  'benchmarks': ['فندقي - 4 نجوم']}]
         calls = []
 
         def fake_call(system_prompt, user_prompt, *args, **kwargs):
@@ -167,12 +263,19 @@ class BenchmarkExpansionTests(unittest.TestCase):
             if len(calls) == 1:
                 return self._response(residential + hotel)
             return self._response([
-                {'name': f'فندق {index}', 'project_type': 'فندقي', 'benchmarks': ['فندقي']}
+                {'name': f'فندق {index}', 'project_type': 'فندقي', 'hotel_stars': 4,
+                 'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
+                 'benchmarks': ['فندقي - 4 نجوم']}
                 for index in range(5)])
 
         payload = {
             'projectType': 'متعدد الاستخدامات',
             'city': 'الرياض',
+            'district': 'النرجس',
+            'competitorScope': {'mode': 'district'},
+            'comparisonTypes': [
+                {'type': 'residential', 'operation': 'sale'},
+                {'type': 'hotel', 'stars': 4}],
             'mode': 'generate',
             'components': [
                 {'name': 'الشقق', 'useType': 'residential', 'investmentModel': 'sale'},
@@ -194,15 +297,18 @@ class BenchmarkExpansionTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertIn('فنادق', calls[1])
         self.assertIn('benchmarks', calls[1])
-        self.assertEqual(len(result['competitors']), 11)
+        self.assertEqual(len(result['competitors']), 10)
 
     def test_full_axes_skip_expansion(self):
         module = self.application_module
         rows = [
-            {'name': f'سكني {index}', 'project_type': 'سكني', 'benchmarks': ['سكني']}
+            {'name': f'سكني {index}', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'الرياض', 'district': 'النرجس', 'benchmarks': ['سكني - بيع']}
             for index in range(5)
         ] + [
-            {'name': f'فندق {index}', 'project_type': 'فندقي', 'benchmarks': ['فندقي']}
+            {'name': f'فندق {index}', 'project_type': 'فندقي', 'hotel_stars': 4,
+             'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
+             'benchmarks': ['فندقي - 4 نجوم']}
             for index in range(5)
         ]
         calls = []
@@ -214,6 +320,11 @@ class BenchmarkExpansionTests(unittest.TestCase):
         payload = {
             'projectType': 'متعدد الاستخدامات',
             'city': 'الرياض',
+            'district': 'النرجس',
+            'competitorScope': {'mode': 'district'},
+            'comparisonTypes': [
+                {'type': 'residential', 'operation': 'sale'},
+                {'type': 'hotel', 'stars': 4}],
             'mode': 'generate',
             'components': [
                 {'name': 'الشقق', 'useType': 'residential', 'investmentModel': 'sale'},

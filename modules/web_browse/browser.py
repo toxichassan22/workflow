@@ -246,6 +246,14 @@ _PROVIDER_UNWRAP = {'ddg': _unwrap_ddg, 'bing': _unwrap_bing,
 # a valid BROWSER_SEARCH_PROVIDER pin so tests can force the old chain.
 _DEFAULT_ORDER = ['brave', 'yahoo', 'bing']
 
+
+def _browser_log(message):
+    """Keep browser diagnostics from breaking searches on non-UTF consoles."""
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        print(str(message).encode('ascii', 'backslashreplace').decode('ascii'))
+
 # Self-hosted metasearch: SEARXNG_URL points at a SearXNG instance (its JSON
 # format must be enabled in settings.yml). When configured it leads the
 # order — one local HTTP call beats three walled SERP scrapes — and
@@ -271,7 +279,7 @@ def _searxng_search(query, cap):
         payload = json.loads(
             urllib.request.urlopen(req, timeout=_SEARXNG_TIMEOUT).read() or b'{}')
     except Exception as exc:
-        print(f'[BROWSER] searxng failed: {exc}')
+        _browser_log(f'[BROWSER] searxng failed: {exc}')
         return []
     hits = []
     for row in payload.get('results') or []:
@@ -288,7 +296,10 @@ def _searxng_search(query, cap):
     return hits
 
 
-def _providers():
+def _providers(search_provider=None):
+    forced = str(search_provider or '').strip().lower()
+    if forced:
+        return [forced] if forced == 'searxng' and _searxng_base() else [forced]
     pinned = (os.environ.get('BROWSER_SEARCH_PROVIDER') or '').strip().lower()
     order = list(_DEFAULT_ORDER)
     if _searxng_base():
@@ -308,10 +319,11 @@ def _active_worker():
 class BrowserWorker:
     """One headless Chromium + page, bound to the thread that opened it."""
 
-    def __init__(self, headless=True):
+    def __init__(self, headless=True, search_provider=None):
         if os.environ.get('BROWSER_HEADLESS') == '0':
             headless = False
         self.headless = headless
+        self.search_provider = str(search_provider or '').strip().lower() or None
         self._pw = None
         self._browser = None
         self._context = None
@@ -429,16 +441,16 @@ class BrowserWorker:
         A provider that serves a bot wall twice in a row is skipped for the
         rest of the session — its goto+settle seconds are pure cost."""
         cap = max(1, int(max_results or MAX_RESULTS))
-        for provider in _providers():
+        for provider in _providers(getattr(self, 'search_provider', None)):
             if provider in getattr(self, '_blocked_serps', ()):
                 continue
             try:
                 hits = self._search_once(provider, query, cap)
             except Exception as exc:
-                print(f'[BROWSER] search provider={provider} failed: {exc}')
+                _browser_log(f'[BROWSER] search provider={provider} failed: {exc}')
                 hits = []
             if hits:
-                print(f'[BROWSER] search provider={provider} hits={len(hits)}')
+                _browser_log(f'[BROWSER] search provider={provider} hits={len(hits)}')
                 return hits
             title, walled = (('', False) if provider == 'searxng'
                              else self._serp_state())
@@ -447,15 +459,15 @@ class BrowserWorker:
                 if streaks is None:
                     streaks = self._serp_block_streak = {}
                 streaks[provider] = streaks.get(provider, 0) + 1
-                print(f"[BROWSER] search provider={provider} blocked (bot wall) title={title!r}")
+                _browser_log(f"[BROWSER] search provider={provider} blocked (bot wall) title={title!r}")
                 if streaks[provider] >= 2:
                     blocked = getattr(self, '_blocked_serps', None)
                     if blocked is None:
                         blocked = self._blocked_serps = set()
                     blocked.add(provider)
-                    print(f'[BROWSER] search provider={provider} skipped for this session')
+                    _browser_log(f'[BROWSER] search provider={provider} skipped for this session')
                 continue
-            print(f"[BROWSER] search provider={provider} hits=0 title={title!r}")
+            _browser_log(f"[BROWSER] search provider={provider} hits=0 title={title!r}")
         return []
 
     def _serp_state(self):
@@ -601,7 +613,7 @@ class BrowserWorker:
         return self._state(page)
 
 
-def thread_local_browser(headless=True):
+def thread_local_browser(headless=True, search_provider=None):
     """The calling thread's shared worker — a live BrowserWorker bound via
     ``_tls.worker``.
 
@@ -612,6 +624,13 @@ def thread_local_browser(headless=True):
     when the pool shuts down.
     """
     worker = _active_worker()
+    requested_provider = str(search_provider or '').strip().lower() or None
+    if worker is not None and getattr(worker, 'search_provider', None) != requested_provider:
+        try:
+            worker.close()
+        except Exception:
+            pass
+        worker = None
     if worker is None:
         stale = getattr(_tls, 'worker', None)
         if stale is not None:
@@ -619,7 +638,7 @@ def thread_local_browser(headless=True):
                 stale.close()
             except Exception:
                 pass
-        worker = BrowserWorker(headless=headless)
+        worker = BrowserWorker(headless=headless, search_provider=requested_provider)
         worker.start()
         _tls.worker = worker
     return worker
@@ -637,9 +656,9 @@ def close_thread_browser():
 
 
 @contextmanager
-def browser_session(headless=True):
+def browser_session(headless=True, search_provider=None):
     """The per-agent-run session: one browser for the calling thread."""
-    worker = BrowserWorker(headless=headless)
+    worker = BrowserWorker(headless=headless, search_provider=search_provider)
     previous = getattr(_tls, 'worker', None)
     try:
         worker.start()

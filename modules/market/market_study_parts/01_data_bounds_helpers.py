@@ -34,16 +34,16 @@ def data_period_window_text(payload):
 
 
 def competitor_scope_text(payload):
-    """«داخل نطاق N كم من إحداثيات المشروع» or the city label."""
-    resolved = (payload or {}).get('resolvedRadiusKm')
-    label = _norm((payload or {}).get('competitorRadiusLabel')) or 'تلقائي'
-    try:
-        km = float(resolved)
-    except (TypeError, ValueError):
-        km = 0
-    if km > 0:
-        return f'داخل نطاق {km:g} كم من موقع المشروع ({label})'
-    return label
+    """The competitor table's neighborhood-or-city boundary."""
+    payload = payload or {}
+    scope = payload.get('competitorScope') or payload.get('competitor_scope')
+    scope = scope if isinstance(scope, dict) else {}
+    city = _norm(payload.get('city'))
+    district = _norm(payload.get('district'))
+    mode = scope.get('mode')
+    if mode == 'city':
+        return f'كامل مدينة {city}' if city else 'كامل المدينة'
+    return f'حي {district} في مدينة {city}' if district and city else f'حي {district}' if district else 'حي المشروع'
 SUMMARY_TITLE = 'الملخص التنفيذي لسوق المشروع'
 SUMMARY_WORD_TARGET = 350
 SUMMARY_MIN_WORDS = 300

@@ -39,6 +39,74 @@ def _iter_payload_components(payload):
     return [item for item in components if isinstance(item, dict)]
 
 
+_COMPARISON_TYPE_ALIASES = {
+    'hotel': {'hotel', 'hospitality', 'فندقي', 'فندق'},
+    'residential': {'residential', 'سكني'},
+    'commercial': {'commercial', 'تجاري'},
+}
+
+
+def normalize_comparison_types(value):
+    """Return only the explicit hotel/residential/commercial comparison picks."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            value = []
+    if not isinstance(value, list):
+        return []
+    normalized = []
+    seen = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        raw_type = _fold_choice(item.get('type') or item.get('kind') or item.get('category'))
+        kind = next((key for key, aliases in _COMPARISON_TYPE_ALIASES.items()
+                     if raw_type in {_fold_choice(alias) for alias in aliases}), '')
+        if not kind:
+            continue
+        operation = _fold_choice(item.get('operation') or item.get('operationType'))
+        stars = item.get('stars') or item.get('hotelStars') or item.get('hotel_stars')
+        if kind == 'hotel':
+            try:
+                stars = int(str(stars).translate(
+                    str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).strip())
+            except (TypeError, ValueError):
+                continue
+            if stars < 1 or stars > 5:
+                continue
+            operation = 'hotel_operation'
+            key = f'hotel:{stars}'
+            label, label_en = f'فندقي - {stars} نجوم', f'{stars}-star hotel'
+            search = f'فنادق مصنفة {stars} نجوم'
+        else:
+            if operation in {'sale', 'بيع', 'for sale'}:
+                operation = 'sale'
+                operation_ar, operation_en = 'بيع', 'for sale'
+            elif operation in {'rent', 'rental', 'إيجار', 'تأجير', 'for rent'}:
+                operation = 'rent'
+                operation_ar, operation_en = 'إيجار', 'for rent'
+            else:
+                continue
+            key = f'{kind}:{operation}'
+            type_ar, type_en = (('سكني', 'residential') if kind == 'residential'
+                                else ('تجاري', 'commercial'))
+            label, label_en = f'{type_ar} - {operation_ar}', f'{type_en} {operation_en}'
+            search = (f'مشاريع {type_ar} {operation_ar} مسماة'
+                      if kind == 'residential' else
+                      f'مشاريع تجارية {operation_ar} مسماة')
+            stars = ''
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append({
+            'key': key, 'type': kind, 'base': kind, 'operation': operation,
+            'stars': stars, 'label': label, 'label_en': label_en,
+            'search': search, 'names': [], 'explicit': True,
+        })
+    return normalized
+
+
 def project_competitor_axes(payload):
     """Ordered benchmark axes for the competitor table.
 
@@ -47,6 +115,10 @@ def project_competitor_axes(payload):
     single 'general' axis — which reproduces the old whole-table minimum.
     """
     payload = payload or {}
+    if 'comparisonTypes' in payload or 'comparison_types' in payload:
+        selected = (payload.get('comparisonTypes')
+                    if 'comparisonTypes' in payload else payload.get('comparison_types'))
+        return normalize_comparison_types(selected)
     axes = []
 
     def add(key, base=None, label='', name=''):
@@ -135,6 +207,9 @@ def competitor_row_axis_keys(row, axes, offer_lang='ar'):
         return {'general'}
     if not isinstance(row, dict):
         return set()
+    if any(axis.get('explicit') for axis in axes):
+        return {axis['key'] for axis in axes
+                if competitor_matches_comparison_axis(row, axis)}
     keys = set()
     raw = (row.get('benchmarks') or row.get('benchmark_axes')
            or row.get('measured_against') or row.get('serves_components')
@@ -160,3 +235,93 @@ def competitor_row_axis_keys(row, axes, offer_lang='ar'):
                 if axis['key'] in fallback
                 or (axis.get('base') == 'other' and 'other' in fallback)}
     return keys
+
+
+def competitor_matches_comparison_axis(row, axis):
+    """Match an AI row to exactly one selected type, operation, and hotel class."""
+    if not isinstance(row, dict) or not isinstance(axis, dict):
+        return False
+    project_type = _fold_choice(row.get('project_type') or row.get('projectType'))
+    if axis.get('type') == 'hotel':
+        if not any(token in project_type for token in ('فندقي', 'فندق', 'hotel', 'hospitality')):
+            return False
+        raw_stars = (row.get('hotel_stars') or row.get('hotelStars')
+                     or row.get('star_rating') or row.get('stars'))
+        if not raw_stars:
+            text = _fold_choice(' '.join(str(row.get(key) or '')
+                                         for key in ('name', 'notes', 'classification')))
+            match = re.search(r'(?<!\d)([1-5])\s*(?:نجوم|star)', text)
+            raw_stars = match.group(1) if match else ''
+        star_text = str(raw_stars or '').translate(
+            str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+        star_match = re.search(r'(?<!\d)([1-5])(?!\d)', star_text)
+        try:
+            actual_stars = int(star_match.group(1)) if star_match else int(star_text.strip())
+            return actual_stars == int(axis.get('stars'))
+        except (TypeError, ValueError):
+            return False
+    wanted_type = axis.get('type')
+    if wanted_type == 'residential':
+        type_match = any(token in project_type for token in ('سكني', 'residential', 'housing'))
+    elif wanted_type == 'commercial':
+        type_match = any(token in project_type for token in (
+            'تجاري', 'commercial', 'retail', 'office', 'مكاتب', 'محلات'))
+    else:
+        return False
+    if not type_match:
+        return False
+    operation = _fold_choice(row.get('operation_type') or row.get('operationType'))
+    if axis.get('operation') == 'sale':
+        return any(token in operation for token in ('بيع', 'sale'))
+    if axis.get('operation') == 'rent':
+        return any(token in operation for token in ('ايجار', 'تاجير', 'rent', 'rental'))
+    return False
+
+
+def competitor_matches_location_scope(row, scope, city='', district=''):
+    """Enforce the selected city or exact neighborhood on generated rows."""
+    if not isinstance(row, dict):
+        return False
+    scope = scope if isinstance(scope, dict) else {}
+    mode = scope.get('mode') if scope.get('mode') in ('district', 'city') else 'district'
+    row_city = _fold_choice(row.get('city') or row.get('location_city'))
+    if not row_city or row_city != _fold_choice(city):
+        return False
+    if mode == 'city':
+        return True
+    row_district = _fold_choice(row.get('district') or row.get('neighborhood'))
+    return bool(row_district and row_district == _fold_choice(district))
+
+
+def filter_and_cap_competitors(rows, axes, limit_per_axis=5, offer_lang='ar',
+                               scope=None, city='', district=''):
+    """Drop rows outside explicit selections and cap each selected group."""
+    if not axes or not any(axis.get('explicit') for axis in axes):
+        return [row for row in (rows or []) if isinstance(row, dict)]
+    counts = {axis['key']: 0 for axis in axes}
+    accepted = []
+    seen_names = set()
+    for row in rows or []:
+        if not isinstance(row, dict) or not _norm(row.get('name')):
+            continue
+        if not competitor_matches_location_scope(row, scope, city, district):
+            continue
+        name_key = _fold_choice(row.get('name'))
+        if not name_key or name_key in seen_names:
+            continue
+        matched = [axis for axis in axes
+                   if competitor_matches_comparison_axis(row, axis)]
+        available = [axis for axis in matched
+                     if counts[axis['key']] < limit_per_axis]
+        if not available:
+            continue
+        chosen = available[0]
+        row = dict(row)
+        row['benchmarks'] = [benchmark_axis_label(chosen, offer_lang)]
+        row['comparison_type'] = chosen['type']
+        row['comparison_operation'] = chosen['operation']
+        row['hotel_stars'] = chosen['stars'] if chosen['type'] == 'hotel' else ''
+        counts[chosen['key']] += 1
+        seen_names.add(name_key)
+        accepted.append(row)
+    return accepted

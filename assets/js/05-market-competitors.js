@@ -30,6 +30,20 @@
     };
 
     function marketBenchmarkAxes() {
+      const selectedComparisons = typeof collectMarketComparisonTypes === 'function'
+        ? collectMarketComparisonTypes() : [];
+      if (selectedComparisons.length) {
+        return selectedComparisons.map(item => {
+          const hotel = item.type === 'hotel';
+          const typeLabel = item.type === 'hotel' ? 'فندقي' : item.type === 'residential' ? 'سكني' : 'تجاري';
+          const operationLabel = item.operation === 'sale' ? 'بيع' : item.operation === 'rent' ? 'إيجار' : '';
+          const label = hotel ? typeLabel + ' - ' + item.stars + ' نجوم' : typeLabel + ' - ' + operationLabel;
+          const labelEn = hotel ? item.stars + '-star hotel' : item.type + ' ' + (item.operation === 'sale' ? 'for sale' : 'for rent');
+          return { key: item.type + ':' + (item.stars || item.operation), base: item.type,
+            type: item.type, stars: item.stars, operation: item.operation,
+            label, labelEn, names: [] };
+        });
+      }
       const axes = [];
       const add = (key, base, label, name) => {
         const def = MARKET_USE_AXIS_DEFS[base];
@@ -316,6 +330,7 @@
       tr.dataset.logoFaviconHost = row.logo_favicon_host || row.logoFaviconHost || '';
       tr.dataset.notes = row.notes || row.note || '';
       tr.dataset.district = row.district || row.neighborhood || '';
+      tr.dataset.city = row.city || row.location_city || '';
       tr.dataset.distanceKm = row.distance_km || row.distanceKm || '';
       tr.dataset.lat = row.lat || '';
       tr.dataset.lng = row.lng || '';
@@ -371,10 +386,15 @@
       (tr.dataset.verifyProviderError
         ? '<div style="color:#b91c1c;margin-top:4px;font-size:0.85em">' + escapeHtml(WFT('market.provider_detail', 'تفاصيل المزود: {err}', { err: tr.dataset.verifyProviderError })) + '</div>'
         : '');
+      const typeValue = marketTranslateCompetitorValue(row.project_type);
+      const starsValue = String(row.hotel_stars || row.hotelStars || '');
+      const isHotel = /فندق|فندقي|hotel|hospitality/i.test(typeValue);
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td data-field="logo_cell"></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_PROJECT_TYPES_EN : MARKET_PROJECT_TYPES, marketTranslateCompetitorValue(row.project_type)) + '</select></td>' +
+        '<td data-hotel-stars-cell' + (isHotel ? '' : ' hidden') + '><select data-field="hotel_stars">' +
+        marketSelectHtml(['1', '2', '3', '4', '5'], starsValue) + '</select></td>' +
         '<td><select data-field="classification">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_CLASSIFICATIONS_EN : MARKET_COMPETITOR_CLASSIFICATIONS, marketTranslateCompetitorValue(row.classification)) + '</select></td>' +
         '<td data-field="benchmarks_cell">' + benchmarksHtml + '</td>' +
         '<td data-field="area_cell"></td>' +
@@ -392,6 +412,12 @@
       renderCompetitorSourceLinks(tr);
       renderCompetitorAreaInputs(tr, row);
       renderCompetitorPriceInputs(tr, row);
+      tr.querySelector('[data-field="project_type"]')?.addEventListener('change', event => {
+        const value = String(event.target.value || '');
+        const starsCell = tr.querySelector('[data-hotel-stars-cell]');
+        if (starsCell) starsCell.hidden = !/فندق|فندقي|hotel|hospitality/i.test(value);
+        persistMarketStudyFromDom();
+      });
       tr.querySelector('[data-field="operation_type"]').addEventListener('change', () => {
         cacheCompetitorPriceInputs(tr, tr.dataset.previousPriceType);
         const nextOp = tr.querySelector('[data-field="operation_type"]').value;
@@ -475,6 +501,7 @@
         id: tr.dataset.competitorId,
         name: read('name'),
         project_type: read('project_type'),
+        hotel_stars: read('hotel_stars'),
         area_mode,
         area_sqm: area_mode === 'fixed' ? area_cache.area_sqm : '',
         area_from: area_mode === 'range' ? area_cache.area_from : '',
@@ -501,6 +528,7 @@
         source_urls,
         field_sources,
         district: tr.dataset.district || '',
+        city: tr.dataset.city || '',
         distance_km: cleanMarketNumber(tr.dataset.distanceKm || ''),
         lat: cleanMarketNumber(tr.dataset.lat || ''),
         lng: cleanMarketNumber(tr.dataset.lng || ''),
@@ -833,17 +861,21 @@
         Array.isArray(next.sources) ? next.sources : [],
         buildMarketCompetitorSourceRows(next.competitors)
       );
-      const radius = document.getElementById('marketCompetitorRadius');
-      const custom = document.getElementById('marketCompetitorRadiusCustom');
+      const scopeMode = document.getElementById('marketCompetitorScopeMode');
       const period = document.getElementById('marketDataPeriod');
       const from = document.getElementById('marketDataPeriodFrom');
       const to = document.getElementById('marketDataPeriodTo');
-      if (radius) radius.value = (!next.competitor_radius || next.competitor_radius === 'auto') ? '10' : next.competitor_radius;
-      if (custom) custom.value = next.competitor_radius_custom_km || '';
+      if (scopeMode) scopeMode.value = next.competitor_scope?.mode === 'city' ? 'city' : 'district';
+      if (typeof renderMarketComparisonTypes === 'function') {
+        renderMarketComparisonTypes(Array.isArray(next.comparison_types) ? next.comparison_types : []);
+      }
       if (period) period.value = next.data_period || '12m';
       if (from) from.value = next.data_period_from || '';
       if (to) to.value = next.data_period_to || '';
       renderMarketCompetitors(next.competitors || []);
+      if (typeof renderMarketTransactionBenchmarks === 'function') {
+        renderMarketTransactionBenchmarks(next.transaction_benchmarks);
+      }
       const summary = marketSummaryState(next.summary);
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
         const field = document.getElementById('marketSummary_' + item.key);
@@ -947,8 +979,8 @@
         nearbyLandmarks,
         financial,
         components,
-        competitorRadius: state.competitor_radius,
-        competitorRadiusCustomKm: state.competitor_radius_custom_km,
+        competitorScope: state.competitor_scope,
+        comparisonTypes: state.comparison_types,
         summaryScope: state.summary_scope,
         dataPeriod: state.data_period,
         dataPeriodFrom: state.data_period_from,
@@ -962,15 +994,4 @@
         // build_project_facts renders it into the bounded facts brief).
         projectData: collectMarketProjectData()
       };
-    }
-
-    function collectMarketProjectData() {
-      const data = { ...(tenantProjectData || {}) };
-      document.querySelectorAll('#tenantProjectForm [data-key]').forEach(input => {
-        const key = input.dataset && input.dataset.key;
-        const type = input.dataset && input.dataset.type;
-        if (!key || type === 'image' || type === 'pdf' || type === 'file') return;
-        if (input.value !== undefined && input.value !== '') data[key] = input.value;
-      });
-      return data;
     }
