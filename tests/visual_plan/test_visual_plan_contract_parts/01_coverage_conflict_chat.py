@@ -52,6 +52,10 @@ class VisualPlanContractTestsPart01(VisualPlanContractBase):
         self.assertEqual(first['coverageConflict']['coverageCapSqm'], 300)
         self.assertEqual(first['coverageConflict']['requiredFootprintTotalSqm'], 450)
         self.assertEqual(first['coverageConflict']['buildingGroups'][0]['count'], 3)
+        self.assertIn('1,000 م² × نسبة التغطية 30% = حد أقصى 300 م²', first['reply'])
+        self.assertIn('التوزيع المعتمد عن الحد 150 م²', first['reply'])
+        self.assertIn('3 × 150 م² لكل مبنى', first['reply'])
+        self.assertIn('لا مجموع مساحات جميع الأدوار', first['reply'])
         self.assertFalse(first['assistantState']['generateRequested'])
         self.assertEqual(second['assistantState']['answers'], [{
             'question': first['question'], 'answer': 'راجع مساحات الفلل',

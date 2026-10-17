@@ -1,3 +1,58 @@
+def _visual_plan_site_area_text(value):
+    number = visual_plan_geometry.finite_number(value)
+    return f'{number:,.2f}'.rstrip('0').rstrip('.') if number is not None else ''
+
+
+def _visual_plan_site_conflict_summary(facts):
+    land = facts.get('landAreaSqm')
+    ratio = facts.get('coverageRatioPercent')
+    cap = facts.get('coverageCapSqm')
+    required = facts.get('requiredFootprintTotalSqm')
+    placed = facts.get('placedFootprintTotalSqm')
+    parts = ['سبب التعارض هو تجاوز حد التغطية المحسوب من بيانات الأرض.']
+    if land is not None and ratio is not None and cap is not None:
+        parts.append(
+            f"الحساب: مساحة الأرض {_visual_plan_site_area_text(land)} م² × "
+            f"نسبة التغطية {_visual_plan_site_area_text(ratio)}% = "
+            f"حد أقصى {_visual_plan_site_area_text(cap)} م² للبصمات الأرضية.")
+    elif cap is not None:
+        parts.append(f"حد التغطية المسجل هو {_visual_plan_site_area_text(cap)} م² للبصمات الأرضية.")
+    if placed is not None:
+        parts.append(f"مجموع البصمات في المخطط الحالي {_visual_plan_site_area_text(placed)} م².")
+    if required:
+        parts.append(f"المجموع المطلوب من التوزيع المعتمد {_visual_plan_site_area_text(required)} م².")
+
+    compared = [('المخطط الحالي', placed), ('التوزيع المعتمد', required)]
+    excess = [(label, total - cap) for label, total in compared
+              if total is not None and cap is not None and total > cap + 0.5]
+    if excess:
+        if len(excess) == 1:
+            label, amount = excess[0]
+            parts.append(f"زيادة {label} عن الحد {_visual_plan_site_area_text(amount)} م².")
+        elif abs(excess[0][1] - excess[1][1]) <= 0.5:
+            parts.append(f"الزيادة عن الحد {_visual_plan_site_area_text(excess[0][1])} م².")
+        else:
+            parts.append('المخطط والتوزيع يتجاوزان حد التغطية المسجل.')
+
+    group_details = []
+    for item in facts.get('buildingGroups', [])[:4]:
+        count = item.get('count') or 0
+        total = item.get('totalFootprintAreaSqm') or 0
+        low = item.get('minFootprintAreaSqm')
+        high = item.get('maxFootprintAreaSqm')
+        if not count or not total:
+            continue
+        if low is not None and high is not None and abs(high - low) <= 0.5:
+            area_detail = (f"{count} × {_visual_plan_site_area_text(low)} م² لكل مبنى")
+        else:
+            area_detail = f"إجمالي {_visual_plan_site_area_text(total)} م²"
+        group_details.append(f"{item.get('name')}: {area_detail}")
+    if group_details:
+        parts.append('تفصيل البصمات: ' + '؛ '.join(group_details) + '.')
+    parts.append('المقارنة هنا مع مساحة الدور الأرضي المشغولة، لا مجموع مساحات جميع الأدوار.')
+    return ' '.join(parts)
+
+
 def _visual_plan_site_conflict_interview(data, error):
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     previous = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
@@ -20,11 +75,15 @@ def _visual_plan_site_conflict_interview(data, error):
         if item.get('basementOnly'):
             continue
         name = str(item.get('name') or 'مبنى')[:100]
+        area = visual_plan_geometry.finite_number(item.get('footprintArea')) or 0
         row = buildings_by_name.setdefault(name, {'name': name, 'count': 0,
-                                                   'totalFootprintAreaSqm': 0})
+                                                   'totalFootprintAreaSqm': 0,
+                                                   'minFootprintAreaSqm': area,
+                                                   'maxFootprintAreaSqm': area})
         row['count'] += 1
-        row['totalFootprintAreaSqm'] += visual_plan_geometry.finite_number(
-            item.get('footprintArea')) or 0
+        row['totalFootprintAreaSqm'] += area
+        row['minFootprintAreaSqm'] = min(row['minFootprintAreaSqm'], area)
+        row['maxFootprintAreaSqm'] = max(row['maxFootprintAreaSqm'], area)
 
     placed = None
     scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else {}
@@ -56,7 +115,10 @@ def _visual_plan_site_conflict_interview(data, error):
         'requiredFootprintTotalSqm': round(required, 2),
         'placedFootprintTotalSqm': round(placed, 2) if placed is not None else None,
         'buildingGroups': [
-            {**item, 'totalFootprintAreaSqm': round(item['totalFootprintAreaSqm'], 2)}
+            {**item,
+             'totalFootprintAreaSqm': round(item['totalFootprintAreaSqm'], 2),
+             'minFootprintAreaSqm': round(item['minFootprintAreaSqm'], 2),
+             'maxFootprintAreaSqm': round(item['maxFootprintAreaSqm'], 2)}
             for item in buildings_by_name.values()
         ][:20],
     }
@@ -71,17 +133,20 @@ def _visual_plan_site_conflict_interview(data, error):
     system_prompt = (
         'You are the site-planning assistant continuing a client conversation in Arabic. '
         'The validated project inputs currently have a hard building-coverage conflict. '
-        'Use only the supplied conflict facts and conversation history. Explain the conflict briefly '
-        'with the supplied figures when available, then ask one concise question about which recorded '
-        'input the client wants to review, such as the approved building areas/distribution or the '
-        'recorded coverage ratio. Do not change, approve, or reinterpret any project input, survey '
-        'geometry, or approved distribution. Do not claim the conflict is resolved, do not set ready, '
-        'and do not generate a drawing. Always return ready=false and generateRequested=false. '
+        'Use only the supplied conflict facts and conversation history. Respond to the latest client '
+        'message instead of repeating a generic menu. Put a brief direct response in reply, then one '
+        'specific follow-up in question. Acknowledge when the client says they reviewed '
+        'the data or drew the same plan: visual similarity does not remove the numeric coverage limit. '
+        'Do not repeat the exact figures in reply; the server displays its calculation separately. Ask one '
+        'specific follow-up about which source number is disputed. Do not change, approve, or reinterpret '
+        'any project input, survey geometry, or approved distribution. Do not claim the conflict is '
+        'resolved, do not set ready, and do not generate a drawing. Always return ready=false and '
+        'generateRequested=false. '
         'Return JSON only: {"ready":false,"generateRequested":false,"question":"",'
         '"choices":[],"reply":"","memory":""}.'
     )
     user_packet = {
-        'task': 'discuss the current coverage conflict and ask what approved input should be reviewed',
+        'task': 'explain this exact coverage conflict in the context of the latest client message',
         'coverageConflict': facts,
         'resolvedAnswers': state['answers'][-8:],
         'sessionMemory': state['summary'],
@@ -98,29 +163,31 @@ def _visual_plan_site_conflict_interview(data, error):
         # Keep the failed geometry check discussable if the chat provider is unavailable.
         pass
 
-    question = _visual_concept_text(parsed.get('question'), 800)
+    model_question = _visual_concept_text(parsed.get('question'), 600)
+    model_reply = _visual_concept_text(parsed.get('reply'), 500)
     choices = [str(item).strip()[:240] for item in
                (parsed.get('choices') if isinstance(parsed.get('choices'), list) else [])[:6]
                if str(item).strip()]
-    if not question:
-        cap_text = f"{cap:g} م²" if cap is not None else 'الحد المسجل'
-        conflict_total = placed if placed is not None else required
-        total_text = f"{conflict_total:g} م²" if conflict_total else 'المساحة المسجلة'
-        total_label = 'إجمالي البصمات المرسومة' if placed is not None else 'إجمالي البصمات المطلوبة'
-        question = (f'{total_label} {total_text} يتجاوز حد التغطية {cap_text}. '
-                    'هل تريد مراجعة مساحات المباني في التوزيع المعتمد أم نسبة التغطية المسجلة؟')
-    state['pendingQuestion'] = question
+    if not model_question:
+        model_question = 'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟'
+    explanation = _visual_plan_site_conflict_summary(facts)
+    reply_parts = [explanation]
+    if model_reply and model_reply != model_question:
+        reply_parts.append(model_reply)
+    reply_parts.append(model_question)
+    reply = ' '.join(reply_parts)
+    state['pendingQuestion'] = reply
     state['readyForGeneration'] = False
     state['generateRequested'] = False
     state['status'] = 'questioning'
     if parsed.get('memory'):
         state['summary'] = str(parsed['memory'])[:40000]
     _visual_plan_site_record_tokens(state, prompt_tokens)
-    state['turns'].append({'role': 'assistant', 'text': question, 'choices': choices})
+    state['turns'].append({'role': 'assistant', 'text': reply, 'choices': choices})
     return {
         'success': True, 'readyForGeneration': False, 'generateRequested': False,
-        'needsClarification': True, 'question': question, 'choices': choices,
-        'reply': question, 'assistantState': state, 'coverageConflict': facts,
+        'needsClarification': True, 'question': reply, 'choices': choices,
+        'reply': reply, 'assistantState': state, 'coverageConflict': facts,
         'contextChanged': bool(previous.get('inputSignature')
                                and previous.get('inputSignature') != signature),
     }
