@@ -1,13 +1,23 @@
 import copy
+import math
 import unittest
 
 from visual_plan_context import croquis_contract, primary_frontage, recorded_setbacks
 from visual_plan_geometry import (PlanGeometryError, boundary_geometry, fit_projection,
                                   isometric_projection, polygons_overlap, setback_envelope,
-                                  validate_footprint)
+                                  validate_footprint, validate_polygon)
 
 
 class VisualPlanGeometryTests(unittest.TestCase):
+    def test_closed_polygon_ring_counts_vertices_without_its_repeated_endpoint(self):
+        polygon = [[math.cos(2 * math.pi * index / 24),
+                    math.sin(2 * math.pi * index / 24)] for index in range(24)]
+        closed_ring = polygon + [polygon[0]]
+
+        accepted = validate_polygon(closed_ring, limit=24)
+
+        self.assertEqual(len(accepted), 24)
+
     def points(self):
         return [{'point': str(index + 1), 'eastings': 500000 + x, 'northings': 2000000 + y}
                 for index, (x, y) in enumerate(((0, 0), (40, 0), (40, 30), (24, 30), (24, 14), (0, 14)))]

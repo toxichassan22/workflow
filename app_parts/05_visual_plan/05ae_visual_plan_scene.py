@@ -546,10 +546,13 @@ def _visual_plan_create_scene(data, context=None):
         return _visual_plan_seal_scene(data, scene, context), context, reference_url
     except visual_plan_geometry.PlanGeometryError as failure:
         fallback_error = failure
-    if error is None or getattr(error, 'code', '') != 'PLANS_PROVIDER_FAILED':
+        app.logger.warning('Deterministic plan fallback failed (code=%s): %s',
+                           getattr(failure, 'code', 'PLANS_LAYOUT_INVALID'), failure)
+        # If deterministic placement cannot honor the recorded areas or
+        # setbacks, return that actionable constraint even when the model's
+        # last response also failed. The model transport error hides the
+        # actual reason no valid scene could be sealed.
         error = fallback_error
-    else:
-        app.logger.warning('Deterministic plan fallback also failed: %s', fallback_error)
     if error is None:
         error = visual_plan_geometry.PlanGeometryError(
             'تعذر إنشاء توزيع هندسي صالح للمخططات.', 'PLANS_LAYOUT_INVALID')

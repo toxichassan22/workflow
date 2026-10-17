@@ -229,7 +229,7 @@
         '<section class="visual-plan-site-chat-panel" aria-label="محادثة المخطط">' +
         restart +
         '<div class="visual-plan-site-messages" role="log" aria-live="polite">' + chat + assistantStatus + '</div>' +
-        '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(visualConceptPlansWorkflowState().jobTodos) : '') + '</div>' +
+        '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(workflow.jobTodos, workflow.jobError) : '') + '</div>' +
         '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="رسالة جديدة" ' + (!canCompose ? 'disabled' : '') + '></textarea>' +
         '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="plan_site" ' + (!canCompose ? 'disabled' : '') + '>إرسال</button></div>' +
         '</section>' +

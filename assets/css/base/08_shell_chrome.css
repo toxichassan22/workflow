@@ -251,6 +251,21 @@
   line-height: 1.45;
 }
 
+.visual-plan-job-todos li > span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.visual-plan-job-error {
+  display: block;
+  margin-top: 4px;
+  color: var(--p);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .visual-plan-job-todos li strong {
   flex: 0 0 auto;
   color: var(--muted);

@@ -47,6 +47,7 @@
         promptReady: false,
         promptsError: '',
         jobTodos: [],
+        jobError: '',
         siteAssistant: {
           inputSignature: '', summary: '', turns: [], answers: [], pendingQuestion: '',
           readyForGeneration: false, designSpec: null, checkpoints: {}, renderRevision: 0,
@@ -145,10 +146,12 @@
         viewStage: ['verify', 'boundary', 'generate', 'other'].includes(source.viewStage) ? source.viewStage : 'verify',
         promptReady: Boolean(scene && scene.token && (source.promptReady || (prompts.site && prompts.uses && prompts.massing))),
         promptsError: String(source.promptsError || '').slice(0, 400),
+        jobError: String(source.jobError || '').slice(0, 1200),
         jobTodos: (Array.isArray(source.jobTodos) ? source.jobTodos : []).slice(0, 8).map((item, index) => ({
           id: String(item?.id || index + 1).slice(0, 24),
           label: String(item?.label || '').slice(0, 160),
-          status: ['pending', 'active', 'done', 'failed'].includes(item?.status) ? item.status : 'pending'
+          status: ['pending', 'active', 'done', 'failed'].includes(item?.status) ? item.status : 'pending',
+          error: String(item?.error || '').slice(0, 1200)
         })).filter(item => item.label),
         siteAssistant: {
           inputSignature: String(assistant.inputSignature || '').slice(0, 80),

@@ -70,8 +70,7 @@ def check_program_feasibility(contract, program):
                    if not building.get('basementOnly'))
     if required > cap + 0.5:
         raise PlanGeometryError(
-            f'مجموع البصمات المطلوبة {required:g} م² يتجاوز حد التغطية المسجل {cap:g} م² — '
-            'لا يوجد ترتيب كتل يحقق التوزيع؛ قلّل أكبر مساحة دور بكل مبنى أو راجع نسبة التغطية.',
+            f'مجموع البصمات المطلوبة {required:g} م² يتجاوز حد التغطية المسجل {cap:g} م².',
             'PLANS_COVERAGE_CONFLICT')
 
 
@@ -341,7 +340,7 @@ def fallback_scene(contract, program, version=1):
             available = sum(abs(signed_area(item)) for item in envelopes)
             raise PlanGeometryError(
                 f'بصمات المباني المطلوبة {required:g} م² لا تتسع داخل منطقة البناء بعد الارتدادات المسجلة '
-                f'(~{available:g} م² متاحة) — قلّل مساحة أكبر دور في التوزيع أو راجع الارتدادات.',
+                f'(~{available:g} م² متاحة).',
                 'PLANS_SETBACK_CONFLICT')
         placed[building['id']] = footprint
     layout = [{'id': building['id'], 'footprint': placed[building['id']]}

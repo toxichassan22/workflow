@@ -1,22 +1,42 @@
     const visualConceptPlanRequests = new Set();
 
-    function visualConceptPlanTodoMarkup(todos) {
+    function visualConceptPlanTodoMarkup(todos, jobError = '') {
       const statusText = { pending: 'بانتظار', active: 'قيد التنفيذ', done: 'مكتمل', failed: 'تعذر' };
       const rows = Array.isArray(todos) ? todos : [];
       if (!rows.length) return '';
-      return '<ol class="visual-plan-job-todos">' + rows.map(item =>
-        '<li class="is-' + escapeHtml(item.status) + '"><span>' + escapeHtml(item.label) + '</span>' +
-        '<strong>' + escapeHtml(statusText[item.status] || statusText.pending) + '</strong></li>'
-      ).join('') + '</ol>';
+      return '<ol class="visual-plan-job-todos">' + rows.map(item => {
+        const detail = String(item.error || (item.status === 'failed' ? jobError : '') || '').trim();
+        return '<li class="is-' + escapeHtml(item.status) + '"><span>' + escapeHtml(item.label) +
+          (detail ? '<small class="visual-plan-job-error">' + escapeHtml(detail) + '</small>' : '') + '</span>' +
+          '<strong>' + escapeHtml(statusText[item.status] || statusText.pending) + '</strong></li>';
+      }).join('') + '</ol>';
     }
 
     function updateVisualConceptPlanJobUi(job) {
       if (!job) return;
       const workflow = visualConceptPlansWorkflowState();
       let changed = false;
-      if (Array.isArray(job.todos) && JSON.stringify(workflow.jobTodos) !== JSON.stringify(job.todos)) {
-        workflow.jobTodos = job.todos;
+      const jobSucceeded = job.status === 'completed' &&
+        (job.success === true || job.result?.success === true);
+      const jobError = !jobSucceeded && job.status === 'failed'
+        ? String(job.result?.error || job.error || '').trim().slice(0, 1200) : '';
+      if (workflow.jobError !== jobError) {
+        workflow.jobError = jobError;
         changed = true;
+      }
+      if (Array.isArray(job.todos)) {
+        const todos = jobSucceeded
+          ? job.todos.map(item => item.status === 'failed'
+            ? { ...item, status: 'done', error: '' } : item)
+          : jobError
+            ? job.todos.map((item, index) => item.status === 'failed' &&
+            !job.todos.slice(0, index).some(previous => previous.status === 'failed')
+            ? { ...item, error: jobError } : item)
+          : job.todos;
+        if (JSON.stringify(workflow.jobTodos) !== JSON.stringify(todos)) {
+          workflow.jobTodos = todos;
+          changed = true;
+        }
       }
       const checkpoint = job.checkpoint && typeof job.checkpoint === 'object' ? job.checkpoint : {};
       const revision = Number(checkpoint.svgRenderRevision) || 0;
@@ -40,7 +60,7 @@
       }
       if (changed && typeof markVisualConceptDirty === 'function') markVisualConceptDirty();
       if (!Array.isArray(job.todos)) return;
-      const markup = visualConceptPlanTodoMarkup(workflow.jobTodos);
+      const markup = visualConceptPlanTodoMarkup(workflow.jobTodos, workflow.jobError);
       const panel = document.querySelector('[data-plans-workflow-todos]');
       if (panel) panel.innerHTML = markup;
       const siteStatus = document.querySelector('[data-site-chat-status]');
@@ -68,18 +88,21 @@
       }
     }
 
-    function failVisualConceptPlanJobUi() {
+    function failVisualConceptPlanJobUi(error = '') {
       const workflow = visualConceptPlansWorkflowState();
+      workflow.jobError = String(error || '').trim().slice(0, 1200);
       const todos = Array.isArray(workflow.jobTodos) ? workflow.jobTodos : [];
       let failedActive = false;
       const failedTodos = todos.map(item => {
         if (!failedActive && (item.status === 'active' || item.status === 'pending')) {
           failedActive = true;
-          return { ...item, status: 'failed' };
+          return { ...item, status: 'failed', error: workflow.jobError };
         }
         return item;
       });
-      if (failedTodos.length) updateVisualConceptPlanJobUi({ status: 'failed', todos: failedTodos });
+      if (failedTodos.length) updateVisualConceptPlanJobUi({
+        status: 'failed', error: workflow.jobError, todos: failedTodos
+      });
     }
 
     function visualConceptPlanActionBusy(action, busy) {
@@ -99,7 +122,10 @@
     // its stored {success:false,error} result instead of hanging the caller.
     async function visualConceptPlanJobApi(method, path, body) {
       const initial = await api(method, path, body);
-      if (!initial || !initial.jobId) return initial;
+      if (!initial || !initial.jobId) {
+        if (initial?.success === false) failVisualConceptPlanJobUi(initial.error || '');
+        return initial;
+      }
       const timeoutSeconds = Number(initial.timeoutSeconds);
       const jobWindowMs = Number.isFinite(timeoutSeconds) && timeoutSeconds > 0
         ? timeoutSeconds * 1000 : 600000;
@@ -118,13 +144,13 @@
           null, requestTimeout, WFT('plans.job_status_timeout', 'تعذر الاتصال بحالة معالجة المخطط.'));
         updateVisualConceptPlanJobUi(job);
         if (job?.error && !job?.result) {
-          failVisualConceptPlanJobUi();
+          failVisualConceptPlanJobUi(job.error);
           return { success: false, error: job.error, error_code: job.error_code };
         }
       }
       if (job && job.result && typeof job.result === 'object') return job.result;
       if (job && job.error) return { success: false, error: job.error, error_code: job.error_code };
-      failVisualConceptPlanJobUi();
+      failVisualConceptPlanJobUi(timeoutMessage);
       return { success: false, error: timeoutMessage, error_code: 'PLANS_JOB_EXPIRED' };
     }
 

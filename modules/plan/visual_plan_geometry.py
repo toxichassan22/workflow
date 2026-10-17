@@ -100,7 +100,9 @@ def point_inside(point, polygon, boundary=True):
 
 
 def validate_polygon(raw, limit=60):
-    if not isinstance(raw, list) or not 3 <= len(raw) <= limit:
+    # Closed GeoJSON rings repeat their first point at the end. Permit that
+    # one bookkeeping vertex without relaxing the actual polygon limit.
+    if not isinstance(raw, list) or not 3 <= len(raw) <= limit + 1:
         raise PlanGeometryError('عدد رؤوس المضلع غير صالح.')
     polygon = []
     for point in raw:
@@ -112,7 +114,9 @@ def validate_polygon(raw, limit=60):
         polygon.append(parsed)
     if polygon[0] == polygon[-1]:
         polygon = polygon[:-1]
-    if len(polygon) < 3 or len({tuple(point) for point in polygon}) != len(polygon):
+    if not 3 <= len(polygon) <= limit:
+        raise PlanGeometryError('عدد رؤوس المضلع غير صالح.')
+    if len({tuple(point) for point in polygon}) != len(polygon):
         raise PlanGeometryError('حدود المضلع تحتوي نقاطًا مكررة.')
     if abs(signed_area(polygon)) <= EPSILON:
         raise PlanGeometryError('المضلع لا يكوّن مساحة أرض صالحة.')
