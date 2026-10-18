@@ -288,6 +288,12 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         self.assertIn('type="range"', index_source.split('function accessRoadPathWidthSliderHtml()', 1)[1][:1200])
         self.assertNotIn('adjustAccessRoadPathWidth(-0.1)', index_source)
         self.assertNotIn('adjustAccessRoadPathWidth(0.1)', index_source)
+        # Switching roads must re-point the slider: the toolbar is only
+        # rebuilt by renderLocationWorkflowState, so selection changes sync
+        # the thumb and readout to the newly selected road instead.
+        self.assertIn('function syncAccessRoadPathWidthSlider()', index_source)
+        select_body = index_source.split('function selectAccessRoadEdit(value)', 1)[1][:800]
+        self.assertIn('syncAccessRoadPathWidthSlider()', select_body)
 
     def test_land_analysis_is_persisted_but_not_shown_as_a_review_panel(self):
         """The conflicts/parcels panels were removed; the payload must still be saved because

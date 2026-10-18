@@ -721,6 +721,7 @@
     function selectAccessRoadEdit(value) {
       closeAccessRoadPathWidthGesture();
       tenantRoadEditSelectedIndex = Number(value);
+      syncAccessRoadPathWidthSlider();
       const input = document.getElementById('accessRoadEditName');
       if (input) input.value = tenantRoadEditSelectedIndex >= 0
         ? tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.name || ''
@@ -825,6 +826,19 @@
       if (tenantRoadEditDraft) tenantRoadEditDraft._widthGestureOpen = false;
     }
 
+    // The slider lives in the toolbar, which is only rebuilt by
+    // renderLocationWorkflowState — switching roads re-renders the overlay
+    // but not the toolbar, so the thumb would keep showing the previous
+    // road's width while editing the newly selected one.
+    function syncAccessRoadPathWidthSlider() {
+      const row = tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex];
+      const current = Math.max(0.3, Math.min(1.5, Number(row?.path_width_scale) || 0.55)).toFixed(1);
+      const slider = document.querySelector('.road-width-control input[type="range"]');
+      if (slider) slider.value = current;
+      const readout = document.getElementById('accessRoadPathWidthValue');
+      if (readout) readout.textContent = current;
+    }
+
     function adjustAccessRoadPathWidth(delta) {
       if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
       const row = tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex];
@@ -844,6 +858,7 @@
       const input = document.getElementById('accessRoadEditName');
       if (select) select.value = String(index);
       if (input) input.value = tenantRoadEditDraft.rows[index].name;
+      syncAccessRoadPathWidthSlider();
       pushRoadEditHistory();
       highlightMapPlacePair('road', name, true, true);
       const image = document.querySelector('#mapPreviewImage img');
