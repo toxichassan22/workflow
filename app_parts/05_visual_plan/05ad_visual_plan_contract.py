@@ -125,6 +125,14 @@ def _visual_plan_notes(data):
     return notes.strip()
 
 
+def _visual_plan_distribution_notes(data):
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    notes = workflow.get('distributionNotes', '')
+    if not isinstance(notes, str) or len(notes) > 1000000:
+        raise visual_plan_geometry.PlanGeometryError('ملاحظات توزيع الأدوار غير صالحة أو تتجاوز الحجم المتاح.', 'PLANS_NOTES_INVALID')
+    return notes.strip()
+
+
 def _visual_plan_prompt_context(data):
     """The deterministic drawing-prompt context: project facts, croquis
     measurements, summary, constraints and primary frontage — everything the
@@ -164,6 +172,7 @@ def _visual_plan_contract(data, context=None):
     normalized = _visual_concept_plan_normalize_distribution(distribution, context, context.get('regulations') or {})
     contract['distribution'] = {'rows': normalized['rows'], 'totals': normalized['totals']}
     contract['clientNotes'] = _visual_plan_notes(data)
+    contract['distributionNotes'] = _visual_plan_distribution_notes(data)
     for field in ('plotNumber', 'planNumber', 'deedNumber', 'deedDate', 'boundaryLengths',
                   'surroundingStreets', 'facadesCount', 'facadesDirections', 'allowedUses',
                   'buildingRatioCoverage', 'maxFloorsHeight', 'regulatoryConstraints',

@@ -16,7 +16,8 @@ def _visual_plan_site_identity_value(value, limit=120):
 
 
 def _visual_plan_site_feature_type(source, kind=''):
-    text = ' '.join(str(source.get(key) or '') for key in ('name', 'label', 'siteType')).lower()
+    text = ' '.join(str(source.get(key) or '') for key in
+                    ('name', 'label', 'siteType', 'featureType')).lower()
     if re.search(r'\bpadel\b|بادل', text, re.IGNORECASE):
         return 'padel'
     if re.search(r'\bswimming\s*pool\b|\bpool\b|مسبح|حمام\s*سباحة', text, re.IGNORECASE):
@@ -44,10 +45,6 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
     for area in scene.get('openAreas') or []:
         if isinstance(area, dict) and isinstance(area.get('polygon'), list):
             polygons.append(area['polygon'])
-    try:
-        polygons.extend(item['polygon'] for item in visual_plan_scene.buildable_envelopes(contract))
-    except Exception:
-        pass
     points = [point for polygon in polygons for point in polygon
               if isinstance(point, (list, tuple)) and len(point) == 2
               and all(visual_plan_geometry.finite_number(axis) is not None for axis in point)]
@@ -72,17 +69,19 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
     categories = []
     building_label_counts = {}
     for building in scene.get('buildings') or []:
-        source = buildings_by_id.get(building.get('id'), {})
-        label = _visual_plan_site_short_label(source.get('label') or building.get('id') or 'Building')
+        source = buildings_by_id.get(building.get('id')) or building
+        label = _visual_plan_site_short_label(
+            source.get('label') or source.get('name') or building.get('id') or 'Building')
         if label:
             building_label_counts[label.casefold()] = building_label_counts.get(label.casefold(), 0) + 1
     for building in scene.get('buildings') or []:
-        source = buildings_by_id.get(building.get('id'), {})
+        source = buildings_by_id.get(building.get('id')) or building
         bands = source.get('bands') or []
         category = next((band.get('category') for band in bands
                          if band.get('kind') not in ('basement', 'roof')),
-                        (bands[0].get('category') if bands else 'amenity'))
-        label = _visual_plan_site_short_label(source.get('label') or building.get('id') or 'Building')
+                        (bands[0].get('category') if bands else source.get('category') or 'amenity'))
+        label = _visual_plan_site_short_label(
+            source.get('label') or source.get('name') or building.get('id') or 'Building')
         unit_match = re.search(r'^unit_\d+_(\d+)$', str(building.get('id') or ''), re.IGNORECASE)
         display_label = ('V ' + unit_match.group(1).lstrip('0') if unit_match else label)
         if not unit_match and building_label_counts.get(label.casefold(), 0) > 1:
@@ -101,19 +100,19 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
     projected_parcels = [{'id': parcel.get('id'), 'points': [project(point) for point in parcel.get('polygon') or []]}
                          for parcel in parcels if isinstance(parcel, dict)]
     envelopes = []
-    try:
-        envelopes = [{'parcelId': item.get('parcelId'), 'points': [project(point) for point in item['polygon']]}
-                     for item in visual_plan_scene.buildable_envelopes(contract)]
-    except Exception:
-        pass
     entries = []
     for entry in scene.get('entries') or []:
         try:
+            point = entry.get('point')
+            if isinstance(point, (list, tuple)) and len(point) == 2:
+                entries.append({**{key: entry.get(key) for key in ('id', 'kind', 'buildingId', 'side')},
+                                'point': project(point)})
+                continue
             entries.append({**{key: entry.get(key) for key in ('id', 'kind', 'buildingId', 'side')},
                             'point': project(visual_plan_scene.entry_position(entry, scene))})
         except Exception:
             continue
-    approved_site_items = program.get('siteItems') or []
+    approved_site_items = program.get('siteItems') or scene.get('siteItems') or []
     site_items = {str(item.get('id')): item for item in approved_site_items}
     for source in approved_site_items:
         site_type = _visual_plan_site_feature_type(source)
@@ -123,7 +122,7 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
             categories.append(display_category)
     open_areas = []
     for item in scene.get('openAreas') or []:
-        source = site_items.get(str(item.get('componentId') or ''), {})
+        source = site_items.get(str(item.get('componentId') or '')) or item
         feature_type = _visual_plan_site_feature_type(source, item.get('kind'))
         category = (feature_type if feature_type in ('pool', 'padel', 'playground', 'landscape') else
                     source.get('category') or ('parking' if item.get('kind') == 'surface_parking' else 'landscape'))
@@ -181,69 +180,7 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
                         'labelPoint': [round((start[0] + end[0]) / 2 + outward[0] * width / 2, 2),
                                        round((start[1] + end[1]) / 2 + outward[1] * width / 2, 2)]})
         labels.append(label)
-    repeated_units = [item for item in projected_buildings
-                      if re.match(r'^unit_\d+_\d+$', str(item.get('id') or ''), re.IGNORECASE)]
     site_circulation = []
-    site_edges = [(a, b) for parcel in projected_parcels
-                  for a, b in zip(parcel.get('points') or [],
-                                  (parcel.get('points') or [])[1:] + (parcel.get('points') or [])[:1])]
-    if site_edges:
-        axis_a, axis_b = max(site_edges, key=lambda edge: math.dist(*edge))
-        axis_angle = math.atan2(axis_b[1] - axis_a[1], axis_b[0] - axis_a[0])
-    else:
-        axis_angle = 0
-    axis_cos, axis_sin = math.cos(axis_angle), math.sin(axis_angle)
-
-    def site_local(point):
-        return [point[0] * axis_cos + point[1] * axis_sin,
-                -point[0] * axis_sin + point[1] * axis_cos]
-
-    def site_project(point):
-        return [point[0] * axis_cos - point[1] * axis_sin,
-                point[0] * axis_sin + point[1] * axis_cos]
-
-    def unit_bounds(item):
-        points = [site_local(point) for point in item.get('footprint') or []]
-        if len(points) < 3:
-            return None
-        return (min(point[0] for point in points), max(point[0] for point in points),
-                min(point[1] for point in points), max(point[1] for point in points))
-
-    for first_index, first in enumerate(repeated_units):
-        first_bounds = unit_bounds(first)
-        if first_bounds is None:
-            continue
-        first_center = ((first_bounds[0] + first_bounds[1]) / 2,
-                        (first_bounds[2] + first_bounds[3]) / 2)
-        for second in repeated_units[first_index + 1:]:
-            second_bounds = unit_bounds(second)
-            if second_bounds is None:
-                continue
-            second_center = ((second_bounds[0] + second_bounds[1]) / 2,
-                             (second_bounds[2] + second_bounds[3]) / 2)
-            horizontal_gap = (second_bounds[0] - first_bounds[1] if first_center[0] <= second_center[0]
-                              else first_bounds[0] - second_bounds[1])
-            vertical_overlap = min(first_bounds[3], second_bounds[3]) - max(first_bounds[2], second_bounds[2])
-            if (9 <= horizontal_gap <= 90
-                    and vertical_overlap >= min(first_bounds[3] - first_bounds[2],
-                                                second_bounds[3] - second_bounds[2]) * 0.45):
-                left, right = (first_bounds, second_bounds) if first_center[0] <= second_center[0] else (second_bounds, first_bounds)
-                center_y = (max(left[2], right[2]) + min(left[3], right[3])) / 2
-                site_circulation.append({'points': [site_project([left[1], center_y]),
-                                                    site_project([right[0], center_y])],
-                                         'width': round(min(12, max(4, horizontal_gap * 0.6)), 2)})
-                continue
-            vertical_gap = (second_bounds[2] - first_bounds[3] if first_center[1] <= second_center[1]
-                            else first_bounds[2] - second_bounds[3])
-            horizontal_overlap = min(first_bounds[1], second_bounds[1]) - max(first_bounds[0], second_bounds[0])
-            if (9 <= vertical_gap <= 90
-                    and horizontal_overlap >= min(first_bounds[1] - first_bounds[0],
-                                                  second_bounds[1] - second_bounds[0]) * 0.45):
-                top, bottom = (first_bounds, second_bounds) if first_center[1] <= second_center[1] else (second_bounds, first_bounds)
-                center_x = (max(top[0], bottom[0]) + min(top[1], bottom[1])) / 2
-                site_circulation.append({'points': [site_project([center_x, top[3]]),
-                                                    site_project([center_x, bottom[2]])],
-                                         'width': round(min(12, max(4, vertical_gap * 0.6)), 2)})
     category_labels = {
         'pool': 'Swimming Pool', 'padel': 'Padel Court',
         'playground': "Children's Playground", 'landscape': 'Landscape/Open space',

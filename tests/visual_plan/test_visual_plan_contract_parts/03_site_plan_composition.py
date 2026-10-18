@@ -144,7 +144,7 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         self.assertEqual(layout['identity']['developerName'], 'شركة النخيل للتطوير')
         self.assertEqual(layout['streets'][0]['label'], 'West Road, 18 m')
         self.assertEqual(layout['buildings'][1]['displayLabel'], 'V 1')
-        self.assertTrue(layout['siteCirculation'])
+        self.assertEqual(layout['siteCirculation'], [])
         self.assertEqual({item['featureType'] for item in layout['openAreas']},
                          {'pool', 'padel', 'landscape', 'parking'})
         self.assertEqual({item['category'] for item in layout['architecturalColorLegend']},
@@ -159,7 +159,7 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         self.assertIn('class="ll-street"', coordinates)
         self.assertIn('West Road, 18 m', access)
         self.assertIn('class="ll-access-road"', access)
-        self.assertIn('class="ll-internal-road"', access)
+        self.assertNotIn('class="ll-internal-road"', access)
         self.assertIn('>V 1</', components)
         self.assertIn('data-site-feature="pool"', landscape)
         self.assertIn('data-site-feature="padel"', landscape)

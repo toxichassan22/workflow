@@ -545,6 +545,8 @@ def _visual_concept_plan_normalize_distribution(raw, context, regulations, backf
             'floor_area_sqm': _visual_concept_number(item.get('floor_area_sqm') or item.get('floor_area')),
             'circulation': _visual_concept_plan_sanitize_text(
                 item.get('circulation') or item.get('services'))[:400],
+            'notes': _visual_concept_plan_sanitize_text(
+                item.get('notes') or item.get('note'))[:1200],
         })
     if backfill:
         _visual_concept_plan_backfill_distribution_rows(rows, context)

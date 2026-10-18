@@ -62,6 +62,7 @@ def _visual_plan_site_state(data, signature):
         'pendingQuestion': str(source.get('pendingQuestion') or '')[:800],
         'readyForGeneration': bool(source.get('readyForGeneration')),
         'generateRequested': bool(source.get('generateRequested')),
+        'redesignRequested': bool(source.get('redesignRequested')),
         'designSpec': source.get('designSpec') if isinstance(source.get('designSpec'), dict) else None,
         'checkpoints': {name: str(checkpoints[name])[:60000]
                         for name in _VISUAL_PLAN_SITE_SECTION_IDS
@@ -84,62 +85,6 @@ def _visual_plan_site_reusable_checkpoints(previous, signature):
             if key in _VISUAL_PLAN_SITE_SECTION_IDS and isinstance(value, str)}
 
 
-
-
-_VISUAL_PLAN_SITE_CONFLICT_CODES = (
-    'PLANS_COVERAGE_CONFLICT',
-    'PLANS_SITE_AREA_CONFLICT',
-    'PLANS_SETBACK_CONFLICT',
-    'PLANS_FOOTPRINT_OUTSIDE',
-    'PLANS_BUILDING_OVERLAP',
-    'PLANS_LAYOUT_INVALID',
-    'PLANS_SITE_ITEMS_MISSING',
-    'PLANS_SITE_ITEMS_DUPLICATED',
-)
-
-
-def _visual_plan_site_packet(data):
-    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
-    has_sealed_scene = (isinstance(workflow.get('scene'), dict)
-                        and bool(workflow['scene'].get('token')))
-    if has_sealed_scene:
-        try:
-            scene, contract, context, program = _visual_plan_scene_from_request(data)
-            signature = scene.get('inputSignature') or _visual_plan_input_signature(data, context)
-        except visual_plan_geometry.PlanGeometryError as error:
-            if error.code not in _VISUAL_PLAN_SITE_CONFLICT_CODES:
-                raise
-            contract, context = _visual_plan_contract(data)
-            program = _visual_plan_program(contract, context)
-            signature = _visual_plan_input_signature(data, context)
-            scene = workflow.get('scene')
-    else:
-        contract, context = _visual_plan_contract(data)
-        program = _visual_plan_program(contract, context)
-        signature = _visual_plan_input_signature(data, context)
-        scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
-    clean_scene = {key: value for key, value in scene.items() if key not in ('token', 'inputSignature')} if scene else None
-    drawing_layout = None
-    if scene and isinstance(scene.get('buildings'), list):
-        try:
-            tenant = getattr(g, 'tenant', {})
-            tenant = tenant if isinstance(tenant, dict) else {}
-            drawing_layout = _visual_plan_site_projected_layout(scene, contract, program, {
-                'projectName': contract.get('projectName'),
-                'developerName': tenant.get('company_name_en') or tenant.get('company_name'),
-            })
-        except Exception:
-            drawing_layout = None
-    packet = {
-        'project': {'name': contract.get('projectName'), 'idea': contract.get('projectIdea')},
-        'landAndRegulations': contract,
-        'validatedScene': clean_scene,
-        'program': program,
-        'drawingLayout': drawing_layout,
-        'financialComponents': context.get('components') or [],
-    }
-    _visual_plan_report_site_chat_progress(2, 68)
-    return packet, contract, context, signature
 
 
 def _visual_plan_site_call(system_prompt, user_prompt, data=None, max_tokens=12000,
@@ -193,11 +138,16 @@ def _visual_plan_site_interview(data, action='chat'):
         'You are the single entity that commands, designs, responds, identifies conflicts, answers inquiries, '
         'and accepts modifications. There is no code or geometric engine running analysis: you alone perform '
         'the entire spatial, regulatory, and architectural analysis. '
-        'On the first turn, review the complete approved land survey, coordinates, boundaries, setbacks (north, '
+        'On EVERY turn, review the complete project packet, approved land survey, coordinates, boundaries, setbacks (north, '
         'south, east, west), maximum coverage ratio, height limits, building program (names, IDs, uses, floor ranges, '
         'ground-floor footprint areas, units), site amenities (landscape, surface parking, pools, playgrounds, courts), '
-        'and client notes. On continuation turns, the full packet is omitted if inputs are unchanged; continue from '
-        'sessionMemory, resolvedAnswers, and recentTurns. '
+        'all distribution table rows and row notes, distributionNotes, clientNotes, and financial components. '
+        'The packet is included in full on every turn. Treat approvedFinancialAreaSqm as the declared project land area '
+        'when supplied, and keep it distinct from croquisLandAreaSqm and surveyed coordinates. If these sources disagree, '
+        'explain the discrepancy and ask the client which recorded source should govern; never silently replace one with another. '
+        'Use the supplied notes and distribution rows directly. No deterministic geometry or engineering engine analyzes, '
+        'calculates, distributes, validates, or rejects the design; all such reasoning is yours. '
+        'Continue the discussion using sessionMemory, resolvedAnswers, and recentTurns while re-reading the full packet. '
         'RULES OF YOUR ARCHITECTURAL AUTHORITY:\n'
         '1. IDENTIFYING CONFLICTS: If you find any regulatory or spatial conflict (e.g. required ground-floor footprints '
         'cannot fit inside the buildable area after setbacks, total footprints exceed the allowable coverage ratio, '
@@ -210,11 +160,14 @@ def _visual_plan_site_interview(data, action='chat'):
         '3. ACCEPTING MODIFICATIONS: When the client requests adjustments, changes, or revisions, accept them, update '
         'your sessionMemory and designSpec, and respond constructively. '
         '4. DESIGN & GENERATION: When the client asks to generate or draw the master plan ("ارسم", "صمم", "ولد المخطط", '
-        '"وزع المباني على الأرض"), set generateRequested=true. If ready=true with no blocking conflicts, the server '
-        'generates the master plan drawing designed by you. Otherwise ask the blocking question first. '
+        '"وزع المباني على الأرض"), set generateRequested=true. If the current layout must change to satisfy the request, '
+        'set redesignRequested=true and describe your design decision. If ready=true with no blocking conflicts, the server '
+        'only renders your layout. If approved project inputs changed since the existing layout, set redesignRequested=true. '
+        'Otherwise ask the blocking question first. '
         'Never generate code in this interview response. '
         'Return JSON only: {"ready":true|false,"generateRequested":true|false,"conflict":true|false,"question":"",'
-        '"choices":[],"reply":"","memory":"","designSpec":{"palette":{},"layoutNotes":""}}.'
+        '"redesignRequested":true|false,"choices":[],"reply":"","memory":"",'
+        '"designSpec":{"palette":{},"layoutNotes":""}}.'
     )
     compact_mode = state['promptTokens'] >= _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT
     if action == 'generate':
@@ -226,7 +179,7 @@ def _visual_plan_site_interview(data, action='chat'):
     user_packet = {
         'task': task,
         'continuation': continuing,
-        'validatedProjectData': None if continuing else packet,
+        'validatedProjectData': packet,
         'resolvedAnswers': state['answers'][-8:] if continuing else state['answers'],
         'sessionMemory': state['summary'],
         'recentTurns': state['turns'][-4:] if continuing else state['turns'][-8:],
@@ -250,7 +203,7 @@ def _visual_plan_site_interview(data, action='chat'):
     generate_requested = bool(parsed.get('generateRequested')) or state['generateRequested'] or action == 'generate'
     reply = _visual_concept_text(parsed.get('reply'), 1200)
     if question:
-        reply = question
+        reply = reply or question
         state['pendingQuestion'] = question
         state['readyForGeneration'] = False
         state['generateRequested'] = generate_requested
@@ -261,6 +214,12 @@ def _visual_plan_site_interview(data, action='chat'):
         state['generateRequested'] = generate_requested
         state['status'] = 'ready' if ready else 'questioning'
     state['summary'] = str(parsed.get('memory') or state['summary'])[:40000]
+    inputs_changed = bool(prior_assistant.get('inputSignature')
+                          and prior_assistant.get('inputSignature') != signature)
+    state['redesignRequested'] = (bool(parsed.get('redesignRequested'))
+                                  or state['redesignRequested']
+                                  or (inputs_changed and bool(scene_after))
+                                  or bool(scene_after and scene_after.get('inputSignature') != signature))
     if isinstance(parsed.get('designSpec'), dict):
         state['designSpec'] = parsed['designSpec']
     _visual_plan_site_record_tokens(state, prompt_tokens)
@@ -392,7 +351,7 @@ def _visual_plan_site_section_todos(checkpoints=None, active_section=None,
     return rows
 
 
-def _visual_plan_site_ai_design_scene(data, packet, contract, program, context):
+def _visual_plan_site_ai_design_scene(data, packet, contract):
     """AI model as sole architect and planner designs the conceptual site layout placement."""
     geometry = contract.get('geometry') if isinstance(contract.get('geometry'), dict) else {}
     parcels = geometry.get('parcels') or []
@@ -406,102 +365,50 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, program, context):
         survey = contract.get('recordedSurvey') or geometry.get('surveyPoints') or []
         if isinstance(survey, list) and len(survey) >= 3:
             parcel_polygon = survey
-    if not parcel_polygon:
-        parcel_polygon = [[0, 0], [100, 0], [100, 100], [0, 100]]
-
-    xs = [pt[0] for pt in parcel_polygon if isinstance(pt, (list, tuple)) and len(pt) >= 2]
-    ys = [pt[1] for pt in parcel_polygon if isinstance(pt, (list, tuple)) and len(pt) >= 2]
-    min_x, max_x = (min(xs), max(xs)) if xs else (0, 100)
-    min_y, max_y = (min(ys), max(ys)) if ys else (0, 100)
-    width = max(10.0, max_x - min_x)
-    height = max(10.0, max_y - min_y)
-
-    buildings_spec = []
-    for b in (program.get('buildings') or []):
-        if not isinstance(b, dict):
-            continue
-        buildings_spec.append({
-            'id': b.get('id'),
-            'name': b.get('name'),
-            'label': b.get('label'),
-            'footprintAreaSqm': b.get('footprintArea'),
-            'levels': b.get('levels', 1),
-            'category': b.get('bands', [{}])[0].get('category') if b.get('bands') else 'residential',
-        })
-
-    site_items_spec = []
-    for s in (program.get('siteItems') or []):
-        if not isinstance(s, dict):
-            continue
-        site_items_spec.append({
-            'id': s.get('id'),
-            'name': s.get('name'),
-            'label': s.get('label'),
-            'siteType': s.get('siteType') or 'amenity',
-            'areaSqm': s.get('area'),
-        })
-
     design_context = {
-        'projectName': contract.get('projectName'),
-        'projectIdea': contract.get('projectIdea'),
-        'plotNumber': contract.get('plotNumber'),
-        'planNumber': contract.get('planNumber'),
-        'deedNumber': contract.get('deedNumber'),
-        'deedDate': contract.get('deedDate'),
-        'city': contract.get('city'),
-        'district': contract.get('district'),
-        'locationAddress': contract.get('locationAddress'),
-        'landAreaSqm': contract.get('landArea'),
+        **packet,
         'landParcelBoundary': parcel_polygon,
-        'boundaryLengths': contract.get('boundaryLengths'),
-        'directions': contract.get('directions'),
-        'directionsTable': contract.get('directionsTable'),
-        'surroundingStreets': contract.get('surroundingStreets'),
-        'facadesCount': contract.get('facadesCount'),
-        'facadesDirections': contract.get('facadesDirections'),
-        'primaryFrontage': contract.get('primaryFrontage'),
-        'northDirection': contract.get('northDirection'),
-        'setbacks': contract.get('setbacks') or {'north': 2, 'south': 2, 'east': 2, 'west': 2},
-        'setbackText': contract.get('setbackText'),
-        'coverageRatioPercent': contract.get('coverageRatio'),
-        'buildingRatioCoverage': contract.get('buildingRatioCoverage'),
-        'floorAreaRatio': contract.get('floorAreaRatio'),
-        'floorCount': contract.get('floorCount'),
-        'maxFloorsHeight': contract.get('maxFloorsHeight'),
-        'allowedUses': contract.get('allowedUses'),
-        'regulatoryConstraints': contract.get('regulatoryConstraints'),
-        'landBrief': contract.get('landBrief'),
-        'parkingRequirements': contract.get('parkingRequirements'),
-        'entrancesExitsRequirements': contract.get('entrancesExitsRequirements'),
-        'clientNotes': contract.get('clientNotes'),
-        'buildingsToPlace': buildings_spec,
-        'siteItemsToPlace': site_items_spec,
     }
 
     system_prompt = (
-        'You are the lead architect and master site planner. You are the sole designer responsible for '
+        'You are Argon, the lead architect and master site planner. You are the sole designer responsible for '
         'laying out the project on the parcel. There is no external layout algorithm: you determine the spatial '
-        'positions, footprints, and geometry for all buildings, open spaces, parking, landscape, and access entries. '
+        'positions, footprints, geometry, calculations, distribution, conflict checks, and client-facing explanation '
+        'for all buildings, open spaces, parking, landscape, and access entries. No engineering or geometry engine '
+        'will calculate, validate, rearrange, reject, or repair your design. '
         'Take into full consideration all provided land and croquis data: boundaries, surrounding streets, street widths, '
-        'facades, setback rules, boundary lengths, orientation with north, and regulatory constraints. '
+        'facades, setback rules, boundary lengths, orientation with north, regulatory constraints, financial components, '
+        'the complete floor-distribution table, every row note, distributionNotes, clientNotes, and all area sources. '
+        'Use projectMeasurements.landAreaSqm as the declared project area when provided, while keeping the source visible. '
+        'If the survey coordinates, approved financial area, croquis area, footprint requirements, or regulations conflict, '
+        'do not silently choose or alter a value. Return ready=false, conflict=true, explain the specific discrepancy in '
+        'Arabic, and ask one useful question in question. '
         'RULES:\n'
-        '1. Place every building in buildingsToPlace inside landParcelBoundary with coordinates [x, y] in the '
-        'exact coordinate system of landParcelBoundary.\n'
-        '2. For each building, output a footprint polygon of 4 points [[x, y], [x, y], [x, y], [x, y]] whose area '
-        'closely matches footprintAreaSqm.\n'
+        'If parcel boundary coordinates are absent or insufficient to place a responsible plan, set ready=false, '
+        'explain the missing source in Arabic, and ask the client for it. Never invent parcel dimensions. '
+        '1. Use the full financialComponents and distributionRows to decide the building groups, floor allocation, '
+        'required footprints, and site elements. Each building id must be stable and each item must carry its source name.\n'
+        '2. Place every building inside landParcelBoundary with coordinates [x, y] in the exact coordinate system '
+        'of landParcelBoundary. Calculate the required footprint areas yourself from the source data and notes.\n'
         '3. Respect setbacks from boundary edges where possible. Do not overlap buildings.\n'
-        '4. Place site items (parking, landscape, amenities) in openAreas with polygon coordinates.\n'
-        '5. Specify at least one access entry along the street frontage.\n'
-        'Return JSON only: {"buildings":[{"id":"","footprint":[[x,y],...]}],"openAreas":[{"id":"","polygon":[[x,y],...],"featureType":""}],"entries":[{"id":"","point":[x,y],"entryType":"main","label":"Main Entry"}]}'
+        '4. Place all required site items (parking, landscape, amenities) in openAreas with polygon coordinates.\n'
+        '5. Specify access entries that match the recorded streets and frontage.\n'
+        '6. Before returning, calculate the areas yourself, inspect every placement for overlaps, setbacks, boundary fit, '
+        'coverage, and omitted requirements. If any conflict prevents a responsible layout, explain it to the client '
+        'instead of drawing an invalid plan.\n'
+        'Return JSON only: {"ready":true|false,"conflict":true|false,"reply":"Arabic explanation",'
+        '"question":"Arabic follow-up or empty","choices":[],"buildings":[{"id":"","name":"",'
+        '"label":"","category":"","levels":1,"footprint":[[x,y],...]}],'
+        '"openAreas":[{"id":"","name":"","label":"","componentId":"",'
+        '"polygon":[[x,y],...],"featureType":""}],'
+        '"entries":[{"id":"","point":[x,y],"entryType":"main","label":"Main Entry"}]}'
     )
 
-    try:
-        parsed, _tokens = _visual_plan_site_call(
-            system_prompt, json.dumps(design_context, ensure_ascii=False),
-            data=data, max_tokens=8000, reasoning_effort='high')
-    except Exception as err:
-        app.logger.warning('AI site design call failed, using baseline geometric layout: %s', err)
-        parsed = {}
+    parsed, _tokens = _visual_plan_site_call(
+        system_prompt, json.dumps(design_context, ensure_ascii=False),
+        data=data, max_tokens=8000, reasoning_effort='high')
+    if parsed.get('ready') is False or parsed.get('conflict'):
+        return {'assistantDecision': parsed}
 
     ai_buildings_map = {}
     if isinstance(parsed, dict) and isinstance(parsed.get('buildings'), list):
@@ -524,69 +431,42 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, program, context):
                         'featureType': str(a.get('featureType') or 'amenity'),
                     }
 
-    sb_inset = 4.0
-    usable_w = max(5.0, width - 2 * sb_inset)
-    usable_h = max(5.0, height - 2 * sb_inset)
-    b_count = max(1, len(program.get('buildings', [])))
-    cols = max(1, int(math.ceil(math.sqrt(b_count))))
-    rows = max(1, int(math.ceil(b_count / cols)))
-    cell_w = usable_w / cols
-    cell_h = usable_h / rows
-
     scene_buildings = []
-    for idx, b in enumerate(program.get('buildings', [])):
-        if not isinstance(b, dict):
+    raw_buildings = parsed.get('buildings') if isinstance(parsed.get('buildings'), list) else []
+    for idx, b in enumerate(raw_buildings):
+        if not isinstance(b, dict) or not b.get('id'):
             continue
-        bid = str(b.get('id') or f'b{idx+1}')
+        bid = str(b['id'])
         footprint = ai_buildings_map.get(bid)
         if not footprint:
-            r_idx, c_idx = idx // cols, idx % cols
-            area = visual_plan_geometry.finite_number(b.get('footprintArea')) or 100.0
-            side = min(math.sqrt(area), min(cell_w * 0.8, cell_h * 0.8))
-            cx = min_x + sb_inset + c_idx * cell_w + cell_w / 2
-            cy = min_y + sb_inset + r_idx * cell_h + cell_h / 2
-            footprint = [
-                [round(cx - side / 2, 2), round(cy - side / 2, 2)],
-                [round(cx + side / 2, 2), round(cy - side / 2, 2)],
-                [round(cx + side / 2, 2), round(cy + side / 2, 2)],
-                [round(cx - side / 2, 2), round(cy + side / 2, 2)],
-            ]
-        category = b.get('bands', [{}])[0].get('category') if b.get('bands') else 'residential'
+            continue
         scene_buildings.append({
             'id': bid,
-            'name': b.get('name') or 'Building',
-            'label': b.get('label') or 'Building',
-            'category': category,
-            'displayLabel': b.get('label') or 'Building',
+            'name': str(b.get('name') or 'Building'),
+            'label': str(b.get('label') or b.get('name') or 'Building'),
+            'category': str(b.get('category') or 'residential'),
+            'displayLabel': str(b.get('label') or b.get('name') or 'Building'),
             'footprint': footprint,
-            'levels': b.get('levels', 1),
+            'levels': b.get('levels') or 1,
             'footprintArea': b.get('footprintArea'),
         })
 
     scene_open_areas = []
-    for idx, s in enumerate(program.get('siteItems', [])):
-        if not isinstance(s, dict):
+    raw_open_areas = parsed.get('openAreas') if isinstance(parsed.get('openAreas'), list) else []
+    for s in raw_open_areas:
+        if not isinstance(s, dict) or not s.get('id'):
             continue
-        sid = str(s.get('id') or f'site_{idx+1}')
+        sid = str(s['id'])
         ai_area = ai_open_areas_map.get(sid)
-        if ai_area:
-            polygon, ftype = ai_area['polygon'], ai_area['featureType']
-        else:
-            ftype = s.get('siteType') or 'landscape'
-            area_val = visual_plan_geometry.finite_number(s.get('area')) or 50.0
-            side = min(math.sqrt(area_val), min(usable_w * 0.3, usable_h * 0.3))
-            cx = min_x + sb_inset + (idx % 3) * (usable_w / 3) + 10
-            cy = min_y + sb_inset + 5
-            polygon = [
-                [round(cx, 2), round(cy, 2)],
-                [round(cx + side, 2), round(cy, 2)],
-                [round(cx + side, 2), round(cy + side, 2)],
-                [round(cx, 2), round(cy + side, 2)],
-            ]
+        if not ai_area:
+            continue
+        polygon, ftype = ai_area['polygon'], ai_area['featureType']
         scene_open_areas.append({
             'id': sid,
-            'name': s.get('name') or 'Site Area',
-            'label': s.get('label') or 'Site Area',
+            'componentId': str(s.get('componentId') or sid),
+            'name': str(s.get('name') or 'Site Area'),
+            'label': str(s.get('label') or s.get('name') or 'Site Area'),
+            'category': str(s.get('category') or 'landscape'),
             'featureType': ftype,
             'polygon': polygon,
         })
@@ -604,38 +484,51 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, program, context):
                         'entryType': str(e.get('entryType') or 'main'),
                         'label': str(e.get('label') or 'Main Entry'),
                     })
-    if not scene_entries:
-        frontage_edge = parcel_polygon[:2] if len(parcel_polygon) >= 2 else [[0, 0], [10, 0]]
-        mid_x = (frontage_edge[0][0] + frontage_edge[1][0]) / 2
-        mid_y = (frontage_edge[0][1] + frontage_edge[1][1]) / 2
-        scene_entries.append({
-            'id': 'entry_main',
-            'point': [round(mid_x, 2), round(mid_y, 2)],
-            'entryType': 'main',
-            'label': 'Main Entry',
-        })
-
     scene = {
+        'version': VISUAL_PLAN_SCENE_VERSION,
         'geometry': contract.get('geometry') or {'parcels': [{'polygon': parcel_polygon}]},
+        'primaryFrontage': contract.get('primaryFrontage'),
+        'setbacks': contract.get('setbacks') or {},
+        'directions': contract.get('directions') or [],
+        'siteItems': scene_open_areas,
         'buildings': scene_buildings,
         'openAreas': scene_open_areas,
         'entries': scene_entries,
     }
-    return _visual_plan_seal_scene(data, scene, context)
+    signature = _visual_plan_site_context_signature(data)
+    return _visual_plan_site_seal_scene(data, scene, signature)
 
 
 def _visual_plan_site_generate(data, interview):
     if interview.get('needsClarification') or not interview.get('readyForGeneration'):
         return interview
-    packet, contract, context, signature = _visual_plan_site_packet(data)
+    packet, contract, _context, signature = _visual_plan_site_packet(data)
     state = interview['assistantState']
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     if not packet.get('drawingLayout') or state.get('redesignRequested'):
-        ai_scene = _visual_plan_site_ai_design_scene(data, packet, contract, packet.get('program') or {}, context)
+        ai_scene = _visual_plan_site_ai_design_scene(data, packet, contract)
+        decision = ai_scene.get('assistantDecision') if isinstance(ai_scene, dict) else None
+        if isinstance(decision, dict):
+            reply = _visual_concept_text(decision.get('reply'), 1200)
+            question = _visual_concept_text(decision.get('question'), 800)
+            raw_choices = decision.get('choices') if isinstance(decision.get('choices'), list) else []
+            choices = [str(item).strip()[:240] for item in raw_choices[:6] if str(item).strip()]
+            if question:
+                state['pendingQuestion'] = question
+            state['readyForGeneration'] = False
+            state['generateRequested'] = True
+            state['status'] = 'questioning'
+            state['summary'] = str(decision.get('memory') or state.get('summary') or '')[:40000]
+            state['turns'].append({'role': 'assistant', 'text': reply or question or 'لم يعتمد Argon التوزيع بعد.',
+                                   'choices': choices})
+            return {'success': True, 'readyForGeneration': False, 'generateRequested': True,
+                    'needsClarification': bool(question), 'reply': reply, 'question': question,
+                    'choices': choices, 'assistantState': state, 'scene': workflow.get('scene')}
         workflow = dict(workflow)
         workflow['scene'] = ai_scene
         data['plansWorkflow'] = workflow
-        packet, contract, context, signature = _visual_plan_site_packet(data)
+        packet, contract, _context, signature = _visual_plan_site_packet(data)
+        workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     previous = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
     checkpoints = _visual_plan_site_reusable_checkpoints(previous, signature)
     state.update({'status': 'generating', 'inputSignature': signature,
@@ -645,7 +538,7 @@ def _visual_plan_site_generate(data, interview):
     if not drawing_layout and workflow.get('scene'):
         tenant = getattr(g, 'tenant', {})
         tenant = tenant if isinstance(tenant, dict) else {}
-        drawing_layout = _visual_plan_site_projected_layout(workflow['scene'], contract, packet.get('program') or {}, {
+        drawing_layout = _visual_plan_site_projected_layout(workflow['scene'], contract, {}, {
             'projectName': contract.get('projectName'),
             'developerName': tenant.get('company_name_en') or tenant.get('company_name'),
         })
@@ -680,7 +573,8 @@ def _visual_plan_site_generate(data, interview):
     encoded = base64.b64encode(svg.encode('utf-8')).decode('ascii')
     image = persist_generated_image('data:image/svg+xml;base64,' + encoded, g.tenant_id)
     state.update({'status': 'review', 'readyForGeneration': True,
-                  'generateRequested': False, 'renderRevision': _VISUAL_PLAN_SITE_RENDER_REVISION,
+                  'generateRequested': False, 'redesignRequested': False,
+                  'renderRevision': _VISUAL_PLAN_SITE_RENDER_REVISION,
                   'checkpoints': checkpoints})
     _visual_plan_site_report_progress(
         98, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints, signature)
@@ -772,40 +666,28 @@ def _visual_plan_site_edit(data):
             'assistantState': state, 'scene': workflow.get('scene')}
 
 def _visual_plan_site_assistant_execute(data, action):
-    automatic_placement_retry = False
-    try:
-        if action == 'edit':
-            return _visual_plan_site_edit(data), 200
-        interview = None
-        if action == 'generate':
-            _packet, _contract, _context, signature = _visual_plan_site_packet(data)
-            state = _visual_plan_site_state(data, signature)
-            if state['readyForGeneration'] and not state['pendingQuestion']:
-                interview = {'success': True, 'readyForGeneration': True,
-                             'needsClarification': False, 'assistantState': state}
-        if interview is None:
-            interview = _visual_plan_site_interview(data, 'generate' if action == 'generate' else 'chat')
-        if interview.get('needsClarification'):
-            return interview, 200
-        if action != 'generate' and not interview.get('generateRequested'):
-            return interview, 200
-        automatic_placement_retry = action != 'generate' and bool(interview.get('generateRequested'))
-        return _visual_plan_site_generate(data, interview), 200
-    except visual_plan_geometry.PlanGeometryError as error:
-        if error.code not in _VISUAL_PLAN_SITE_CONFLICT_CODES:
-            raise
-        interview = _visual_plan_site_conflict_interview(
-            data, error, auto_retry_failed=automatic_placement_retry)
-        if (action != 'generate' and not automatic_placement_retry
-                and interview.get('generateRequested')):
-            try:
-                return _visual_plan_site_generate(data, interview), 200
-            except visual_plan_geometry.PlanGeometryError as retry_error:
-                if retry_error.code not in _VISUAL_PLAN_SITE_CONFLICT_CODES:
-                    raise
-                return _visual_plan_site_conflict_interview(
-                    data, retry_error, auto_retry_failed=True), 200
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    has_scene = isinstance(workflow.get('scene'), dict)
+    scene_matches_inputs = _visual_plan_site_verify_scene(data) if has_scene else False
+    if action == 'edit':
+        return _visual_plan_site_edit(data), 200
+    interview = None
+    if action == 'generate':
+        _packet, _contract, _context, signature = _visual_plan_site_packet(data)
+        state = _visual_plan_site_state(data, signature)
+        if state['readyForGeneration'] and not state['pendingQuestion']:
+            interview = {'success': True, 'readyForGeneration': True,
+                         'needsClarification': False, 'assistantState': state}
+    if interview is None:
+        interview = _visual_plan_site_interview(data, 'generate' if action == 'generate' else 'chat')
+    if has_scene and not scene_matches_inputs:
+        state = interview.get('assistantState') if isinstance(interview.get('assistantState'), dict) else {}
+        state['redesignRequested'] = True
+    if interview.get('needsClarification'):
         return interview, 200
+    if action != 'generate' and not interview.get('generateRequested'):
+        return interview, 200
+    return _visual_plan_site_generate(data, interview), 200
 
 
 @app.route('/api/visual-concept/site-plan-assistant', methods=['POST'])

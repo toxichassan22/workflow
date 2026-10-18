@@ -118,7 +118,8 @@ class VisualPlanContractTests(VisualPlanContractBase):
         first_packet = json.loads(model_call.call_args_list[0].args[1])
         self.assertIsNotNone(first_packet['validatedProjectData'])
         self.assertTrue(second_packet['continuation'])
-        self.assertIsNone(second_packet['validatedProjectData'])
+        self.assertIsNotNone(second_packet['validatedProjectData'])
+        self.assertEqual(second_packet['validatedProjectData'], {})
         self.assertTrue(second_packet['sessionMemory'])
         self.assertEqual(second_packet['resolvedAnswers'][0]['answer'], 'West street')
         self.assertEqual(model_call.call_args_list[0].kwargs['max_tokens'], 12000)
@@ -470,14 +471,10 @@ class VisualPlanContractTests(VisualPlanContractBase):
             }
             data['plansWorkflow'] = {**self.workflow(project), 'scene': original,
                                      'siteAssistant': stale_assistant}
-            contract, current_context = module._visual_plan_contract(data)
-            current_program = module._visual_plan_program(contract, current_context)
-            changed_program = {**current_program, 'siteItems': [{
-                'id': 'new-landscape', 'name': 'Landscape', 'label': 'Landscape',
-                'category': 'landscape', 'kind': 'landscape', 'area': 0,
-            }]}
-
-            with patch.object(module, '_visual_plan_program', return_value=changed_program), \
+            with patch.object(module, '_visual_plan_program', side_effect=AssertionError(
+                    'The site chat must not calculate the placement program')), \
+                    patch.object(module, '_visual_plan_contract', side_effect=AssertionError(
+                        'The site chat must not build or validate engineering geometry')), \
                     patch.object(module, '_visual_plan_site_call', return_value=(
                         {'ready': False, 'question': 'Where should the garden be?',
                          'memory': 'Fresh context'}, 5)) as interview_call:
@@ -490,10 +487,9 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertIsNotNone(interview_packet['validatedProjectData'])
         self.assertEqual(response['assistantState']['answers'], [])
         self.assertEqual(response['assistantState']['summary'], 'Fresh context')
-        self.assertEqual(refreshed['siteItems'], changed_program['siteItems'])
-        self.assertNotEqual(refreshed['token'], original['token'])
-        self.assertEqual(data['plansWorkflow']['scene']['token'], refreshed['token'])
+        self.assertEqual(refreshed['token'], original['token'])
         self.assertEqual(refreshed['inputSignature'], original['inputSignature'])
+        self.assertTrue(response['assistantState']['redesignRequested'])
 
     def test_stale_signed_scene_requires_regeneration_when_villa_program_expands_to_units(self):
         """A signed scene whose building IDs no longer match the program is not
@@ -615,6 +611,13 @@ class VisualPlanContractTests(VisualPlanContractBase):
             {'ready': True, 'reply': 'Requirements are clear.', 'memory': 'Preserve the approved layout.'})}}],
                           'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}},
                          {'choices': [{'message': {'content': json.dumps({
+            'ready': True, 'conflict': False,
+            'buildings': [{'id': 'b1', 'name': 'Main Building', 'label': 'Main Building',
+                           'category': 'residential',
+                           'footprint': [[5, 3], [15, 3], [15, 15], [5, 15]]}],
+            'openAreas': [], 'entries': [],
+        })}}], 'usage': {'prompt_tokens': 2000, 'completion_tokens': 100}},
+                         {'choices': [{'message': {'content': json.dumps({
             'clear': True, 'targetSection': 'components',
             'code': '<g id="ll-section-components"><text>Main Building</text></g>',
             'reply': 'Updated the component label.'})}}],
@@ -674,6 +677,7 @@ class VisualPlanContractTests(VisualPlanContractBase):
                 }
                 edit_workflow = copy.deepcopy(workflow)
                 edit_workflow['siteAssistant'] = body['assistantState']
+                edit_workflow['scene'] = body['scene']
                 edited = client.post('/api/visual-concept/site-plan-assistant',
                     headers=self._headers(self.token_a), json={
                         'slotId': 'plan_site', 'planAssistantAction': 'edit',
@@ -695,13 +699,15 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertEqual(render.status_code, 200, render.get_json())
         body = render.get_json()
         self.assertEqual(body['model'], 'google/gemini-4-argon')
-        self.assertEqual(chat_call.call_count, 2)
+        self.assertEqual(chat_call.call_count, 3)
         self.assertTrue(all(call.kwargs.get('model') == 'google/gemini-4-argon'
                             for call in chat_call.call_args_list))
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('reasoning_effort'), 'high')
         self.assertEqual(chat_call.call_args_list[1].kwargs.get('reasoning_effort'), 'high')
+        self.assertEqual(chat_call.call_args_list[2].kwargs.get('reasoning_effort'), 'high')
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('max_tokens'), 12000)
-        self.assertEqual(chat_call.call_args_list[1].kwargs.get('max_tokens'), 24000)
+        self.assertEqual(chat_call.call_args_list[1].kwargs.get('max_tokens'), 8000)
+        self.assertEqual(chat_call.call_args_list[2].kwargs.get('max_tokens'), 24000)
         persisted_uri = persist_mock.call_args.args[0]
         self.assertTrue(persisted_uri.startswith('data:image/svg+xml;base64,'))
         persisted_svg = base64.b64decode(persisted_uri.split(',', 1)[1])
