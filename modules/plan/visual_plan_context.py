@@ -135,29 +135,41 @@ def meter_value(value):
     if re.search(r'\d\s*/\s*\d|نسبة|حسب|بحسب|وفق|depending|if\b|where\b', source, re.IGNORECASE):
         return None
     match = re.search(r'(?<![\d.])(\d+(?:[.,]\d+)?)\s*(?:متر|م\b|met(?:er|re)s?\b|m\b)', source, re.IGNORECASE)
+    if not match:
+        match = re.search(r'(?<![\d.])(\d+(?:[.,]\d+)?)(?!\s*%)', source, re.IGNORECASE)
     return finite_number(match.group(1)) if match else None
 
 
 def recorded_setbacks(source, rows, frontage):
-    setbacks = {row['direction']: meter_value(row['setback']) for row in rows if row['setback']}
+    setbacks = {row['direction']: meter_value(row['setback']) for row in rows if row.get('setback')}
     prose = text(source).translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
     labels = dict(DIRECTION_WORDS)
     if frontage:
         labels[frontage] += r'|(?:الأمامي|الامامي|أمامي|امامي|\bfront\b)'
         labels[OPPOSITE[frontage]] += r'|(?:الخلفي|خلفي|\brear\b|\bback\b)'
-    fragments = re.split(r'[;؛\n|,،]', prose)
+    pattern = (r'[;؛\n|,،]|\s+(?:و\s*)?(?:عدا|باستثناء|ما عدا|إلا|أما|لكن)\s*'
+               r'|\s+(?:و\s*|و(?=[^\s]))(?=(?:\d+|[٠-٩]+)|(?:الشارع|الواجهة|الحد|جهة|(?:ال)?(?:شمال|جنوب|شرق|غرب)(?:ي|ية)?)\s*(?:ال\w+\s+)?(?:\d+|[٠-٩]+))')
+    fragments = [part.strip() for part in re.split(pattern, prose) if part and part.strip()]
+    general_keys = set()
     for fragment in fragments:
         value = meter_value(fragment)
         if value is None:
             continue
-        keys = [key for key, pattern in labels.items() if re.search(pattern, fragment, re.IGNORECASE)]
-        if re.search(r'كل\s*(?:الجهات|الجوانب)|جميع\s*(?:الجهات|الجوانب)|all\s*(?:sides|edges)', fragment, re.IGNORECASE):
+        keys = [key for key, pattern_dir in labels.items() if re.search(pattern_dir, fragment, re.IGNORECASE)]
+        is_general = bool(re.search(r'كل\s*(?:الجهات|الجوانب)|جميع\s*(?:الجهات|الجوانب)|all\s*(?:sides|edges)', fragment, re.IGNORECASE))
+        if is_general:
             keys = list(DIRECTION_VECTORS)
+            general_keys.update(keys)
         elif frontage and re.search(r'الجانبي|جانبي|\bside\b', fragment, re.IGNORECASE):
             keys += [LEFT[frontage], OPPOSITE[LEFT[frontage]]]
         for key in keys:
             existing = setbacks.get(key)
             if existing is not None and abs(existing - value) > 1e-7:
+                if key in general_keys and not is_general:
+                    setbacks[key] = value
+                    continue
+                if any(row.get('direction') == key and meter_value(row.get('setback')) is not None for row in rows) and is_general:
+                    continue
                 raise PlanGeometryError('قيم الارتدادات المسجلة متعارضة.', 'PLANS_SETBACK_CONFLICT')
             setbacks[key] = value
     return setbacks

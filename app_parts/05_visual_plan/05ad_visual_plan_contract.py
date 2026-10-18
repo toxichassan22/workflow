@@ -269,7 +269,21 @@ def _visual_plan_notes_ack(data, context=None):
 
 
 def _visual_plan_review_notes(data, context=None):
-    contract, context = _visual_plan_contract(data, context)
+    try:
+        contract, context = _visual_plan_contract(data, context)
+    except visual_plan_geometry.PlanGeometryError as error:
+        review = {
+            'verified': True,
+            'canProceed': False,
+            'checks': [{'index': 0, 'note': 'بيانات الأرض والارتدادات', 'result': 'متعارض',
+                        'detail': str(error)}],
+            'issues': [{'title': 'تعارض في بيانات الأرض أو الارتدادات', 'points': [str(error)],
+                        'suggestion': 'راجع قيم الارتدادات المسجلة في بيانات المشروع للتأكد من تطابقها',
+                        'severity': 'high'}],
+            'inputSignature': '',
+            'token': '',
+        }
+        return review, {'direction': '', 'status': 'unresolved', 'evidence': []}
     if (contract['primaryFrontage'].get('status') == 'unresolved'
             and (contract.get('landBrief') or contract.get('regulatoryConstraints'))):
         resolved = _visual_plan_resolve_primary_frontage(

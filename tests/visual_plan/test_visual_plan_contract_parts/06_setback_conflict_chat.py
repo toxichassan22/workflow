@@ -262,4 +262,41 @@ class VisualPlanContractTestsPart06(VisualPlanContractBase):
         req_resolved = module._visual_concept_plan_required_footprints(by_bld_resolved)
         self.assertEqual(req_resolved, 1040 + 1040 + 10500)
 
+    def test_natural_arabic_setback_parsing_resolves_without_false_conflicts(self):
+        import visual_plan_context
+        rows = [
+            {'direction': 'east', 'setback': '5م'},
+            {'direction': 'north', 'setback': '3م'},
+            {'direction': 'south', 'setback': '3م'},
+            {'direction': 'west', 'setback': '3م'},
+        ]
+        test_phrases = [
+            '3 شمال و جنوب وغرب و 5 شرق',
+            '3م شمال وجنوب وغرب و5م شرق',
+            '3م شمال وجنوب وغرب و 5م شرق',
+            'ارتداد 3م لجميع الجهات عدا الشرق 5م',
+            'الارتدادات: 3م شمال وجنوب وغرب، 5م شرق',
+            '3م من جميع الجهات',
+        ]
+        for phrase in test_phrases:
+            result = visual_plan_context.recorded_setbacks(phrase, rows, 'east')
+            self.assertEqual(result.get('east'), 5.0, f'East failed on {phrase}')
+            self.assertEqual(result.get('north'), 3.0, f'North failed on {phrase}')
+            self.assertEqual(result.get('south'), 3.0, f'South failed on {phrase}')
+            self.assertEqual(result.get('west'), 3.0, f'West failed on {phrase}')
+
+    def test_notes_review_surfaces_geometry_error_as_actionable_check_item(self):
+        module = self.application_module
+        data = {'plansWorkflow': {'clientNotes': 'ملاحظة عامة'}}
+        with patch.object(module, '_visual_plan_contract',
+                          side_effect=module.visual_plan_geometry.PlanGeometryError('قيم الارتدادات المسجلة متعارضة.', 'PLANS_SETBACK_CONFLICT')):
+            review, frontage = module._visual_plan_review_notes(data)
+
+        self.assertTrue(review['verified'])
+        self.assertFalse(review['canProceed'])
+        self.assertEqual(len(review['checks']), 1)
+        self.assertEqual(review['checks'][0]['result'], 'متعارض')
+        self.assertIn('قيم الارتدادات المسجلة متعارضة', review['checks'][0]['detail'])
+        self.assertEqual(frontage['status'], 'unresolved')
+
 
