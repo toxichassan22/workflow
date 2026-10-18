@@ -753,6 +753,15 @@ _BANNED_LISTING_HOST_TOKENS = (
 _HOTEL_LISTING_HOST_TOKENS = ('=booking.com',)
 
 
+def _booking_hotel_detail_url(url):
+    """Booking.com hotel evidence must point to a property page, not a place index."""
+    host = _source_host(url)
+    if not host or not _banned_listing_host_token(host, '=booking.com'):
+        return False
+    path_parts = [part for part in urlsplit(str(url or '')).path.split('/') if part]
+    return len(path_parts) >= 3 and path_parts[0].casefold() == 'hotel'
+
+
 def _banned_listing_host_token(host, token):
     if token.startswith('='):
         dom = token[1:]
@@ -770,7 +779,7 @@ def banned_competitor_listing_host(url, operation='', project_type=''):
     is_booking = any(_banned_listing_host_token(host, token)
                      for token in _HOTEL_LISTING_HOST_TOKENS)
     if hotel:
-        return not is_booking
+        return not (is_booking and _booking_hotel_detail_url(url))
     if is_booking:
         return True
     return any(_banned_listing_host_token(host, token)

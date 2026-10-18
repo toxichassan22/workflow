@@ -221,14 +221,14 @@ class PoolVerifyPhaseTests(_MarketTestBase):
                 row,
                 {'price': {'type': 'سعر الليلة', 'value': '140',
                            'currency': 'يورو',
-                           'url': 'https://booking.com/hotel'}},
-                {'https://booking.com/hotel'})
+                           'url': 'https://booking.com/hotel/sa/example'}},
+                {'https://booking.com/hotel/sa/example'})
         self.assertEqual(row['price_value'], '567')   # 140 EUR × 4.05
         self.assertEqual(row['price_type'], 'سعر الليلة')
         self.assertEqual(row['price_currency'], 'SAR')
         self.assertEqual(row['price_cache']['original_price_value'], '140')
         self.assertEqual(row['price_cache']['original_currency'], 'EUR')
-        self.assertIn('https://booking.com/hotel',
+        self.assertIn('https://booking.com/hotel/sa/example',
                       row['field_sources']['price_value'])
 
     def test_verify_price_fx_env_override(self):
@@ -240,8 +240,8 @@ class PoolVerifyPhaseTests(_MarketTestBase):
                 row,
                 {'price': {'type': 'سعر الليلة', 'value': '140',
                            'currency': 'يورو',
-                           'url': 'https://booking.com/hotel'}},
-                {'https://booking.com/hotel'})
+                           'url': 'https://booking.com/hotel/sa/example'}},
+                {'https://booking.com/hotel/sa/example'})
         self.assertEqual(row['price_value'], '700')
         self.assertEqual(row['price_currency'], 'SAR')
 
@@ -256,8 +256,8 @@ class PoolVerifyPhaseTests(_MarketTestBase):
                 row,
                 {'price': {'type': 'سعر الليلة', 'value': '400',
                            'currency': 'CHF',
-                           'url': 'https://booking.com/hotel'}},
-                {'https://booking.com/hotel'})
+                           'url': 'https://booking.com/hotel/sa/example'}},
+                {'https://booking.com/hotel/sa/example'})
         self.assertEqual(row['price_value'], '1800')   # 400 CHF × 4.5
         self.assertEqual(row['price_currency'], 'SAR')
         self.assertEqual(row['price_cache']['original_price_value'], '400')
@@ -273,8 +273,8 @@ class PoolVerifyPhaseTests(_MarketTestBase):
                 row,
                 {'price': {'type': 'سعر الليلة', 'value': '400',
                            'currency': 'XYZ',
-                           'url': 'https://booking.com/hotel'}},
-                {'https://booking.com/hotel'})
+                           'url': 'https://booking.com/hotel/sa/example'}},
+                {'https://booking.com/hotel/sa/example'})
         self.assertFalse(row.get('price_value'))
         self.assertFalse(row.get('price_type'))
         self.assertFalse(row.get('price_cache'))

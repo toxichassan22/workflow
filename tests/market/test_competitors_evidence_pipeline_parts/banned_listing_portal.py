@@ -28,7 +28,13 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
             ('https://www.wasalt.sa/p/1', 'بيع', True),
             ('https://dealapp.sa/x', 'إيجار', True),
             ('https://dubizzle.sa/x', 'إيجار', True),
-            ('https://booking.com/hotel', 'تشغيل فندقي', False),
+            ('https://www.booking.com/hotel/sa/novotel-jeddah-tahlia.ar.html',
+             'تشغيل فندقي', False),
+            ('https://www.booking.com/district/sa/jiddah/alandalus.ar.html',
+             'تشغيل فندقي', True),
+            ('https://www.booking.com/city/sa/jeddah.ar.html',
+             'تشغيل فندقي', True),
+            ('https://booking.com/hotel', 'تشغيل فندقي', True),
             ('https://booking.com/hotel', 'بيع', True),
             ('https://airbnb.com/rooms/1', 'تشغيل فندقي', True),
             ('https://trivago.sa/hotel', 'تشغيل فندقي', True),
@@ -54,7 +60,31 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
         self.assertTrue(market_study.banned_competitor_listing_host(
             'https://hotel.example/rooms', 'بيع', 'فندقي'))
         self.assertFalse(market_study.banned_competitor_listing_host(
-            'https://www.booking.com/hotel', 'بيع', 'فندقي'))
+            'https://www.booking.com/hotel/sa/novotel-jeddah-tahlia.ar.html',
+            'بيع', 'فندقي'))
+
+    def test_hotel_row_drops_booking_district_pages(self):
+        module = self.module
+        property_page = (
+            'https://www.booking.com/hotel/sa/novotel-jeddah-tahlia.ar.html')
+        district_page = (
+            'https://www.booking.com/district/sa/jiddah/alandalus.ar.html')
+        row = {
+            'name': 'Novotel Jeddah Tahlia', 'project_type': 'فندقي',
+            'operation_type': 'تشغيل فندقي', 'source_url': district_page,
+            'source_urls': [district_page, property_page],
+            'logo_source_url': district_page,
+            'price_value': '500', 'price_currency': 'SAR',
+            'field_sources': {'name': [property_page],
+                              'price_value': [district_page]},
+        }
+
+        module._drop_banned_competitor_listing_urls(row)
+
+        self.assertEqual(row['source_urls'], [property_page])
+        self.assertEqual(row['source_url'], property_page)
+        self.assertNotIn('logo_source_url', row)
+        self.assertNotIn('price_value', row)
 
     def test_hotel_row_keeps_only_booking_sources_and_clears_unlinked_price(self):
         module = self.module
