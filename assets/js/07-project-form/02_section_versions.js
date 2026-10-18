@@ -645,16 +645,23 @@
 
     function parseLocationFieldText(key, value) {
       if (Array.isArray(value)) {
-        return value.map(item => ({
-          name: (item && (item.name || item.area || item.title)) || '',
-          category: item && (item.category || item.type || ''),
-          distance_km: item && locationDistanceKmOrBlank(item),
-          duration_minutes: item && (item.duration_minutes ?? item.duration_min ?? item.minutes ?? ''),
-          lat: item && (item.lat ?? item.latitude ?? ''),
-          lng: item && (item.lng ?? item.longitude ?? ''),
-          show_on_map: !!(item && (item.show_on_map || item.selected)),
-          row_source: item && (item.row_source || item.rowSource || 'manual'),
-        })).filter(r => r.name);
+        return value.map(item => {
+          const row = {
+            name: (item && (item.name || item.area || item.title)) || '',
+            category: item && (item.category || item.type || ''),
+            distance_km: item && locationDistanceKmOrBlank(item),
+            duration_minutes: item && (item.duration_minutes ?? item.duration_min ?? item.minutes ?? ''),
+            lat: item && (item.lat ?? item.latitude ?? ''),
+            lng: item && (item.lng ?? item.longitude ?? ''),
+            show_on_map: !!(item && (item.show_on_map || item.selected)),
+            row_source: item && (item.row_source || item.rowSource || 'manual'),
+          };
+          // Road width is stored on main_roads_data rows only (no table column),
+          // so a parse of the structured mirror must not silently drop it.
+          if (key === 'main_roads' && item && item.path_width_scale !== undefined && item.path_width_scale !== null && item.path_width_scale !== '') row.path_width_scale = Number(item.path_width_scale) || 0.55;
+          if (key === 'main_roads' && item && item.original_name) row.original_name = item.original_name;
+          return row;
+        }).filter(r => r.name);
       }
       const rows = [];
       String(value == null ? '' : value).split('\n').forEach(rawLine => {
@@ -760,7 +767,19 @@
       hidden.value = (key === 'main_roads' ? normalizeAccessRoadNames(lines) : lines).join('\n');
       if (key === 'main_roads') {
         tenantProjectData.main_roads = hidden.value;
-        tenantProjectData.main_roads_data = structuredRows;
+        // The roads table has no width column — the value lives on the stored
+        // main_roads_data rows only, so re-serializing from the DOM must carry
+        // it over by road name or every save wipes the access-map thickness.
+        const widthByKey = new Map();
+        (Array.isArray(tenantProjectData.main_roads_data) ? tenantProjectData.main_roads_data : []).forEach(item => {
+          const rawKey = (typeof accessRoadNameKey === 'function' ? accessRoadNameKey(item?.name) : String(item?.name || '').trim().toLowerCase());
+          if (rawKey && item?.path_width_scale !== undefined && item?.path_width_scale !== null && item?.path_width_scale !== '') widthByKey.set(rawKey, Number(item.path_width_scale) || 0.55);
+        });
+        tenantProjectData.main_roads_data = structuredRows.map(row => {
+          const rawKey = (typeof accessRoadNameKey === 'function' ? accessRoadNameKey(row?.name) : String(row?.name || '').trim().toLowerCase());
+          const kept = widthByKey.get(rawKey);
+          return kept !== undefined ? { ...row, path_width_scale: kept } : row;
+        });
       } else if (key === 'nearby_landmarks') {
         tenantNearbyLandmarks = structuredRows;
         tenantProjectData.nearby_landmarks_data = structuredRows;

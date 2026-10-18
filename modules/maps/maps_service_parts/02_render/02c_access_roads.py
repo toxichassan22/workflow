@@ -121,11 +121,36 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         for item in road_data if isinstance(road_data, list) else []:
             if not isinstance(item, dict):
                 continue
+            # Only an explicitly stored width wins here — a row without one
+            # must not block the stored-geometry fallback below.
+            if item.get('path_width_scale') is None:
+                continue
             try:
                 path_width_by_key[_road_name_key(item.get('name'))] = max(
-                    0.3, min(1.5, float(item.get('path_width_scale', 0.55))))
+                    0.3, min(1.5, float(item.get('path_width_scale'))))
             except (TypeError, ValueError):
                 continue
+        # Stored geometry may still carry a newer thickness than the table
+        # mirror (old drafts, manual redraws), so fill gaps from it instead
+        # of silently falling back to the default width.
+        for extra in ((project_data or {}).get('manual_road_paths'), (project_data or {}).get('access_roads_data')):
+            if isinstance(extra, str):
+                try:
+                    extra = json.loads(extra)
+                except (TypeError, ValueError):
+                    continue
+            for item in extra if isinstance(extra, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                key = _road_name_key(item.get('name'))
+                if not key or key in path_width_by_key:
+                    continue
+                if item.get('path_width_scale') is None:
+                    continue
+                try:
+                    path_width_by_key[key] = max(0.3, min(1.5, float(item.get('path_width_scale'))))
+                except (TypeError, ValueError):
+                    continue
 
         # Find actual nearby access roads through Google Roads + Directions.
         # The probes are fixed on purpose. They used to be shifted and rotated by regen_seed,

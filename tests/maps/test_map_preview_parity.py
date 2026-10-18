@@ -102,6 +102,49 @@ class MapPreviewParityTests(unittest.TestCase):
                 self.assertTrue(gold)
                 self.assertAlmostEqual(len(gold), 9 * size[0] / 1000, delta=2)
 
+    def test_road_thickness_follows_path_width_scale(self):
+        """A thickness change must reach the baked image, not just the overlay."""
+        def gold_rows(width_scale, project):
+            self.base()
+            rendered = maps._draw_access_roads(
+                self.path, 24, 46, 14, project_data=project, allow_discovery=False)
+            self.assertEqual(len(rendered), 1)
+            with Image.open(self.path) as image:
+                size = image.size
+                x, y = size[0] // 2, size[1] // 2
+                rows = [row for row in range(max(0, y - 60), min(size[1], y + 60))
+                        if image.getpixel((x, row))[:3] == (212, 163, 89)]
+            return rendered, rows
+        thin_project = {
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد', 'path_width_scale': 0.3}],
+            'manual_road_paths': [{'name': 'طريق الملك فهد', 'points': [[24, 45.99], [24, 46.01]]}],
+        }
+        thick_project = {
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد', 'path_width_scale': 1.5}],
+            'manual_road_paths': [{'name': 'طريق الملك فهد', 'points': [[24, 45.99], [24, 46.01]]}],
+        }
+        thin_rendered, thin_gold = gold_rows(0.3, thin_project)
+        thick_rendered, thick_gold = gold_rows(1.5, thick_project)
+        self.assertEqual(thin_rendered[0]['path_width_scale'], 0.3)
+        self.assertEqual(thick_rendered[0]['path_width_scale'], 1.5)
+        self.assertTrue(thin_gold)
+        self.assertTrue(thick_gold)
+        self.assertGreater(len(thick_gold), len(thin_gold))
+
+    def test_road_thickness_falls_back_to_stored_geometry(self):
+        """Old drafts whose table mirror lost the width still draw thick."""
+        self.base()
+        rendered = maps._draw_access_roads(self.path, 24, 46, 14, project_data={
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد'}],
+            'manual_road_paths': [{'name': 'طريق الملك فهد', 'points': [[24, 45.99], [24, 46.01]],
+                                    'path_width_scale': 1.5}],
+        }, allow_discovery=False)
+        self.assertEqual(len(rendered), 1)
+        self.assertEqual(rendered[0]['path_width_scale'], 1.5)
+
     def test_catchment_cap_never_reintroduces_a_far_ring(self):
         zones = [{'km': 25, 'minutes': 30}, {'km': 65, 'minutes': 75}]
         self.assertEqual(maps.catchment_rings(zones), [])

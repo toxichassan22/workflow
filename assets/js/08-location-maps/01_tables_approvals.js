@@ -681,8 +681,7 @@
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="clearAccessRoadPathButton" onclick="clearAccessRoadPath()">مسح المسار</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadLabelSize(-0.1)">تصغير الاسم</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadLabelSize(0.1)">تكبير الاسم</button>' +
-        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadPathWidth(-0.1)">تخفيف سمك المسار</button>' +
-        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadPathWidth(0.1)">زيادة سمك المسار</button>' +
+        accessRoadPathWidthSliderHtml() +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoAccessRoadEditsButton" onclick="undoAccessRoadEdits()">تراجع</button>' +
         '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmAccessRoadEdits()">اعتماد</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelAccessRoadEdits()">إلغاء</button>';
@@ -720,6 +719,7 @@
     }
 
     function selectAccessRoadEdit(value) {
+      closeAccessRoadPathWidthGesture();
       tenantRoadEditSelectedIndex = Number(value);
       const input = document.getElementById('accessRoadEditName');
       if (input) input.value = tenantRoadEditSelectedIndex >= 0
@@ -794,15 +794,45 @@
       updateTenantRoadControls();
     }
 
+    function accessRoadPathWidthSliderHtml() {
+      const row = tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex];
+      const current = Math.max(0.3, Math.min(1.5, Number(row?.path_width_scale) || 0.55));
+      return '<label class="map-control-field">سمك المسار' +
+        '<span class="road-width-control">' +
+        '<input type="range" min="0.3" max="1.5" step="0.1" value="' + current.toFixed(1) + '" data-section-lock-ignore="1" oninput="setAccessRoadPathWidth(this.value)" onchange="closeAccessRoadPathWidthGesture()">' +
+        '<span class="road-width-value" id="accessRoadPathWidthValue">' + current.toFixed(1) + '</span>' +
+        '</span></label>';
+    }
+
+    function setAccessRoadPathWidth(value) {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      const row = tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex];
+      if (!row) return;
+      // One undo step per drag gesture: the history entry is pushed on the
+      // first tick and the gesture closes on change (release).
+      if (!tenantRoadEditDraft._widthGestureOpen) {
+        pushRoadEditHistory();
+        tenantRoadEditDraft._widthGestureOpen = true;
+      }
+      row.path_width_scale = Math.max(0.3, Math.min(1.5, Math.round(Number(value || 0.55) * 10) / 10));
+      const readout = document.getElementById('accessRoadPathWidthValue');
+      if (readout) readout.textContent = row.path_width_scale.toFixed(1);
+      renderTenantMapPolygonOverlay();
+      updateTenantRoadControls();
+    }
+
+    function closeAccessRoadPathWidthGesture() {
+      if (tenantRoadEditDraft) tenantRoadEditDraft._widthGestureOpen = false;
+    }
+
     function adjustAccessRoadPathWidth(delta) {
       if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
       const row = tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex];
       if (!row) return;
-      pushRoadEditHistory();
-      const current = Number(row.path_width_scale || 0.55);
-      row.path_width_scale = Math.max(0.3, Math.min(1.5, Math.round((current + Number(delta || 0)) * 10) / 10));
-      renderTenantMapPolygonOverlay();
-      updateTenantRoadControls();
+      tenantRoadEditDraft._widthGestureOpen = false;
+      setAccessRoadPathWidth((Number(row.path_width_scale || 0.55) + Number(delta || 0)).toFixed(1));
+      closeAccessRoadPathWidthGesture();
+      renderLocationWorkflowState();
     }
 
     function startAccessRoadLabelDrag(event, name) {
@@ -874,6 +904,7 @@
       const state = JSON.parse(snapshot);
       tenantRoadEditDraft = state.draft;
       tenantRoadEditSelectedIndex = state.selectedIndex;
+      closeAccessRoadPathWidthGesture();
       renderLocationWorkflowState();
       renderTenantMapPolygonOverlay();
     }
@@ -890,7 +921,15 @@
         return true;
       });
       const renamed = new Map(rows.map(row => [accessRoadNameKey(row.original_name), row.name]));
-      const renameGeometry = road => ({ ...road, name: renamed.get(accessRoadNameKey(road?.name)) || road?.name });
+      const widthByKey = new Map(rows.map(row => [accessRoadNameKey(row.name), row.path_width_scale || 0.55]));
+      const renameGeometry = road => {
+        const next = { ...road, name: renamed.get(accessRoadNameKey(road?.name)) || road?.name };
+        // A thickness change with no redraw still commits: the stored geometry
+        // carries the row's width so the overlay and the next save keep it.
+        const kept = widthByKey.get(accessRoadNameKey(next?.name));
+        if (kept !== undefined) next.path_width_scale = kept;
+        return next;
+      };
       const allowedRoadKeys = new Set(rows.map(row => accessRoadNameKey(row.name)));
       const clearedRoadKeys = new Set(rows
         .filter(row => row.pathCleared && !(Array.isArray(row.points) && row.points.length >= 2))

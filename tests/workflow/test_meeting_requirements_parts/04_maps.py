@@ -266,6 +266,29 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         self.assertFalse(draft_data['nearby_landmarks_data'][1]['show_on_map'])
         self.assertTrue(draft_data['city_landmarks_data'][0]['show_on_map'])
 
+    def test_road_thickness_survives_table_serialize_and_confirm(self):
+        """The thickness buttons were dead: serialize rebuilt main_roads_data
+        from the DOM (which has no width column) and wiped path_width_scale,
+        so every save and every reopen reset the width to the default."""
+        index_source = read_frontend_text()
+        serialize_body = index_source.split('function serializeLocationTable(key)', 1)[1] \
+            .split('function updateLocationTableStats', 1)[0] if 'function updateLocationTableStats' in index_source \
+            else index_source.split('function serializeLocationTable(key)', 1)[1][:6000]
+        self.assertIn('path_width_scale', serialize_body)
+        self.assertIn('widthByKey', serialize_body)
+        parse_body = index_source.split('function parseLocationFieldText(key, value)', 1)[1][:3000]
+        self.assertIn('path_width_scale', parse_body)
+        confirm_body = index_source.split('async function confirmAccessRoadEdits()', 1)[1] \
+            .split('function cancelAccessRoadEdits()', 1)[0]
+        self.assertIn('widthByKey', confirm_body)
+        self.assertIn('path_width_scale', confirm_body)
+        # Thickness is a slider with a live readout, not +/- buttons.
+        self.assertIn('function setAccessRoadPathWidth(value)', index_source)
+        self.assertIn('accessRoadPathWidthValue', index_source)
+        self.assertIn('type="range"', index_source.split('function accessRoadPathWidthSliderHtml()', 1)[1][:1200])
+        self.assertNotIn('adjustAccessRoadPathWidth(-0.1)', index_source)
+        self.assertNotIn('adjustAccessRoadPathWidth(0.1)', index_source)
+
     def test_land_analysis_is_persisted_but_not_shown_as_a_review_panel(self):
         """The conflicts/parcels panels were removed; the payload must still be saved because
         the directions table falls back to parcels[0].directions on reload."""

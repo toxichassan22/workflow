@@ -154,6 +154,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "رقم النقطة": "Point number",
   "سكني فاخر": "Luxury Residential",
   "سيظهر جدول الإحداثيات بعد تحليل المستندات.": "Coordinates table will appear after document analysis.",
+  "سمك المسار": "Path thickness",
   "شغّل تحليل الموقع أولًا": "Run site analysis first",
   "صور كحد أقصى للأرض": "Site photos (maximum allowed)",
   "عام": "General",

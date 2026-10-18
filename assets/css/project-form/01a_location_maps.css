@@ -365,6 +365,23 @@
       stroke-width: 1.6cqw;
     }
 
+    .road-width-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .road-width-control input[type="range"] {
+      flex: 1;
+      accent-color: #0A829B;
+    }
+
+    .road-width-value {
+      min-width: 34px;
+      text-align: center;
+      font-weight: 700;
+    }
+
     .map-road-label-delete {
       position: absolute;
       top: -12px;
