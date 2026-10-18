@@ -1,4 +1,4 @@
-STATIC_MAP_FRAME_VERSION = 2
+STATIC_MAP_FRAME_VERSION = 3
 FIXED_MAP_VIEWPORT_SIZE = (1280, 720)
 
 
@@ -142,7 +142,7 @@ def catchment_rings(zones, limit=3):
     for item in chosen:
         minutes = item['minutes']
         name = str(item.get('label') or item.get('name') or '').strip()
-        time_label = f'{minutes} دقائق' if minutes else f'{item["km"]:.1f} كم'
+        time_label = f'{minutes} دقائق' if minutes else f'{item["km"]} كم'
         label = f'{name} — {time_label}' if name else time_label
         rings.append({'km': item['km'], 'minutes': minutes or 0, 'name': name, 'label': label})
     return rings
@@ -220,9 +220,9 @@ def _prepare_static_map_image(path, provider_size, factor, size):
         with Image.open(path) as source:
             if source.size != (provider_size[0] * 2, provider_size[1] * 2):
                 return False
-            if factor == 1:
+            if abs(factor - 1) < 1e-9:
                 return True
-            image = source.resize((source.width * factor, source.height * factor), Image.Resampling.LANCZOS)
+            image = source.resize((round(source.width * factor), round(source.height * factor)), Image.Resampling.LANCZOS)
         width, height = size[0] * 2, size[1] * 2
         left, top = (image.width - width) // 2, (image.height - height) // 2
         image.crop((left, top, left + width, top + height)).save(path, 'PNG')

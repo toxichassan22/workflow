@@ -95,7 +95,7 @@
 
     .location-table th.lt-actions,
     .location-table td.lt-actions {
-      width: 176px;
+      width: 230px;
     }
 
     .location-table td {
@@ -131,7 +131,7 @@
       align-items: center;
       justify-content: flex-start;
       gap: 6px;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
     }
 
     .lt-action-group .btn {

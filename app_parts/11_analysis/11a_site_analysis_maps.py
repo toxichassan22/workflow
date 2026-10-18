@@ -71,7 +71,7 @@ def api_debug_osm_polygon():
     return jsonify({
         'found': True,
         'points': len(coords),
-        'area_sqm': round(maps_service._approx_polygon_area_sqm(coords)),
+        'area_sqm': maps_service._approx_polygon_area_sqm(coords),
         'coords': coords,
     })
 
@@ -200,7 +200,7 @@ def api_preview_map_data():
         dist_m = maps_service._distance_meters(lat, lng, lm['lat'], lm['lng'])
         if dist_m < 50 or dist_m > landmark_radius_m:
             continue
-        lm['distance_meters'] = round(dist_m)
+        lm['distance_meters'] = dist_m
         filtered_landmarks.append(lm)
 
     landmarks = sorted(filtered_landmarks, key=lambda item: item.get('distance_meters', float('inf')))
@@ -394,6 +394,36 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
     nearby = maps_service.get_nearby_landmarks(lat, lng, radius=20000, max_results=20, include_all=True, language=lang)
     nearby_items = nearby.get('landmarks', []) if nearby.get('success') else []
     nearby_error = nearby.get('error') if not nearby.get('success') else None
+    education_types = {
+        'educational_institution', 'school', 'university', 'preschool', 'primary_school', 'secondary_school'
+    }
+    educational_items = [item for item in nearby_items if education_types.intersection(item.get('types') or [])]
+    if len(educational_items) < 7:
+        education_result = maps_service.get_nearby_landmarks(
+            lat, lng, radius=20000, max_results=7, include_all=True,
+            included_types=sorted(education_types),
+            usage_ctx=maps_service.maps_usage_ctx('places', tenant_id=tenant_id),
+            language=lang,
+        )
+        if education_result.get('success'):
+            merged_education = []
+            seen_education = set()
+            for item in educational_items + (education_result.get('landmarks') or []):
+                identity = str(item.get('place_id') or item.get('name') or '').strip().casefold()
+                if identity and identity not in seen_education:
+                    seen_education.add(identity)
+                    merged_education.append(item)
+            education_ids = {
+                str(item.get('place_id') or item.get('name') or '').strip().casefold()
+                for item in merged_education
+            }
+            other_items = [
+                item for item in nearby_items
+                if str(item.get('place_id') or item.get('name') or '').strip().casefold() not in education_ids
+            ]
+            nearby_items = merged_education[:7] + other_items[:max(0, 20 - len(merged_education[:7]))]
+            if nearby_items:
+                nearby_error = None
     nearby_warning = 'لم تُرجع Google Places أي معالم ضمن نطاق 20 كم من الموقع' if nearby.get('success') and not nearby_items else None
     nearby_matrix = maps_service.get_drive_matrix((lat, lng), nearby_items, language=lang) if nearby_items else []
     for index, item in enumerate(nearby_items):
@@ -571,7 +601,7 @@ def _collect_site_fields(project_data, tenant_id, lat, lng):
         fields['catchment_areas'] = '\n'.join(catchment_lines)
 
     if polygon:
-        fields['location_polygon'] = ';'.join(f'{point[0]:.6f},{point[1]:.6f}' for point in polygon)
+        fields['location_polygon'] = ';'.join(f'{point[0]},{point[1]}' for point in polygon)
     # 'manual' only stands while the drawn boundary actually survived into this
     # analysis: a moved site drops it above, and the returned polygon (if any) is
     # a fresh detection, never the user's old drawing. 'cleared' is the user
@@ -737,12 +767,36 @@ def api_site_analysis():
         g.tenant_id, surface='content', offer_lang=offer_lang) or ''
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
+
+    def _analysis_text(response, label, retry_call):
+        text = extract_chat_content(response, label).strip()
+        choices = response.get('choices') if isinstance(response, dict) else None
+        choice = choices[0] if choices and isinstance(choices[0], dict) else {}
+        finish = str(choice.get('native_finish_reason') or choice.get('finish_reason') or '').lower()
+        if finish not in ('length', 'max_tokens', 'max_output_tokens'):
+            return text
+        retry_cap = min(max(int(SITE_ANALYSIS_MAX_TOKENS) * 2, 12000), 24000)
+        if retry_cap <= int(SITE_ANALYSIS_MAX_TOKENS):
+            raise RuntimeError('تحليل الموقع وصل إلى حد الإخراج المسموح')
+        print(f'[SITE ANALYSIS] output limit reached; retrying with max_tokens={retry_cap}')
+        retried = retry_call(retry_cap)
+        text = extract_chat_content(retried, label + '-RETRY').strip()
+        retry_choices = retried.get('choices') if isinstance(retried, dict) else None
+        retry_choice = retry_choices[0] if retry_choices and isinstance(retry_choices[0], dict) else {}
+        retry_finish = str(retry_choice.get('native_finish_reason') or retry_choice.get('finish_reason') or '').lower()
+        if retry_finish in ('length', 'max_tokens', 'max_output_tokens'):
+            raise RuntimeError('تحليل الموقع ما زال يتجاوز حد الإخراج بعد إعادة المحاولة')
+        return text
+
     try:
         try:
-            response = call_text_chat(
-                system_prompt, prompt, max_tokens=SITE_ANALYSIS_MAX_TOKENS,
-                reasoning_effort='max', usage_ctx=_usage_ctx('site', data))
-            analysis = extract_chat_content(response, 'SITE-ANALYSIS').strip()
+            def _primary_call(max_tokens):
+                return call_text_chat(
+                    system_prompt, prompt, max_tokens=max_tokens,
+                    reasoning_effort='max', usage_ctx=_usage_ctx('site', data))
+
+            analysis = _analysis_text(
+                _primary_call(SITE_ANALYSIS_MAX_TOKENS), 'SITE-ANALYSIS', _primary_call)
         except Exception as primary_error:
             # A deterministic refusal (wallet/key) cannot be routed around —
             # the fallback call would hit the same refusal for nothing.
@@ -751,15 +805,18 @@ def api_site_analysis():
             if not _has_any_openrouter_key(_usage_ctx('site', data)):
                 raise
             print(f'[SITE ANALYSIS PRIMARY ERROR] {primary_error}. Trying direct OpenRouter fallback...')
-            fallback = call_openrouter_chat(
-                system_prompt,
-                prompt,
-                temperature=None,
-                max_tokens=SITE_ANALYSIS_MAX_TOKENS,
-                model=LUNA_TEXT_MODEL,
-                usage_ctx=_usage_ctx('site', data)
-            )
-            analysis = extract_chat_content(fallback, 'SITE-ANALYSIS-FALLBACK').strip()
+            def _fallback_call(max_tokens):
+                return call_openrouter_chat(
+                    system_prompt,
+                    prompt,
+                    temperature=None,
+                    max_tokens=max_tokens,
+                    model=LUNA_TEXT_MODEL,
+                    usage_ctx=_usage_ctx('site', data)
+                )
+
+            analysis = _analysis_text(
+                _fallback_call(SITE_ANALYSIS_MAX_TOKENS), 'SITE-ANALYSIS-FALLBACK', _fallback_call)
         warnings = [value for value in (
             enrichment_diagnostics.get('nearby_landmarks_error'),
             enrichment_diagnostics.get('nearby_landmarks_warning'),

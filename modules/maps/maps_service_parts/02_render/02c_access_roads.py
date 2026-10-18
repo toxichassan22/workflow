@@ -117,6 +117,16 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 except (TypeError, ValueError):
                     continue
 
+        path_width_by_key = {}
+        for item in road_data if isinstance(road_data, list) else []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                path_width_by_key[_road_name_key(item.get('name'))] = max(
+                    0.3, min(1.5, float(item.get('path_width_scale', 0.55))))
+            except (TypeError, ValueError):
+                continue
+
         # Find actual nearby access roads through Google Roads + Directions.
         # The probes are fixed on purpose. They used to be shifted and rotated by regen_seed,
         # so every regeneration snapped to different roads and the map came back with a
@@ -226,6 +236,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             origin_px, origin_py = cx + origin_dx, cy + origin_dy
 
             for coords, label_text in road_route_mapping:
+                path_width_scale = path_width_by_key.get(_road_name_key(label_text), 0.55)
                 pixels = []
                 for lat, lng in coords:
                     dx, dy = _latlng_to_pixel_offset(lat, lng, center_lat, center_lng, zoom, scale=scale)
@@ -249,8 +260,8 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
 
                 # Draw thick gold road line
                 for segment in segments:
-                    draw.line(segment, fill=(105, 73, 35, 140), width=max(1, round(18 * unit)), joint='curve')
-                    draw.line(segment, fill=gold_color, width=max(1, round(9 * unit)), joint='curve')
+                    draw.line(segment, fill=(105, 73, 35, 140), width=max(1, round(18 * unit * path_width_scale)), joint='curve')
+                    draw.line(segment, fill=gold_color, width=max(1, round(9 * unit * path_width_scale)), joint='curve')
 
                 route_segment = max(segments, key=len)
                 pending_labels.append((route_segment, label_text, coords))
@@ -309,6 +320,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                     'points': [[point[0], point[1]] for point in route_coords],
                     'label_point': list(label_point) if label_point else None,
                     'label_scale': label_scale,
+                    'path_width_scale': path_width_scale,
                 })
 
             img = Image.alpha_composite(img, labels_overlay)

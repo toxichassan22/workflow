@@ -129,7 +129,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
     # Try to auto-detect a building/compound polygon from OSM
     if highlight_site and not user_polygon_used and (not polygon_coords or len(polygon_coords) < 3):
-        cache_key = f"{lat:.6f},{lng:.6f}"
+        cache_key = f"{lat},{lng}"
         if cache_key in _osm_polygon_cache:
             osm_poly = _osm_polygon_cache[cache_key]
         else:
@@ -215,10 +215,10 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
 
     def _manual_viewport_zoom(map_key, fallback):
         try:
-            value = int(zoom_overrides.get(map_key))
+            value = float(zoom_overrides.get(map_key))
         except (TypeError, ValueError):
             return fallback
-        return max(8, min(20, value)) if 0 < value else fallback
+        return max(8, min(20, value)) if math.isfinite(value) and 0 < value else fallback
 
     def _manual_viewport_center(map_key, fallback_lat, fallback_lng):
         item = center_overrides.get(map_key)
@@ -294,7 +294,7 @@ def _generate_all_map_images(project_data, tenant_id, presentation_id=None, forc
             if maximum_distance_m is not None and distance_meters > maximum_distance_m:
                 print(f"[LANDMARKS] '{landmark.get('name')}' is {distance_meters / 1000.0:.1f} km away, beyond {maximum_distance_m / 1000.0:.0f} km — skipped")
                 continue
-            landmark['distance_meters'] = round(distance_meters)
+            landmark['distance_meters'] = distance_meters
             resolved.append(landmark)
         return resolved
 

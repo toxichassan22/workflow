@@ -210,9 +210,9 @@ MARKER_COLOR_LANDMARK = '#8B2020'  # Red-maroon for landmark pins
 SITE_FILL_COLOR = (107, 28, 35, 71)     # Keep the building imagery visible beneath the highlight
 SITE_BORDER_COLOR = (107, 28, 35, 255)  # Dark maroon border
 COMPASS_COLOR = (107, 28, 35)       # Dark maroon for compass
-ACCESS_ROADS_RENDER_VERSION = 'v14-draggable-road-labels'
+ACCESS_ROADS_RENDER_VERSION = 'v15-client-path-width'
 MAP_HIGHLIGHT_RENDER_VERSION = 'survey-polygon-v3'
-MAP_LABEL_RENDER_VERSION = 'named-labels-v5-preview-parity'
+MAP_LABEL_RENDER_VERSION = 'numbered-labels-road-width-v7-preview-parity'
 ACCESS_ROADMAP_STYLES = [
     'feature:poi|visibility:off',
     'feature:poi.business|visibility:off',
@@ -387,8 +387,8 @@ def _get_api_key():
 def _discovery_cache_key(tenant_id, kind, lat=None, lng=None, extra=''):
     """Stable key for one Google discovery answer. None when unkeyable."""
     try:
-        lat_part = f"{round(float(lat), 4):.4f}" if lat is not None else '-'
-        lng_part = f"{round(float(lng), 4):.4f}" if lng is not None else '-'
+        lat_part = str(float(lat)) if lat is not None else '-'
+        lng_part = str(float(lng)) if lng is not None else '-'
     except (TypeError, ValueError):
         return None
     return f"maps:{kind}:{str(tenant_id or 'shared')}:{lat_part}:{lng_part}:{extra}"
@@ -820,7 +820,7 @@ def get_curated_city_landmarks(city, lat, lng, tenant_id=None, language='ar'):
     for item in resolved_entries:
         if not item or item.get('lat') is None or item.get('lng') is None:
             continue
-        item['distance_meters'] = round(_distance_meters(lat, lng, item['lat'], item['lng']))
+        item['distance_meters'] = _distance_meters(lat, lng, item['lat'], item['lng'])
         landmarks.append(item)
     for item in get_nearest_category_landmarks(lat, lng, radius=20000, tenant_id=tenant_id, language=language):
         key = item.get('name', '').casefold()
@@ -879,9 +879,11 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
         return _api_key_error()
     try:
         size = tuple(map(int, size))
-        provider_zoom = int(zoom)
-        if len(size) != 2 or not all(1 <= dimension <= 2048 for dimension in size) or not 0 <= provider_zoom <= 20:
+        requested_zoom = float(zoom)
+        if len(size) != 2 or not all(1 <= dimension <= 2048 for dimension in size) \
+                or not math.isfinite(requested_zoom) or not 0 <= requested_zoom <= 20:
             raise ValueError
+        provider_zoom = math.floor(requested_zoom)
     except (TypeError, ValueError, OverflowError):
         return {'success': False, 'error': 'Invalid static map frame'}
     factor = 1
@@ -927,7 +929,8 @@ def get_static_map(lat, lng, zoom=14, markers=None, paths=None, size=(1280, 720)
     if not res.get('success'):
         return res
     _record_maps_usage(usage_ctx, 'staticmap', 1)
-    if not _prepare_static_map_image(cache_path, provider_size, factor, size):
+    fractional_scale = 2 ** (requested_zoom - math.floor(requested_zoom))
+    if not _prepare_static_map_image(cache_path, provider_size, factor * fractional_scale, size):
         return {'success': False, 'error': 'Static map image does not match the requested frame'}
     if output_path != cache_path:
         shutil.copyfile(cache_path, output_path)

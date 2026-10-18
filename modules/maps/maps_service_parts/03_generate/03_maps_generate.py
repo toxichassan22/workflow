@@ -46,7 +46,7 @@ def _get_cached_map_images(tenant_id, presentation_id, expected_lat=None, expect
     for metadata in metadata_by_type.values():
         try:
             if metadata.get('lat') is not None and metadata.get('lng') is not None:
-                locations.add((round(float(metadata.get('lat')), 6), round(float(metadata.get('lng')), 6)))
+                locations.add((float(metadata.get('lat')), float(metadata.get('lng'))))
         except (TypeError, ValueError):
             return None
     if len(locations) > 1:
@@ -223,7 +223,7 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
             metadata = json.loads(final.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
-            zoom = int(metadata.get('zoom'))
+            zoom = float(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         active_maptype = 'roadmap' if final_type.endswith('_roadmap') else 'satellite'
@@ -262,7 +262,7 @@ def _recompose_overview_map(project_data, tenant_id, effective_id, highlight_sit
             metadata = json.loads(editable.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
-            zoom = int(metadata.get('zoom'))
+            zoom = float(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         final_type = editable_type.replace('_editable', '')
@@ -339,7 +339,7 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
             metadata = json.loads(final.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
-            zoom = int(metadata.get('zoom'))
+            zoom = float(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         # The unsuffixed access map is the roadmap render — only an explicit
@@ -379,7 +379,7 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
             metadata = json.loads(editable.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
-            zoom = int(metadata.get('zoom'))
+            zoom = float(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         final_type = editable_type.replace('_editable', '')
@@ -481,7 +481,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             metadata = json.loads(source.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
-            zoom = int(metadata.get('zoom'))
+            zoom = float(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         # The catchment map is a fixed frame fitted to content — a wider stored
@@ -495,7 +495,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
         if existing is not None:
             try:
                 existing_meta = json.loads(existing.get('metadata_json') or '{}')
-                existing_zoom = int(existing_meta.get('zoom'))
+                existing_zoom = float(existing_meta.get('zoom'))
                 existing_center = (
                     float(existing_meta.get('center_lat')),
                     float(existing_meta.get('center_lng')))
@@ -564,7 +564,7 @@ def _recompose_catchment_map(project_data, tenant_id, effective_id, draft_id=Non
             metadata = json.loads(editable.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
-            zoom = int(metadata.get('zoom'))
+            zoom = float(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         final_type = editable_type.replace('_editable', '')
@@ -663,7 +663,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             metadata = json.loads(source.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
-            zoom = int(metadata.get('zoom'))
+            zoom = float(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         # The landmarks frame mirrors generation: the same directional content
@@ -677,7 +677,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
         if existing is not None:
             try:
                 existing_meta = json.loads(existing.get('metadata_json') or '{}')
-                existing_zoom = int(existing_meta.get('zoom'))
+                existing_zoom = float(existing_meta.get('zoom'))
                 existing_center = (
                     float(existing_meta.get('center_lat')),
                     float(existing_meta.get('center_lng')))
@@ -741,7 +741,7 @@ def _recompose_landmarks_map(project_data, tenant_id, effective_id, draft_id=Non
             metadata = json.loads(editable.get('metadata_json') or '{}')
             center_lat = float(metadata.get('center_lat'))
             center_lng = float(metadata.get('center_lng'))
-            zoom = int(metadata.get('zoom'))
+            zoom = float(metadata.get('zoom'))
         except (TypeError, ValueError, json.JSONDecodeError):
             continue
         final_type = editable_type.replace('_editable', '')

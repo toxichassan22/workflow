@@ -109,6 +109,7 @@
 
     function tenantMapCoordinatesFromClient(clientX, clientY, img) {
       // The live map converts through its own projection — always frame-accurate.
+      if (tenantInteractiveMapReveal) return null;
       if (interactiveMapActive()) return interactiveMapClientToLatLng(clientX, clientY);
       // Without the zoom the server rendered at, click-to-coordinates math lands the
       // point at a completely wrong place — refuse instead of storing corrupt data.
@@ -159,8 +160,8 @@
       }
       const landmarkMapType = LOCATION_TABLE_FIELDS[tenantLandmarkPlacementTarget?.key]?.mapType;
       if (tenantLandmarkPlacementTarget && tenantSelectedMapType === landmarkMapType) {
-        tenantLandmarkPlacementTarget.tr.dataset.lat = nextLat.toFixed(6);
-        tenantLandmarkPlacementTarget.tr.dataset.lng = nextLng.toFixed(6);
+        tenantLandmarkPlacementTarget.tr.dataset.lat = String(nextLat);
+        tenantLandmarkPlacementTarget.tr.dataset.lng = String(nextLng);
         tenantLandmarkPlacementTarget.tr.dataset.manualPosition = '1';
         serializeLocationTable(tenantLandmarkPlacementTarget.key);
         scheduleMapTableRecompose(tenantLandmarkPlacementTarget.key);
@@ -193,7 +194,8 @@
       if (editUndo) editUndo.disabled = !tenantRoadEditHistory.length;
       if (pathClear) pathClear.disabled = !(
         tenantRoadEditSelectedIndex >= 0
-        && (tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.points || []).length
+        && ((tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.points || []).length
+          || tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.has_stored_path)
       );
     }
 
@@ -512,8 +514,8 @@
     async function confirmTenantMapPin() {
       if (!tenantMapPinMode || tenantMapDraftPinHistory.length <= 1) return;
       const [lat, lng] = tenantMapDraftPinHistory[tenantMapDraftPinHistory.length - 1];
-      const latValue = lat.toFixed(6);
-      const lngValue = lng.toFixed(6);
+      const latValue = String(lat);
+      const lngValue = String(lng);
       const latInput = document.querySelector('#tenantProjectForm [data-key="location_lat"]');
       const lngInput = document.querySelector('#tenantProjectForm [data-key="location_lng"]');
       if (latInput) latInput.value = latValue;
@@ -538,7 +540,7 @@
 
     function syncTenantLocationPolygon() {
       const input = document.getElementById('tenantLocationPolygon');
-      const value = tenantMapPolygonPoints.map(point => point[0].toFixed(6) + ',' + point[1].toFixed(6)).join(';');
+      const value = tenantMapPolygonPoints.map(point => String(point[0]) + ',' + String(point[1])).join(';');
       tenantProjectData.location_polygon = value;
       if (input) input.value = value;
     }
@@ -613,11 +615,10 @@
         const hoverAttrs = tenantCatchmentEditMode
           ? ' onmouseenter="highlightMapPlacePair(\'catchment\',decodeURIComponent(\'' + encodedName + '\'),true)" onmouseleave="highlightMapPlacePair(\'catchment\',decodeURIComponent(\'' + encodedName + '\'),false)"'
           : '';
-        const numChip = tenantCatchmentEditMode ? '<span class="map-place-label-num">' + index + '</span>' : '';
         const marker = '<div class="map-place-marker' + linked + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
           (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + index + '</div>';
         const label = '<div class="map-place-label' + linked + (tenantCatchmentEditMode ? ' editable' : '') + '" data-catchment-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;font-size:1.2cqw;padding:3px 7px;padding:.3cqw .7cqw"' +
-          (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + numChip + escapeHtml(item.name) + '</div>';
+          (tenantCatchmentEditMode ? ' onpointerdown="startCatchmentLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + escapeHtml(String(index) + ' — ' + item.name) + '</div>';
         return marker + label;
       }).join('');
     }
@@ -638,11 +639,10 @@
         const hoverAttrs = tenantLandmarksEditMode
           ? ' onmouseenter="highlightMapPlacePair(\'landmark\',decodeURIComponent(\'' + encodedName + '\'),true)" onmouseleave="highlightMapPlacePair(\'landmark\',decodeURIComponent(\'' + encodedName + '\'),false)"'
           : '';
-        const numChip = tenantLandmarksEditMode ? '<span class="map-place-label-num">' + (index + 1) + '</span>' : '';
         const marker = '<div class="map-place-marker' + linked + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-marker="' + escapeHtml(item.name) + '" style="left:' + markerPoint[0].toFixed(3) + '%;top:' + markerPoint[1].toFixed(3) + '%"' +
           (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksMarkerDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + (index + 1) + '</div>';
         const label = '<div class="map-place-label' + linked + (tenantLandmarksEditMode ? ' editable' : '') + '" data-landmark-label="' + escapeHtml(item.name) + '" style="left:' + x.toFixed(3) + '%;top:' + y.toFixed(3) + '%;font-size:12px;font-size:1.2cqw;padding:3px 7px;padding:.3cqw .7cqw"' +
-          (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + numChip + escapeHtml(item.name) + '</div>';
+          (tenantLandmarksEditMode ? ' onpointerdown="startLandmarksLabelDrag(event,decodeURIComponent(\'' + encodedName + '\'))"' + hoverAttrs : '') + '>' + escapeHtml(String(index + 1) + ' — ' + item.name) + '</div>';
         return marker + label;
       }).join('');
     }
@@ -710,8 +710,9 @@
         const pathClass = 'map-road-path' +
           (selectedRoadName && accessRoadNameKey(label) === accessRoadNameKey(selectedRoadName) ? ' map-road-path-selected' : '') +
           mapPlaceLinkClass('road', label);
-        return '<polyline class="map-road-casing" points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline>' +
-          '<polyline data-road-path="' + escapeHtml(label) + '" class="' + pathClass + '" points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="0.9" vector-effect="non-scaling-stroke" stroke-linejoin="round"><title>' + escapeHtml(label) + '</title></polyline>';
+        const widthScale = Math.max(0.3, Math.min(1.5, Number(path.path_width_scale) || 0.55));
+        return '<polyline class="map-road-casing" points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="' + (1.8 * widthScale).toFixed(2) + '" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline>' +
+          '<polyline data-road-path="' + escapeHtml(label) + '" class="' + pathClass + '" points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="' + (0.9 * widthScale).toFixed(2) + '" vector-effect="non-scaling-stroke" stroke-linejoin="round"><title>' + escapeHtml(label) + '</title></polyline>';
       }).join('') : '';
       const linkLinePairs = (showLandmarks && tenantLandmarksEditMode)
         ? landmarkItems.map(item => ['landmark', item])

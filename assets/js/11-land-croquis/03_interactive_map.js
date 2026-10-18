@@ -6,7 +6,11 @@
 
     let tenantInteractiveMap = null;
     let tenantInteractiveMapType = null;
+    let tenantInteractiveMapRenderedType = null;
     let tenantInteractiveProjection = null;
+    let tenantInteractiveZoomControl = null;
+    let tenantInteractiveMapReveal = null;
+    let tenantInteractiveRevealSequence = 0;
     let tenantInteractiveReadyPromise = null;
     let tenantInteractiveMountPromise = null;
     let tenantInteractiveMounted = false;
@@ -67,6 +71,57 @@
 
     function interactiveMapActive() {
       return !!(tenantInteractiveMounted && tenantInteractiveMap && tenantInteractiveProjection);
+    }
+
+    function normalizeInteractiveZoom(value) {
+      const zoom = Number(value);
+      return Number.isFinite(zoom) ? Math.max(8, Math.min(20, Math.round(zoom * 100) / 100)) : 17;
+    }
+
+    function setInteractiveMapPreviewHidden(hidden) {
+      const holder = document.getElementById('mapLiveView');
+      const polygon = document.getElementById('mapPolygonOverlay');
+      const labels = document.getElementById('mapLabelOverlay');
+      if (holder) holder.style.visibility = hidden ? 'hidden' : '';
+      if (polygon) polygon.style.visibility = hidden ? 'hidden' : '';
+      if (labels) labels.style.visibility = hidden ? 'hidden' : '';
+    }
+
+    function revealInteractiveMapWhenReady(eventName) {
+      const pending = tenantInteractiveMapReveal;
+      const map = tenantInteractiveMap;
+      if (!pending || !map || !tenantInteractiveMounted) return;
+      const center = map.getCenter();
+      if (!center || map.getMapTypeId() !== pending.mapTypeId
+          || Math.abs(center.lat() - pending.lat) > 1e-5
+          || Math.abs(center.lng() - pending.lng) > 1e-5
+          || Math.abs(Number(map.getZoom()) - pending.zoom) > 0.02) return;
+      pending[eventName] = true;
+      if (!pending.idle || !pending.tiles) return;
+      tenantInteractiveMapReveal = null;
+      setInteractiveMapPreviewHidden(false);
+      renderTenantMapPolygonOverlay();
+    }
+
+    function createInteractiveZoomControl(map) {
+      const control = document.createElement('div');
+      control.style.cssText = 'display:flex;flex-direction:column;gap:5px;margin:10px;background:#fff;border-radius:8px;padding:5px;box-shadow:0 1px 5px rgba(0,0,0,.35);';
+      [[0.5, 'تكبير أدق'], [-0.5, 'تصغير أدق']].forEach(([delta, label]) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = label;
+        button.title = label;
+        button.setAttribute('aria-label', label);
+        button.style.cssText = 'border:0;border-radius:5px;background:#f4f6f8;color:#244a65;padding:6px 9px;font-weight:700;cursor:pointer;';
+        ['pointerdown', 'mousedown', 'click'].forEach(eventName => button.addEventListener(eventName, event => {
+          event.stopPropagation();
+          if (eventName !== 'click') return;
+          const current = Number(map.getZoom());
+          if (Number.isFinite(current)) map.setZoom(normalizeInteractiveZoom(current + delta));
+        }));
+        control.appendChild(button);
+      });
+      return control;
     }
 
     // The frame the last raster bake actually rendered, persisted in creative
@@ -162,7 +217,7 @@
       // Fixed maps never mount live: catchment and landmarks show the stored
       // auto-framed raster and only their labels/markers are repositioned.
       if (!mapViewportAdjustable(mapType)) return false;
-      const clampedZoom = Math.max(8, Math.min(20, Number(zoom) || 17));
+      const clampedZoom = normalizeInteractiveZoom(zoom || 17);
       const options = {
         center: { lat: Number(lat), lng: Number(lng) },
         zoom: clampedZoom,
@@ -171,21 +226,49 @@
         mapTypeId: mapType === 'access' ? 'roadmap' : 'satellite',
         styles: interactiveMapStylesFor(mapType),
         disableDefaultUI: true,
-        zoomControl: true,
+        zoomControl: false,
         fullscreenControl: false,
         // cooperative: a stray wheel pass scrolls the page instead of zooming;
         // zoom needs Ctrl+wheel and panning needs a real drag (two fingers on
         // touch) — the map only catches deliberate gestures.
         gestureHandling: 'cooperative',
-        // Whole-number zooms only: the Static Maps API bakes integer zooms, so a
-        // fractional live frame could never be reproduced exactly at bake time.
-        isFractionalZoomEnabled: false,
+        isFractionalZoomEnabled: true,
         tilt: 0,
         clickableIcons: false,
         keyboardShortcuts: false,
         backgroundColor: '#f4f6f8'
       };
       if (!Number.isFinite(options.center.lat) || !Number.isFinite(options.center.lng)) return false;
+      const previousCenter = tenantInteractiveMap?.getCenter?.();
+      const frameChanged = !tenantInteractiveMap || tenantInteractiveMapRenderedType !== mapType
+        || !previousCenter
+        || Math.abs(previousCenter.lat() - options.center.lat) > 1e-5
+        || Math.abs(previousCenter.lng() - options.center.lng) > 1e-5
+        || Math.abs(Number(tenantInteractiveMap.getZoom()) - clampedZoom) > 0.02;
+      if (frameChanged) {
+        const revealSequence = ++tenantInteractiveRevealSequence;
+        tenantInteractiveMapReveal = {
+          lat: options.center.lat, lng: options.center.lng, zoom: clampedZoom,
+          mapTypeId: options.mapTypeId, idle: false, tiles: false
+        };
+        setInteractiveMapPreviewHidden(true);
+        setTimeout(() => {
+          const pending = tenantInteractiveMapReveal;
+          const center = tenantInteractiveMap?.getCenter?.();
+          if (revealSequence === tenantInteractiveRevealSequence && pending && center
+              && tenantInteractiveMap.getMapTypeId() === pending.mapTypeId
+              && Math.abs(center.lat() - pending.lat) < 1e-5
+              && Math.abs(center.lng() - pending.lng) < 1e-5
+              && Math.abs(Number(tenantInteractiveMap.getZoom()) - pending.zoom) < 0.02) {
+            tenantInteractiveMapReveal = null;
+            setInteractiveMapPreviewHidden(false);
+            renderTenantMapPolygonOverlay();
+          }
+        }, 5000);
+      } else {
+        tenantInteractiveMapReveal = null;
+        setInteractiveMapPreviewHidden(false);
+      }
       tenantInteractiveSuppressIdle = { lat: options.center.lat, lng: options.center.lng, zoom: clampedZoom };
       if (!tenantInteractiveMap) {
         holder.style.display = 'block';
@@ -200,7 +283,11 @@
           if (event && event.latLng) dispatchTenantMapPoint(event.latLng.lat(), event.latLng.lng());
         });
         tenantInteractiveMap.addListener('idle', interactiveMapFrameChanged);
+        tenantInteractiveMap.addListener('idle', () => revealInteractiveMapWhenReady('idle'));
+        tenantInteractiveMap.addListener('tilesloaded', () => revealInteractiveMapWhenReady('tiles'));
         tenantInteractiveMap.addListener('bounds_changed', positionInteractiveOverlaySoon);
+        tenantInteractiveZoomControl = createInteractiveZoomControl(tenantInteractiveMap);
+        tenantInteractiveMap.controls[google.maps.ControlPosition.RIGHT_CENTER].push(tenantInteractiveZoomControl);
         meterInteractiveMapLoad(mapType);
       } else {
         tenantInteractiveMap.setOptions(options);
@@ -208,6 +295,7 @@
         tenantInteractiveMap.setZoom(clampedZoom);
       }
       tenantInteractiveMapType = mapType;
+      tenantInteractiveMapRenderedType = mapType;
       tenantInteractiveMounted = true;
       // The stored raster is exactly 16:9, so pinning the box ratio keeps the
       // live map measurable even before the backdrop image loads.
@@ -242,7 +330,7 @@
         tenantInteractiveFrameDirty[mapType] = !baked
           || Math.abs(Number(baked.lat) - lat) > 1e-6
           || Math.abs(Number(baked.lng) - lng) > 1e-6
-          || Number(baked.zoom) !== Math.round(Number(zoom));
+          || Math.abs(Number(baked.zoom) - normalizeInteractiveZoom(zoom)) >= 0.02;
       }
       if (interactiveFrameSizeChanged(interactiveBakedFrame(mapType), interactiveViewportSize(mapType))) {
         tenantInteractiveFrameDirty[mapType] = true;
@@ -253,6 +341,9 @@
     function unmountInteractiveMap() {
       const holder = document.getElementById('mapLiveView');
       if (holder) holder.style.display = 'none';
+      tenantInteractiveMapReveal = null;
+      tenantInteractiveRevealSequence += 1;
+      setInteractiveMapPreviewHidden(false);
       tenantInteractiveMounted = false;
       tenantInteractiveMapType = null;
     }
@@ -388,7 +479,7 @@
         tenantInteractiveSuppressIdle = null;
         if (Math.abs(Number(expected.lat) - lat) < 1e-6
             && Math.abs(Number(expected.lng) - lng) < 1e-6
-            && Math.round(Number(expected.zoom)) === Math.round(zoom)) return;
+            && Math.abs(normalizeInteractiveZoom(expected.zoom) - normalizeInteractiveZoom(zoom)) < 0.02) return;
       }
       recordInteractiveFrame(mapType, lat, lng, zoom);
     }
@@ -398,15 +489,14 @@
     // approve path can pull the live camera synchronously — idle is debounced
     // by Google, and a click landing first would read stale map_centers.
     function recordInteractiveFrame(mapType, lat, lng, zoom) {
-      const roundedZoom = Math.round(Number.isFinite(zoom) ? zoom : 0);
-      if (!roundedZoom) return;
+      const roundedZoom = normalizeInteractiveZoom(zoom);
       // Idle also fires on tile loads and viewport fits with no gesture at all —
       // a frame identical to what is already recorded is not user intent, so it
       // must not mint a viewport override or flip the dirty flag.
       const recordedCenter = (tenantCreativeImages.map_centers || {})[mapType];
       const recordedZoom = (tenantCreativeImages.map_zooms || {})[mapType];
       const size = interactiveViewportSize(mapType);
-      if (recordedCenter && recordedZoom === roundedZoom
+      if (recordedCenter && Math.abs(Number(recordedZoom) - roundedZoom) < 0.02
           && Math.abs(Number(recordedCenter.lat) - lat) < 1e-6
           && Math.abs(Number(recordedCenter.lng) - lng) < 1e-6
           && !interactiveFrameSizeChanged(recordedCenter, size)
@@ -422,7 +512,7 @@
       // baked record mounts dirty so its next approval re-bakes) — that verdict
       // stands, while a never-generated map has nothing to diverge from.
       const diverged = interactiveFrameSizeChanged(baked, size) || (baked
-        ? (baked.zoom !== roundedZoom
+        ? (Math.abs(Number(baked.zoom) - roundedZoom) >= 0.02
           || Math.abs(Number(baked.lat) - lat) > 1e-6
           || Math.abs(Number(baked.lng) - lng) > 1e-6)
         : (mapGenerated && tenantInteractiveFrameDirty[mapType] === true));
@@ -513,7 +603,7 @@
         tenantInteractiveFrameDirty[mapType] =
           Math.abs(Number(frame.lat) - Number(liveCenter.lat)) > 1e-6
           || Math.abs(Number(frame.lng) - Number(liveCenter.lng)) > 1e-6
-          || Number(frame.zoom) !== Math.round(Number(liveZoom))
+          || Math.abs(Number(frame.zoom) - Number(liveZoom)) >= 0.02
           || interactiveFrameSizeChanged(frame, liveCenter.width && liveCenter.height ? liveCenter : null);
       } else {
         tenantInteractiveFrameDirty[mapType] = false;

@@ -188,7 +188,8 @@ def _overlay_markers(image_path, center_lat, center_lng, zoom, markers_list, siz
         for px, py, marker, is_site in rendered_markers:
             name = marker.get('name') or marker.get('label_text')
             if name and not is_site:
-                _draw_marker_name_label(img, px, py, name, img_w, img_h, occupied_labels)
+                label_text = f"{marker.get('label')} — {name}" if marker.get('label') else name
+                _draw_marker_name_label(img, px, py, label_text, img_w, img_h, occupied_labels)
         for px, py, marker, is_site in rendered_markers:
             _draw_marker_shape(img, px, py, unit, img_h, is_site, label=marker.get('label'))
         img.save(image_path, 'PNG')
@@ -257,8 +258,9 @@ def _draw_catchment_markers(image_path, center_lat, center_lng, zoom, landmarks,
                         preferred_point = (center_x + label_dx, center_y + label_dy)
                 except (TypeError, ValueError):
                     preferred_point = None
+            label_text = f"{marker.get('label')} — {marker['name']}" if marker.get('label') else marker['name']
             label_pixel = _draw_marker_name_label(
-                img, px, py, marker['name'], img_w, img_h, occupied, preferred_point=preferred_point
+                img, px, py, label_text, img_w, img_h, occupied, preferred_point=preferred_point
             )
             item = next((dict(value) for value in drawable if value.get('name') == marker['name']), {'name': marker['name']})
             if label_pixel:
@@ -319,7 +321,7 @@ def classify_landmark_category(types, language='ar'):
     english = _lang_norm(language) == 'en'
     categories = (
         ('Leisure' if english else 'ترفيهي', {'amusement_park', 'aquarium', 'zoo', 'park', 'garden', 'sports_complex', 'golf_course', 'swimming_pool', 'movie_theater', 'performing_arts_theater', 'concert_hall', 'event_venue'}),
-        ('Education' if english else 'تعليمي', {'school', 'university', 'library', 'preschool', 'primary_school', 'secondary_school'}),
+        ('Education' if english else 'تعليمي', {'educational_institution', 'school', 'university', 'library', 'preschool', 'primary_school', 'secondary_school'}),
         ('Health' if english else 'صحي', {'hospital', 'doctor', 'dentist', 'pharmacy', 'veterinary_care'}),
         ('Retail' if english else 'تجاري', {'shopping_mall', 'department_store', 'supermarket', 'market', 'store'}),
         ('Religious' if english else 'ديني', {'mosque', 'church', 'hindu_temple', 'synagogue', 'place_of_worship'}),
@@ -458,7 +460,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
         'sports_complex', 'golf_course', 'swimming_pool',
         'tourist_attraction', 'landmark', 'historical_landmark',
         'cemetery', 'monument', 'civic_center', 'city_hall',
-        'primary_school', 'secondary_school', 'preschool',
+        'educational_institution', 'primary_school', 'secondary_school', 'preschool',
         'movie_theater', 'performing_arts_theater', 'concert_hall',
         'convention_center', 'event_venue', 'wedding_venue',
         'government_office', 'police', 'fire_station',
@@ -557,7 +559,7 @@ def get_nearby_landmarks(lat, lng, radius=1500, keyword=None, max_results=8, inc
                 'category': classify_landmark_category(p.get('types', []), language=language),
                 'rating': p.get('rating', 0),
                 'preferred': is_preferred,
-                'distance_meters': round(distance_meters),
+                'distance_meters': distance_meters,
             })
 
         places.sort(key=lambda x: (not x.get('preferred', False), x.get('distance_meters', float('inf')), -(x.get('rating') or 0)))

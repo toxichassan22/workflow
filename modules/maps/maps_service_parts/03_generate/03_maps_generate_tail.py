@@ -181,7 +181,7 @@ def _merge_landmark_data(landmarks, structured):
             target['lng'] = longitude
         distance_meters = numeric(item.get('distance_meters'))
         if distance_meters is not None:
-            target['distance_meters'] = round(distance_meters)
+            target['distance_meters'] = distance_meters
         if item.get('manual_position'):
             target['manual_position'] = True
     return landmarks
@@ -238,8 +238,8 @@ def _snap_road_landmarks(items, project_data, site_lat, site_lng, language='ar',
             if not (place and place.get('lat') is not None and place.get('lng') is not None):
                 continue
             item['lat'], item['lng'] = place['lat'], place['lng']
-        item['distance_meters'] = round(_distance_meters(
-            site_lat, site_lng, float(item['lat']), float(item['lng'])))
+        item['distance_meters'] = _distance_meters(
+            site_lat, site_lng, float(item['lat']), float(item['lng']))
         moved_m = None
         try:
             moved_m = _distance_meters(float(old_lat), float(old_lng), float(item['lat']), float(item['lng']))

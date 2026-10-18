@@ -658,8 +658,8 @@
           input.dataset.type = f.fieldType;
           if (f.fieldType === 'number') {
             input.addEventListener('blur', () => {
-              if (input.value !== '' && !projectNumberKeepsPrecision(f.fieldKey)) {
-                input.value = String(roundSystemNumber(Number(input.value)));
+              if (input.value !== '') {
+                input.value = String(normalizeSystemNumber(Number(input.value)));
               }
             });
           }
@@ -715,6 +715,7 @@
           if (f.fieldKey === 'site_analysis') {
             input.readOnly = !(tenantProjectData && tenantProjectData.site_analysis);
             input.classList.add('site-analysis-input');
+            input.rows = 8;
           }
 
           if (f.fieldKey === 'location_address') {

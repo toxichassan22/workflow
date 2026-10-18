@@ -86,9 +86,17 @@
       delBtn.addEventListener('click', () => {
         const roadName = nameInput.value.trim();
         tr.remove();
+        updateLocationTableOrderControls(key);
         if (cfg.road && roadName) {
-          tenantProjectData.manual_road_paths = (tenantProjectData.manual_road_paths || [])
-            .filter(item => String(item?.name || '').trim() !== roadName);
+          const roadKey = accessRoadNameKey(roadName);
+          tenantProjectData.manual_road_paths = (Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [])
+            .filter(item => accessRoadNameKey(item?.name) !== roadKey);
+          tenantProjectData.access_roads_data = (Array.isArray(tenantProjectData.access_roads_data) ? tenantProjectData.access_roads_data : [])
+            .filter(item => accessRoadNameKey(item?.name) !== roadKey);
+          if (tenantCreativeImages) {
+            tenantCreativeImages.map_access_roads = (Array.isArray(tenantCreativeImages.map_access_roads) ? tenantCreativeImages.map_access_roads : [])
+              .filter(item => accessRoadNameKey(item?.name) !== roadKey);
+          }
         }
         serializeLocationTable(key);
         scheduleMapTableRecompose(key);
@@ -111,6 +119,22 @@
         placeBtn.textContent = 'تحديد الموقع';
         placeBtn.addEventListener('click', () => startLandmarkPlacement(key, tr));
         actionGroup.appendChild(placeBtn);
+
+        const moveUpBtn = document.createElement('button');
+        moveUpBtn.type = 'button';
+        moveUpBtn.dataset.sectionLockIgnore = '1';
+        moveUpBtn.className = 'btn small ghost lt-move-up';
+        moveUpBtn.textContent = 'أعلى';
+        moveUpBtn.addEventListener('click', () => moveLocationTableRow(key, tr, -1));
+        actionGroup.appendChild(moveUpBtn);
+
+        const moveDownBtn = document.createElement('button');
+        moveDownBtn.type = 'button';
+        moveDownBtn.dataset.sectionLockIgnore = '1';
+        moveDownBtn.className = 'btn small ghost lt-move-down';
+        moveDownBtn.textContent = 'أسفل';
+        moveDownBtn.addEventListener('click', () => moveLocationTableRow(key, tr, 1));
+        actionGroup.appendChild(moveDownBtn);
       }
       actionGroup.appendChild(delBtn);
       delTd.appendChild(actionGroup);
@@ -128,6 +152,36 @@
       if (selectTd) tr.appendChild(selectTd);
       tr.appendChild(delTd);
       tbody.appendChild(tr);
+      updateLocationTableOrderControls(key);
+    }
+
+    function updateLocationTableOrderControls(key) {
+      const table = document.querySelector('#tenantProjectForm table.location-table[data-location-table="' + key + '"]');
+      if (!table) return;
+      const rows = Array.from(table.querySelectorAll('tbody tr'));
+      rows.forEach((row, index) => {
+        const moveUp = row.querySelector('.lt-move-up');
+        const moveDown = row.querySelector('.lt-move-down');
+        if (moveUp) moveUp.disabled = index === 0;
+        if (moveDown) moveDown.disabled = index === rows.length - 1;
+      });
+    }
+
+    function moveLocationTableRow(key, row, direction) {
+      const tbody = row?.parentElement;
+      if (!tbody) return false;
+      const rows = Array.from(tbody.children);
+      const index = rows.indexOf(row);
+      const target = index + Number(direction || 0);
+      if (index < 0 || target < 0 || target >= rows.length) return false;
+      if (target < index) tbody.insertBefore(row, rows[target]);
+      else tbody.insertBefore(rows[target], row);
+      updateLocationTableOrderControls(key);
+      serializeLocationTable(key);
+      scheduleMapTableRecompose(key);
+      releaseLocationSectionApproval();
+      if (typeof triggerAutoSaveDraft === 'function') triggerAutoSaveDraft();
+      return true;
     }
 
     function locationDistanceKmOrBlank(item) {
@@ -135,13 +189,6 @@
       if (Number.isFinite(direct)) return direct;
       const textMatch = String((item && item.distance_text) || '').replace(/,/g, '').match(/(\d+(?:\.\d+)?)/);
       return textMatch ? parseFloat(textMatch[1]) : '';
-    }
-
-    function locationDistanceKmValue(item) {
-      const km = locationDistanceKmOrBlank(item);
-      if (km !== '') return km;
-      const meters = parseFloat(item && item.distance_meters);
-      return Number.isFinite(meters) ? meters / 1000 : Infinity;
     }
 
     function setLocationTableValue(key, value) {
@@ -159,13 +206,7 @@
             : key === 'city_landmarks' ? tenantProjectData.city_landmarks_data : null;
         if (Array.isArray(structured) && structured.length) value = structured;
       }
-      if (Array.isArray(value) && (key === 'nearby_landmarks' || key === 'city_landmarks')) {
-        value = value.slice().sort((a, b) => locationDistanceKmValue(a) - locationDistanceKmValue(b));
-      }
       let rows = parseLocationFieldText(key, value);
-      if (key === 'nearby_landmarks' || key === 'city_landmarks') {
-        rows = rows.slice().sort((a, b) => locationDistanceKmValue(a) - locationDistanceKmValue(b));
-      }
       if (key === 'main_roads') {
         const seen = new Set();
         rows = rows.flatMap(row => normalizeAccessRoadNames([row.name]).map(name => ({ ...row, name })))
@@ -589,10 +630,10 @@
         if (!key || !Array.isArray(road?.points) || road.points.length < 2) return;
         byName.set(key, { ...road, points: road.points.map(point => [Number(point[0]), Number(point[1])]) });
       };
-      const storedRoads = Array.isArray(tenantProjectData.access_roads_data)
-        ? tenantProjectData.access_roads_data
-        : (Array.isArray(tenantCreativeImages.map_access_roads) ? tenantCreativeImages.map_access_roads : []);
-      storedRoads.forEach(add);
+      const projectRoads = Array.isArray(tenantProjectData.access_roads_data) ? tenantProjectData.access_roads_data : [];
+      const creativeRoads = Array.isArray(tenantCreativeImages.map_access_roads) ? tenantCreativeImages.map_access_roads : [];
+      creativeRoads.forEach(add);
+      projectRoads.forEach(add);
       (Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : []).forEach(add);
       const positions = tenantRoadEditMode
         ? tenantRoadEditDraft?.labelPositions || {}
@@ -607,11 +648,13 @@
         // override the stored geometry live, and a road with no stored path
         // still renders once it has two drawn points.
         const drawn = tenantRoadEditMode && Array.isArray(row.points) && row.points.length >= 2 ? row.points : null;
+        if (tenantRoadEditMode && row.pathCleared && !drawn) return null;
         if (!geometry && !drawn) return null;
         return {
           ...(geometry || {}),
           points: drawn || geometry.points,
           name: row.name,
+          path_width_scale: row.path_width_scale || geometry?.path_width_scale || 0.55,
           label_point: positions[row.name] || positions[row.original_name] || geometry?.label_point || null,
           label_scale: sizes[row.name] || sizes[row.original_name] || geometry?.label_scale || 1
         };
@@ -638,6 +681,8 @@
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="clearAccessRoadPathButton" onclick="clearAccessRoadPath()">مسح المسار</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadLabelSize(-0.1)">تصغير الاسم</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadLabelSize(0.1)">تكبير الاسم</button>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadPathWidth(-0.1)">تخفيف سمك المسار</button>' +
+        '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="adjustAccessRoadPathWidth(0.1)">زيادة سمك المسار</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" id="undoAccessRoadEditsButton" onclick="undoAccessRoadEdits()">تراجع</button>' +
         '<button type="button" class="btn primary small" data-section-lock-ignore="1" onclick="confirmAccessRoadEdits()">اعتماد</button>' +
         '<button type="button" class="btn ghost small" data-section-lock-ignore="1" onclick="cancelAccessRoadEdits()">إلغاء</button>';
@@ -646,10 +691,23 @@
     async function startAccessRoadEditMode() {
       if (typeof mapApprovalBlocksEdit === 'function' && mapApprovalBlocksEdit('access')) return;
       if (!openLocationTableMap('access')) return;
+      const storedRoadWidths = [
+        ...(Array.isArray(tenantProjectData.access_roads_data) ? tenantProjectData.access_roads_data : []),
+        ...(Array.isArray(tenantCreativeImages?.map_access_roads) ? tenantCreativeImages.map_access_roads : []),
+        ...(Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [])
+      ];
       tenantLandmarkPlacementTarget = null;
       tenantRoadEditMode = true;
       tenantRoadEditDraft = {
-        rows: accessRoadRows(),
+        rows: accessRoadRows().map(row => {
+          const geometry = storedRoadWidths.find(road => accessRoadNameKey(road?.name) === accessRoadNameKey(row.original_name)
+            || accessRoadNameKey(road?.name) === accessRoadNameKey(row.name));
+          return {
+            ...row,
+            has_stored_path: Array.isArray(geometry?.points) && geometry.points.length >= 2,
+            path_width_scale: row.path_width_scale || geometry?.path_width_scale || 0.55
+          };
+        }),
         labelPositions: JSON.parse(JSON.stringify(tenantProjectData.access_road_label_positions || {})),
         labelSizes: JSON.parse(JSON.stringify(tenantProjectData.access_road_label_sizes || {})),
         newName: ''
@@ -726,11 +784,23 @@
     function clearAccessRoadPath() {
       if (!tenantRoadEditMode || !tenantRoadEditDraft || tenantRoadEditSelectedIndex < 0) return;
       const row = tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex];
-      if (!row || !(Array.isArray(row.points) && row.points.length)) return;
+      if (!row || (!(Array.isArray(row.points) && row.points.length) && !row.has_stored_path)) return;
       pushRoadEditHistory();
       row.points = [];
       row.pathCleared = true;
+      row.has_stored_path = false;
       renderLocationWorkflowState();
+      renderTenantMapPolygonOverlay();
+      updateTenantRoadControls();
+    }
+
+    function adjustAccessRoadPathWidth(delta) {
+      if (!tenantRoadEditMode || !tenantRoadEditDraft) return;
+      const row = tenantRoadEditDraft.rows[tenantRoadEditSelectedIndex];
+      if (!row) return;
+      pushRoadEditHistory();
+      const current = Number(row.path_width_scale || 0.55);
+      row.path_width_scale = Math.max(0.3, Math.min(1.5, Math.round((current + Number(delta || 0)) * 10) / 10));
       renderTenantMapPolygonOverlay();
       updateTenantRoadControls();
     }
@@ -822,10 +892,16 @@
       const renamed = new Map(rows.map(row => [accessRoadNameKey(row.original_name), row.name]));
       const renameGeometry = road => ({ ...road, name: renamed.get(accessRoadNameKey(road?.name)) || road?.name });
       const allowedRoadKeys = new Set(rows.map(row => accessRoadNameKey(row.name)));
+      const clearedRoadKeys = new Set(rows
+        .filter(row => row.pathCleared && !(Array.isArray(row.points) && row.points.length >= 2))
+        .map(row => accessRoadNameKey(row.name)));
       tenantProjectData.access_roads_data = (Array.isArray(tenantProjectData.access_roads_data) ? tenantProjectData.access_roads_data : [])
-        .map(renameGeometry).filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)));
+        .map(renameGeometry).filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name))
+          && !clearedRoadKeys.has(accessRoadNameKey(road?.name)));
+      tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
       tenantProjectData.manual_road_paths = (Array.isArray(tenantProjectData.manual_road_paths) ? tenantProjectData.manual_road_paths : [])
-        .map(renameGeometry).filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name)));
+        .map(renameGeometry).filter(road => allowedRoadKeys.has(accessRoadNameKey(road?.name))
+          && !clearedRoadKeys.has(accessRoadNameKey(road?.name)));
       // Paths sketched during the session commit here: a drawn path replaces
       // the stored manual one for its road, and a cleared sketch drops it.
       // Sketches shorter than two points are ignored so a stray map click can
@@ -836,7 +912,9 @@
         const key = accessRoadNameKey(row.name);
         tenantProjectData.manual_road_paths = tenantProjectData.manual_road_paths
           .filter(road => accessRoadNameKey(road?.name) !== key);
-        if (drawn) tenantProjectData.manual_road_paths.push({ name: row.name, points: drawn });
+        if (drawn) tenantProjectData.manual_road_paths.push({
+          name: row.name, points: drawn, path_width_scale: row.path_width_scale || 0.55
+        });
       });
       tenantProjectData.access_road_label_positions = Object.fromEntries(rows.map(row => {
         const point = tenantRoadEditDraft.labelPositions[row.name] || tenantRoadEditDraft.labelPositions[row.original_name];
@@ -847,7 +925,7 @@
         return size ? [row.name, size] : null;
       }).filter(Boolean));
       tenantProjectData.main_roads = rows.map(row => row.name).join('\n');
-      tenantProjectData.main_roads_data = rows.map(({ original_name, points, pathCleared, ...row }) => row);
+      tenantProjectData.main_roads_data = rows.map(({ original_name, points, pathCleared, has_stored_path, ...row }) => row);
       setLocationTableValue('main_roads', tenantProjectData.main_roads_data);
       tenantRoadEditMode = false;
       tenantRoadEditDraft = null;

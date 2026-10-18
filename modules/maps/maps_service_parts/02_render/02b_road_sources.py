@@ -106,8 +106,8 @@ def _google_directions_route(origin_lat, origin_lng, destination_lat, destinatio
             'coords': coordinates,
             'summary': route.get('summary', ''),
             'distance_meters': distance_meters,
-            'distance_km': round(distance_meters / 1000.0, 1) if distance_meters is not None else None,
-            'duration_min': math.ceil(duration_seconds / 60) if duration_seconds is not None else None,
+            'distance_km': distance_meters / 1000.0 if distance_meters is not None else None,
+            'duration_min': duration_seconds / 60 if duration_seconds is not None else None,
         }
     except Exception as error:
         print(f"[GOOGLE DIRECTIONS ERROR] {error}")
@@ -197,10 +197,10 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
         key = (snapped or {}).get('place_id') or name.casefold()
         distance_meters = route.get('distance_meters')
         if distance_meters is None:
-            distance_meters = round(_distance_meters(route_origin_lat, route_origin_lng, dest_lat, dest_lng))
+            distance_meters = _distance_meters(route_origin_lat, route_origin_lng, dest_lat, dest_lng)
         distance_km = route.get('distance_km')
         if distance_km is None:
-            distance_km = round(distance_meters / 1000.0, 1)
+            distance_km = distance_meters / 1000.0
         duration_min = route.get('duration_min')
         return {
             'name': name,

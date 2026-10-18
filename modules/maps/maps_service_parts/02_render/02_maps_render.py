@@ -71,12 +71,12 @@ def _get_drive_matrix_chunk(origin, destinations, usage_ctx=None, language='ar')
             duration_min = None
             in_traffic = False
             if elem.get('status') == 'OK' and elem.get('duration') and elem.get('distance'):
-                distance_km = round(elem['distance']['value'] / 1000.0, 1)
+                distance_km = elem['distance']['value'] / 1000.0
                 # Prefer the traffic-aware duration; fall back to free-flow.
                 traffic = elem.get('duration_in_traffic') or {}
                 seconds = traffic.get('value') or elem['duration']['value']
                 in_traffic = bool(traffic.get('value'))
-                duration_min = math.ceil(seconds / 60)
+                duration_min = seconds / 60
             # One entry per destination, in order, so callers can zip by index.
             result.append({
                 'name': names[i] if i < len(names) else '',
@@ -252,8 +252,8 @@ def _is_viewport_rectangle(coords):
         return False
     lats = [c[0] for c in coords]
     lngs = [c[1] for c in coords]
-    unique_lats = {round(lat, 5) for lat in lats}
-    unique_lngs = {round(lng, 5) for lng in lngs}
+    unique_lats = set(lats)
+    unique_lngs = set(lngs)
     return len(unique_lats) == 2 and len(unique_lngs) == 2
 
 
@@ -673,7 +673,7 @@ def _draw_site_highlight(image_path, center_lat, center_lng, zoom, area_radius_m
 
         # Priority 1 & 2: Real building polygon
         if auto_detect_polygon and (not polygon_coords or len(polygon_coords) < 3):
-            cache_key = f"{center_lat:.6f},{center_lng:.6f}"
+            cache_key = f"{center_lat},{center_lng}"
             if cache_key in _osm_polygon_cache:
                 osm_poly = _osm_polygon_cache[cache_key]
             else:

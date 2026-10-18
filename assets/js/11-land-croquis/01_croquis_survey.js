@@ -472,7 +472,7 @@
       const hidden = document.getElementById('tenantCoordinatesConfirmed');
       if (hidden) hidden.value = 'true';
       const status = document.getElementById('tenantCoordinatesStatus');
-      if (status) status.innerHTML = '<span>تم اعتماد الإحداثيات:</span> ' + lat.toFixed(6) + ', ' + lng.toFixed(6);
+      if (status) status.innerHTML = '<span>تم اعتماد الإحداثيات:</span> ' + formatExactSystemNumber(lat, false) + ', ' + formatExactSystemNumber(lng, false);
       const button = document.getElementById('confirmTenantCoordinatesButton');
       if (button) { button.textContent = 'تم اعتماد الإحداثيات'; button.classList.add('success'); }
       triggerAutoSaveDraft();
@@ -524,7 +524,7 @@
           const boundaryLabel = data.boundary && data.boundary.status === 'verified_building'
             ? 'تم العثور على حدود مبنى مطابقة.'
             : 'حدود المبنى تحتاج مراجعة.';
-          mapHint.innerHTML = '<span>تم تحديد النقطة من</span> <span>' + sourceLabel + '</span>: ' + Number(data.lat).toFixed(6) + ', ' + Number(data.lng).toFixed(6) + '. <span>' + boundaryLabel + '</span>';
+          mapHint.innerHTML = '<span>تم تحديد النقطة من</span> <span>' + sourceLabel + '</span>: ' + formatExactSystemNumber(Number(data.lat), false) + ', ' + formatExactSystemNumber(Number(data.lng), false) + '. <span>' + boundaryLabel + '</span>';
           mapHint.style.display = 'block';
         }
         // A re-analysis on a different link voids every raster, saved frame and
@@ -694,6 +694,8 @@
       return true;
     }
 
+    let tenantMapPreviewImageLoadId = 0;
+
     function selectMapPreviewView(mapType) {
       const view = MAP_PREVIEW_VIEW_DEFS.find(item => item.mapType === mapType);
       if (!view) return false;
@@ -720,17 +722,29 @@
       const previewBox = document.getElementById('mapPreviewImage');
       const image = previewBox?.querySelector('img');
       if (!url || !previewBox || !image) {
-        if (previewBox) previewBox.style.display = 'none';
+        if (previewBox) { previewBox.style.display = 'none'; previewBox.style.visibility = ''; }
         if (image) image.removeAttribute('src');
         if (typeof unmountInteractiveMap === 'function') unmountInteractiveMap();
         tenantMapPreviewState = null;
         renderTenantMapPolygonOverlay();
         return false;
       }
-      image.onload = () => renderTenantMapPolygonOverlay();
-      image.src = withCacheBust(url);
-      image.alt = view.title;
+      const imageLoadId = ++tenantMapPreviewImageLoadId;
+      const imageUrl = withCacheBust(url).replace(
+        /([?&])t=\d+(?=(&|#|$))/, '$1t=' + (Date.now() + imageLoadId)
+      );
       previewBox.style.display = 'block';
+      previewBox.style.visibility = 'hidden';
+      image.onload = () => {
+        if (imageLoadId !== tenantMapPreviewImageLoadId) return;
+        previewBox.style.visibility = '';
+        renderTenantMapPolygonOverlay();
+      };
+      image.onerror = () => {
+        if (imageLoadId === tenantMapPreviewImageLoadId) previewBox.style.visibility = '';
+      };
+      image.src = imageUrl;
+      image.alt = view.title;
       // Clicks are converted against this state, so it must be the centre the server actually
       // rendered: the plot view is centred on the boundary, not on the site pin. The live map
       // may leave map_centers ahead of the stored raster, so the static fallback reads the
