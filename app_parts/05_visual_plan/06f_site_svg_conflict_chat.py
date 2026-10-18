@@ -66,6 +66,21 @@ def _visual_plan_site_footprint_review_request(message):
     ))
 
 
+def _visual_plan_site_area_calculation_inquiry(message):
+    text = str(message or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
+    text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').lower()
+    asks_calc = any(term in text for term in (
+        'احسب', 'كام', 'كم', 'قد اي', 'قد ايه', 'ارقام', 'حساب', 'صافي', 'كم يتبقى',
+    ))
+    mentions_subject = any(term in text for term in (
+        'ارتداد', 'بصم', 'مساح', 'حرم', 'ارض', 'مبني', 'مباني',
+    ))
+    mentions_direct_metric = any(term in text for term in (
+        'مساحه الارض', 'مساحه البصمه', 'حرم البناء', 'بعد الارتداد', 'بالارتدادات', 'صافي البناء',
+    ))
+    return (asks_calc and mentions_subject) or mentions_direct_metric
+
+
 def _visual_plan_site_area_value_dispute(message):
     text = str(message or '').translate(str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
     text = text.replace('أ', 'ا').replace('إ', 'ا').replace('آ', 'ا').replace('ة', 'ه').lower()
@@ -307,6 +322,20 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
     if parcel_area <= 0:
         parcel_area = visual_plan_geometry.finite_number(contract.get('landArea'))
 
+    buildable_area = 0.0
+    if contract and geometry.get('parcels'):
+        try:
+            for parcel in geometry.get('parcels') or []:
+                polygon = parcel.get('polygon') if isinstance(parcel, dict) else parcel
+                if isinstance(polygon, list) and len(polygon) >= 3:
+                    env = visual_plan_geometry.setback_envelope(polygon, contract.get('setbacks'))
+                    if isinstance(env, list) and len(env) >= 3:
+                        buildable_area += abs(visual_plan_geometry.signed_area(env))
+        except Exception:
+            buildable_area = 0.0
+    if buildable_area <= 0:
+        buildable_area = None
+
     facts = {
         'code': getattr(error, 'code', 'PLANS_COVERAGE_CONFLICT'),
         'message': str(error)[:500],
@@ -325,9 +354,19 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         'financialComponentInputs': component_inputs[:20],
     }
     if is_setback_conflict:
+        effective_parcel = (parcel_area if parcel_area is not None and parcel_area > 0
+                            else visual_plan_geometry.finite_number(contract.get('landArea')))
+        setback_loss = (round(effective_parcel - buildable_area, 2)
+                        if effective_parcel is not None and buildable_area is not None else None)
+        footprint_surplus = (round(buildable_area - required, 2)
+                             if buildable_area is not None and required is not None else None)
         facts.update({
             'setbacks': contract.get('setbacks'),
             'parcelAreaSqm': round(parcel_area, 2) if parcel_area is not None else None,
+            'buildableAreaSqm': round(buildable_area, 2) if buildable_area is not None else None,
+            'setbackDeductionAreaSqm': setback_loss,
+            'footprintSurplusDeficitSqm': footprint_surplus,
+            'footprintFitsNumerically': footprint_surplus is not None and footprint_surplus >= -0.5,
             'directions': contract.get('directions') if isinstance(contract.get('directions'), dict) else {},
         })
     elif is_site_area_conflict:
@@ -369,9 +408,12 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
             'The client supplies the setbacks, land boundaries, and building program; the system is '
             'responsible for placing those items on the land. Never ask the client to arrange or position '
             'buildings. Only the recorded setbacks, surveyed parcel, and approved program may be used. '
-            'Use only the supplied facts and conversation history. '
+            'Use the supplied facts (parcelAreaSqm, buildableAreaSqm, requiredFootprintTotalSqm, setbacks, buildingGroups). '
+            'When the client asks for areas, calculations, or why there is a conflict, cite the exact figures from facts: '
+            'parcel area, net buildable area (حرم البناء), and required footprint total. Never claim you lack numerical '
+            'values when they are provided in facts. '
             'If the client states that setbacks are correct, explain that the issue is not that setbacks '
-            'are wrongly entered, but that the required ground-floor building footprints exceed the '
+            'are wrongly entered, but that the required ground-floor building footprints exceed or conflict with the '
             'buildable envelope remaining after deducting those setbacks. '
             'Offer options to review building footprints (reducing ground-floor footprint and offsetting '
             'with additional floors), review setbacks, or request an automatic placement retry. '
@@ -443,6 +485,7 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
     area_value_dispute = _visual_plan_site_area_value_dispute(message)
     setback_inquiry = _visual_plan_site_setback_inquiry(message)
     footprint_review = _visual_plan_site_footprint_review_request(message)
+    area_calc_inquiry = _visual_plan_site_area_calculation_inquiry(message)
     can_retry_placement = (is_setback_conflict or bool(facts.get('aggregateAreaSufficient'))) and not auto_retry_failed
     placement_retry_request = (
         _visual_plan_site_placement_retry_request(message)
@@ -473,6 +516,49 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         )
         model_question = ''
         parsed = {'reply': model_reply, 'question': model_question, 'choices': []}
+    elif is_setback_conflict and area_calc_inquiry:
+        parcel_area_val = facts.get('parcelAreaSqm') or facts.get('landAreaSqm')
+        buildable_area_val = facts.get('buildableAreaSqm')
+        required_footprint_val = facts.get('requiredFootprintTotalSqm')
+        setbacks = facts.get('setbacks') or {}
+        sb_desc = []
+        sb_map = {'north': 'شمالاً', 'south': 'جنوباً', 'east': 'شرقاً', 'west': 'غرباً'}
+        for k, name in sb_map.items():
+            if setbacks.get(k) is not None:
+                sb_desc.append(f"{setbacks.get(k)}م {name}")
+        sb_text = '، و'.join(sb_desc) if sb_desc else 'المسجلة في المشروع'
+
+        lines = [
+            'حساب المساحات المسجلة والمحتسبة هندسياً بالمشروع:',
+            f'• مساحة الأرض الإجمالية: {_visual_plan_site_area_text(parcel_area_val)} م².',
+        ]
+        if setbacks:
+            lines.append(f'• الارتدادات المطبقة: ({sb_text}).')
+        if buildable_area_val is not None:
+            deduction = facts.get('setbackDeductionAreaSqm')
+            deduction_text = f' (المقتطع للارتدادات: {_visual_plan_site_area_text(deduction)} م²)' if deduction else ''
+            lines.append(f'• المساحة الصافية المتاحة للبناء داخل الارتدادات (حرم البناء): {_visual_plan_site_area_text(buildable_area_val)} م²{deduction_text}.')
+        if required_footprint_val is not None:
+            lines.append(f'• إجمالي مساحة بصمات المباني المطلوبة في الدور الأرضي: {_visual_plan_site_area_text(required_footprint_val)} م².')
+
+        if buildable_area_val is not None and required_footprint_val is not None:
+            if required_footprint_val > buildable_area_val:
+                deficit = required_footprint_val - buildable_area_val
+                lines.append(
+                    f'السبب الهندسي للتعارض: بصمات المباني المطلوبة ({_visual_plan_site_area_text(required_footprint_val)} م²) '
+                    f'تتجاوز المساحة الصافية لحرم البناء ({_visual_plan_site_area_text(buildable_area_val)} م²) '
+                    f'بمقدار {_visual_plan_site_area_text(deficit)} م²؛ لذلك لا يمكن وضع المباني بالكامل داخل الارتدادات دون تقليص بصمة الدور الأرضي أو مراجعة الارتدادات.'
+                )
+            else:
+                surplus = buildable_area_val - required_footprint_val
+                lines.append(
+                    f'السبب الهندسي للتعارض: مجموع المساحات حسابياً يتيح فائضاً قدره {_visual_plan_site_area_text(surplus)} م²، '
+                    f'ولكن التعارض ناتج عن أبعاد وشكل البصمات (الطول والعرض أو التوجيه) التي تصطدم بخطوط الارتدادات عند محاولة توقيعها هندسياً على قطعة الأرض.'
+                )
+        model_reply = '\n'.join(lines)
+        model_question = 'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟'
+        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
     elif is_setback_conflict and setback_inquiry:
         setbacks = facts.get('setbacks') or {}
         sb_desc = []

@@ -299,4 +299,76 @@ class VisualPlanContractTestsPart06(VisualPlanContractBase):
         self.assertIn('قيم الارتدادات المسجلة متعارضة', review['checks'][0]['detail'])
         self.assertEqual(frontage['status'], 'unresolved')
 
+    def test_setback_area_calculation_inquiry_returns_exact_numerical_breakdown(self):
+        module = self.application_module
+        # Land: 40x25 = 1000 sqm rectangle
+        # Setbacks: 3m north, 3m south, 5m east, 3m west
+        # Buildable rectangle: (40 - 5 - 3) = 32m width; (25 - 3 - 3) = 19m height.
+        # Buildable area = 32 * 19 = 608 sqm.
+        contract = {
+            'landArea': 1000,
+            'coverageRatio': 70,
+            'setbacks': {'north': 3.0, 'south': 3.0, 'east': 5.0, 'west': 3.0},
+            'geometry': {'parcels': [{'polygon': [[0, 0], [40, 0], [40, 25], [0, 25]]}]},
+            'distribution': {'rows': []},
+        }
+        context = {'components': []}
+        # Required footprint = 1040 sqm, which exceeds 608 sqm!
+        program = {'buildings': [{'id': 'b1', 'name': 'Tower', 'footprintArea': 1040}], 'siteItems': []}
+        error = module.visual_plan_geometry.PlanGeometryError(
+            'المبنى «Tower» (1040 م²) لا تتسع داخل أي جزء متبقٍ من منطقة البناء بعد الارتدادات المسجلة.',
+            'PLANS_SETBACK_CONFLICT')
+        data = {
+            'message': 'طيب احسبلي كده المساحه بالارتدادات كام ومساحه البصمه كام',
+            'plansWorkflow': {'siteAssistant': {'turns': []}},
+        }
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            with patch.object(module, '_visual_plan_site_packet', side_effect=error), \
+                    patch.object(module, '_visual_plan_contract', return_value=(contract, context)), \
+                    patch.object(module, '_visual_plan_program', return_value=program), \
+                    patch.object(module, '_visual_plan_input_signature', return_value='setback-conflict'):
+                result, status = module._visual_plan_site_assistant_execute(data, 'chat')
+
+        self.assertEqual(status, 200)
+        self.assertTrue(result['success'])
+        reply = result.get('reply') or ''
+        self.assertIn('حساب المساحات المسجلة والمحتسبة هندسياً', reply)
+        self.assertIn('1,000', reply)  # Total land area
+        self.assertIn('608', reply)    # Net buildable area
+        self.assertIn('1,040', reply)  # Required footprint
+        self.assertIn('تتجاوز', reply)
+        self.assertNotIn('لا تتوفر لدي', reply)
+        self.assertTrue(any('مراجعة مساحات بصمات المباني' in c for c in result.get('choices') or []))
+
+    def test_setback_facts_contain_buildable_envelope_area_and_deduction(self):
+        module = self.application_module
+        contract = {
+            'landArea': 1000,
+            'coverageRatio': 70,
+            'setbacks': {'north': 3.0, 'south': 3.0, 'east': 5.0, 'west': 3.0},
+            'geometry': {'parcels': [{'polygon': [[0, 0], [40, 0], [40, 25], [0, 25]]}]},
+            'distribution': {'rows': []},
+        }
+        context = {'components': []}
+        program = {'buildings': [{'id': 'b1', 'name': 'Tower', 'footprintArea': 500}], 'siteItems': []}
+        error = module.visual_plan_geometry.PlanGeometryError('تجاوز الارتداد', 'PLANS_SETBACK_CONFLICT')
+        data = {
+            'message': 'كم المساحة المتبقية بعد الارتداد',
+            'plansWorkflow': {'siteAssistant': {'turns': []}},
+        }
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            with patch.object(module, '_visual_plan_site_packet', side_effect=error), \
+                    patch.object(module, '_visual_plan_contract', return_value=(contract, context)), \
+                    patch.object(module, '_visual_plan_program', return_value=program), \
+                    patch.object(module, '_visual_plan_input_signature', return_value='setback-conflict'):
+                result, status = module._visual_plan_site_assistant_execute(data, 'chat')
+
+        self.assertEqual(status, 200)
+        reply = result.get('reply') or ''
+        self.assertIn('608', reply)
+        self.assertIn('500', reply)
+
+
 

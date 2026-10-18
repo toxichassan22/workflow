@@ -319,10 +319,12 @@ def buildable_envelopes(contract):
     layout model and to the deterministic fallback so footprints start inside
     the legal zone instead of discovering it by rejection."""
     envelopes = []
-    for parcel in contract['geometry']['parcels']:
-        envelope = setback_envelope(parcel['polygon'], contract.get('setbacks'))
+    for idx, parcel in enumerate(contract['geometry']['parcels']):
+        polygon = parcel.get('polygon') if isinstance(parcel, dict) else parcel
+        envelope = setback_envelope(polygon, contract.get('setbacks'))
         if len(envelope) >= 3:
-            envelopes.append({'parcelId': parcel['id'], 'polygon': envelope})
+            pid = parcel.get('id', f'parcel_{idx + 1}') if isinstance(parcel, dict) else f'parcel_{idx + 1}'
+            envelopes.append({'parcelId': pid, 'polygon': envelope})
     return envelopes
 
 
