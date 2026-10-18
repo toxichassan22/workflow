@@ -70,6 +70,8 @@ function fixture() {
     marketSummaryChatLog: { scrollTop: 0, scrollHeight: 10 },
     marketDisclaimer: { value: '' },
     marketCompetitorScopeMode: { value: 'district' },
+    marketCompetitorRadius: { value: '10' },
+    marketCompetitorRadiusCustomKm: { value: '' },
     marketComparisonTypes: { querySelectorAll: () => [] },
     marketDataPeriod: { value: '12m' },
     marketDataPeriodFrom: { value: '' },
@@ -143,17 +145,25 @@ function postCount(context, endpoint) {
 test('market study separates competitors and market into accessible tabs', () => {
   const ui = fs.readFileSync(
     path.join(root, 'assets/js/04a-market-section.js'), 'utf8');
+  const markupStart = ui.indexOf('body.innerHTML = `');
+  const markupEnd = ui.indexOf('`;', markupStart);
+  const markup = ui.slice(markupStart, markupEnd);
   assert.match(ui, /data-market-study-tab="competitors"[^>]*>المنافسون<\/button>/);
   assert.match(ui, /data-market-study-tab="market"[^>]*>السوق<\/button>/);
   assert.match(ui, /data-market-study-panel="competitors"/);
   assert.match(ui, /data-market-study-panel="market"/);
   assert.match(ui, /id="marketCompetitorScopeMode"/);
+  assert.match(ui, /<option value="distance">المسافة<\/option>/);
+  assert.match(ui, /id="marketCompetitorRadius"/);
+  assert.match(ui, /id="marketCompetitorRadiusCustomKm"/);
+  const marketPanelStart = markup.indexOf('data-market-study-panel="market"');
+  assert.ok(markup.indexOf('marketCompetitorRadius') < marketPanelStart);
+  assert.equal(markup.indexOf('marketCompetitorRadius', marketPanelStart), -1);
   assert.match(ui, /id="marketComparisonTypes"/);
   assert.match(ui, /id="marketAddComparisonTypeBtn"/);
   assert.match(ui, /id="marketCompetitorTypeTabs"/);
   assert.match(ui, /data-comparison-field="stars"/);
   assert.match(ui, /إضافة نوع مقارنة/);
-  assert.doesNotMatch(ui, /marketCompetitorRadius/);
   assert.doesNotMatch(source, /outOfRadiusCount/);
 
   const { context } = fixture();

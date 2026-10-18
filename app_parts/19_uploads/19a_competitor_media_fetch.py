@@ -455,17 +455,19 @@ def _drop_foreign_competitor_urls(row):
 def _drop_banned_competitor_listing_urls(row):
     """Remove banned classifieds/booking links from a competitor row.
 
-    The owner rule: aqar.fm is the only classifieds portal, trivago only on
-    hotel-operation rows. Banned links leave source_urls/field_sources/
+    The owner rule: aqar.fm is the only classifieds portal for non-hotels;
+    Booking.com is the only allowed source host for hotels. Banned links leave source_urls/field_sources/
     source_url/logo_source_url — and a price whose evidence was all banned
     goes back to empty rather than standing on a link the rules reject.
     """
     if not isinstance(row, dict):
         return row
     operation = row.get('operation_type')
+    project_type = row.get('project_type')
 
     def _keep(url):
-        return not market_study.banned_competitor_listing_host(url, operation)
+        return not market_study.banned_competitor_listing_host(
+            url, operation, project_type)
 
     field_sources = market_study.competitor_field_sources(row)
     price_urls_before = [

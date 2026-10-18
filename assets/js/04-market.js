@@ -2,8 +2,12 @@
 
     function collectMarketStudyFromDom() {
       const state = getMarketStudyState();
+      const competitorRadius = document.getElementById('marketCompetitorRadius');
+      const competitorRadiusCustom = document.getElementById('marketCompetitorRadiusCustomKm');
       state.competitor_scope = {
-        mode: document.getElementById('marketCompetitorScopeMode')?.value === 'city' ? 'city' : 'district'
+        mode: document.getElementById('marketCompetitorScopeMode')?.value || 'district',
+        radius: competitorRadius?.value || '10',
+        radius_custom_km: competitorRadiusCustom?.value || ''
       };
       state.comparison_types = typeof collectMarketComparisonTypes === 'function'
         ? collectMarketComparisonTypes() : (state.comparison_types || []);
@@ -40,6 +44,12 @@
       const period = document.getElementById('marketDataPeriod')?.value;
       const periodWrap = document.getElementById('marketCustomPeriodWrap');
       if (periodWrap) periodWrap.hidden = period !== 'custom';
+      const scopeMode = document.getElementById('marketCompetitorScopeMode')?.value || 'district';
+      const radius = document.getElementById('marketCompetitorRadius')?.value || '10';
+      const radiusWrap = document.getElementById('marketCompetitorRadiusWrap');
+      const customRadiusWrap = document.getElementById('marketCompetitorRadiusCustomWrap');
+      if (radiusWrap) radiusWrap.hidden = scopeMode !== 'distance';
+      if (customRadiusWrap) customRadiusWrap.hidden = scopeMode !== 'distance' || radius !== 'custom';
       syncMarketSummaryScopeUI();
     }
 

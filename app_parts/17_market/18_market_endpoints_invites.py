@@ -273,6 +273,36 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                             evidence_pool=None, deadline=None, session=None):
     report = progress if callable(progress) else (lambda *_args: None)
     payload = _prepare_market_payload(data, tenant_id)
+    raw_scope = (data or {}).get('competitorScope') or (data or {}).get('competitor_scope')
+    if not raw_scope:
+        raw_radius = ((data or {}).get('competitorRadius')
+                      or (data or {}).get('competitor_radius'))
+        if raw_radius:
+            raw_scope = {
+                'mode': 'city' if str(raw_radius).strip().lower() == 'city' else 'distance',
+                'radius': raw_radius,
+                'radius_custom_km': ((data or {}).get('competitorRadiusCustomKm')
+                                     or (data or {}).get('competitor_radius_custom_km')),
+            }
+    competitor_scope = market_study.normalize_competitor_scope(raw_scope)
+    if competitor_scope.get('mode') == 'distance':
+        project_data = payload.get('projectData') or payload.get('project_data') or {}
+        if not isinstance(project_data, dict):
+            project_data = {}
+        origin_lat = next((value for value in (
+            payload.get('location_lat'), payload.get('locationLat'),
+            project_data.get('location_lat'), project_data.get('locationLat'),
+            project_data.get('lat'), project_data.get('latitude'))
+            if value is not None and str(value).strip()), None)
+        origin_lng = next((value for value in (
+            payload.get('location_lng'), payload.get('locationLng'),
+            project_data.get('location_lng'), project_data.get('locationLng'),
+            project_data.get('lng'), project_data.get('longitude'))
+            if value is not None and str(value).strip()), None)
+        if origin_lat is not None and origin_lng is not None:
+            competitor_scope['origin_lat'] = origin_lat
+            competitor_scope['origin_lng'] = origin_lng
+    payload['competitorScope'] = competitor_scope
     offer_lang = slide_engine.resolve_offer_lang(data)
     axes = market_study.project_competitor_axes(payload)
     if not axes or not any(axis.get('explicit') for axis in axes):
@@ -416,6 +446,12 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         target_label = market_study.benchmark_axis_label(target, offer_lang)
         priority = (f'أولوية هذه الجولة اختيار العميل «{target_label}» فقط. '
                     'لا تضف أنواعًا أو عمليات أخرى.')
+        hotel_source_rule = (
+            'لأن هذا محور فندقي، استخدم صفحات Booking.com فقط ولا تضع روابط فنادق من أي نطاق آخر. '
+            if target.get('type') == 'hotel' else '')
+        distance_field = (
+            ', "distance_km":"المسافة الموثقة من موقع المشروع بالكيلومتر"'
+            if payload.get('competitorScope', {}).get('mode') == 'distance' else '')
         if _pool_covers_angle(evidence_pool, angle):
             # The corpus already holds this angle — the same query ran before
             # or stored pages carry its tokens, so a fresh browse call would
@@ -439,10 +475,11 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             + (priority + '\n' if priority else '')
             + (f'قيم benchmarks المسموحة حصرًا: {axis_label_list}.\n'
                if needs_benchmarks else '')
+            + hotel_source_rule
             + 'أعد JSON فقط: {"competitors":[{"name":"","city":"انسخ المدينة من بيانات المشروع حرفيًا",'
               '"district":"","hotel_stars":"",'
               '"benchmarks":[],"operation_type":"","price_type":"","price_currency":"",'
-              '"price":"","source_urls":[]}]} '
+              '"price":"","source_urls":[]' + distance_field + '}]} '
               'مع بقية الحقول المعتادة عند توفرها.'
               + (' Write every field value in English using the allowed English enum '
                  'values (status: Operating/Under Construction/Off-Plan; classification: '
@@ -536,6 +573,10 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         merged, payload, data, tenant_id=tenant_id, progress=report,
         citation_pages=evidence_pages, evidence_pool=evidence_pool,
         deadline=deadline, session=session)
+    for row in merged:
+        market_study.canonicalize_competitor_source_urls(row)
+        _drop_foreign_competitor_urls(row)
+        _drop_banned_competitor_listing_urls(row)
     report(93, 'إعداد جدول المصادر والتحذيرات...')
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))

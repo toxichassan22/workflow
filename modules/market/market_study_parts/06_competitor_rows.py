@@ -6,6 +6,54 @@
 # namespace, so helpers here call the earlier parts' functions unchanged.
 # ---------------------------------------------------------------------------
 
+def _competitor_price_in_sar(values, raw_currency, price_cache):
+    """Return price values in SAR while preserving the printed source values."""
+    from numeric_precision import format_precise_number
+
+    amounts = {key: _clean_numeric(values.get(key)) for key in (
+        'price_value', 'price_from', 'price_to')}
+    has_amount = any(amounts.values())
+    cache = dict(price_cache) if isinstance(price_cache, dict) else {}
+    currency = _canonical_price_currency(raw_currency)
+    if not has_amount:
+        return amounts, currency, cache, ''
+    if not raw_currency:
+        return amounts, 'SAR', cache, ''
+    if not currency:
+        rate = None
+    elif currency == 'SAR':
+        return amounts, 'SAR', cache, ''
+    else:
+        rate = price_fx_to_sar(currency)
+    if not rate:
+        cache.update({
+            'original_price_value': amounts['price_value'],
+            'original_price_from': amounts['price_from'],
+            'original_price_to': amounts['price_to'],
+            'original_currency': str(raw_currency).strip(),
+        })
+        return {key: '' for key in amounts}, 'SAR', cache, 'missing_fx_rate'
+
+    if cache.get('original_currency') != currency:
+        cache.update({
+            'original_price_value': amounts['price_value'],
+            'original_price_from': amounts['price_from'],
+            'original_price_to': amounts['price_to'],
+            'original_currency': currency,
+        })
+    converted = {}
+    for key, amount in amounts.items():
+        if not amount:
+            converted[key] = ''
+            continue
+        try:
+            converted[key] = format_precise_number(
+                Decimal(amount) * Decimal(str(rate)), grouped=False)
+        except (InvalidOperation, TypeError, ValueError):
+            converted[key] = ''
+    return converted, 'SAR', cache, ''
+
+
 def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
     if not isinstance(row, dict):
         return None
@@ -38,15 +86,21 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         price_payload.get('to'), price_payload.get('price_to'), price_payload.get('priceTo'),
         price_payload.get('إلى'), price_payload.get('الى'), price_payload.get('max'), price_payload.get('maximum'),
     )
-    price_value = _clean_numeric(price_value)
-    price_from = _clean_numeric(price_from)
-    price_to = _clean_numeric(price_to)
-    price_currency = _canonical_price_currency(_first_nonempty(
+    raw_price_currency = _first_nonempty(
         row.get('price_currency'), row.get('priceCurrency'), row.get('currency'),
         row.get('العملة'), row.get('عملة السعر'),
         price_payload.get('currency'), price_payload.get('price_currency'),
         price_payload.get('priceCurrency'), price_payload.get('العملة'),
-    ))
+    )
+    price_cache, conversion_error = {}, ''
+    price_values, price_currency, price_cache, conversion_error = _competitor_price_in_sar(
+        {'price_value': price_value, 'price_from': price_from, 'price_to': price_to},
+        raw_price_currency,
+        row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {},
+    )
+    price_value = price_values['price_value']
+    price_from = price_values['price_from']
+    price_to = price_values['price_to']
     area_cache = row.get('area_cache') if isinstance(row.get('area_cache'), dict) else {}
     area_sqm = _clean_numeric(_first_nonempty(
         row.get('area_sqm'), row.get('areaSqm'), row.get('area'), row.get('المساحة'), area_cache.get('area_sqm')))
@@ -130,7 +184,7 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'price_from': price_from,
         'price_to': price_to,
         'price_currency': price_currency,
-        'price_cache': row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {},
+        'price_cache': price_cache,
         'source': _norm(row.get('source') or row.get('source_name') or row.get('sourceName')),
         'source_url': source_url,
         'source_urls': source_urls,
@@ -141,6 +195,8 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'verify_provider_error': _norm(row.get('verify_provider_error') or row.get('verifyProviderError')),
         'row_source': _norm(row.get('row_source') or row.get('rowSource')) or fallback_source,
     }
+    if conversion_error:
+        result['price_conversion_error'] = conversion_error
     return result
 
 

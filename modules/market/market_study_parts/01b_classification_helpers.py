@@ -733,8 +733,8 @@ def _source_host(url):
 
 
 # Classifieds/booking portals banned as competitor evidence. Aqar is the only
-# classifieds portal for residential/commercial rows; Booking.com is allowed
-# for hotel rows alone. Every other portal link is stripped from the row.
+# classifieds portal for residential/commercial rows; Booking.com is the only
+# source host allowed for hotel rows.
 _BANNED_LISTING_HOST_TOKENS = (
     'bayut.', 'wasalt.', 'dealapp.', 'dealmap', 'dubizzle', 'propertyfinder',
     'opensooq', 'haraj', 'lamudi', 'exxl', 'estater', 'muqawil', 'eqqar',
@@ -760,20 +760,19 @@ def _banned_listing_host_token(host, token):
     return token in host
 
 
-def banned_competitor_listing_host(url, operation=''):
-    """True when a URL lives on a banned classifieds/booking portal.
-
-    aqar.fm passes for every operation; Booking.com passes only on hotel rows.
-    Foreign-market pages are the separate concern of
-    _foreign_market_host — this list is the Saudi-market complement.
-    """
+def banned_competitor_listing_host(url, operation='', project_type=''):
+    """True when a URL is not allowed as a competitor source for this operation."""
     host = _source_host(url)
     if not host:
         return False
-    if any(_banned_listing_host_token(host, token)
-           for token in _HOTEL_LISTING_HOST_TOKENS):
-        op = _fold_choice(operation)
-        return 'فندقي' not in op and 'hotel' not in op
+    op = _fold_choice(f'{operation or ""} {project_type or ""}')
+    hotel = any(token in op for token in ('فندقي', 'فندق', 'hotel', 'hospitality'))
+    is_booking = any(_banned_listing_host_token(host, token)
+                     for token in _HOTEL_LISTING_HOST_TOKENS)
+    if hotel:
+        return not is_booking
+    if is_booking:
+        return True
     return any(_banned_listing_host_token(host, token)
                for token in _BANNED_LISTING_HOST_TOKENS)
 

@@ -36,7 +36,21 @@
               <select id="marketCompetitorScopeMode">
                 <option value="district" selected>الحي</option>
                 <option value="city">المدينة</option>
+                <option value="distance">المسافة</option>
               </select>
+            </div>
+            <div id="marketCompetitorRadiusWrap" hidden>
+              <label>مسافة البحث</label>
+              <select id="marketCompetitorRadius">
+                <option value="3">3 كم</option>
+                <option value="5">5 كم</option>
+                <option value="10" selected>10 كم</option>
+                <option value="custom">مسافة مخصصة</option>
+              </select>
+            </div>
+            <div id="marketCompetitorRadiusCustomWrap" hidden>
+              <label>المسافة المخصصة (كم)</label>
+              <input id="marketCompetitorRadiusCustomKm" type="number" min="0.1" max="100" step="0.1" inputmode="decimal">
             </div>
             <div><label>فترة البيانات</label>
               <select id="marketDataPeriod">
@@ -152,13 +166,13 @@
           '<textarea id="marketSwot_' + item.key + '" rows="4"></textarea></div>'
         ).join('');
       }
-      ['marketCompetitorScopeMode', 'marketDataPeriod'].forEach(id => {
+      ['marketCompetitorScopeMode', 'marketCompetitorRadius', 'marketDataPeriod'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', () => {
           updateMarketStudyFieldVisibility();
           persistMarketStudyFromDom();
         });
       });
-      ['marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
+      ['marketCompetitorRadiusCustomKm', 'marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
         .forEach(id => document.getElementById(id)?.addEventListener('input', persistMarketStudyFromDom));
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
         document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);

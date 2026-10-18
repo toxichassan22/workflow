@@ -143,11 +143,62 @@ class BenchmarkAxesTests(unittest.TestCase):
         self.assertIn('لا تضف نوعًا أو عملية أو تصنيف نجوم غير مختار', prompt)
         self.assertIn('حي الروضة في جدة', prompt)
         self.assertIn('Booking.com', prompt)
+        self.assertIn('صفحات Booking.com فقط', prompt)
+        self.assertIn('النظام يحول كل الأسعار إلى الريال', prompt)
         self.assertIn('inspect_page', prompt)
         self.assertIn('type_text', prompt)
         self.assertIn('click_element', prompt)
         self.assertIn('انسخ المدينة كما وردت في بيانات المشروع دون ترجمة', prompt)
         self.assertIn('"benchmarks"', prompt)
+
+    def test_distance_scope_normalizes_and_filters_competitors(self):
+        scope = market_study.normalize_competitor_scope({
+            'mode': 'distance', 'radius': 'custom', 'radius_custom_km': '3.5'})
+        self.assertEqual(scope, {'mode': 'distance', 'radius_km': 3.5})
+        self.assertIn('3.5 كم', market_study.competitor_scope_text({
+            'competitorScope': scope, 'city': 'جدة', 'district': 'الروضة'}))
+
+        axis = market_study.normalize_comparison_types(
+            [{'type': 'residential', 'operation': 'sale'}])
+        rows = [
+            {'name': 'داخل المسافة', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'distance_km': '3.5'},
+            {'name': 'خارج المسافة', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'distance_km': '3.6'},
+            {'name': 'مسافة غير موثقة', 'project_type': 'سكني', 'operation_type': 'بيع'},
+        ]
+        accepted = market_study.filter_and_cap_competitors(
+            rows, axis, scope=scope, city='جدة', district='الروضة')
+        self.assertEqual([row['name'] for row in accepted], ['داخل المسافة'])
+
+    def test_distance_scope_calculates_from_verified_coordinates(self):
+        scope = {'mode': 'distance', 'radius_km': 5,
+                 'origin_lat': 24.0, 'origin_lng': 46.0}
+        nearby = {'lat': 24.03, 'lng': 46.0}
+        distant = {'lat': 24.06, 'lng': 46.0}
+        self.assertTrue(market_study.competitor_matches_location_scope(
+            nearby, scope, city='الرياض', district='النرجس'))
+        self.assertFalse(market_study.competitor_matches_location_scope(
+            distant, scope, city='الرياض', district='النرجس'))
+
+    def test_competitor_normalization_converts_foreign_prices_to_sar(self):
+        with patch.object(market_study, '_live_fx_rates', return_value={}):
+            row = market_study.normalize_competitor_row({
+                'name': 'منافس أوروبي', 'operation_type': 'بيع', 'price_value': '1000',
+                'price_currency': 'EUR'})
+        self.assertEqual(row['price_currency'], 'SAR')
+        self.assertEqual(row['price_value'], '4050')
+        self.assertEqual(row['price_cache']['original_price_value'], '1000')
+        self.assertEqual(row['price_cache']['original_currency'], 'EUR')
+
+    def test_competitor_normalization_hides_prices_without_an_fx_rate(self):
+        with patch.object(market_study, '_live_fx_rates', return_value={}):
+            row = market_study.normalize_competitor_row({
+                'name': 'منافس بعملة غير مدعومة', 'operation_type': 'بيع',
+                'price_value': '1000', 'price_currency': 'XYZ'})
+        self.assertEqual(row['price_currency'], 'SAR')
+        self.assertEqual(row['price_value'], '')
+        self.assertEqual(row['price_conversion_error'], 'missing_fx_rate')
 
     def test_rent_operation_matches_arabic_and_english_values(self):
         axis = market_study.normalize_comparison_types([
@@ -372,6 +423,48 @@ class BenchmarkExpansionTests(unittest.TestCase):
         self.assertTrue(result['success'], result)
         self.assertEqual(len(calls), 1)
         self.assertEqual(len(result['competitors']), 10)
+
+    def test_distance_scope_reaches_search_and_drops_out_of_radius_rows(self):
+        module = self.application_module
+        rows = [
+            {'name': f'منافس داخل {index}', 'project_type': 'سكني',
+             'operation_type': 'بيع', 'city': 'جدة', 'district': 'الروضة',
+             'lat': '24.036', 'lng': '46.0', 'benchmarks': ['سكني - بيع'],
+             'source_urls': [f'https://developer.example/project-{index}']}
+            for index in range(4)
+        ] + [{
+            'name': 'منافس خارج المسافة', 'project_type': 'سكني',
+            'operation_type': 'بيع', 'city': 'جدة', 'district': 'الروضة',
+            'lat': '24.054', 'lng': '46.0', 'benchmarks': ['سكني - بيع'],
+            'source_urls': ['https://developer.example/outside'],
+        }]
+        calls = []
+
+        def fake_call(_system_prompt, user_prompt, *args, **kwargs):
+            calls.append(user_prompt)
+            return self._response(rows)
+
+        payload = {
+            'projectType': 'سكني', 'city': 'جدة', 'district': 'الروضة',
+            'location_lat': '24.0', 'location_lng': '46.0',
+            'competitorScope': {'mode': 'distance', 'radius': '5'},
+            'comparisonTypes': [{'type': 'residential', 'operation': 'sale'}],
+            'mode': 'generate', 'competitors': [],
+        }
+        with self.app.app_context(), \
+                patch.object(module, '_run_market_source_plan', return_value=None), \
+                patch.object(module, '_browse_agent_call', side_effect=fake_call), \
+                patch.object(module, '_pool_covers_angle', return_value=True), \
+                patch.object(module, '_verify_competitor_rows', return_value=None), \
+                patch.object(module, '_verify_market_urls', return_value=set()), \
+                patch.object(module, '_auto_import_competitor_logos', return_value=None):
+            result = module._execute_market_competitors(payload)
+
+        self.assertTrue(calls)
+        self.assertIn('ضمن مسافة 5 كم', calls[0])
+        self.assertEqual(len(result['competitors']), 4)
+        self.assertFalse(any(row['name'] == 'منافس خارج المسافة'
+                             for row in result['competitors']))
 
 
 if __name__ == '__main__':

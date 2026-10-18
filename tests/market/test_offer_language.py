@@ -399,14 +399,14 @@ class TextModuleTests(unittest.TestCase):
                    'city': 'Jeddah', 'competitorRadius': '10'}
         ar_prompt = market_study.build_summary_user_prompt(payload, [])
         en_prompt = market_study.build_summary_user_prompt(payload, [], offer_lang='en')
-        self.assertIn('فقرة عربية واحدة', ar_prompt)
+        self.assertIn('فقرة تحليل سوق متماسكة ومهنية', ar_prompt)
         ar_system = market_study.build_consultant_system_prompt()
         en_system = market_study.build_consultant_system_prompt(offer_lang='en')
         self.assertNotIn('English paragraph', ar_system)
-        self.assertIn('English paragraph', en_system)
-        self.assertIn('فقرة عربية واحدة', ar_system)
+        self.assertIn('English executive paragraph', en_system)
+        self.assertIn('فقرة تنفيذية عربية واحدة', ar_system)
         self.assertNotIn('فقرة عربية واحدة', en_system)
-        self.assertIn('English paragraph', en_prompt)
+        self.assertIn('One cohesive professional market analysis paragraph', en_prompt)
         self.assertNotIn('فقرة عربية واحدة', en_prompt)
 
     def test_market_competitors_prompt_unchanged_by_default(self):

@@ -458,15 +458,46 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
     )
     scope = payload.get('competitorScope') or payload.get('competitor_scope') or {}
     scope = scope if isinstance(scope, dict) else {}
-    scope_mode = scope.get('mode') if scope.get('mode') in ('district', 'city') else 'district'
+    scope_mode = (scope.get('mode')
+                  if scope.get('mode') in ('district', 'city', 'distance') else 'district')
     city_name = _norm(payload.get('city'))
     district_name = _norm(payload.get('district'))
-    if en:
+    if scope_mode == 'distance':
+        radius = scope.get('radius_km') or scope.get('radiusKm') or DEFAULT_COMPETITOR_RADIUS_KM
+        try:
+            radius = float(radius)
+        except (TypeError, ValueError):
+            radius = float(DEFAULT_COMPETITOR_RADIUS_KM)
+        scope_label = (f'within {radius:g} km of the project site'
+                       if en else f'ضمن مسافة {radius:g} كم من موقع المشروع')
+    elif en:
         scope_label = (f'the whole city of {city_name}' if scope_mode == 'city'
                        else f'district {district_name} in {city_name}')
     else:
         scope_label = ('كامل المدينة ' + city_name if scope_mode == 'city'
                        else 'حي ' + district_name + ' في ' + city_name)
+    distance_scope_rule = ''
+    if scope_mode == 'distance':
+        distance_scope_rule = (
+            'In distance mode, include only competitors within the selected radius '
+            'from the project site. Never guess coordinates or distance: the system '
+            'calculates straight-line distance when verified project and competitor '
+            'coordinates are available; otherwise provide a sourced distance_km and '
+            'exclude rows whose distance cannot be verified. '
+            if en else
+            'في نمط المسافة لا تُدرج إلا منافسًا ضمن المسافة المحددة من موقع المشروع. '
+            'لا تخمّن الإحداثيات أو المسافة: يحسب النظام المسافة المستقيمة عند توفر '
+            'إحداثيات موثقة لموقع المشروع والمنافس؛ وإلا أعد distance_km موثقًا، '
+            'واستبعد الصف الذي لا يمكن التحقق من مسافته. '
+        )
+    distance_km_shape = (
+        'distance from the project site in kilometers, or blank if unverified'
+        if en else 'المسافة من موقع المشروع بالكيلومتر أو فارغ إن لم تكن موثقة'
+    )
+    price_currency_shape = (
+        'ISO code shown on the source page; the system converts it to SAR'
+        if en else 'رمز العملة كما ظهر في المصدر؛ النظام يحول السعر إلى الريال'
+    )
     selected_scope_text = '، '.join(axis_labels) or 'لا توجد اختيارات صالحة'
     transaction_benchmarks = payload.get('transactionBenchmarks')
     transaction_benchmarks = (transaction_benchmarks
@@ -518,9 +549,10 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '2. استخدم SearXNG وحده للبحث. ثم نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي '
         '(سعر البيع أو المتر أو الإيجار أو سعر الليلة أو ADR حسب نوع التشغيل) '
         'باستخدام اسم المنافس مع المدينة. أي صفحة مسترجعة تذكر المنافس بالاسم '
-        'وتحمل بياناته مصدر مقبول لصفّه — موقع المطور أو المشغل، إعلان على منصة '
-        'عقار (sa.aqar.fm) للسكني والتجاري، أو Booking.com للفنادق المطابقة لاختيار العميل، '
-        'والأخبار والتقارير — ولا يُشترط مصدر رسمي لكل حقل. '
+        'وتحمل بياناته مصدر مقبول لصفّه — للفنادق استخدم صفحات Booking.com فقط، '
+        'ولا تضع أي رابط فندقي من موقع الفندق أو المشغل أو العلامة أو أي منصة أخرى. '
+        'للسكني والتجاري استخدم موقع المطور أو المشغل أو إعلان عقار (sa.aqar.fm) '
+        'والأخبار والتقارير التي تسمي المشروع. '
         'روابط منصات الإعلانات الأخرى (bayut.sa، wasalt.sa، dealapp.sa، dubizzle '
         'وغيرها) ممنوعة وتُسقط آليًا من الصف، وكذلك روابط التواصل الاجتماعي '
         '(إنستغرام، فيسبوك، تيك توك، إكس، يوتيوب وغيرها) — ليست مصدرًا للمنافس '
@@ -541,16 +573,16 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'عناصر الصفحة عند الحاجة للوصول إلى تفاصيل الغرف والأسعار. '
         'لا تعتمد على مقتطف نتيجة البحث وحده، ولا تخترع السعر أو تواريخ الإقامة؛ سجّل التواريخ '
         'الظاهرة على الصفحة في notes وdata_date.\n'
-        'اكتب في price_currency عملة السعر كما ظهرت في الصفحة (SAR للريال): إذا سعّرت '
-        'الصفحة بعملة أخرى — كأسعار منصات الحجز باليورو أو الدولار — اكتب رمزها في '
-        'price_currency ولا تحوّلها ولا تسقط السعر لأجل عملته؛ وسعر ليلة معروض على '
-        'Booking.com — منصة الحجز المقبولة للفنادق — يُقبل لنوع تشغيل فندقي مع ذكر '
-        'المصدر والتاريخ في notes.\n'
+        'اكتب في price_currency عملة السعر كما ظهرت في الصفحة. أعد القيمة وعملتها الأصلية '
+        'بأمانة؛ النظام يحول كل الأسعار إلى الريال قبل عرضها، ويحتفظ بعملة المصدر للتوثيق. '
+        'سعر الليلة من Booking.com مقبول للفندق المطابق لاختيار العميل، مع ذكر المصدر '
+        'والتاريخ الظاهرين في notes.\n'
         '7. النطاق الجغرافي ملزم: في نمط الحي لا تُدرج إلا منافسًا داخل الحي '
         f'{_norm(payload.get("district"))} في مدينة {_norm(payload.get("city"))}. '
         f'وفي نمط المدينة لا تُدرج إلا منافسًا داخل مدينة {_norm(payload.get("city"))}. '
-        'اكتب اسم الحي في district عندما يظهر في المصدر. لا تستخدم المسافة بالكيلومتر '
-        'لتوسيع النطاق، ولا تُدرج مدينة أو حيًا خارج النطاق المختار.\n'
+        + distance_scope_rule
+        + 'اكتب اسم الحي في district عندما يظهر في المصدر. لا تستخدم المسافة بالكيلومتر '
+        'لتوسيع النطاق المختار في نمطي الحي أو المدينة، ولا تُدرج موقعًا خارج النطاق المختار.\n'
         '8. فترة البيانات الملزمة مكتوبة في بيانات المشروع: ارفض أي سعر أو مساحة مصدرها أقدم من '
         'بداية الفترة، واكتب تاريخ البيانات التي وجدتها لكل صف داخل notes.\n'
         '9. مصادر المؤشرات الرسمية إلزامية عند الارتباط: إن كان المشروع أو أي من منافسيه '
@@ -560,18 +592,15 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'العقارية (rei.rega.gov.sa/ar/cities) كمرجعية رسمية لعدد صفقات المدينة '
         'وقيمتها والحي الأكثر نشاطًا — صفحات البحث المتقدم في المنصة تتطلب دخول '
         'نفاذ فلا تعتمد عليها. هذه المرجعية '
-        'لسياق السوق؛ أما مصادر صفوف المنافسين فيقبل فيها أي موقع يذكر المشروع '
-        'بالاسم — إعلانًا تفصيليًا على عقار أو Booking.com للفندقي، خبرًا أو تقريرًا '
-        'أو موقع مطوّر — ولا يقبل فيها إعلان على أي منصة أخرى.\n'
+        'لسياق السوق؛ أما مصادر صفوف الفنادق فـBooking.com وحده، ومصادر الصفوف '
+        'السكنية والتجارية تقبل إعلانًا تفصيليًا على عقار أو موقع مطور أو خبرًا موثقًا.\n'
         '10. نوع المقارنة الذي اختاره العميل هو الحاكم: للسكني والتجاري طابق عملية البيع أو الإيجار '
         'المحددة بالضبط، وللفندق طابق عدد النجوم المختار. لا تستبدل اختيار العميل بنموذج الإيراد '
         'المسجل للمشروع ولا تضف عملية أو فئة أخرى.\n'
         '11. المنافس مشروع حقيقي مسمّى (برج، مجمع سكني، مشروع مطوّر معلن). صفحات المؤشرات '
-        'الرسمية (سكني، شبكة إيجار، منصة المؤشرات العقارية) ومواقع البيانات الإجمالية ليست '
-        'منافسين: استخدمها مصدرَ سعر داخل source_urls للصفوف الحقيقية وفي مصادر الملخص، '
-        'ولا تُنشئ صف منافس باسم مؤشر أو صفحة بيانات إحصائية. ويجب أن يحمل source_urls '
-        'كل منافس صفحةً تخص المشروع نفسه — موقع المطور أو المشغل أو إعلانًا تفصيليًا '
-        'يذكره بالاسم — فروابط المؤشرات العامة وحدها لا توثّق هوية المنافس ولا سعره.\n'
+        'الرسمية ومواقع البيانات الإجمالية ليست منافسين؛ لا تنشئ صف منافس باسم مؤشر أو صفحة '
+        'بيانات إحصائية. الفنادق توثق صفحاتها من Booking.com فقط، والصفوف السكنية والتجارية '
+        'تستخدم صفحات تخص المشروع نفسه. لا تضع صفحات المؤشرات العامة داخل روابط الفنادق.\n'
         'أنواع السعر المسموحة حسب نوع التشغيل:\n'
         f'{price_types}\n'
     )
@@ -619,7 +648,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         f'      "benchmarks": ["{axis_labels[0]}"]' + (f' — قيم حصرية من: {axis_list}' if needs_benchmarks else '') + ',\n'
         f'      "operation_type": "{enum["operation_type"]}",\n'
         '      "price_type": "",\n'
-        '      "price_currency": "SAR",\n'
+        f'      "price_currency": "{price_currency_shape}",\n'
         '      "price_value": "",\n'
         '      "price_from": "",\n'
         '      "price_to": "",\n'
@@ -628,6 +657,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         '      "source_urls": [],\n'
         f'      "city": "{competitor_city_shape}",\n'
         f'      "district": "{competitor_district_shape}",\n'
+        f'      "distance_km": "{distance_km_shape}",\n'
         '      "lat": "خط العرض أو فارغ",\n'
         '      "lng": "خط الطول أو فارغ",\n'
         '      "logo_url": "رابط صورة الشعار من الموقع الرسمي فقط أو فارغ",\n'
@@ -648,7 +678,7 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'في source_urls ضع كل روابط الصفحات التي قرأتها واستخدمت منها أي معلومة لهذا المنافس، رابطًا لكل صفحة، '
         'ولا تكتف برابط واحد إذا استخدمت أكثر من صفحة. اجعل source_url هو الرابط الأهم للتوافق مع البيانات القديمة. '
         'في field_sources اربط كل حقل أعدت له قيمة بروابط الصفحات التي تثبته، وبالأخص area_sqm، area_from، area_to، status، classification، operation_type، price_type، price_value، price_from، price_to، وlogo_url. '
-        'اكتب district كما يظهر في مصدر المنافس، وانسخ المدينة والحي المختارين حرفيًا دون ترجمة. لا تخمّن district أو distance_km أو lat أو lng؛ اترك الإحداثيات والمسافة فارغة إذا لم يذكرها مصدر موثوق، ولا تستخدمها لتوسيع النطاق الجغرافي. '
+        'اكتب district كما يظهر في مصدر المنافس، وانسخ المدينة والحي المختارين حرفيًا دون ترجمة. لا تخمّن district أو distance_km أو lat أو lng؛ اترك الإحداثيات والمسافة فارغة إذا لم يذكرها مصدر موثوق. في نطاق المسافة، الصف الذي لا يملك distance_km موثقًا لا يدخل النتائج. '
         'logo_url مقبول فقط عندما يكون logo_source_url صفحة رسمية للمشروع أو المطور، وإلا اترك الحقلين فارغين. '
         'اجعل source_urls اتحاد جميع روابط field_sources. '
         'في source_url وsource_urls ضع روابط الصفحات المحددة من نتائج البحث، وليس رابط الصفحة الرئيسية للموقع. '

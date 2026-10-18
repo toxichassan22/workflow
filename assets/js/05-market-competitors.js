@@ -864,10 +864,23 @@
         buildMarketCompetitorSourceRows(next.competitors)
       );
       const scopeMode = document.getElementById('marketCompetitorScopeMode');
+      const competitorRadius = document.getElementById('marketCompetitorRadius');
+      const competitorRadiusCustom = document.getElementById('marketCompetitorRadiusCustomKm');
       const period = document.getElementById('marketDataPeriod');
       const from = document.getElementById('marketDataPeriodFrom');
       const to = document.getElementById('marketDataPeriodTo');
-      if (scopeMode) scopeMode.value = next.competitor_scope?.mode === 'city' ? 'city' : 'district';
+      if (scopeMode) {
+        const mode = next.competitor_scope?.mode;
+        scopeMode.value = ['city', 'distance'].includes(mode) ? mode : 'district';
+      }
+      if (competitorRadius) {
+        competitorRadius.value = String(next.competitor_scope?.radius
+          || next.competitor_scope?.radius_km || '10');
+      }
+      if (competitorRadiusCustom) {
+        competitorRadiusCustom.value = String(next.competitor_scope?.radius_custom_km
+          || next.competitor_scope?.radiusCustomKm || '');
+      }
       if (typeof renderMarketComparisonTypes === 'function') {
         renderMarketComparisonTypes(Array.isArray(next.comparison_types) ? next.comparison_types : []);
       }
@@ -892,6 +905,7 @@
       if (decision) decision.value = next.decision || '';
       if (disclaimer) disclaimer.value = next.disclaimer || 'هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.';
       if (typeof renderMarketSummaryScope === 'function') renderMarketSummaryScope(next.summary_scope);
+      updateMarketStudyFieldVisibility();
       next.one_block_summary = buildMarketStudyOneBlockSummary(next);
       const oneBlock = document.getElementById('marketStudyOneBlockSummary');
       if (oneBlock) oneBlock.value = next.one_block_summary;

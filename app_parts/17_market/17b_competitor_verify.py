@@ -76,7 +76,7 @@ def _absorb_verify_response(row, prompt_response, tokens, needed, matched_pages,
         url = str(page.get('url') or '').strip()
         if url and (_foreign_market_host(url)
                     or market_study.banned_competitor_listing_host(
-                        url, row.get('operation_type'))):
+                        url, row.get('operation_type'), row.get('project_type'))):
             continue
         title_url = market_study._fold_choice(f"{page.get('title') or ''} {url}")
         haystack = market_study._fold_choice(
@@ -135,26 +135,38 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     price_rule = (
         'السعر يُقبل فقط إذا ظهر في صفحة قرأتها في هذا البحث، ورابطها يوضع في '
         'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. '
-        'السعر بعملة غير الريال (كيورو منصات الحجز) مقبول — اكتب العملة في '
-        'price.currency ولا تحوّلها ولا تسقط السعر لأجلها. ')
+        'اكتب قيمة السعر وعملته كما وردتا في الصفحة؛ النظام يحوّل السعر إلى الريال '
+        'قبل عرضه ويحفظ عملة المصدر للتوثيق. ')
     folded_operation = market_study._fold_choice(operation)
     hotel_rule = ''
-    if any(token in folded_operation for token in ('فندقي', 'فندق', 'hotel', 'hospitality')):
+    is_hotel = any(token in folded_operation for token in ('فندقي', 'فندق', 'hotel', 'hospitality'))
+    source_rule = (
+        'للفنادق، استخدم صفحات Booking.com فقط لكل بيانات المنافس والسعر؛ لا تفتح '
+        'ولا تضع روابط مواقع الفندق أو المشغل أو العلامة أو أي منصة أخرى. '
+        if is_hotel else
+        'لغير الفنادق يمكن استخدام موقع المطور أو المشغل أو إعلان عقار '
+        '(sa.aqar.fm) أو خبر موثوق يذكر المشروع بالاسم. '
+    )
+    official_page_shape = (
+        'رابط صفحة Booking.com المطابقة للمنافس إن وُجدت'
+        if is_hotel else 'صفحة الموقع الرسمي للمشروع أو مطوّره إن وُجدت'
+    )
+    if is_hotel:
         stars = str(row.get('hotel_stars') or '').strip()
         hotel_rule = (
-            f'تحقق من الفندق على Booking.com وطابق تصنيف {stars} نجوم المختار. '
+            f'تحقق من الفندق على Booking.com فقط وطابق تصنيف {stars} نجوم المختار. '
             'إذا لم يظهر السعر أو النجوم في النتائج، افتح Booking.com بأدوات المتصفح '
             'التفاعلية، وافحص عناصر الصفحة ثم اكتب المدينة والحي في خانة الوجهة ونفّذ '
             'البحث بالضغط على العنصر المناسب. اقرأ السعر والتصنيف من صفحة الفندق نفسها، '
             'ولا تخمّن السعر أو تواريخ الإقامة. ')
     prompt = (
         f'ابحث في الويب عن المشروع العقاري «{name}» في مدينة {city} بالسعودية.\n'
-        'أرجع JSON فقط: {"exists": true/false, "official_url": "صفحة الموقع الرسمي '
-        'للمشروع أو مطوّره إن وُجدت", "summary": "سطر واحد عن المشروع", '
+        f'أرجع JSON فقط: {{"exists": true/false, "official_url": "{official_page_shape}", '
+        '"summary": "سطر واحد عن المشروع", '
         + price_shape + '}.\n' + price_rule +
-        'أي صفحة مسترجعة تذكر المشروع بالاسم تُحتسب دليلًا — موقع المطور أو '
-        'إعلانًا على منصة عقار (sa.aqar.fm) أو Booking.com للفندق أو خبرًا، '
-        'وليس شرطًا أن تكون رسمية — وروابط منصات الإعلانات الأخرى '
+        source_rule +
+        'أي صفحة مسترجعة تذكر المشروع بالاسم تُحتسب دليلًا وفق نوع المنافس، '
+        'وروابط منصات الإعلانات الأخرى '
         '(bayut، wasalt، dealapp…) ممنوعة ولا تُعتمد، وكذلك كل روابط '
         'التواصل الاجتماعي (إنستغرام، فيسبوك، تيك توك، إكس، يوتيوب…) — '
         'ليست دليلًا ولا مصدرًا للأسعار فلا تفتحها. '
@@ -239,7 +251,8 @@ def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'
     url = str(price.get('url') or price.get('source_url') or price.get('sourceUrl') or '').strip()
     if not url or url not in (citation_urls or set()):
         return
-    if market_study.banned_competitor_listing_host(url, row.get('operation_type')):
+    if market_study.banned_competitor_listing_host(
+            url, row.get('operation_type'), row.get('project_type')):
         return
     value = market_study._clean_numeric(price.get('value') or price.get('price_value'))
     from_v = market_study._clean_numeric(price.get('from') or price.get('price_from'))
@@ -458,7 +471,8 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         url_key = str(url).strip().casefold()
         if url_key in dead:
             continue
-        if market_study.banned_competitor_listing_host(url, operation):
+        if market_study.banned_competitor_listing_host(
+                url, operation, row.get('project_type')):
             continue
         # The citation excerpt is searched first — fetching is the fallback
         # for pages the provider did not quote (or quoted too thinly).
@@ -767,7 +781,8 @@ def _verify_row_deterministic(row, payload, data, evidence_pool, deadline):
         url = str(item.get('url') or '').strip()
         if not url or not callable(open_fn):
             continue
-        if market_study.banned_competitor_listing_host(url, row.get('operation_type')):
+        if market_study.banned_competitor_listing_host(
+                url, row.get('operation_type'), row.get('project_type')):
             continue
         if _market_deadline_hit(deadline):
             break

@@ -583,12 +583,11 @@ def _attach_retrieved_citations(rows, pages):
             # The name often sits in the retrieved excerpt, not the page title
             # or URL — search results carry a generic title for listing pages.
             # Same-name projects abroad are never evidence for a Saudi row,
-            # and banned classifieds portals (all but aqar.fm — trivago for
-            # hotel rows) never attach to a competitor at all.
+            # and banned classifieds portals never attach to a competitor.
             if _foreign_market_host(page.get('url')):
                 continue
             if market_study.banned_competitor_listing_host(
-                    page.get('url'), row.get('operation_type')):
+                    page.get('url'), row.get('operation_type'), row.get('project_type')):
                 continue
             haystack = market_study._fold_choice(
                 f"{page.get('title') or ''} {page.get('url') or ''} {page.get('content') or ''}")

@@ -289,12 +289,51 @@ def competitor_matches_comparison_axis(row, axis):
     return False
 
 
+def _competitor_distance_from_coordinates(row, scope):
+    """Compute straight-line distance when the project and row coordinates exist."""
+    scope = scope if isinstance(scope, dict) else {}
+    def first_value(*candidates):
+        return next((value for value in candidates
+                     if value is not None and str(value).strip()), None)
+
+    values = (
+        first_value(row.get('lat'), row.get('latitude')),
+        first_value(row.get('lng'), row.get('lon'), row.get('longitude')),
+        first_value(scope.get('origin_lat'), scope.get('originLat')),
+        first_value(scope.get('origin_lng'), scope.get('originLng')),
+    )
+    try:
+        lat, lng, origin_lat, origin_lng = (float(str(value).strip().replace(',', '.'))
+                                           for value in values)
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -90 <= origin_lat <= 90
+            and -180 <= lng <= 180 and -180 <= origin_lng <= 180):
+        return None
+    import math
+    lat1, lat2 = math.radians(origin_lat), math.radians(lat)
+    delta_lat = lat2 - lat1
+    delta_lng = math.radians(lng - origin_lng)
+    haversine = (math.sin(delta_lat / 2) ** 2
+                 + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2)
+    return 6371.0 * 2 * math.asin(math.sqrt(min(1.0, haversine)))
+
+
 def competitor_matches_location_scope(row, scope, city='', district=''):
-    """Enforce the selected city or exact neighborhood on generated rows."""
+    """Enforce the selected distance, city or exact neighborhood."""
     if not isinstance(row, dict):
         return False
     scope = scope if isinstance(scope, dict) else {}
-    mode = scope.get('mode') if scope.get('mode') in ('district', 'city') else 'district'
+    mode = scope.get('mode') if scope.get('mode') in ('district', 'city', 'distance') else 'district'
+    if mode == 'distance':
+        distance = _competitor_distance_from_coordinates(row, scope)
+        if distance is None:
+            distance = _number_in_text(row.get('distance_km') or row.get('distanceKm'))
+        radius = _number_in_text(
+            scope.get('radius_km') or scope.get('radiusKm') or scope.get('radius'))
+        if radius is None:
+            radius = float(DEFAULT_COMPETITOR_RADIUS_KM)
+        return distance is not None and distance <= radius
     row_city = _fold_choice(row.get('city') or row.get('location_city'))
     if not row_city or row_city != _fold_choice(city):
         return False

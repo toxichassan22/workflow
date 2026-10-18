@@ -34,16 +34,47 @@ def data_period_window_text(payload):
 
 
 def competitor_scope_text(payload):
-    """The competitor table's neighborhood-or-city boundary."""
+    """The competitor table's distance, neighborhood or city boundary."""
     payload = payload or {}
     scope = payload.get('competitorScope') or payload.get('competitor_scope')
     scope = scope if isinstance(scope, dict) else {}
     city = _norm(payload.get('city'))
     district = _norm(payload.get('district'))
     mode = scope.get('mode')
+    if mode == 'distance':
+        radius = scope.get('radius_km') or scope.get('radiusKm') or scope.get('radius')
+        try:
+            radius = float(radius)
+        except (TypeError, ValueError):
+            radius = DEFAULT_COMPETITOR_RADIUS_KM
+        return f'ضمن مسافة {radius:g} كم من موقع المشروع'
     if mode == 'city':
         return f'كامل مدينة {city}' if city else 'كامل المدينة'
     return f'حي {district} في مدينة {city}' if district and city else f'حي {district}' if district else 'حي المشروع'
+
+
+def normalize_competitor_scope(value):
+    """Normalize the competitor-only location mode and optional radius."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            value = {}
+    scope = value if isinstance(value, dict) else {}
+    mode = _norm(scope.get('mode')).lower()
+    if mode not in {'district', 'city', 'distance'}:
+        mode = 'district'
+    result = {'mode': mode}
+    if mode == 'distance':
+        radius_choice = (scope.get('radius') or scope.get('radius_choice')
+                         or scope.get('radiusChoice') or '10')
+        custom = (scope.get('radius_custom_km') or scope.get('radiusCustomKm')
+                  or scope.get('custom_km') or scope.get('customKm'))
+        if scope.get('radius_km') or scope.get('radiusKm'):
+            radius_choice = 'custom'
+            custom = scope.get('radius_km') or scope.get('radiusKm')
+        result['radius_km'] = resolve_competitor_radius_km(radius_choice, custom)
+    return result
 SUMMARY_TITLE = 'الملخص التنفيذي لسوق المشروع'
 SUMMARY_WORD_TARGET = 350
 SUMMARY_MIN_WORDS = 300

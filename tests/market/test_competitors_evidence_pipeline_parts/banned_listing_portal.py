@@ -12,9 +12,9 @@ _LISTING_PAGE = pipeline._LISTING_PAGE
 _agent_reply = pipeline._agent_reply
 
 class BannedListingPortalTests(pipeline._MarketTestBase):
-    """Owner rule: aqar.fm is the only classifieds portal on a competitor
-    row — Booking.com is allowed for hotel-operation rows alone. Every other
-    portal is banned at every layer: the deterministic search never opens
+    """Owner rule: aqar.fm is the only classifieds portal for non-hotels;
+    Booking.com is the only allowed source host for hotel rows. Other links
+    are banned at every layer: the deterministic search never opens
     it, absorbed citations drop it, the price fill ignores it, and the
     finalizer strips it (plus any price it alone carried)."""
 
@@ -51,6 +51,27 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
             self.assertEqual(
                 market_study.banned_competitor_listing_host(url, operation),
                 expected, f'{url} / {operation}')
+        self.assertTrue(market_study.banned_competitor_listing_host(
+            'https://hotel.example/rooms', 'بيع', 'فندقي'))
+        self.assertFalse(market_study.banned_competitor_listing_host(
+            'https://www.booking.com/hotel', 'بيع', 'فندقي'))
+
+    def test_hotel_row_keeps_only_booking_sources_and_clears_unlinked_price(self):
+        module = self.module
+        booking = 'https://www.booking.com/hotel/sa/example'
+        other = 'https://hotelbrand.example/rooms'
+        row = {
+            'name': 'فندق مثال', 'project_type': 'فندقي',
+            'operation_type': 'تشغيل فندقي', 'source_url': other,
+            'source_urls': [booking, other], 'price_value': '900',
+            'price_currency': 'SAR',
+            'field_sources': {'price_value': [other]},
+        }
+        module._drop_banned_competitor_listing_urls(row)
+        self.assertEqual(row['source_urls'], [booking])
+        self.assertEqual(row['source_url'], booking)
+        self.assertNotIn('price_value', row)
+        self.assertNotIn('field_sources', row)
 
     def test_deterministic_search_never_opens_banned_hits(self):
         module = self.module
@@ -197,7 +218,7 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
         offer internals, ids and points serialize the same way, and the old
         default-SAR read stamped them onto the row."""
         module = self.module
-        page = {'url': 'https://marriott.example/hotel/assila',
+        page = {'url': 'https://www.booking.com/hotel/sa/assila',
                 'title': 'فندق أصيلة جدة — الغرف والأجنحة',
                 'content': ('فندق أصيلة جدة — أجنحة فاخرة '
                             '{"@type":"Offer","price":999,"stars":5}')}
@@ -215,7 +236,7 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
         """A project-named page quoting USD converts at the fixed peg — the
         ر.س cell holds riyals, the printed dollar figure stays in the cache."""
         module = self.module
-        page = {'url': 'https://marriott.example/hotel/assila',
+        page = {'url': 'https://www.booking.com/hotel/sa/assila',
                 'title': 'فندق أصيلة جدة — الغرف والأجنحة',
                 'content': ('فندق أصيلة جدة — سعر الليلة '
                             '{"@type":"Offer","price":"1000",'
@@ -249,7 +270,7 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
 
     def test_fill_competitor_price_converts_jod_to_sar(self):
         module = self.module
-        page = {'url': 'https://chalets.example/omar',
+        page = {'url': 'https://www.booking.com/hotel/sa/omar',
                 'title': 'شاليه عمر — الحجز',
                 'content': 'شاليه عمر للحجز اليومي 200 دينار أردني'}
         row = {'name': 'شاليه عمر', 'operation_type': 'تشغيل فندقي',
