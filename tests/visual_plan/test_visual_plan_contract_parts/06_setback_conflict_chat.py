@@ -225,3 +225,41 @@ class VisualPlanContractTestsPart06(VisualPlanContractBase):
         self.assertEqual(final_job['result']['choices'],
                          ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة'])
 
+    def test_shared_ground_components_footprint_and_coverage_resolution(self):
+        module = self.application_module
+        # Case 1: Tower A has 600 showrooms + 625 hall on ground floor -> 1225 m²
+        # Tower B has 600 showrooms + 440 hall on ground floor -> 1040 m²
+        rows_conflicted = [
+            {'id': 'r1', 'building': 'البرج أ', 'floor_range': 'أرضي', 'component': 'معارض', 'floor_area_sqm': 600},
+            {'id': 'r2', 'building': 'البرج أ', 'floor_range': 'أرضي', 'component': 'صالة أفراح', 'floor_area_sqm': 625},
+            {'id': 'r3', 'building': 'البرج ب', 'floor_range': 'أرضي', 'component': 'معارض', 'floor_area_sqm': 600},
+            {'id': 'r4', 'building': 'البرج ب', 'floor_range': 'أرضي', 'component': 'صالة أفراح', 'floor_area_sqm': 440},
+            {'id': 'r5', 'building': 'مبنى الفلل', 'floor_range': 'أرضي', 'component': 'فلل سكنية', 'floor_area_sqm': 10500},
+        ]
+        by_bld_conflicted = {}
+        for r in rows_conflicted:
+            parsed = module._visual_concept_plan_floor_range(r['floor_range'])
+            by_bld_conflicted.setdefault(r['building'], []).append((parsed, r))
+
+        req_conflicted = module._visual_concept_plan_required_footprints(by_bld_conflicted)
+        self.assertEqual(req_conflicted, 1225 + 1040 + 10500)
+
+        # Case 2: User balances Tower A ground floor to 600 + 440 = 1040 m²,
+        # and moves the remaining 185 m² of hall to mezzanine
+        rows_resolved = [
+            {'id': 'r1', 'building': 'البرج أ', 'floor_range': 'أرضي', 'component': 'معارض', 'floor_area_sqm': 600},
+            {'id': 'r2', 'building': 'البرج أ', 'floor_range': 'أرضي', 'component': 'صالة أفراح', 'floor_area_sqm': 440},
+            {'id': 'r2b', 'building': 'البرج أ', 'floor_range': 'ميزانين', 'component': 'صالة أفراح', 'floor_area_sqm': 185},
+            {'id': 'r3', 'building': 'البرج ب', 'floor_range': 'أرضي', 'component': 'معارض', 'floor_area_sqm': 600},
+            {'id': 'r4', 'building': 'البرج ب', 'floor_range': 'أرضي', 'component': 'صالة أفراح', 'floor_area_sqm': 440},
+            {'id': 'r5', 'building': 'مبنى الفلل', 'floor_range': 'أرضي', 'component': 'فلل سكنية', 'floor_area_sqm': 10500},
+        ]
+        by_bld_resolved = {}
+        for r in rows_resolved:
+            parsed = module._visual_concept_plan_floor_range(r['floor_range'])
+            by_bld_resolved.setdefault(r['building'], []).append((parsed, r))
+
+        req_resolved = module._visual_concept_plan_required_footprints(by_bld_resolved)
+        self.assertEqual(req_resolved, 1040 + 1040 + 10500)
+
+
