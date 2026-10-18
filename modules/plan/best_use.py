@@ -3,7 +3,7 @@ import json
 import re
 import db
 from best_use_geometry import number
-from best_use_contract import (ProposalError, decoded, read_object, text, rounded,
+from best_use_contract import (ProposalError, decoded, read_object, text, precise,
                                capacity, apply_proposal, canonical_use, digest)
 
 
@@ -57,8 +57,8 @@ SYSTEM_PROMPT = (
     'التزم بحدود نظام توزيعك واشرح القاعدة المختارة في setbackExplanation. '
     'وزّع footprintLimit على المكونات أولًا ثم احسب مسطحات كل مكون داخل حصته؛ '
     'لا تنسخ قيم الحدود أرقامًا للمكونات ولا تساوِها بالضبط. '
-    'اترك هامشًا لا يقل عن متر مربع واحد تحت كل حد؛ الأرقام تُقرَّب لأقرب 0.1 وأي تجاوز يُرفض. '
-    'أخرج أرقامًا صحيحة أو بخانة عشرية واحدة فقط حتى تبقى متسقة بعد التقريب. '
+    'اترك هامشًا لا يقل عن متر مربع واحد تحت كل حد؛ أرسل كل المساحات بدقتها الأصلية وأي تجاوز يُرفض. '
+    'أخرج كل الأرقام بدقتها الكاملة دون تقريب أو حذف خانات عشرية. '
     'footprintArea حصة المكون من مسطح الأرض المبني ولا تنطبق إلا على المكونات فوق الأرض؛ '
     'للمساحات المفتوحة والبدروم ومواقف السطح أو القبو اترك footprintArea صفرًا بينما يبقى builtArea مساحتها الفعلية؛ '
     'أما مواقف aboveGround فهي مبنى فوق الأرض وتحتاج footprintArea أكبر من صفر. '
@@ -267,19 +267,19 @@ def normalize_proposal(raw, project, proposal_id, version=1):
                               f'في {budget["floors"]:g} أدوار = {footprint * budget["floors"]:g}')
         names.add(name.casefold())
         row = {'id': f'best_{proposal_id}_{index + 1}', 'name': name, 'useType': use_type,
-               'units': max(0, int(units)) if units == int(units) else 0, 'unitArea': rounded(unit_area),
-               'builtArea': rounded(built), 'revenueArea': rounded(revenue),
-               'footprintArea': rounded(footprint), 'investmentModel': investment,
+               'units': max(0, int(units)) if units == int(units) else 0, 'unitArea': precise(unit_area),
+               'builtArea': precise(built), 'revenueArea': precise(revenue),
+               'footprintArea': precise(footprint), 'investmentModel': investment,
                'reason': reason, 'areaReason': area_reason,
-               'grossArea': rounded(built), 'nonRevenueArea': rounded(built - revenue),
+               'grossArea': precise(built), 'nonRevenueArea': precise(built - revenue),
                'revenueAreaBasis': text(item.get('revenueAreaBasis')),
                'notes': text(item.get('notes')) or reason + '\n' + area_reason}
         if valid:
             if row['units'] * row['unitArea'] > row['builtArea'] + 1e-6:
-                issues.append(f'تقريب مساحات {label} يجعل الوحدات '
+                issues.append(f'مساحات {label} تجعل الوحدات '
                               f'({row["units"]:g} × {row["unitArea"]:g}) تتجاوز المسطح المبني ({row["builtArea"]:g})')
             if category == 'builtArea' and row['builtArea'] > row['footprintArea'] * budget['floors'] + 1e-6:
-                issues.append(f'تقريب مسطح {label} ({row["builtArea"]:g}) يتجاوز حصته الأرضية '
+                issues.append(f'مسطح {label} ({row["builtArea"]:g}) يتجاوز حصته الأرضية '
                               f'({row["footprintArea"]:g}) في {budget["floors"]:g} أدوار')
         if use_type == 'parking':
             row['parkingLocation'] = location
@@ -299,8 +299,8 @@ def normalize_proposal(raw, project, proposal_id, version=1):
     for total, limit in (('builtArea', built_limit), ('footprintArea', footprint_limit),
                          ('openArea', budget['openAreaLimit']), ('basementArea', budget['basementAreaLimit'])):
         if totals[total] > limit + 1e-6:
-            issues.append(f'مجموع {total_labels[total]} ({totals[total]:.1f} م²) '
-                          f'يتجاوز الحد المعتمد ({limit:.1f} م²)')
+            issues.append(f'مجموع {total_labels[total]} ({totals[total]:g} م²) '
+                          f'يتجاوز الحد المعتمد ({limit:g} م²)')
     if totals['builtArea'] <= 0:
         issues.append('الاقتراح لا يتضمن مكونات مبنية لنوع المشروع المختار')
     if issues:
@@ -310,7 +310,7 @@ def normalize_proposal(raw, project, proposal_id, version=1):
         'mode': 'guided', 'title': text(raw.get('title'), 300), 'approved': False, 'rejected': False,
         'sourceHash': source_hash(project), 'sourceSnapshot': source_snapshot(project),
         'components': rows, 'rationale': rationale, 'setbackExplanation': setback_explanation,
-        'capacity': budget, 'totals': {key: rounded(value) for key, value in totals.items()},
+        'capacity': budget, 'totals': {key: precise(value) for key, value in totals.items()},
     }
     result['inputHash'] = result['sourceHash']
     result['contentHash'] = proposal_content_hash(result)

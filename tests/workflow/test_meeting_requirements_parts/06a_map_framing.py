@@ -25,6 +25,9 @@ class MeetingRequirementsTestsPart05MapFraming(MeetingRequirementsTests):
                     'map_baked_frames': {'overview': frame}, 'map_zooms': {'overview': 18},
                     'map_centers': {'overview': {key: value for key, value in frame.items() if key != 'zoom'}}}
         self.assertTrue(module._frame_matches_baked(creative, 'overview'))
+        creative['map_zooms']['overview'] = 18.25
+        self.assertFalse(module._frame_matches_baked(creative, 'overview'))
+        creative['map_zooms']['overview'] = 18
         for change in ({'width': 375, 'height': 211}, {'lat': 24.00001}, {'lng': 46.00001}):
             with self.subTest(change=change):
                 creative['map_centers']['overview'] = {**frame, **change}
@@ -85,3 +88,8 @@ class MeetingRequirementsTestsPart05MapFraming(MeetingRequirementsTests):
         self.assertNotIn("query = f\"{lm['name']}, {location_context}\"", source)
         self.assertNotIn('unapproveMapPreview', index_source)
         self.assertNotIn('approveMapPreview', index_source)
+
+    def test_frontend_preserves_fractional_zoom_and_map_coordinate_precision(self):
+        source = read_frontend_text()
+        self.assertIn('Math.max(8, Math.min(20, zoom))', source)
+        self.assertIn("String(px.x / w * 100) + ',' + String(px.y / h * 100)", source)

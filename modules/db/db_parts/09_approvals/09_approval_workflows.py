@@ -29,12 +29,11 @@ def estimate_generation_cost(tenant_id, draft_id=None, slides_count=0, presentat
         except Exception:
             maps_count = images_count = 0
     units = {'plan': 1, 'slide': slides, 'map': maps_count, 'image': images_count}
-    estimated = round(
-        sum(units[key] * prices.get(key, 0.0) for key in units) + 1e-9, 4)
+    estimated = sum(units[key] * prices.get(key, 0.0) for key in units)
     return {
         'estimated_cost_usd': estimated,
         'estimated_cost_sar': usd_to_sar(estimated),
-        'estimated_points': int(round(estimated * POINTS_PER_USD)),
+        'estimated_points': estimated * POINTS_PER_USD,
         'slides_count': slides,
         'units': units,
         'unit_prices': prices,
@@ -383,7 +382,7 @@ def _hold_points_tx(conn, tenant_id, points, cost_sar, reserved_by=None, reserve
     as-is (the unique index makes a second row impossible anyway).
     """
     points = int(points or 0)
-    cost = round(float(cost_sar or 0.0) + 1e-9, 2)
+    cost = float(cost_sar or 0.0)
     if points <= 0 or cost <= 0:
         return {'error': 'nothing_to_reserve'}
     if generation_approval_id:
@@ -424,8 +423,8 @@ def _hold_points_tx(conn, tenant_id, points, cost_sar, reserved_by=None, reserve
     )
     if (debit.rowcount or 0) <= 0:
         return {'error': 'insufficient_balance',
-                'available_sar': round(float(get_tenant_balance(tenant_id) or 0.0)
-                                       + float(get_package_remaining_sar(tenant_id) or 0.0), 2),
+                'available_sar': float(get_tenant_balance(tenant_id) or 0.0)
+                                       + float(get_package_remaining_sar(tenant_id) or 0.0),
                 'required_sar': cost}
     reservation_id = str(uuid.uuid4())
     conn.execute(

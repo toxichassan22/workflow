@@ -487,18 +487,18 @@ def api_admin_packages():
         except (TypeError, ValueError):
             credit_sar = 0.0
         cost_sar = credit_sar / multiplier
-        package['credit_sar'] = round(credit_sar, 2)
-        package['est_cost_sar'] = round(cost_sar, 2)
-        package['est_cost_usd'] = round(cost_sar / fx_rate, 2) if fx_rate > 0 else None
+        package['credit_sar'] = credit_sar
+        package['est_cost_sar'] = cost_sar
+        package['est_cost_usd'] = cost_sar / fx_rate if fx_rate > 0 else None
         price_sar = package.get('price_sar')
         if price_sar is not None:
             margin_sar = float(price_sar) - cost_sar
-            package['est_margin_sar'] = round(margin_sar, 2)
-            package['est_margin_usd'] = round(margin_sar / fx_rate, 2) if fx_rate > 0 else None
+            package['est_margin_sar'] = margin_sar
+            package['est_margin_usd'] = margin_sar / fx_rate if fx_rate > 0 else None
     return jsonify({'success': True, 'packages': packages,
                     'billingMultiplier': multiplier,
                     'fxRate': fx_rate or None,
-                    'taxRatePct': round(db.get_package_tax_rate() * 100, 4),
+                    'taxRatePct': db.get_package_tax_rate() * 100,
                     'featureCatalog': db.get_package_feature_catalog()})
 
 
@@ -524,9 +524,9 @@ def api_admin_packages_create():
         # Points derive from the price: the desk sets only the riyal figure
         # and the configured tax rate shaves it into wallet points.
         try:
-            credit_sar = round(
+            credit_sar = (
                 float(data.get('priceSar', data.get('price_sar')))
-                * (1 - db.get_package_tax_rate()), 2)
+                * (1 - db.get_package_tax_rate()))
         except (TypeError, ValueError):
             credit_sar = None
     try:
@@ -573,8 +573,7 @@ def api_admin_package_update(package_id):
         if 'creditSar' not in data and 'credit_sar' not in data \
                 and 'creditUsd' not in data and 'credit_usd' not in data:
             try:
-                kwargs['credit_sar'] = round(
-                    float(kwargs['price_sar']) * (1 - db.get_package_tax_rate()), 2)
+                kwargs['credit_sar'] = float(kwargs['price_sar']) * (1 - db.get_package_tax_rate())
             except (TypeError, ValueError):
                 pass
     if 'isActive' in data or 'is_active' in data:
@@ -623,7 +622,7 @@ def api_admin_package_tax_rate():
         return jsonify({'error': str(exc)}), 400
     _record_audit_event('settings.package_tax_rate', 'platform_settings',
                         'package_tax_rate', metadata={'rate': rate})
-    return jsonify({'success': True, 'ratePct': round(rate * 100, 4)})
+    return jsonify({'success': True, 'ratePct': rate * 100})
 
 
 @app.route('/api/admin/package-features', methods=['GET'])

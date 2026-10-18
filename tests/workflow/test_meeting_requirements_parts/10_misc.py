@@ -789,9 +789,9 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         pool converts at the fixed rate and the source figure stays cached."""
         module = self.application_module
         pages = {
-            'https://trivago.example/hotel-a':
+            'https://www.booking.com/hotel-a':
                 '<title>فندق تجريبي — غرفة</title> غرفة مزدوجة 120 يورو لليلة',
-            'https://trivago.example/hotel-b':
+            'https://www.booking.com/hotel-b':
                 '<title>فندق تجريبي — جناح</title> جناح تنفيذي 180 يورو per night',
         }
         row = {'name': 'فندق تجريبي', 'operation_type': 'تشغيل فندقي',
@@ -803,8 +803,8 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             filled = module._fill_competitor_price_from_listings(row, list(pages))
         self.assertTrue(filled)
         self.assertEqual(row['price_currency'], 'SAR')
-        # Median €150 × 4.05 → 608 ر.س — the printed €150 is not lost.
-        self.assertEqual(row['price_value'], '608')
+        # Median €150 × 4.05 → 607.5 ر.س — the printed €150 is not lost.
+        self.assertEqual(row['price_value'], '607.5')
         self.assertEqual(row['price_type'], 'متوسط سعر الغرفة ADR')
         self.assertEqual(row['price_cache']['original_price_value'], '150')
         self.assertEqual(row['price_cache']['original_currency'], 'EUR')
@@ -813,7 +813,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
     def test_fill_competitor_price_prefers_sar_over_foreign_mentions(self):
         module = self.application_module
         pages = {
-            'https://trivago.example/hotel-c':
+            'https://www.booking.com/hotel-c':
                 '<title>فندق — غرفة</title> غرفة 95 يورو لليلة — يعادل 400 ريال سعودي تقريبًا',
         }
         row = {'name': 'فندق', 'operation_type': 'تشغيل فندقي',

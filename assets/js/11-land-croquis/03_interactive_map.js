@@ -75,7 +75,7 @@
 
     function normalizeInteractiveZoom(value) {
       const zoom = Number(value);
-      return Number.isFinite(zoom) ? Math.max(8, Math.min(20, Math.round(zoom * 100) / 100)) : 17;
+      return Number.isFinite(zoom) ? Math.max(8, Math.min(20, zoom)) : 17;
     }
 
     function setInteractiveMapPreviewHidden(hidden) {
@@ -435,7 +435,7 @@
       const w = holder.clientWidth;
       const h = holder.clientHeight;
       if (!w || !h) return null;
-      return (px.x / w * 100).toFixed(3) + ',' + (px.y / h * 100).toFixed(3);
+      return String(px.x / w * 100) + ',' + String(px.y / h * 100);
     }
 
     // The overlay must track the live map while it pans/zooms. bounds_changed

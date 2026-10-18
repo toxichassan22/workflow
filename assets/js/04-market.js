@@ -847,11 +847,40 @@
       return '';
     }
 
-    function roundSystemNumber(value) {
+    function normalizeSystemNumber(value) {
       const number = Number(value);
       if (!Number.isFinite(number)) return 0;
-      const rounded = Math.sign(number) * Math.round((Math.abs(number) + Number.EPSILON) * 10) / 10;
-      return Object.is(rounded, -0) ? 0 : rounded;
+      return Object.is(number, -0) ? 0 : number;
+    }
+
+    function formatExactSystemNumber(value, grouped = true) {
+      let text = typeof value === 'number'
+        ? String(normalizeSystemNumber(value))
+        : String(value ?? '').trim();
+      if (/[eE]/.test(text)) {
+        const [mantissa, exponentText] = text.toLowerCase().split('e');
+        const exponent = Number(exponentText);
+        if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 10000) return text;
+        const sign = mantissa.startsWith('-') ? '-' : '';
+        const unsigned = sign ? mantissa.slice(1) : mantissa;
+        const [whole, fraction = ''] = unsigned.split('.');
+        const digits = whole + fraction;
+        const decimalIndex = whole.length + exponent;
+        text = decimalIndex <= 0
+          ? sign + '0.' + '0'.repeat(-decimalIndex) + digits
+          : decimalIndex >= digits.length
+            ? sign + digits + '0'.repeat(decimalIndex - digits.length)
+            : sign + digits.slice(0, decimalIndex) + '.' + digits.slice(decimalIndex);
+      }
+      if (!/^-?\d+(?:\.\d+)?$/.test(text)) {
+        const number = Number(value);
+        return Number.isFinite(number) ? String(normalizeSystemNumber(number)) : (text || '0');
+      }
+      const sign = text.startsWith('-') ? '-' : '';
+      const unsigned = sign ? text.slice(1) : text;
+      const [whole, fraction] = unsigned.split('.');
+      const integer = grouped ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : whole;
+      return sign + integer + (fraction ? '.' + fraction : '');
     }
 
     function cleanMarketNumber(value) {
@@ -859,18 +888,18 @@
       if (!text) return '';
       text = text.replace(/[٠-٩]/g, ch => String('٠١٢٣٤٥٦٧٨٩'.indexOf(ch)))
         .replace(/[٬،,]/g, '').replace(/٫/g, '.').replace(/\s/g, '');
-      return /^-?\d+(?:\.\d+)?$/.test(text) ? String(roundSystemNumber(Number(text))) : String(value ?? '').trim();
+      if (!/^-?\d+(?:\.\d+)?$/.test(text)) return String(value ?? '').trim();
+      const sign = text.startsWith('-') ? '-' : '';
+      const unsigned = sign ? text.slice(1) : text;
+      const [whole, fraction] = unsigned.split('.');
+      const normalizedWhole = whole.replace(/^0+(?=\d)/, '');
+      return sign + normalizedWhole + (fraction !== undefined ? '.' + fraction : '');
     }
 
     function formatMarketNumber(value) {
       const clean = cleanMarketNumber(value);
       if (clean === '') return '';
-      const number = Number(clean);
-      if (!Number.isFinite(number)) return clean;
-      const decimals = clean.includes('.') ? clean.split('.')[1].length : 0;
-      return new Intl.NumberFormat('en-US', {
-        minimumFractionDigits: decimals, maximumFractionDigits: decimals
-      }).format(number);
+      return formatExactSystemNumber(clean, true);
     }
 
     function formatMarketNumericInput(input) {

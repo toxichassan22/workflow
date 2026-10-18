@@ -1,4 +1,7 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+from numeric_precision import format_precise_number
+
+
 # Designer agent (DESIGNER_AGENT=1): planner then runner then worker
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # The legacy path sends one giant plan that edits slides by mutable position
@@ -293,8 +296,8 @@ def _agent_balance_preflight(ctx, tasks):
         return None
     return _agent_chat_response(
         ctx,
-        f'رصيد شركتك المتاح حاليًا ~{available:.2f} نقطة، والتكلفة التقديرية '
-        f'لهذا الطلب ~{need_sar:.2f} نقطة — اشحن المحفظة ثم أعد المحاولة.',
+        f'رصيد شركتك المتاح حاليًا ~{format_precise_number(available, grouped=False)} نقطة، والتكلفة التقديرية '
+        f'لهذا الطلب ~{format_precise_number(need_sar, grouped=False)} نقطة — اشحن المحفظة ثم أعد المحاولة.',
         kind='reply')
 
 

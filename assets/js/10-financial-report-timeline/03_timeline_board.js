@@ -178,7 +178,7 @@
       const yearsInput = document.getElementById('tlYears');
       if (yearsInput) {
         yearsInput.value = period
-          ? String(roundSystemNumber(timelineSpanDays(period.start.ms, period.end.ms) / 365.25))
+          ? String(normalizeSystemNumber(timelineSpanDays(period.start.ms, period.end.ms) / 365.25))
           : '';
       }
     }

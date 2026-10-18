@@ -183,10 +183,13 @@ class BestUseTests(unittest.TestCase):
         self.project['setbacks'] = 'الارتداد الأمامي 5 م'
         self.assertFalse(best_use.capacity(self.project)['setbackVerified'])
 
-    def test_rounding_does_not_create_inconsistent_unit_and_built_areas(self):
+    def test_fractional_areas_keep_their_precision_when_normalized(self):
         self.raw['components'][0].update(unitArea=100.06, builtArea=8004.8, footprintArea=2001.2)
-        with self.assertRaises(best_use.ProposalError):
-            best_use.normalize_proposal(self.raw, self.project, 'proposal-1')
+        proposal = best_use.normalize_proposal(self.raw, self.project, 'proposal-1')
+        component = proposal['components'][0]
+        self.assertEqual(component['unitArea'], 100.06)
+        self.assertEqual(component['builtArea'], 8004.8)
+        self.assertEqual(component['footprintArea'], 2001.2)
 
     def test_prerequisites_require_documents_location_market_and_approvals(self):
         self.assertEqual(best_use.missing_inputs(self.project, self.statuses), [])

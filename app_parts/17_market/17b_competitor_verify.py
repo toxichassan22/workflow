@@ -1,3 +1,6 @@
+from numeric_precision import format_precise_number
+
+
 def _agent_run_accepts(agent_module, param):
     """True when ``run_browse_agent`` declares ``param`` (or ``**kwargs``).
 
@@ -286,7 +289,7 @@ def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'
             if not orig or not str(row.get(key) or '').strip():
                 continue
             try:
-                row[key] = str(int(round(float(orig) * fx_rate)))
+                row[key] = format_precise_number(float(orig) * fx_rate, grouped=False)
             except (TypeError, ValueError):
                 continue
             cache[key] = row[key]
@@ -514,12 +517,12 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
                if source_currency != 'SAR' else None)
     # The (ر.س) column stores riyals — convert at a fixed rate and keep the
     # source figure in price_cache.original_* rather than relabeling it.
-    values = (sorted(int(round(v * fx_rate)) for v in orig_values)
+    values = (sorted(v * fx_rate for v in orig_values)
               if fx_rate else orig_values)
     if fx_rate:
         currency = 'SAR'
-    median = int(round(values[len(values) // 2] if len(values) % 2
-                       else (values[len(values) // 2 - 1] + values[len(values) // 2]) / 2))
+    median = (values[len(values) // 2] if len(values) % 2
+              else (values[len(values) // 2 - 1] + values[len(values) // 2]) / 2)
     if len(values) > 1:
         if operation == 'إيجار':
             price_type = _option('متوسط إيجار المتر' if per_sqm else 'متوسط إيجار الوحدة')
@@ -543,28 +546,29 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         else:
             price_type = _option('قيمة واحدة')
     if price_type in market_study.RANGE_PRICE_TYPES and len(values) > 1:
-        row['price_from'], row['price_to'] = str(int(values[0])), str(int(values[-1]))
+        row['price_from'] = format_precise_number(values[0], grouped=False)
+        row['price_to'] = format_precise_number(values[-1], grouped=False)
         row['price_cache'] = {'price_from': row['price_from'], 'price_to': row['price_to']}
         field_key = 'price_from'
     else:
-        row['price_value'] = str(median)
+        row['price_value'] = format_precise_number(median, grouped=False)
         row['price_cache'] = {'price_value': row['price_value']}
         field_key = 'price_value'
     row['price_type'] = price_type
     row['price_listed'] = True
     row['price_currency'] = currency
     if fx_rate:
-        orig_median = int(round(
-            orig_values[len(orig_values) // 2] if len(orig_values) % 2
+        orig_median = (orig_values[len(orig_values) // 2] if len(orig_values) % 2
             else (orig_values[len(orig_values) // 2 - 1]
-                  + orig_values[len(orig_values) // 2]) / 2))
+                  + orig_values[len(orig_values) // 2]) / 2)
         cache = row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {}
         cache['original_currency'] = source_currency
         if field_key == 'price_value':
-            cache['original_price_value'] = str(orig_median)
+            cache['original_price_value'] = format_precise_number(
+                orig_median, grouped=False)
         else:
-            cache['original_price_from'] = str(int(orig_values[0]))
-            cache['original_price_to'] = str(int(orig_values[-1]))
+            cache['original_price_from'] = format_precise_number(orig_values[0], grouped=False)
+            cache['original_price_to'] = format_precise_number(orig_values[-1], grouped=False)
         row['price_cache'] = cache
     field_sources = market_study.competitor_field_sources(row)
     bucket = field_sources.setdefault(field_key, [])

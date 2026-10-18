@@ -11,6 +11,9 @@
 # failure always reads as a balance failure.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+from numeric_precision import format_precise_number
+
+
 class FatalAICallError(RuntimeError):
     """A deterministic AI refusal raised through layers that catch Exception.
 
@@ -78,8 +81,8 @@ def _billing_estimate_for_usage_ctx(usage_ctx):
                 return None
             estimate_sar = float(db.usd_to_sar(estimate_usd))
         return {
-            'estimated_required_usd': round(estimate_usd, 2),
-            'estimated_required_sar': round(estimate_sar, 2),
+            'estimated_required_usd': estimate_usd,
+            'estimated_required_sar': estimate_sar,
         }
     except Exception:
         return None
@@ -112,8 +115,8 @@ def _provider_credit_error_dict(error, status_code, usage_ctx=None):
         if estimate:
             message += (
                 f" تقدير النظام المبدئي لهذه العملية: "
-                f"{estimate['estimated_required_usd']:.2f} دولار "
-                f"(نحو {estimate['estimated_required_sar']:.2f} نقطة). "
+                f"{format_precise_number(estimate['estimated_required_usd'], grouped=False)} دولار "
+                f"(نحو {format_precise_number(estimate['estimated_required_sar'], grouped=False)} نقطة). "
                 'التكلفة الفعلية قد تختلف.'
             )
         refusal.update({'message': message,

@@ -16,10 +16,10 @@ def _clean_numeric(value):
     if not re.fullmatch(r'-?\d+(?:\.\d+)?', text):
         return str(value or '').strip()
     try:
-        rounded = Decimal(text).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
+        number = Decimal(text)
     except (InvalidOperation, ValueError):
         return text
-    return str(int(rounded)) if rounded == rounded.to_integral_value() else f'{rounded:.1f}'
+    return format(number, 'f')
 
 
 def _first_nonempty(*values):

@@ -200,22 +200,22 @@ def _visual_concept_plan_distribution_totals(rows, context):
 
     def summed(field, items):
         numbers = [item[field] for item in items if isinstance(item[field], (int, float))]
-        return round(sum(numbers), 2) if numbers else None
+        return sum(numbers) if numbers else None
 
     totals = []
     for key in order:
         entry = groups[key]
         total = {
             'component': entry['component'],
-            'units': round(entry['units'], 2) if entry['has_units'] else None,
-            'area': round(entry['area'], 2) if entry['has_area'] else None,
+            'units': entry['units'] if entry['has_units'] else None,
+            'area': entry['area'] if entry['has_area'] else None,
             'required_units': summed('required_units', matched[key]),
             'required_area': summed('required_area', matched[key]),
         }
         for pair in (('units', 'required_units', 'delta_units'),
                      ('area', 'required_area', 'delta_area')):
             value, wanted = total[pair[0]], total[pair[1]]
-            total[pair[2]] = (round(value - wanted, 2)
+            total[pair[2]] = (value - wanted
                               if isinstance(value, (int, float)) and isinstance(wanted, (int, float))
                               else None)
         totals.append(total)
@@ -511,7 +511,7 @@ def _visual_concept_plan_backfill_distribution_rows(rows, context):
             claimed = sum(row[row_field] * floor_counts[id(row)]
                           for row in grouped[key]
                           if isinstance(row.get(row_field), (int, float)))
-            per_floor = round((wanted - claimed) / missing_floors, 2)
+            per_floor = (wanted - claimed) / missing_floors
             if per_floor <= 0:
                 continue
             for row in missing:
@@ -583,8 +583,8 @@ def _visual_concept_plan_fallback_distribution(context, regulations):
             rows.append({
                 'building': 'المبنى الرئيسي', 'floor_range': band.get('range') or '',
                 'component': names or band.get('label') or '',
-                'units_per_floor': round(units / floors, 2) if units else None,
-                'floor_area_sqm': round(area / floors, 2) if area else None,
+                'units_per_floor': units / floors if units else None,
+                'floor_area_sqm': area / floors if area else None,
                 'circulation': ''})
         for block in model.get('blocks') or []:
             rows.append({

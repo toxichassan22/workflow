@@ -266,7 +266,7 @@
         items.map(file => {
           const name = file.originalName || file.name || 'ملف مستند';
           const size = Number(file.fileSize || file.size || 0);
-          const sizeText = size ? (size / 1024 / 1024).toFixed(2) + ' MB' : '';
+          const sizeText = size ? formatExactSystemNumber(size / 1024 / 1024, false) + ' MB' : '';
           const pending = file.status === 'pending' || !file.id;
           const isPdf = String(file.mimeType || '').includes('pdf') || /\.pdf$/i.test(name);
           const args = "'" + String(file.id || '').replace(/'/g, "\\'") + "','" +
@@ -437,14 +437,8 @@
       return uploaded[0];
     }
 
-    function projectNumberKeepsPrecision(key) {
-      return /(?:^|_)(?:lat|lng|latitude|longitude|date|year|phone|mobile|deed|plot|document|id|number|area|sqm|ratio)(?:_|$)/i.test(String(key || ''));
-    }
-
     function normalizedProjectNumber(key, value) {
-      const number = Number(value);
-      if (!Number.isFinite(number)) return 0;
-      return projectNumberKeepsPrecision(key) ? number : roundSystemNumber(number);
+      return normalizeSystemNumber(value);
     }
 
     async function collectTenantFormData() {
@@ -607,7 +601,7 @@
             const maxMb = Number(matched.max_size_mb) || 25;
             const fileSizeMb = file.size / (1024 * 1024);
             if (fileSizeMb > maxMb) {
-              toast(WFT('files.size_too_large', 'حجم الملف ({size} ميجابايت) يتجاوز الحد المسموح ({max} ميجابايت)', { size: fileSizeMb.toFixed(1), max: maxMb }));
+              toast(WFT('files.size_too_large', 'حجم الملف ({size} ميجابايت) يتجاوز الحد المسموح ({max} ميجابايت)', { size: formatExactSystemNumber(fileSizeMb, false), max: maxMb }));
               return false;
             }
             if (matched.allowed_extensions) {

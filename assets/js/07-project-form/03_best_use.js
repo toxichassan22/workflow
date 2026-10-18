@@ -246,7 +246,7 @@
 
     function bestUseFormat(value) {
       const number = bestUseNumber(value);
-      return number === null ? '' : new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(number);
+      return number === null ? '' : formatExactSystemNumber(number, true);
     }
 
     function bestUseOptionText(options, value) {

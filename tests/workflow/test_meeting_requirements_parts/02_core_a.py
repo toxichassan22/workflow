@@ -637,7 +637,7 @@ class MeetingRequirementsTestsPart01(MeetingRequirementsTests):
         self.assertIn('03 — 05', html)
         self.assertIn('data-slide-footer="1"', html)
 
-    def test_general_slide_numbers_use_one_decimal_without_changing_exact_values_or_css(self):
+    def test_general_slide_numbers_keep_decimal_precision_without_changing_css(self):
         html = (
             '<style>.metric{width:1280px;opacity:0.875}</style><div class="slide">'
             '<p>القيمة 1234.55 والنسبة 18.25%</p><p>المعامل 1.85</p>'
@@ -647,10 +647,10 @@ class MeetingRequirementsTestsPart01(MeetingRequirementsTests):
         )
         formatted = self.application_module.slide_engine.finalize_slide_html(
             html, 'content', {'budget': '9876.55'}, {'primary_color': '#123456'}, slide_num=2, total_slides=4)
-        self.assertIn('1,234.6', formatted)
-        self.assertIn('9,876.6', formatted)
-        self.assertIn('18.3%', formatted)
-        self.assertIn('1.9', formatted)
+        self.assertIn('1,234.55', formatted)
+        self.assertIn('9,876.55', formatted)
+        self.assertIn('18.25%', formatted)
+        self.assertIn('1.85', formatted)
         self.assertIn('2027', formatted)
         self.assertNotIn('2,027', formatted)
         self.assertIn('0500000000', formatted)

@@ -1,7 +1,6 @@
 import base64
 import io
 import math
-from decimal import Decimal, ROUND_HALF_UP
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
@@ -35,8 +34,8 @@ def font(size):
 def figure(value):
     if value is None:
         return ''
-    value = Decimal(str(value)).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
-    return format(value, ',f').removesuffix('.0')
+    from numeric_precision import format_precise_number
+    return format_precise_number(value, grouped=True)
 
 
 def shade(color, factor):

@@ -462,8 +462,7 @@ def _build_timeline_slide(slide, source, branding=None, slide_num=None, total_sl
         axis_start, axis_end = axis[0], axis[1]
         total_months = axis_end - axis_start + 1
         span_years = total_months / 12
-        years_text = str(int(span_years)) if span_years >= 1 and float(span_years).is_integer() else (
-            str(round(span_years, 1)) if span_years >= 1 else '')
+        years_text = format_precise_number(span_years, grouped=False) if span_years >= 1 else ''
         duration_str = f"{total_months} شهر" + (f" ({years_text} سنوات)" if years_text else '')
         start_parsed = _parse_timeline_date(source.get('timeline_start_date'))
         end_parsed = _parse_timeline_date(source.get('timeline_end_date'))
@@ -478,10 +477,8 @@ def _build_timeline_slide(slide, source, branding=None, slide_num=None, total_sl
         except (TypeError, ValueError):
             years_num = 0
         if years_num <= 0 and total_months >= 12:
-            years_num = round(total_months / 12)
-        # Fractional derived years are a storage detail — the strip shows whole years or none.
-        years_text = str(int(years_num)) if years_num >= 1 and float(years_num).is_integer() else (
-            str(round(years_num, 1)) if years_num >= 1 else '')
+            years_num = total_months / 12
+        years_text = format_precise_number(years_num, grouped=False) if years_num >= 1 else ''
         start_str = phases[0].get('start_label') or (
             f"سنة {phases[0].get('year')} ({phases[0].get('quarter')})" if phases and phases[0].get('year') else '—')
         end_str = phases[-1].get('end_label') or (

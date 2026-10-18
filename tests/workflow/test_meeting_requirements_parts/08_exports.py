@@ -1757,12 +1757,12 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                   for row in module._visual_concept_plan_distribution_totals(rows, context)}
         self.assertEqual(totals['سكني']['units'], 76)
         self.assertEqual(totals['سكني']['required_units'], 76)
-        self.assertEqual(totals['سكني']['area'], 12760.8)
-        self.assertEqual(totals['سكني']['required_area'], 12760.8)
-        self.assertEqual(totals['سكني']['delta_area'], 0)
-        # Long float tails are rounded before they reach the client.
-        self.assertEqual(totals['تجاري']['area'], 2029.0)
-        self.assertEqual(totals['تجاري']['required_area'], 2029.0)
+        self.assertAlmostEqual(totals['سكني']['area'], 12760.8)
+        self.assertAlmostEqual(totals['سكني']['required_area'], 12760.8)
+        self.assertAlmostEqual(totals['سكني']['delta_area'], 0)
+        # Fractional areas retain their calculation precision in the API.
+        self.assertEqual(totals['تجاري']['area'], 2028.9999999999)
+        self.assertAlmostEqual(totals['تجاري']['required_area'], 2029.0)
         self.assertEqual(totals['خدمات']['required_area'], 3617.06)
         # Study rows with no distribution counterpart merge into one entry.
         self.assertEqual(totals['مساحات أخرى']['units'], 0)

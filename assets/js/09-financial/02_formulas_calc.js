@@ -802,7 +802,7 @@
       const hidden = document.getElementById('financialCalcData');
       if (hidden) {
         hidden.value = JSON.stringify({
-          ...roundFinancialSavedResults({
+          ...preserveFinancialResults({
             projectCost, projectCostWithFinance, adjustedProjectCost, totalFundFees,
             roi, projectIrr, equityIrr: irrVal, payback, equityPayback, totalEquityRequired
           }),

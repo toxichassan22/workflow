@@ -8,11 +8,9 @@
     }
 
     function llMoney(value) {
-      // Money renders at halala precision — a raw float like 499.98750000000001
-      // (stored by an old unrounded conversion) must never reach the screen.
       if (value == null || value === '') return '0';
       const n = Number(value);
-      return Number.isFinite(n) ? n.toLocaleString('en-US', { maximumFractionDigits: 2 }) : '0';
+      return Number.isFinite(n) ? formatExactSystemNumber(n, true) : '0';
     }
 
     function llStatus(status) {
@@ -290,7 +288,7 @@
         // catalog price plus VAT — the same total the top-up receipt books.
         const subtotal = (r.price_sar != null && r.price_sar !== '') ? Number(r.price_sar) : null;
         const costCell = (subtotal != null && Number.isFinite(subtotal))
-          ? llMoney(Math.round(subtotal * (1 + taxRate) * 100) / 100) + ' <span>ريال سعودي</span>'
+          ? llMoney(subtotal * (1 + taxRate)) + ' <span>ريال سعودي</span>'
           : (r.amount_sar != null ? llMoney(r.amount_sar) + ' <span>نقطة</span>' : '—');
         const refCell = (r.transfer_reference ? llEscape(r.transfer_reference) : '—') +
           (r.reference_number
@@ -408,7 +406,7 @@
         const pts = Math.max(0, (llCustomPackageAmount || 0) * (1 - llPackageTaxRate));
         box.textContent = WFT('recharge.custom_info',
           'باقة مخصصة — {points} نقطة — {price} ريال سعودي', {
-            points: llMoney(Math.round(pts * 100) / 100),
+            points: llMoney(pts),
             price: llMoney(llCustomPackageAmount || 0)
           });
         box.style.display = '';
@@ -442,7 +440,7 @@
     function llUpdateCustomPoints() {
       const amount = Math.max.apply(null, [0].concat(Array.from(
         document.querySelectorAll('.pkg-custom-input')).map(i => Number(i.value || 0))));
-      const pts = amount > 0 ? Math.round(amount * (1 - llPackageTaxRate) * 100) / 100 : 0;
+      const pts = amount > 0 ? amount * (1 - llPackageTaxRate) : 0;
       document.querySelectorAll('.pkg-custom-points').forEach(el => {
         el.innerHTML = llEscape(llMoney(pts)) +
           ' <span class="pkg-credit-unit">نقطة</span>';
@@ -948,7 +946,7 @@
       const creditEl = document.getElementById('adminPackageCredit');
       if (creditEl) {
         creditEl.value = price > 0
-          ? Math.round(price * (1 - llAdminTaxRatePct / 100) * 100) / 100 : '';
+          ? price * (1 - llAdminTaxRatePct / 100) : '';
       }
     }
 
@@ -1063,7 +1061,7 @@
         name: v('adminPackageName').trim() || WFT('admin.package_name', 'اسم الباقة'),
         name_en: v('adminPackageNameEn').trim(),
         price_sar: price > 0 ? price : null,
-        credit_sar: Math.round(price * (1 - llAdminTaxRatePct / 100) * 100) / 100,
+        credit_sar: price * (1 - llAdminTaxRatePct / 100),
         duration_days: dur === '' ? null : parseInt(dur, 10),
         features: adminSelectedFeatureIds(),
         badge: v('adminPackageBadge'), badge_en: v('adminPackageBadgeEn'),
@@ -1141,11 +1139,11 @@
       const p = llAdminPackages.find(item => item.id === packageId);
       if (!p) return;
       llEditingPackageId = packageId;
-      const llRound2 = (v) => (v == null ? '' : Math.round(Number(v) * 100) / 100);
+      const llExactNumber = (v) => (v == null ? '' : Number(v));
       document.getElementById('adminPackageName').value = p.name || '';
       const nameEnEl = document.getElementById('adminPackageNameEn');
       if (nameEnEl) nameEnEl.value = p.name_en || '';
-      document.getElementById('adminPackagePrice').value = llRound2(p.price_sar);
+      document.getElementById('adminPackagePrice').value = llExactNumber(p.price_sar);
       document.getElementById('adminPackageCredit').value = llRound2(p.credit_sar);
       const pkgFieldMap = {
         adminPackageBadge: 'badge', adminPackageBadgeEn: 'badge_en',

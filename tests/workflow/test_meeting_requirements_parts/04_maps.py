@@ -1058,12 +1058,12 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
                       index_source)
         self.assertIn("FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف', 'مرتبط بمكون'])", index_source)
 
-    def test_financial_decimals_and_pdf_values_use_one_decimal_and_thousands_separators(self):
+    def test_financial_decimals_and_pdf_values_keep_precision_and_thousands_separators(self):
         module = self.application_module
-        self.assertEqual(module._financial_report_format_number(1234567.26, 'projectCost'), '1,234,567.3')
+        self.assertEqual(module._financial_report_format_number(1234567.26, 'projectCost'), '1,234,567.26')
         self.assertEqual(module._financial_report_format_number(1234567, 'projectCost'), '1,234,567')
-        self.assertEqual(module._financial_report_format_number(0.18254, 'projectIrr'), '18.3%')
-        self.assertEqual(module._financial_report_format_number(6.55, 'payback'), '6.6 سنة')
+        self.assertEqual(module._financial_report_format_number(0.18254, 'projectIrr'), '18.254%')
+        self.assertEqual(module._financial_report_format_number(6.55, 'payback'), '6.55 سنة')
         self.assertEqual(module._financial_report_format_number(2027, 'year'), '2027')
         self.assertEqual(module._financial_report_format_number(1234, 'units'), '1,234')
         self.assertEqual(module._financial_report_format_display('0500000000', 'رقم الهاتف'), '0500000000')
@@ -1088,7 +1088,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         }
         with self.app.app_context():
             html = module.build_financial_report_html('مشروع مالي', model, {}, self.tenant_a)
-        for expected in ('1,234,567.3', '18.3%', '9,876,543.3', '87.3%'):
+        for expected in ('1,234,567.26', '18.256%', '9,876,543.26', '87.26%'):
             self.assertIn(expected, html)
         self.assertIn('<td dir="ltr">2027</td>', html)
         self.assertNotIn('2,027', html)
@@ -1103,14 +1103,14 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
                 text = '\n'.join(page.get_text() for page in document)
             finally:
                 document.close()
-            for expected in ('1,234,567.3', '9,876,543.3', '87.3%'):
+            for expected in ('1,234,567.26', '9,876,543.26', '87.26%'):
                 self.assertIn(expected, text)
             self.assertNotIn('2,027', text)
 
         index_source = read_frontend_text()
-        self.assertIn('function roundFinancialResult(value)', index_source)
-        self.assertIn('maximumFractionDigits: hasFraction ? 1 : 0', index_source)
-        self.assertIn('roundFinancialSavedResults(window.__financialProjection || {})', index_source)
+        self.assertIn('function formatFinancialResultNumber(value, grouped = true)', index_source)
+        self.assertIn('formatExactSystemNumber(value, grouped)', index_source)
+        self.assertIn('preserveFinancialResults(window.__financialProjection || {})', index_source)
 
     def test_financial_clarifications_are_manual_optional_and_omitted_when_empty(self):
         module = self.application_module
@@ -1177,7 +1177,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         compound = 'مساحة مبنية 1234567.26 م² وقيمة 7654321 ريال'
         self.assertEqual(
             module._financial_report_format_display(compound, 'تفاصيل الاستثمار'),
-            'مساحة مبنية 1,234,567.3 م² وقيمة 7,654,321 ريال',
+            'مساحة مبنية 1,234,567.26 م² وقيمة 7,654,321 ريال',
         )
         screenshot_values = (
             ('إيراد أول سنة تشغيل', '69192152.4', '69,192,152.4'),
@@ -1216,8 +1216,8 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
             self.assertIn('REVENUE-LABEL', html)
             self.assertNotIn('مرتبط بمكون', html)
             self.assertNotIn('LINKED-COMPONENT-HIDDEN', html)
-            self.assertIn('1,234,567.3', html)
-        self.assertIn('TOTAL 1,234,567.3', report_html)
+            self.assertIn('1,234,567.26', html)
+        self.assertIn('TOTAL 1,234,567.26', report_html)
         for _label, _value, expected in screenshot_values:
             self.assertIn(expected, report_html)
 
@@ -1234,7 +1234,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
             normalized_text = text.replace('\xa0', ' ')
             self.assertIn('REVENUE-LABEL', normalized_text)
             self.assertNotIn('LINKED-COMPONENT-HIDDEN', normalized_text)
-            self.assertIn('TOTAL 1,234,567.3', normalized_text)
+            self.assertIn('TOTAL 1,234,567.26', normalized_text)
 
         index_source = read_frontend_text()
         self.assertIn("<h3>4. بنود الإيرادات</h3>${reportTableSnapshot('revenueTable'", index_source)

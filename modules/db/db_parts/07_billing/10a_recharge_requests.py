@@ -48,8 +48,8 @@ def create_recharge_request(tenant_id, package_name, amount_usd=0, price_sar=Non
             transfer_reference, receipt_file_id, requested_by, requested_by_name)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (row_id, tenant_id, package_id, str(package_name).strip(), float(amount_usd or 0),
-         round(float(amount_sar) + 1e-9, 2) if amount_sar is not None else usd_to_sar(amount_usd or 0),
-         round(float(price_sar) + 1e-9, 2) if price_sar is not None else None, transfer_reference, receipt_file_id,
+         float(amount_sar) if amount_sar is not None else usd_to_sar(amount_usd or 0),
+         float(price_sar) if price_sar is not None else None, transfer_reference, receipt_file_id,
          requested_by, requested_by_name),
     )
     conn.commit()
@@ -104,7 +104,7 @@ def decide_recharge_request(tenant_id, request_id, decision, reviewed_by, review
     if amount_sar is None:
         amount_sar = usd_to_sar(row['amount_usd'])
     if decision == 'approved' and float(amount_sar or 0) > 0:
-        amount = round(float(amount_sar) + 1e-9, 2)
+        amount = float(amount_sar)
         existing = conn.execute(
             'SELECT * FROM tenant_ledger WHERE tenant_id = ? AND idempotency_key = ?',
             (target_tenant_id, 'recharge:' + request_id),

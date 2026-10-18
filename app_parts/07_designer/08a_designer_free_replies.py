@@ -17,6 +17,9 @@ def _designer_last_reply_was_question(history):
     return False
 
 
+from numeric_precision import format_precise_number
+
+
 _DESIGNER_GREETINGS = frozenset({
     'سلام', 'سلام عليكم', 'السلام عليكم', 'وعليكم السلام', 'مرحبا', 'مرحب',
     'اهلا', 'أهلا', 'اهلين', 'يا هلا', 'هلا', 'هلا والله', 'هاي', 'هاى',
@@ -79,7 +82,7 @@ def _designer_balance_reply_text(available_sar):
     capacity_note = (
         f' — تكفي تقريبًا لتعديل {_slide_capacity} شريحة.' if _slide_capacity > 0 else '.')
     return (
-        f'رصيد شركتك المتاح حاليًا ~{available:.2f} نقطة{capacity_note} '
+        f'رصيد شركتك المتاح حاليًا ~{format_precise_number(available, grouped=False)} نقطة{capacity_note} '
         'هذه الرسالة لم تستهلك أي رصيد.'
     )
 
@@ -215,8 +218,8 @@ def _client_safe_llm_error(exc_or_text, fallback='تعذر تنفيذ الطلب
         if estimate and text.startswith(_COMPANY_CREDIT_EXHAUSTED_MSG):
             return (
                 _COMPANY_CREDIT_EXHAUSTED_MSG
-                + f' تقدير النظام المبدئي لهذه العملية: {float(estimate.group(1)):.2f} دولار '
-                + f'(نحو {float(estimate.group(2)):.2f} نقطة). التكلفة الفعلية قد تختلف.'
+                + f' تقدير النظام المبدئي لهذه العملية: {format_precise_number(estimate.group(1), grouped=False)} دولار '
+                + f'(نحو {format_precise_number(estimate.group(2), grouped=False)} نقطة). التكلفة الفعلية قد تختلف.'
             )
         return _COMPANY_CREDIT_EXHAUSTED_MSG
     lowered = text.lower()
@@ -236,7 +239,7 @@ def _designer_available_sar(tenant_id):
     """Spendable company credit in riyals: wallet balance plus unburned package
     credit — package usage runs from its own purse, so it counts as available."""
     try:
-        return round(float(db.get_tenant_balance(tenant_id) or 0.0)
-                     + float(db.get_package_remaining_sar(tenant_id) or 0.0), 2)
+        return (float(db.get_tenant_balance(tenant_id) or 0.0)
+                + float(db.get_package_remaining_sar(tenant_id) or 0.0))
     except Exception:
         return 0.0

@@ -2,7 +2,6 @@ import copy
 import hashlib
 import json
 import re
-from decimal import Decimal, ROUND_HALF_UP
 
 import db
 from best_use_geometry import number, parcel_shape_source, setback_envelope
@@ -71,8 +70,8 @@ def text(value, limit=6000):
     return str(value or '').strip()[:limit]
 
 
-def rounded(value):
-    return float(Decimal(str(value)).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP))
+def precise(value):
+    return float(value)
 
 
 def capacity(project):

@@ -34,7 +34,7 @@
         const approvedArea = parseNumber(readLand('approved_financial_area'));
         const approvedFar = parseNumber(readLand('approved_floor_area_ratio'));
         const builtNext = approvedArea > 0 && approvedFar > 0
-          ? String(Math.round(approvedArea * approvedFar * 100) / 100)
+          ? String(approvedArea * approvedFar)
           : '';
         if (builtAreaInput.value !== builtNext) builtAreaInput.value = builtNext;
       }

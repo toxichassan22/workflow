@@ -2,7 +2,7 @@ import copy
 import re
 
 from best_use_contract import (ProposalError, SUPPORT_USES, INVESTMENT_MODELS, capacity,
-                               canonical_use, number, rounded, text, read_object, USE_TERMS)
+                               canonical_use, number, precise, text, read_object, USE_TERMS)
 import best_use_regulations as regulations
 import best_use_prices as prices
 import best_use_workflow as workflow
@@ -138,7 +138,7 @@ def distribution(raw, project, regulation_data, artifact_id, stage='concept', la
                                 f'= {footprint * budget["floors"]:g})')
         if stage == 'land' and pool == 'builtArea' and abs(built - footprint) > 1e-6:
             raise ProposalError('مرحلة الأرض لا توزع مسطحات الأدوار: ' + name)
-        row.update({key: int(value) if key == 'units' else rounded(value) for key, value in values.items()})
+        row.update({key: int(value) if key == 'units' else precise(value) for key, value in values.items()})
         if (row['builtArea'] <= 0 or row['unitArea'] <= 0
                 or (pool == 'builtArea' and (row['footprintArea'] <= 0
                     or row['builtArea'] > row['footprintArea'] * budget['floors'] + 1e-6))
@@ -166,7 +166,7 @@ def distribution(raw, project, regulation_data, artifact_id, stage='concept', la
                 if (floor is None or floor != int(floor) or not 1 <= floor <= budget['floors']
                         or floor in floors_seen or area is None or not 0 < area <= row['footprintArea']):
                     raise ProposalError('تخصيص دور يتجاوز الحدود أو يتكرر: ' + name)
-                area = rounded(area)
+                area = precise(area)
                 if not 0 < area <= row['footprintArea']:
                     raise ProposalError('تقريب مساحة الدور يتجاوز الحصة الأرضية.')
                 floors_seen.add(floor)
@@ -204,7 +204,7 @@ def distribution(raw, project, regulation_data, artifact_id, stage='concept', la
         raise ProposalError('تخصيصات الأدوار المتكررة تتجاوز تغطيتها المعتمدة.')
     return {'title': text(raw.get('title'), 300), 'rationale': text(raw.get('rationale'), 16000),
             'setbackExplanation': text(raw.get('setbackExplanation'), 6000), 'components': rows,
-            'capacity': budget, 'totals': {key: rounded(value) for key, value in totals.items()},
+            'capacity': budget, 'totals': {key: precise(value) for key, value in totals.items()},
             'stage': stage, 'planningOnly': True}
 
 

@@ -3,7 +3,7 @@ from datetime import date
 from html.parser import HTMLParser
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode, unquote
 
-from best_use_contract import ProposalError, text, rounded, USE_TERMS, DIGITS, digest
+from best_use_contract import ProposalError, text, precise, USE_TERMS, DIGITS, digest
 from best_use_geometry import number
 
 
@@ -235,7 +235,7 @@ def build_scan(uses, candidates, pages, retrieved_at, city, district, search_ran
                       'sourceIds': [item['id'] for item in eligible]}
             if len(eligible) >= minimum:
                 values = [item['value'] for item in eligible]
-                metric.update(value=rounded(sum(values) / len(values)), method='arithmetic_mean',
+                metric.update(value=precise(sum(values) / len(values)), method='arithmetic_mean',
                               min=min(values), max=max(values))
                 entry[key] = metric['value']
             entry['metrics'][mode] = metric
@@ -272,11 +272,11 @@ def revenue_potential(components, scan):
         source_ids.update(metric.get('sourceIds') or [])
     comparable = bool(modes) and len(modes) == 1 and not issues and 'unsupported' not in modes
     return {'metric': 'revenue_potential', 'currency': 'SAR',
-            'saleTotal': rounded(sale) if 'sale' in modes and not issues else None,
-            'annualRentTotal': rounded(rent) if 'rent' in modes and not issues else None,
+            'saleTotal': precise(sale) if 'sale' in modes and not issues else None,
+            'annualRentTotal': precise(rent) if 'rent' in modes and not issues else None,
             'revenueMode': next(iter(modes)) if comparable else None,
             'period': ('oneOff' if modes == {'sale'} else 'year') if comparable else None,
-            'value': rounded(sale if modes == {'sale'} else rent) if comparable else None,
+            'value': precise(sale if modes == {'sale'} else rent) if comparable else None,
             'comparisonStatus': 'comparable' if comparable else 'insufficient_data' if issues else 'mixed_basis',
             'rank': None, 'issues': issues, 'sourceIds': sorted(source_ids),
             'areaStatus': 'planning_assumption', 'excludesCostsAndROI': True}

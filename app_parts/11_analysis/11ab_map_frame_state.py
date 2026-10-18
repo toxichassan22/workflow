@@ -132,7 +132,7 @@ def _frame_matches_baked(creative, map_type):
             return False
     try:
         if zoom is not None and baked.get('zoom') is not None \
-                and int(round(float(zoom))) != int(round(float(baked['zoom']))):
+                and float(zoom) != float(baked['zoom']):
             return False
         for axis in ('lat', 'lng'):
             live_val, baked_val = center.get(axis), baked.get(axis)

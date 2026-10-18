@@ -118,9 +118,9 @@ class BillingLedgerTests(unittest.TestCase):
         self.assertAlmostEqual(entry['ai_cost_usd'], 1.0)
         self.assertAlmostEqual(entry['maps_cost_usd'], 0.02)
         # Wallet money is riyals: raw USD x rate (3.75) x multiplier.
-        self.assertAlmostEqual(entry['amount_usd'], round(1.02 * 2.0, 2))
-        self.assertAlmostEqual(entry['amount_sar'], round(1.02 * 3.75 * 2.0, 2))
-        self.assertAlmostEqual(result['balance_sar'], 10.0 - round(1.02 * 3.75 * 2.0, 2))
+        self.assertAlmostEqual(entry['amount_usd'], 1.02 * 2.0)
+        self.assertAlmostEqual(entry['amount_sar'], 1.02 * 3.75 * 2.0)
+        self.assertAlmostEqual(result['balance_sar'], 10.0 - 1.02 * 3.75 * 2.0)
         with self.app.app_context():
             unbilled = db.get_unbilled_usage(tenant_id, draft_id='draft-bill')
         self.assertEqual(unbilled['ai_calls'], 0)
@@ -263,51 +263,50 @@ class BillingLedgerTests(unittest.TestCase):
         self.assertAlmostEqual(result['entry']['amount_sar'], 5.0)
         self.assertAlmostEqual(result['balance_sar'], 6.0)
 
-    # ── Sub-cent carry (ISS-038) ───────────────────────────────────────
+    # ── Exact sub-cent billing ─────────────────────────────────────────
 
-    def test_subcent_claim_carries_instead_of_closing_at_zero(self):
-        """ISS-038: a claim whose billed total rounds to 0.00 SAR must leave
-        the rows unbilled so the cents accumulate into the next invoice."""
+    def test_subcent_claim_is_billed_without_rounding(self):
+        """A positive sub-cent charge is recorded at its actual precision."""
         tenant_id = self._fresh_tenant('subcent', balance=10.0)
         with self.app.app_context():
-            # 0.0001 raw x 3.75 x 1.6 = 0.0006 SAR — below a single halala.
+            # 0.0001 raw x 3.75 x 1.6 = 0.0006 SAR.
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=3,
                 cost_usd=0.0001, draft_id='draft-subcent')
             result = db.bill_unbilled_usage(tenant_id, draft_id='draft-subcent')
-        self.assertFalse(result['billed'])
-        self.assertEqual(result['reason'], 'below_minimum_charge')
+        self.assertTrue(result['billed'])
+        self.assertAlmostEqual(result['entry']['amount_sar'], 0.0006)
         with self.app.app_context():
             conn = db.get_db()
             row = conn.execute(
                 'SELECT billed_ledger_id FROM ai_usage_events WHERE draft_id = ?',
                 ('draft-subcent',)).fetchone()
-            self.assertIsNone(row['billed_ledger_id'])
+            self.assertIsNotNone(row['billed_ledger_id'])
             count = conn.execute(
                 'SELECT COUNT(*) AS c FROM tenant_ledger WHERE tenant_id = ? AND kind = ?',
                 (tenant_id, 'debit')).fetchone()['c']
-            self.assertEqual(count, 0)
-            self.assertAlmostEqual(db.get_tenant_balance(tenant_id), 10.0)
+            self.assertEqual(count, 1)
+            self.assertAlmostEqual(db.get_tenant_balance(tenant_id), 9.9994)
 
-    def test_carried_subcent_claim_bills_once_threshold_is_crossed(self):
-        """ISS-038: after the carried cents push the aggregate past a halala,
-        the next checkout claims the earlier rows under the new debit."""
+    def test_each_subcent_claim_is_billed_at_its_full_precision(self):
+        """Separate claims retain their own exact values instead of carrying."""
         tenant_id = self._fresh_tenant('subcent-carry', balance=10.0)
         with self.app.app_context():
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=3,
                 cost_usd=0.0001, draft_id='draft-carry')
             first = db.bill_unbilled_usage(tenant_id, draft_id='draft-carry')
-            self.assertFalse(first['billed'])
+            self.assertTrue(first['billed'])
+            self.assertAlmostEqual(first['entry']['amount_sar'], 0.0006)
             db.record_ai_usage_event(
                 tenant_id, 'model-x', flow='slide', total_tokens=900,
                 cost_usd=0.002, draft_id='draft-carry')
             second = db.bill_unbilled_usage(tenant_id, draft_id='draft-carry')
         self.assertTrue(second['billed'])
         entry = second['entry']
-        # 0.0021 raw x 3.75 x 1.6 = 0.0126 -> 0.01 SAR collected once.
-        self.assertAlmostEqual(entry['amount_sar'], 0.01, places=2)
-        self.assertEqual(entry['ai_events_count'], 2)
+        # 0.002 raw x 3.75 x 1.6 = 0.012 SAR.
+        self.assertAlmostEqual(entry['amount_sar'], 0.012)
+        self.assertEqual(entry['ai_events_count'], 1)
         with self.app.app_context():
             conn = db.get_db()
             unbilled = conn.execute(
@@ -405,7 +404,7 @@ class BillingLedgerTests(unittest.TestCase):
                 'ORDER BY created_at DESC, rowid DESC LIMIT 1',
                 (tenant_id,)).fetchone()
             self.assertEqual(row['package_id'], package['id'])
-            self.assertAlmostEqual(db.get_package_remaining_sar(tenant_id), 1.87)
+            self.assertAlmostEqual(db.get_package_remaining_sar(tenant_id), 1.875)
 
     def test_catalog_edit_does_not_rewrite_existing_entitlement(self):
         """ISS-040: changing the catalog credit must not change what an
@@ -439,8 +438,8 @@ class BillingLedgerTests(unittest.TestCase):
         body = response.get_json()
         self.assertFalse(body['success'])
         self.assertEqual(body['error_code'], 'INSUFFICIENT_BALANCE')
-        self.assertIn(f"{body['required_sar']:.2f} نقطة", body['error'])
-        self.assertIn(f"{body['available_sar']:.2f} نقطة", body['error'])
+        self.assertIn(f"{body['required_sar']:g} نقطة", body['error'])
+        self.assertIn(f"{body['available_sar']:g} نقطة", body['error'])
 
     def test_preflight_fails_closed_when_balance_lookup_errors(self):
         """ISS-037: an unreadable wallet is not a funded wallet — a DB error

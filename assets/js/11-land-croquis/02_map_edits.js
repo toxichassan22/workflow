@@ -681,7 +681,7 @@
           const pointLatRad = point[0] * Math.PI / 180;
           const pointY = (1 - Math.log(Math.tan(pointLatRad) + 1 / Math.cos(pointLatRad)) / Math.PI) / 2;
           const yOffset = (pointY - centerY) * world;
-          return ((0.5 + lngOffset / img.naturalWidth) * 100).toFixed(3) + ',' + ((0.5 + yOffset / img.naturalHeight) * 100).toFixed(3);
+          return String((0.5 + lngOffset / img.naturalWidth) * 100) + ',' + String((0.5 + yOffset / img.naturalHeight) * 100);
         });
       const points = showBoundary ? polygonPoints.map(toPoint) : [];
       const line = points.length > 2 ? points.concat(points[0]).join(' ') : points.join(' ');

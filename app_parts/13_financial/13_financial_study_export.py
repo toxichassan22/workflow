@@ -63,14 +63,9 @@ def _financial_report_plain_number(value):
         return None
 
 
-def _financial_rounded_text(value, grouped=True):
-    try:
-        rounded = Decimal(str(value)).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)
-    except (InvalidOperation, TypeError, ValueError):
-        return ''
-    if rounded == rounded.to_integral_value():
-        return f'{int(rounded):,}' if grouped else str(int(rounded))
-    return f'{rounded:,.1f}' if grouped else f'{rounded:.1f}'
+def _financial_exact_text(value, grouped=True):
+    from numeric_precision import format_precise_number
+    return format_precise_number(value, grouped=grouped)
 
 
 def _financial_report_format_number(value, key=''):
@@ -89,12 +84,12 @@ def _financial_report_format_number(value, key=''):
             display = number * 100
         else:
             display = number
-        return html_lib.escape(_financial_rounded_text(display, grouped=False) + '%')
+        return html_lib.escape(_financial_exact_text(display, grouped=False) + '%')
     if field in {'payback', 'equityPayback'} or (isinstance(value, str) and 'سنة' in str(value)):
-        return html_lib.escape(_financial_rounded_text(number, grouped=False) + ' سنة')
+        return html_lib.escape(_financial_exact_text(number, grouped=False) + ' سنة')
     if field in _FINANCIAL_YEAR_KEYS and float(number).is_integer() and abs(number) < 10000:
         return html_lib.escape(str(int(number)))
-    return html_lib.escape(_financial_rounded_text(number))
+    return html_lib.escape(_financial_exact_text(number))
 
 
 _FINANCIAL_DISPLAY_VALUE_RE = re.compile(
@@ -137,7 +132,7 @@ def _financial_report_format_display(value, context=''):
         amount = bool(_FINANCIAL_AMOUNT_CONTEXT_RE.search(context_text))
         percent = bool(suffix in {'%', '٪'} or (not amount and _FINANCIAL_PERCENT_CONTEXT_RE.search(context_text)))
         year = bool(suffix in {'سنة', 'سنوات'} or (not amount and _FINANCIAL_YEAR_CONTEXT_RE.search(context_text)))
-        formatted = _financial_rounded_text(number, grouped=not (percent or year))
+        formatted = _financial_exact_text(number, grouped=not (percent or year))
         if match.group('open') and match.group('close'):
             formatted = f'({formatted.lstrip("-")})'
         if suffix:
@@ -155,7 +150,7 @@ def _financial_report_format_display(value, context=''):
         if 1900 <= abs(number) <= 2100 and _FINANCIAL_YEAR_CONTEXT_RE.search(context_text):
             return raw
         trailing = text[token_match.end():].lstrip()
-        return _financial_rounded_text(number, grouped=not trailing.startswith(('%', '٪')))
+        return _financial_exact_text(number, grouped=not trailing.startswith(('%', '٪')))
 
     return html_lib.escape(_FINANCIAL_NUMBER_TOKEN_RE.sub(format_token, text))
 

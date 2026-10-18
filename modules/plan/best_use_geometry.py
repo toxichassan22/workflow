@@ -233,7 +233,7 @@ def setback_envelope(project, regime='parking'):
     if not cadastral:
         return None, {'code': 'cadastral'}
     if abs(abs(signed) - cadastral) > max(5, cadastral * 0.03):
-        return None, {'code': 'mismatch', 'polygonArea': round(abs(signed), 1),
+        return None, {'code': 'mismatch', 'polygonArea': abs(signed),
                       'cadastralArea': cadastral}
     if signed < 0:
         points.reverse()

@@ -591,10 +591,10 @@ def generation_job_metrics():
             except (TypeError, ValueError):
                 continue
         if counted:
-            metrics['avg_duration_seconds'] = round(total_seconds / counted, 1)
+            metrics['avg_duration_seconds'] = total_seconds / counted
         decided = metrics['by_status'].get('completed', 0) + metrics['by_status'].get('failed', 0)
         if decided:
-            metrics['success_rate'] = round(metrics['by_status'].get('completed', 0) / decided * 100, 1)
+            metrics['success_rate'] = metrics['by_status'].get('completed', 0) / decided * 100
     except Exception:
         pass
     return metrics

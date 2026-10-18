@@ -39,6 +39,13 @@ def _mixed_payload():
 
 class BenchmarkAxesTests(unittest.TestCase):
 
+    def test_competitor_numeric_text_keeps_all_decimal_places(self):
+        self.assertEqual(market_study._clean_numeric('1,234.56789'), '1234.56789')
+        self.assertEqual(market_study._clean_numeric('١٢٣٫٤٥٦٧'), '123.4567')
+        frontend = (ROOT / 'assets' / 'js' / '04-market.js').read_text(encoding='utf-8')
+        self.assertIn("return sign + normalizedWhole + (fraction !== undefined ? '.' + fraction : '');", frontend)
+        self.assertIn('return formatExactSystemNumber(clean, true);', frontend)
+
     def test_axes_derived_from_revenue_components(self):
         axes = market_study.project_competitor_axes(_mixed_payload())
         self.assertEqual([axis['key'] for axis in axes],

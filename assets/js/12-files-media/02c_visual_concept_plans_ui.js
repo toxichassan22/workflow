@@ -26,7 +26,7 @@
       const totals = Array.isArray(distribution.totals) ? distribution.totals : [];
       if (!totals.length) return '';
       const fmt = value => (value === null || value === undefined || value === '') ? '—'
-        : (typeof value === 'number' ? String(Math.round(value * 100) / 100) : String(value));
+        : String(value);
       const rowsHtml = totals.map(item => {
         const deltas = [];
         if (typeof item.delta_units === 'number' && item.delta_units) deltas.push(WFT('vc.delta_units', 'وحدات {n}', { n: (item.delta_units > 0 ? '+' : '') + item.delta_units }));

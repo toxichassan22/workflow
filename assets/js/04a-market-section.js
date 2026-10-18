@@ -370,7 +370,7 @@
         return;
       }
       const format = value => value === null || value === undefined || value === ''
-        ? 'غير متاح' : new Intl.NumberFormat('ar-SA', { maximumFractionDigits: 0 }).format(Number(value));
+        ? 'غير متاح' : formatExactSystemNumber(Number(value), true);
       const sourceLabel = benchmark.source_label || 'صفقات مرجعية من ملفات البيانات';
       host.innerHTML = '<div class="market-transaction-benchmarks"><h4>' + escapeHtml(sourceLabel) + '</h4>' +
         '<div class="tenant-hint">' + escapeHtml(benchmark.note || '') + '</div>' +

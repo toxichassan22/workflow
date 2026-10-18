@@ -477,10 +477,8 @@ def _summary_sar_amount(raw_amount, currency):
         if rate is None:
             return ''
         converted = amount * Decimal(str(rate))
-        quantum = Decimal('1') if converted == converted.to_integral_value() else Decimal('0.01')
-        rounded = converted.quantize(quantum, rounding=ROUND_HALF_UP)
-        formatted = f'{rounded:,.2f}'
-        return formatted.rstrip('0').rstrip('.') if '.' in formatted else f'{rounded:,}'
+        from numeric_precision import format_precise_number
+        return format_precise_number(converted, grouped=True)
     except (InvalidOperation, TypeError, ValueError):
         return ''
 

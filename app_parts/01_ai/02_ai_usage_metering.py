@@ -5,6 +5,9 @@
 # draft and presentation. Token figures are copied verbatim from the provider
 # response. Dollar cost is resolved per generation id off the request path.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+from numeric_precision import format_precise_number
+
+
 AI_USAGE_FLOWS = (
     'slide', 'slide_plan', 'designer_chat', 'training_chat', 'land', 'site',
     'market', 'executive', 'project_data', 'image', 'other',
@@ -548,12 +551,12 @@ def _require_billing_balance(flow_key):
             'success': False,
             'error': (
                 'الرصيد غير كافٍ لتشغيل هذه العملية. اشحن رصيد الشركة ثم أعد المحاولة. '
-                f'التقدير المبدئي المطلوب: {estimate_sar:.2f} نقطة، '
-                f'والمتاح: {balance:.2f} نقطة.'
+                f'التقدير المبدئي المطلوب: {format_precise_number(estimate_sar, grouped=False)} نقطة، '
+                f'والمتاح: {format_precise_number(balance, grouped=False)} نقطة.'
             ),
             'error_code': 'INSUFFICIENT_BALANCE',
-            'required_sar': round(estimate_sar, 2),
-            'available_sar': round(balance, 2),
+            'required_sar': estimate_sar,
+            'available_sar': balance,
         }), 402
     return None
 
@@ -780,8 +783,8 @@ def api_billing_checkout():
             'success': False,
             'error': 'الرصيد غير كافٍ لإتمام الفوترة. اشحن رصيد الشركة ثم أعد المحاولة',
             'error_code': 'INSUFFICIENT_BALANCE',
-            'required_sar': round(short.required_sar, 2),
-            'available_sar': round(short.available_sar, 2),
+            'required_sar': short.required_sar,
+            'available_sar': short.available_sar,
         }), 402
     except Exception as exc:
         print(f"[BILLING] checkout failed: {exc}")
@@ -793,8 +796,8 @@ def api_billing_checkout():
         entry = result.get('entry') or {}
         _notify_tenant_billing(
             g.tenant_id, 'خُصم من المحفظة',
-            f'{float(entry.get("amount_sar") or 0.0):.2f} نقطة — الرصيد الحالي '
-            f'{float(result.get("balance_sar") or 0.0):.2f} نقطة',
+            f'{format_precise_number(entry.get("amount_sar") or 0.0, grouped=False)} نقطة — الرصيد الحالي '
+            f'{format_precise_number(result.get("balance_sar") or 0.0, grouped=False)} نقطة',
             entity_type='wallet', entity_id='debit:' + str(entry.get('id') or ''))
     except Exception:
         pass

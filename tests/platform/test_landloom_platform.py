@@ -729,8 +729,8 @@ class LandloomDbTests(unittest.TestCase):
         self.assertEqual(len(receipts), 1)
         receipt = receipts[0]
         self.assertTrue(receipt['invoice_number'].startswith('INV-'))
-        self.assertAlmostEqual(receipt['tax_amount_sar'], round(375 * db.TAX_RATE_SAR, 2))
-        self.assertAlmostEqual(receipt['total_sar'], round(375 * (1 + db.TAX_RATE_SAR), 2))
+        self.assertAlmostEqual(receipt['tax_amount_sar'], 375 * db.TAX_RATE_SAR)
+        self.assertAlmostEqual(receipt['total_sar'], 375 * (1 + db.TAX_RATE_SAR))
         self.assertEqual(receipt['recharge_request_id'], row['id'])
         # A second decision attempt cannot mint a second receipt.
         dup = db.decide_recharge_request('tenant-1', row['id'], 'approved', 'admin-1', 'المدير')

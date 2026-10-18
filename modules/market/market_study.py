@@ -8,7 +8,7 @@ required indicator, source-priority rule, or input option from the PDF.
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit, urlunsplit
 import json
 import math

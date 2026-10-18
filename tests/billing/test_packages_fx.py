@@ -171,13 +171,13 @@ class PackagesFxTests(unittest.TestCase):
         # The wallet is riyal-native now: 10 SAR reads back 10, with the
         # dollar twin divided out at the stored rate.
         self.assertAlmostEqual(body['billing']['balance_sar'], 10.0)
-        self.assertAlmostEqual(body['billing']['balance_usd'], round(10.0 / 3.5, 2))
+        self.assertAlmostEqual(body['billing']['balance_usd'], 10.0 / 3.5)
         self.assertEqual(body['billing']['fx']['rate'], 3.5)
 
-    def test_usd_to_sar_rounding(self):
+    def test_usd_to_sar_keeps_full_precision(self):
         with self.app.app_context():
             self.assertEqual(db.usd_to_sar(10.0, 3.5), 35.0)
-            self.assertEqual(db.usd_to_sar(0.374, 3.75), 1.4)
+            self.assertEqual(db.usd_to_sar(0.374, 3.75), 1.4025)
             self.assertEqual(db.sar_to_usd(35.0, 3.5), 10.0)
             self.assertEqual(db.sar_to_usd(37.5, 3.75), 10.0)
 
@@ -211,36 +211,34 @@ class PackagesFxTests(unittest.TestCase):
         feed_row = next(p for p in feed['packages'] if p['id'] == package['id'])
         self.assertAlmostEqual(feed_row['credit_sar'], 200.0)
 
-    def test_money_figures_store_at_halala_precision(self):
-        """Sub-halala float noise (133.33 x 3.75 = 499.9875...) must never be
-        stored: the create/update paths round to 2dp and init_db normalizes
-        legacy artifacts left by the unrounded wallet migration."""
+    def test_money_figures_keep_sub_halala_precision(self):
+        """Package writes and schema initialization must preserve all supplied
+        decimal places, including values smaller than one halala."""
         client = self.app.test_client()
-        noise = 133.33 * 3.75  # 499.98750000000001 — the exact artifact seen live
-        self.assertNotEqual(noise, round(noise, 2))
+        precise_amount = 133.33 * 3.75
 
         created = client.post(
             '/api/admin/packages', headers=self._admin_headers(),
-            json={'name': 'باقة الضجيج', 'creditSar': noise, 'priceSar': noise})
+            json={'name': 'باقة الدقة', 'creditSar': precise_amount, 'priceSar': precise_amount})
         self.assertEqual(created.status_code, 201, created.get_json())
         package = created.get_json()['package']
-        self.assertEqual(package['credit_sar'], 499.99)
-        self.assertEqual(package['price_sar'], 499.99)
+        self.assertEqual(package['credit_sar'], precise_amount)
+        self.assertEqual(package['price_sar'], precise_amount)
 
         updated = client.put(
             f"/api/admin/packages/{package['id']}", headers=self._admin_headers(),
-            json={'creditSar': noise})
+            json={'creditSar': precise_amount})
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.get_json()['package']['credit_sar'], 499.99)
+        self.assertEqual(updated.get_json()['package']['credit_sar'], precise_amount)
 
         # Plant raw artifacts the way the old migration wrote them, then let
         # init_db's normalization pass snap them to the halala.
         with self.app.app_context():
             conn = db.get_db()
             conn.execute('UPDATE billing_packages SET credit_sar = ? WHERE id = ?',
-                         (noise, package['id']))
+                         (precise_amount, package['id']))
             conn.execute('UPDATE tenants SET credit_balance = ? WHERE id = ?',
-                         (noise, self.tenant_id))
+                         (precise_amount, self.tenant_id))
             conn.commit()
             db.init_db()
             row = db.get_db().execute(
@@ -249,8 +247,8 @@ class PackagesFxTests(unittest.TestCase):
             wallet = db.get_db().execute(
                 'SELECT credit_balance FROM tenants WHERE id = ?',
                 (self.tenant_id,)).fetchone()
-        self.assertEqual(row['credit_sar'], 499.99)
-        self.assertEqual(wallet['credit_balance'], 499.99)
+        self.assertEqual(row['credit_sar'], precise_amount)
+        self.assertEqual(wallet['credit_balance'], precise_amount)
 
     def test_tenant_credit_balance_keyed_in_sar(self):
         """Wallet money is package-only: a raw creditBalance write on the

@@ -39,8 +39,8 @@ def api_create_recharge_request():
             return jsonify({'error': 'مبلغ غير صالح',
                             'error_code': 'invalid_amount'}), 400
         package_name = 'باقة مخصصة'
-        price_sar = round(amount, 2)
-        amount_sar = round(amount * (1 - db.get_package_tax_rate()), 2)
+        price_sar = amount
+        amount_sar = amount * (1 - db.get_package_tax_rate())
         package_id = None
     row = db.create_recharge_request(
         g.tenant_id, package_name,
@@ -287,9 +287,9 @@ def api_client_overview():
                 package = {
                     'id': 'wallet',
                     'name': (cycle or {}).get('package_name') or 'رصيد المحفظة',
-                    'credit_sar': round(max(credited_sar, balance_sar), 2),
-                    'consumed_sar': round(max(0.0, credited_sar - balance_sar), 2),
-                    'remaining_sar': round(balance_sar, 2),
+                    'credit_sar': max(credited_sar, balance_sar),
+                    'consumed_sar': max(0.0, credited_sar - balance_sar),
+                    'remaining_sar': balance_sar,
                     'status': 'active' if balance_sar > 0 else 'expired',
                     'assigned_at': (cycle or {}).get('reviewed_at'),
                 }
@@ -327,10 +327,9 @@ def api_client_overview():
             # Spendable total: the wallet plus the real package's unburned
             # credit. The synthetic wallet-package block above is excluded —
             # its remaining is the balance itself, so adding it would double.
-            'effective_balance_sar': round(
-                balance_sar
-                + float(((view.get('package') or {}).get('remaining_sar')) or 0.0), 2),
-            'reserved_sar': round(reserved_sar, 2),
+            'effective_balance_sar': balance_sar
+                + float(((view.get('package') or {}).get('remaining_sar')) or 0.0),
+            'reserved_sar': reserved_sar,
             'lifetime': {
                 'consumed_usd': view.get('lifetime_consumed_usd'),
                 'consumed_sar': view.get('lifetime_consumed_sar'),

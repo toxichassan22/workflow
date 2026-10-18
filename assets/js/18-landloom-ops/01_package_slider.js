@@ -350,7 +350,7 @@
           if (target) target.focus();
           return;
         }
-        llCustomPackageAmount = Math.round(amt * 100) / 100;
+        llCustomPackageAmount = amt;
       }
       if (input) input.value = packageId || '';
       document.querySelectorAll('.pkg-pick, .pkg-card--custom').forEach(card => {

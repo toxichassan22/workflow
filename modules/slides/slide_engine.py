@@ -10,7 +10,8 @@ import re
 import concurrent.futures
 import html as html_lib
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation
+from numeric_precision import format_precise_number
 from html.parser import HTMLParser
 from design_templates import (
     build_design_rules, contrast_ratio, dark_surface_color, extract_slide_elements,

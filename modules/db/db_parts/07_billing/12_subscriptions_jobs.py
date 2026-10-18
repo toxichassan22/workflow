@@ -211,8 +211,8 @@ def _create_topup_receipt_tx(conn, tenant_id, recharge_request_id=None, receipt_
         amount_sar = usd_to_sar(amount_usd)
     subtotal = float(price_sar) if price_sar is not None else None
     tax_rate = get_package_tax_rate()
-    tax_amount = round(subtotal * tax_rate, 2) if subtotal is not None else None
-    total_sar = round(subtotal + tax_amount, 2) if subtotal is not None else None
+    tax_amount = subtotal * tax_rate if subtotal is not None else None
+    total_sar = subtotal + tax_amount if subtotal is not None else None
     conn.execute(
         '''INSERT INTO topup_receipts
            (id, tenant_id, recharge_request_id, receipt_file_id, receipt_sha256,

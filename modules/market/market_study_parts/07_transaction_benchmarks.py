@@ -71,11 +71,11 @@ def build_transaction_price_benchmarks(payload, axes):
             'district': group['district'],
             'unit_type': group['unit_type'],
             'deal_count': max(len(group['price_sqm']), len(group['deal_values'])),
-            'median_price_sqm_sar': round(statistics.median(group['price_sqm']))
+            'median_price_sqm_sar': statistics.median(group['price_sqm'])
             if group['price_sqm'] else None,
-            'min_price_sqm_sar': round(min(group['price_sqm'])) if group['price_sqm'] else None,
-            'max_price_sqm_sar': round(max(group['price_sqm'])) if group['price_sqm'] else None,
-            'median_deal_value_sar': round(statistics.median(group['deal_values']))
+            'min_price_sqm_sar': min(group['price_sqm']) if group['price_sqm'] else None,
+            'max_price_sqm_sar': max(group['price_sqm']) if group['price_sqm'] else None,
+            'median_deal_value_sar': statistics.median(group['deal_values'])
             if group['deal_values'] else None,
             'period_from': dates[0] if dates else '',
             'period_to': dates[-1] if dates else '',

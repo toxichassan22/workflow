@@ -312,15 +312,15 @@ def _plan_allocations(snapshot, response, required, area_per_space, source_texts
             'id': f'parking_regulatory_{location}',
             'name': 'مواقف السيارات — ' + PARKING_LOCATION_LABELS[location],
             'useType': 'parking', 'parkingLocation': location,
-            'units': count, 'unitArea': area_per_space, 'builtArea': round(count * area_per_space, 2),
+            'units': count, 'unitArea': area_per_space, 'builtArea': count * area_per_space,
             'revenueArea': 0, 'investmentModel': 'nonRevenue',
             'parkingPlanId': plan_id, 'floorRange': floor_range,
             'notes': _requirement_notes(requirements, required, count),
         })
     return {'existingSpaces': existing, 'additionalSpaces': additional,
             'unallocatedSpaces': remaining, 'components': components,
-            'baseBasementArea': snapshot['basementArea'], 'basementAreaTarget': round(basement_target, 2),
-            'footprintArea': round(footprint, 2), 'warnings': warnings}
+            'baseBasementArea': snapshot['basementArea'], 'basementAreaTarget': basement_target,
+            'footprintArea': footprint, 'warnings': warnings}
 
 
 def build_parking_plan(project, response, plan_id):
@@ -379,7 +379,7 @@ def build_parking_plan(project, response, plan_id):
                                     area_per_space, source_texts, plan_id, requirements)
     plan.update(allocations)
     plan['warnings'] = quantity_notes + plan['warnings']
-    plan['parkingArea'] = round(sum(row['builtArea'] for row in plan['components']), 2)
+    plan['parkingArea'] = sum(row['builtArea'] for row in plan['components'])
     plan['canApply'] = not missing and not plan['unallocatedSpaces'] and (snapshot['landArea'] or 0) > 0
     if missing:
         plan['components'] = []
@@ -448,7 +448,7 @@ def parking_distribution_rows(components, footprint_area):
             rows.append({'building': 'الموقع العام' if location == 'surface' else 'المبنى الرئيسي',
                          'floor_range': f'بدروم {level}' if location == 'basement' else 'مساحة مفتوحة' if location == 'surface' else 'أرضي',
                          'component': component['name'], 'units_per_floor': take,
-                         'floor_area_sqm': round(take * area_per_space, 2),
+                         'floor_area_sqm': take * area_per_space,
                          'circulation': 'المساحة تشمل الحركة والخدمات.'})
             spaces -= take
             level += 1

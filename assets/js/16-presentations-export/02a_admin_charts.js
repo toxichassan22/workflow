@@ -131,7 +131,7 @@
     }
 
     function sagFmtNum(v) {
-      return Number(v || 0).toLocaleString('en-US');
+      return formatExactSystemNumber(Number(v || 0), true);
     }
 
     // The figure and its currency are computed apart on purpose. The currency
@@ -143,7 +143,7 @@
       const n = Number(v || 0);
       const digits = n !== 0 && Math.abs(n) < 100 ? 2 : 0;
       return {
-        number: n.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }),
+        number: formatExactSystemNumber(n, true),
         currency: wfTr('ريال سعودي')
       };
     }
@@ -228,7 +228,7 @@
     }
 
     function sagTickText(v, top) {
-      return top < 10 ? String(Math.round(v * 10) / 10) : sagFmtNum(Math.round(v));
+      return sagFmtNum(v);
     }
 
     // Tick-label width in viewBox units, measured on the same font the

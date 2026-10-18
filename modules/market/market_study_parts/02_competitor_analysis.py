@@ -245,9 +245,10 @@ def _fmt_money(value):
         return ''
     if not math.isfinite(num) or num <= 0:
         return ''
+    from numeric_precision import format_precise_number
     if num >= 1_000_000:
-        return f"{num / 1_000_000:,.1f} مليون ريال سعودي"
-    return f"{num:,.0f} ريال سعودي"
+        return f"{format_precise_number(num / 1_000_000)} مليون ريال سعودي"
+    return f"{format_precise_number(num)} ريال سعودي"
 
 
 def _fmt_area(value):
@@ -257,7 +258,8 @@ def _fmt_area(value):
         return ''
     if not math.isfinite(num) or num <= 0:
         return ''
-    return f"{num:,.0f} م²"
+    from numeric_precision import format_precise_number
+    return f"{format_precise_number(num)} م²"
 
 
 def _fmt_pct(value):
@@ -269,7 +271,8 @@ def _fmt_pct(value):
         return ''
     if abs(num) <= 1.5:
         num *= 100
-    return f"{num:.1f}%"
+    from numeric_precision import format_precise_number
+    return f"{format_precise_number(num, grouped=False)}%"
 
 
 def _fmt_years(value):

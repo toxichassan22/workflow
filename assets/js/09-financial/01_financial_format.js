@@ -9,21 +9,8 @@
     // mismatched columns. Keeping a single table removes that whole class of bug.
 
     // S4: Financial Study Model (Extracted from THE-VIEW-Financial-Model-FINAL-v2.html)
-    const nf = new Intl.NumberFormat('en-US');
-    function roundFinancialResult(value) {
-      const number = Number(value);
-      if (!Number.isFinite(number)) return 0;
-      const rounded = Math.sign(number) * Math.round((Math.abs(number) + Number.EPSILON) * 10) / 10;
-      return Object.is(rounded, -0) ? 0 : rounded;
-    }
     function formatFinancialResultNumber(value, grouped = true) {
-      const rounded = roundFinancialResult(value);
-      const hasFraction = !Number.isInteger(rounded);
-      return new Intl.NumberFormat('en-US', {
-        useGrouping: grouped,
-        minimumFractionDigits: hasFraction ? 1 : 0,
-        maximumFractionDigits: hasFraction ? 1 : 0
-      }).format(rounded);
+      return formatExactSystemNumber(value, grouped);
     }
     function money(n) { return formatFinancialResultNumber(n, true) }
     function financialPercent(n) { return formatFinancialResultNumber(n, false) + '%' }
@@ -42,23 +29,14 @@
       if (value == null || String(value).trim() === '') return fallback;
       return parseNumber(value);
     }
-    const FINANCIAL_SAVED_RATIO_KEYS = new Set(['roi', 'projectIrr', 'irr', 'equityIrr', 'occupancyReach']);
-    const FINANCIAL_SAVED_EXACT_KEYS = new Set([
-      'year', 'startYear', 'endYear', 'studyYear', 'operationYear', 'developmentYears',
-      'operationYears', 'totalYears', 'salesStartYear', 'salesYears', 'saleExitYear',
-      'operatingExitYear', 'financeDrawYears', 'financeRepaymentStartYear',
-      'financeRepaymentYears', 'floorCount', 'units'
-    ]);
-    function roundFinancialSavedResults(value, key = '') {
-      if (Array.isArray(value)) return value.map(item => roundFinancialSavedResults(item, key));
+    function preserveFinancialResults(value) {
+      if (Array.isArray(value)) return value.map(preserveFinancialResults);
       if (value && typeof value === 'object') {
         return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => [
-          childKey, roundFinancialSavedResults(childValue, childKey)
+          childKey, preserveFinancialResults(childValue)
         ]));
       }
-      if (typeof value !== 'number' || !Number.isFinite(value) || FINANCIAL_SAVED_EXACT_KEYS.has(key)) return value;
-      if (FINANCIAL_SAVED_RATIO_KEYS.has(key)) return roundFinancialResult(value * 100) / 100;
-      return roundFinancialResult(value);
+      return value;
     }
     function financialControlContext(control) {
       const cell = control?.closest('td,th');

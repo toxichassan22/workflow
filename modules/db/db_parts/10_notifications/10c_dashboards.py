@@ -113,7 +113,7 @@ def operational_overview(months=12, from_month=None, to_month=None):
         fx_rate = FX_DEFAULT_USD_SAR
     trends = {'labels': labels}
     for key, mmap in series_maps.items():
-        trends[key] = [round(mmap.get(k, 0), 2) for k in bucket_keys]
+        trends[key] = [mmap.get(k, 0) for k in bucket_keys]
     trends['ai_spend_sar'] = [usd_to_sar(v, fx_rate) for v in trends['ai_spend']]
     trends['maps_spend_sar'] = [usd_to_sar(v, fx_rate) for v in trends['maps_spend']]
 
@@ -122,7 +122,7 @@ def operational_overview(months=12, from_month=None, to_month=None):
         prev = mmap.get(bucket_keys[-2], 0)
         if not prev:
             return None
-        return round((cur - prev) / float(prev) * 100)
+        return (cur - prev) / float(prev) * 100
 
     ticket_status = {}
     try:
@@ -151,14 +151,14 @@ def operational_overview(months=12, from_month=None, to_month=None):
         },
         'tickets_by_status': ticket_status,
         'revenue': {
-            'month_usd': round(revenue_map.get(bucket_keys[-1], 0), 2),
-            'total_usd': round(sum(revenue_map.values()), 2),
-            'month_sar': round(series_maps['revenue_sar'].get(bucket_keys[-1], 0), 2),
-            'total_sar': round(sum(series_maps['revenue_sar'].values()), 2),
+            'month_usd': revenue_map.get(bucket_keys[-1], 0),
+            'total_usd': sum(revenue_map.values()),
+            'month_sar': series_maps['revenue_sar'].get(bucket_keys[-1], 0),
+            'total_sar': sum(series_maps['revenue_sar'].values()),
         },
         'spend': {
-            'month_usd': round(spend_map.get(bucket_keys[-1], 0) + maps_map.get(bucket_keys[-1], 0), 2),
-            'total_usd': round(sum(spend_map.values()) + sum(maps_map.values()), 2),
+            'month_usd': spend_map.get(bucket_keys[-1], 0) + maps_map.get(bucket_keys[-1], 0),
+            'total_usd': sum(spend_map.values()) + sum(maps_map.values()),
             'month_sar': usd_to_sar(
                 spend_map.get(bucket_keys[-1], 0) + maps_map.get(bucket_keys[-1], 0), fx_rate),
             'total_sar': usd_to_sar(
@@ -283,7 +283,7 @@ def client_dashboard(tenant_id):
         'open_approval_tasks': _count('approval_tasks', "status = 'open'"),
         'open_tickets': _count('support_tickets', "status IN ('open', 'in_progress', 'waiting_customer')"),
         'unread_notifications': notifications_unread,
-        'month_consumption_usd': round(month_ai + month_maps, 4),
+        'month_consumption_usd': month_ai + month_maps,
         'month_consumption_sar': usd_to_sar(month_ai + month_maps),
         'recent_files': recent_files,
         'pending_generation': _count('generation_approvals', "status = 'pending'"),
@@ -322,7 +322,7 @@ def client_activity_trends(tenant_id, months=12, from_month=None, to_month=None)
         fx_rate = FX_DEFAULT_USD_SAR
     trends = {'labels': labels}
     for key, mmap in series_maps.items():
-        trends[key] = [round(mmap.get(k, 0), 2) for k in bucket_keys]
+        trends[key] = [mmap.get(k, 0) for k in bucket_keys]
     trends['ai_spend_sar'] = [usd_to_sar(v, fx_rate) for v in trends['ai_spend']]
     trends['maps_spend_sar'] = [usd_to_sar(v, fx_rate) for v in trends['maps_spend']]
     return trends
@@ -368,7 +368,7 @@ def company_admin_dashboard(tenant_id):
             except (TypeError, ValueError):
                 continue
         if counted:
-            avg_approval_hours = round(total / counted / 3600, 1)
+            avg_approval_hours = total / counted / 3600
     except Exception:
         pass
 
@@ -393,7 +393,7 @@ def company_admin_dashboard(tenant_id):
             spend_by_project.append({
                 'ref': row['ref'],
                 'title': titles.get(row['ref']) or row['ref'],
-                'total_usd': round(float(row['total'] or 0), 4),
+                'total_usd': float(row['total'] or 0),
             })
     except Exception:
         spend_by_project = []

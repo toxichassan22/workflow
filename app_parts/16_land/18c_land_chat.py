@@ -5,6 +5,8 @@
 # facts). When a value is not in the data or is uncertain, the prompt forces the
 # reply to say so instead of guessing — «لا تضليل». It may suggest field edits
 # as grounded guidance, but it never applies them — the client owns every change.
+from numeric_precision import format_precise_number
+
 
 LAND_CHAT_FIELD_LABELS = (
     ('project_name', 'اسم المشروع'),

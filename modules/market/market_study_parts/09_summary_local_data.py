@@ -258,15 +258,15 @@ def build_summary_local_benchmarks(payload):
             'category': 'سكني',
             'operation': 'بيع',
             'deal_count_in_file': group['record_count'],
-            'average_price_sqm_sar': round(statistics.mean(group['price_sqm']))
+            'average_price_sqm_sar': statistics.mean(group['price_sqm'])
             if group['price_sqm'] else None,
-            'median_price_sqm_sar': round(statistics.median(group['price_sqm']))
+            'median_price_sqm_sar': statistics.median(group['price_sqm'])
             if group['price_sqm'] else None,
-            'min_price_sqm_sar': round(min(group['price_sqm'])) if group['price_sqm'] else None,
-            'max_price_sqm_sar': round(max(group['price_sqm'])) if group['price_sqm'] else None,
-            'average_deal_value_sar': round(statistics.mean(group['deal_values']))
+            'min_price_sqm_sar': min(group['price_sqm']) if group['price_sqm'] else None,
+            'max_price_sqm_sar': max(group['price_sqm']) if group['price_sqm'] else None,
+            'average_deal_value_sar': statistics.mean(group['deal_values'])
             if group['deal_values'] else None,
-            'median_deal_value_sar': round(statistics.median(group['deal_values']))
+            'median_deal_value_sar': statistics.median(group['deal_values'])
             if group['deal_values'] else None,
             'period_from': dates[0] if dates else '', 'period_to': dates[-1] if dates else '',
             'sources': sorted(group['sources']),
@@ -302,10 +302,10 @@ def build_summary_local_benchmarks(payload):
                 'category': 'تجاري',
                 'operation': 'إيجار سنوي',
                 'deal_count_in_file': cnt,
-                'average_price_sqm_sar': round(avg_sqm) if avg_sqm > 0 else None,
-                'median_price_sqm_sar': round(avg_sqm) if avg_sqm > 0 else None,
-                'min_price_sqm_sar': round(avg_sqm) if avg_sqm > 0 else None,
-                'max_price_sqm_sar': round(avg_sqm) if avg_sqm > 0 else None,
+                'average_price_sqm_sar': avg_sqm if avg_sqm > 0 else None,
+                'median_price_sqm_sar': avg_sqm if avg_sqm > 0 else None,
+                'min_price_sqm_sar': avg_sqm if avg_sqm > 0 else None,
+                'max_price_sqm_sar': avg_sqm if avg_sqm > 0 else None,
                 'median_deal_value_sar': None,
                 'unit': item.get('unit') or 'ريال/م² سنوياً',
                 'period_from': r_from,
@@ -325,11 +325,11 @@ def build_summary_local_benchmarks(payload):
                 'category': 'سكني',
                 'operation': 'إيجار سنوي',
                 'deal_count_in_file': cnt,
-                'average_deal_value_sar': round(avg_deal) if avg_deal > 0 else None,
+                'average_deal_value_sar': avg_deal if avg_deal > 0 else None,
                 'median_price_sqm_sar': None,
                 'min_price_sqm_sar': None,
                 'max_price_sqm_sar': None,
-                'median_deal_value_sar': round(avg_deal) if avg_deal > 0 else None,
+                'median_deal_value_sar': avg_deal if avg_deal > 0 else None,
                 'unit': item.get('unit') or 'ريال سنوياً',
                 'period_from': r_from,
                 'period_to': r_to,
