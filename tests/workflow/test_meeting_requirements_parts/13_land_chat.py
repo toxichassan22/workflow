@@ -1,5 +1,43 @@
 class MeetingRequirementsTestsPart13(MeetingRequirementsTests):
 
+    def test_land_area_metrics_use_remaining_built_area_over_18_floors(self):
+        """The per-floor area is the remaining FAR area after the building
+        footprint, divided over 18 repeated floors, in both chat and UI."""
+        module = self.application_module
+        metrics = module._land_chat_derived_metrics({
+            'approved_financial_area': 1000,
+            'approved_floor_area_ratio': 4,
+            'approved_coverage_ratio': 60,
+            'approved_typical_floor_coverage': 5,
+            'approved_floor_count': 18,
+        })
+        self.assertEqual(
+            metrics['إجمالي مسطحات البناء (معامل البناء × المساحة المعتمدة) م²'], 4000)
+        self.assertEqual(
+            metrics['مساحة البناء (تغطية البناء × المساحة المعتمدة) م²'], 600)
+        self.assertEqual(
+            metrics['مساحة الأدوار المتكررة (إجمالي المسطحات بعد طرح مساحة البناء) م²'], 3400)
+        self.assertEqual(
+            metrics['مساحة الدور (المتبقي بعد طرح مساحة البناء مقسومًا على 18) م²'], 3400 / 18)
+        self.assertNotIn('تنبيه', metrics)
+        exceeded = module._land_chat_derived_metrics({
+            'approved_financial_area': 1000,
+            'approved_floor_area_ratio': 4,
+            'approved_coverage_ratio': 60,
+            'approved_typical_floor_coverage': 20,
+            'approved_floor_count': 18,
+        })
+        self.assertIn('تنبيه', exceeded)
+
+        ui_source = (ROOT / 'assets' / 'js' / '08-location-maps' / '02_catchment_edits.js'
+                     ).read_text(encoding='utf-8')
+        self.assertIn('function formatLandComputedArea(value)', ui_source)
+        self.assertIn('let text = String(number);', ui_source)
+        self.assertNotIn('maximumFractionDigits: 1', ui_source)
+        self.assertIn('const LAND_REPEAT_FLOOR_COUNT = 18;', ui_source)
+        self.assertIn('Math.max(totalBuiltArea - buildingArea, 0)', ui_source)
+        self.assertIn('repeatedFloorsArea / LAND_REPEAT_FLOOR_COUNT', ui_source)
+
     def test_land_chat_route_requires_auth_and_message(self):
         """The scoped land chat is a tenant route: anonymous calls are refused
         and an empty question is a 400, not a model call."""

@@ -321,6 +321,32 @@
     }
 
     const LAND_COMPUTED_SOURCE_KEYS = new Set(['approved_financial_area', 'approved_floor_area_ratio', 'approved_coverage_ratio', 'approved_typical_floor_coverage', 'approved_floor_count']);
+    const LAND_REPEAT_FLOOR_COUNT = 18;
+
+    function formatLandComputedArea(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return '—';
+      let text = String(number);
+      if (/[eE]/.test(text)) {
+        const [mantissa, exponentText] = text.toLowerCase().split('e');
+        const exponent = Number(exponentText);
+        const sign = mantissa.startsWith('-') ? '-' : '';
+        const unsigned = sign ? mantissa.slice(1) : mantissa;
+        const [whole, fraction = ''] = unsigned.split('.');
+        const digits = whole + fraction;
+        const decimalIndex = whole.length + exponent;
+        text = decimalIndex <= 0
+          ? sign + '0.' + '0'.repeat(-decimalIndex) + digits
+          : decimalIndex >= digits.length
+            ? sign + digits + '0'.repeat(decimalIndex - digits.length)
+            : sign + digits.slice(0, decimalIndex) + '.' + digits.slice(decimalIndex);
+      }
+      const sign = text.startsWith('-') ? '-' : '';
+      const unsigned = sign ? text.slice(1) : text;
+      const [whole, fraction] = unsigned.split('.');
+      const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+      return sign + grouped + (fraction ? '.' + fraction : '');
+    }
 
     function landApprovedNumber(key) {
       const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
@@ -347,17 +373,21 @@
       if (!box) return;
       const area = landApprovedNumber('approved_financial_area');
       const format = value => value > 0
-        ? new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(value)
+        ? formatLandComputedArea(value)
         : '—';
       const setMetric = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.textContent = format(value);
         return value > 0;
       };
-      const hasAny = setMetric('computedTotalBuiltArea', area * landApprovedNumber('approved_floor_area_ratio'))
-        | setMetric('computedCoverageArea', area * landApprovedNumber('approved_coverage_ratio') / 100)
-        | setMetric('computedRepeatedFloorsArea', area * landApprovedNumber('approved_typical_floor_coverage') / 100 * landApprovedNumber('approved_floor_count'))
-        | setMetric('computedTypicalFloorArea', area * landApprovedNumber('approved_typical_floor_coverage') / 100);
+      const totalBuiltArea = area * landApprovedNumber('approved_floor_area_ratio');
+      const buildingArea = area * landApprovedNumber('approved_coverage_ratio') / 100;
+      const hasRemainingArea = totalBuiltArea > 0 && buildingArea > 0;
+      const repeatedFloorsArea = hasRemainingArea ? Math.max(totalBuiltArea - buildingArea, 0) : 0;
+      const hasAny = setMetric('computedTotalBuiltArea', totalBuiltArea)
+        | setMetric('computedCoverageArea', buildingArea)
+        | setMetric('computedRepeatedFloorsArea', repeatedFloorsArea)
+        | setMetric('computedTypicalFloorArea', repeatedFloorsArea / LAND_REPEAT_FLOOR_COUNT);
       const exceeded = landCapacityExceeded();
       box.classList.toggle('land-metrics-violated', exceeded);
       const note = document.getElementById('landComputedCapNote');

@@ -56,6 +56,51 @@ class MeetingRequirementsTestsPart12(MeetingRequirementsTests):
         missing_keys = {item['key'] for item in module._visual_concept_missing_fields(facts)}
         self.assertNotIn('approved_floor_area_ratio', missing_keys)
 
+    def test_land_specs_generation_carries_approved_and_computed_values(self):
+        """The slide request and deterministic land-spec slide use the
+        client's coverage, floor inputs, and all four calculated areas."""
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'Land Specs Regression',
+            'approved_financial_area': 1000,
+            'croquis_land_area': 2000,
+            'approved_floor_count': 18,
+            'approved_coverage_ratio': 51,
+            'building_ratio_coverage': '60%',
+            'approved_typical_floor_coverage': 35,
+            'approved_floor_area_ratio': 4,
+            'allowed_uses': 'سكني تجاري',
+        }
+
+        specs = engine._extract_land_specs_data(project)
+        self.assertEqual(specs['land_area'], '1000')
+        self.assertEqual(specs['building_ratio_coverage'], '51%')
+        self.assertEqual(specs['approved_floor_count'], '18')
+        self.assertEqual(specs['approved_coverage_ratio'], '51')
+        self.assertEqual(specs['approved_typical_floor_coverage'], '35%')
+        self.assertEqual(specs['far'], '4')
+        self.assertEqual(specs['computed_total_built_area'], 4000)
+        self.assertEqual(specs['computed_coverage_area'], 510)
+        self.assertEqual(specs['computed_repeated_floors_area'], 3490)
+        self.assertEqual(specs['computed_typical_floor_area'], 3490 / 18)
+        self.assertTrue(engine._has_land_specs_data({'approved_floor_count': 18}))
+
+        note = engine._slide_source_data_note(
+            {'content_source': 'land_specs'}, project)
+        payload = json.loads(note.rsplit(':\n', 1)[1])
+        self.assertEqual(payload['building_ratio_coverage'], '51%')
+        self.assertEqual(payload['approved_floor_count'], '18')
+        self.assertEqual(payload['computed_total_built_area'], 4000)
+        self.assertEqual(payload['computed_coverage_area'], 510)
+        self.assertEqual(payload['computed_repeated_floors_area'], 3490)
+        self.assertEqual(payload['computed_typical_floor_area'], 3490 / 18)
+
+        slide = engine._build_land_specs_slide({'title': 'مواصفات الأرض'}, project)
+        for expected in (
+                '51%', '35%', 'الأدوار المعتمدة', '18', 'سكني تجاري',
+                '4,000 م²', '510 م²', '3,490 م²', '193.88888888888889 م²'):
+            self.assertIn(expected, slide)
+
     def test_plans_distribution_prompt_carries_project_idea(self):
         """The recorded idea («3 مجمعات») is what tells the planner how many
         buildings to spread the program across — it must reach the distribution

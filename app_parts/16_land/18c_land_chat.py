@@ -55,7 +55,7 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '- القواعد العامة الموثقة لاشتراطات المدينة: الجداول والقواعد المشتركة (المواقف، الارتدادات، الارتفاعات، الملاحق…) إن توفرت للمدينة.\n'
     '- نصوص الاشتراطات الموثقة من ملفات الأمانة: مقتطفات النص الكامل للوائح البلدية مختارة بحسب سؤال المستخدم.\n'
     '- القيم المعتمدة التي أدخلها العميل (المساحة المعتمدة، الأدوار المعتمدة، تغطية البناء، تغطية الطوابق المتكررة، معامل البناء المعتمد).\n'
-    '- القيم المحسوبة من المدخلات المعتمدة: إجمالي مسطحات البناء (معامل البناء × المساحة المعتمدة)، مساحة البناء، مساحة الدور، ومساحة الأدوار المتكررة بالمتر المربع، مع التنبيه عند تجاوز مجموع الأدوار المتكررة مع مساحة البناء حد إجمالي المسطحات.\n'
+    '- القيم المحسوبة من المدخلات المعتمدة: إجمالي مسطحات البناء (معامل البناء × المساحة المعتمدة)، ومساحة البناء. مساحة الأدوار المتكررة هي إجمالي مسطحات البناء بعد طرح مساحة البناء، ومساحة الدور هي الناتج مقسومًا على 18؛ ومساحة الدور مضروبة في 18 تساوي مساحة الأدوار المتكررة. نبّه عند تجاوز المساحة الفعلية للأدوار المتكررة مع مساحة البناء إجمالي مسطحات البناء.\n'
     '- قسم أفضل استخدامات: التوزيع المقترح أو المعتمد لمكونات المشروع ومساحاتها وحصصها الأرضية ونماذج الاستفادة وأسبابها وحالة الاعتماد.\n'
     '- قسم المخططات التصورية: نتيجة التحقق من المدخلات، حد الأرض المعتمد، توزيع المكونات على الأدوار، ملاحظات العميل ونقاط المراجعة.\n'
     'قواعد إلزامية:\n'
@@ -194,20 +194,22 @@ def _land_chat_derived_metrics(source):
     floors = _visual_concept_number(source.get('approved_floor_count'))
     total = area * far if area and far else None
     building = area * coverage / 100 if area and coverage else None
-    floor_area = area * typical / 100 if area and typical else None
-    repeated = floor_area * floors if floor_area and floors else None
+    repeated = max(total - building, 0) if total is not None and building is not None else None
+    floor_area = repeated / 18 if repeated is not None else None
+    actual_floor_area = area * typical / 100 if area and typical else None
+    actual_repeated = actual_floor_area * floors if actual_floor_area and floors else None
     if total:
-        metrics['إجمالي مسطحات البناء (معامل البناء × المساحة المعتمدة) م²'] = round(total, 1)
+        metrics['إجمالي مسطحات البناء (معامل البناء × المساحة المعتمدة) م²'] = total
     if building:
-        metrics['مساحة البناء (تغطية البناء × المساحة المعتمدة) م²'] = round(building, 1)
+        metrics['مساحة البناء (تغطية البناء × المساحة المعتمدة) م²'] = building
     if repeated:
-        metrics['مساحة الأدوار المتكررة (مساحة الدور × عدد الأدوار) م²'] = round(repeated, 1)
+        metrics['مساحة الأدوار المتكررة (إجمالي المسطحات بعد طرح مساحة البناء) م²'] = repeated
     if floor_area:
-        metrics['مساحة الدور (تغطية الطوابق المتكررة × المساحة المعتمدة) م²'] = round(floor_area, 1)
-    if total and repeated is not None and building is not None and repeated + building > total + 0.05:
-        metrics['تنبيه'] = ('مجموع مساحة الأدوار المتكررة مع مساحة البناء '
-                            f'({repeated + building:.1f} م²) يتجاوز إجمالي مسطحات البناء '
-                            f'({total:.1f} م²)')
+        metrics['مساحة الدور (المتبقي بعد طرح مساحة البناء مقسومًا على 18) م²'] = floor_area
+    if total and actual_repeated is not None and building is not None and actual_repeated + building > total + 0.05:
+        metrics['تنبيه'] = ('مجموع مساحة الأدوار المتكررة الفعلية مع مساحة البناء '
+                            f'({actual_repeated + building} م²) يتجاوز إجمالي مسطحات البناء '
+                            f'({total} م²)')
     return metrics
 
 
