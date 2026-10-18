@@ -338,11 +338,34 @@
         receiveVisualConceptPlanScene(response.scene, 'plan_site');
         workflow.sourceStamp = visualConceptPlanInputStamp();
       }
-      if (response.question && !slot.chat.some(item => item.role === 'assistant' && item.text === response.question)) {
-        slot.chat.push({ role: 'assistant', text: response.question, choices: response.choices || [] });
-      }
-      if (response.reply && response.image && !slot.chat.some(item => item.role === 'assistant' && item.text === response.reply)) {
-        slot.chat.push({ role: 'assistant', text: response.reply, choices: [] });
+      const responseParts = [response.reply, response.question]
+        .map(value => String(value || '').trim()).filter(Boolean);
+      const mergeMessageText = (current, addition) => {
+        const left = String(current || '').trim();
+        const right = String(addition || '').trim();
+        if (!left) return right;
+        if (!right || left.includes(right)) return left;
+        if (right.includes(left)) return right;
+        return left + '\n\n' + right;
+      };
+      const responseText = responseParts.reduce(mergeMessageText, '');
+      const responseChoices = Array.isArray(response.choices)
+        ? response.choices.map(value => String(value || '').trim()).filter(Boolean) : [];
+      if (responseText) {
+        const generatedPlanReply = Boolean(response.image || response.svgCode);
+        const latestAssistant = [...slot.chat].reverse().find(item => item.role === 'assistant');
+        const responseMatchesLatest = latestAssistant && responseParts.some(part =>
+          latestAssistant.text.includes(part) || part.includes(latestAssistant.text));
+        if (generatedPlanReply) {
+          if (!latestAssistant || !latestAssistant.text.includes(responseText)) {
+            slot.chat.push({ role: 'assistant', text: responseText, choices: [] });
+          }
+        } else if (responseMatchesLatest) {
+          latestAssistant.text = responseParts.reduce(mergeMessageText, latestAssistant.text);
+          latestAssistant.choices = [...new Set([...(latestAssistant.choices || []), ...responseChoices])];
+        } else {
+          slot.chat.push({ role: 'assistant', text: responseText, choices: responseChoices });
+        }
       }
       if (response.svgCode) {
         slot.svgCode = String(response.svgCode).slice(0, 300000);

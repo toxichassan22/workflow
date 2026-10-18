@@ -54,7 +54,8 @@ module.exports = function registerJobErrorTests({ test, fixture }) {
 
     const workflow = context.visualConceptPlansWorkflowState();
     assert.equal(workflow.jobError, '');
-    assert.equal(workflow.jobTodos[0].status, 'done');
+    assert.deepEqual(JSON.parse(JSON.stringify(workflow.jobTodos)), []);
     assert.doesNotMatch(todoPanel.innerHTML, /تعذر/);
+    assert.equal(todoPanel.innerHTML, '');
   });
 };

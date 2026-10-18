@@ -7,6 +7,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 const registerJobErrorTests = require('./test_visual_plan_workflow_parts/01_job_error_details.js');
 const registerPlanStatusAndWiringTests = require('./test_visual_plan_workflow_parts/02_plan_status_and_wiring.js');
+const registerSiteChatDisplayTests = require('./test_visual_plan_workflow_parts/03_site_chat_display.js');
 
 const dir = path.resolve(__dirname, '../../assets/js/12-files-media');
 const source = fs.readdirSync(dir).filter(file => /^02.*\.js$/.test(file)).sort()
@@ -45,6 +46,7 @@ function fixture(includeVisualPage = false) {
 
 registerJobErrorTests({ test, fixture });
 registerPlanStatusAndWiringTests({ test, fixture, source, dir, fs, path, vm });
+registerSiteChatDisplayTests({ test, fixture, vm, path });
 
 function installActiveSectionApproval(context) {
   const start = formSectionsSource.indexOf('    function activeProjectSectionKey()');
@@ -948,58 +950,4 @@ test('starting the site plan chat submits analysis without a message from the cl
   assert.equal(vm.runInContext('visualConceptSiteAssistantBusy', context), false);
 });
 
-test('site plan status follows the active backend progress step', () => {
-  const context = fixture();
-  context.tenantVisualConceptState = context.normalizeVisualConceptState({ slots: {}, plansWorkflow: {} });
-  const status = { textContent: '' };
-  const todoPanel = { innerHTML: '' };
-  context.document.querySelector = selector => selector === '[data-site-chat-status]'
-    ? status : selector === '[data-plans-workflow-todos]' ? todoPanel : null;
-  context.document.getElementById = () => null;
-
-  context.updateVisualConceptPlanJobUi({ status: 'running', progress: 82, todos: [
-    { id: '1', label: 'فحص بيانات الأرض والتوزيع', status: 'done' },
-    { id: '2', label: 'تجهيز المشهد الهندسي', status: 'done' },
-    { id: '3', label: 'مراجعة الإجابات السابقة', status: 'done' },
-    { id: '4', label: 'تحليل المتطلبات وتحديد السؤال', status: 'active' },
-  ] });
-
-  assert.equal(status.textContent, 'المرحلة الحالية: تحليل المتطلبات وتحديد السؤال');
-});
-
-test('a rebased site scene clears its approval and returns dependent plans to review', () => {
-  const context = fixture(true);
-  const oldScene = { version: 1, token: 'old-scene' };
-  context.tenantVisualConceptState = context.normalizeVisualConceptState({
-    slots: {
-      plan_site: { imageUrl: '/site.png', approvedImageUrl: '/site.png', status: 'approved' },
-      plan_uses: { imageUrl: '/uses.png', approvedImageUrl: '/uses.png', status: 'approved',
-        sceneToken: 'old-scene' },
-    },
-    plansWorkflow: { scene: oldScene, siteAssistant: { turns: [] } },
-  });
-  context.visualConceptPlanInputStamp = () => 'current-input';
-  context.markVisualConceptDirty = () => {};
-
-  context.applyVisualConceptSiteAssistantResponse({
-    contextChanged: true,
-    scene: { version: 1, token: 'new-scene' },
-    assistantState: { turns: [{ role: 'assistant', text: 'What is the main entry?' }] },
-  });
-
-  assert.equal(context.tenantVisualConceptState.plansWorkflow.scene.token, 'new-scene');
-  assert.equal(context.tenantVisualConceptState.slots.plan_site.approvedImageUrl, '');
-  assert.equal(context.tenantVisualConceptState.slots.plan_uses.approvedImageUrl, '');
-  assert.equal(context.tenantVisualConceptState.slots.plan_uses.imageUrl, '/uses.png');
-  assert.equal(context.tenantVisualConceptState.slots.plan_uses.status, 'review');
-});
-
-test('stage three ignores a second chat send while its current request is active', async () => {
-  const context = fixture(true);
-  let apiCalls = 0;
-  context.api = async () => { apiCalls += 1; return { success: true }; };
-  vm.runInContext('visualConceptSiteAssistantBusy = true', context);
-
-  await context.sendVisualConceptChat('plan_site');
-  assert.equal(apiCalls, 0);
-});
+\n

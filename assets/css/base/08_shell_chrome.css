@@ -295,7 +295,7 @@
 
 .visual-plan-site-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(230px, 0.8fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -451,9 +451,5 @@
 
   .visual-plan-site-messages {
     max-height: 50vh;
-  }
-
-  .visual-plan-site-preview-panel {
-    order: -1;
   }
 }

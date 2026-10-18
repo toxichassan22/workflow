@@ -17,19 +17,23 @@
       const workflow = visualConceptPlansWorkflowState();
       let changed = false;
       const jobSucceeded = job.status === 'completed' &&
-        (job.success === true || job.result?.success === true);
+        (job.success === true || job.result?.success === true ||
+        (Array.isArray(job.todos) && job.todos.length > 0 &&
+        job.todos.every(item => item.status === 'done')));
       const jobError = !jobSucceeded && job.status === 'failed'
         ? String(job.result?.error || job.error || '').trim().slice(0, 1200) : '';
       if (workflow.jobError !== jobError) {
         workflow.jobError = jobError;
         changed = true;
       }
-      if (Array.isArray(job.todos)) {
-        const todos = jobSucceeded
-          ? job.todos.map(item => item.status === 'failed'
-            ? { ...item, status: 'done', error: '' } : item)
-          : jobError
-            ? job.todos.map((item, index) => item.status === 'failed' &&
+      if (jobSucceeded) {
+        if (workflow.jobTodos.length) {
+          workflow.jobTodos = [];
+          changed = true;
+        }
+      } else if (Array.isArray(job.todos)) {
+        const todos = jobError
+          ? job.todos.map((item, index) => item.status === 'failed' &&
             !job.todos.slice(0, index).some(previous => previous.status === 'failed')
             ? { ...item, error: jobError } : item)
           : job.todos;
@@ -59,14 +63,13 @@
         });
       }
       if (changed && typeof markVisualConceptDirty === 'function') markVisualConceptDirty();
-      if (!Array.isArray(job.todos)) return;
       const markup = visualConceptPlanTodoMarkup(workflow.jobTodos, workflow.jobError);
       const panel = document.querySelector('[data-plans-workflow-todos]');
       if (panel) panel.innerHTML = markup;
       const siteStatus = document.querySelector('[data-site-chat-status]');
       if (siteStatus) {
         const active = workflow.jobTodos.find(item => item.status === 'active');
-        siteStatus.textContent = 'المرحلة الحالية: ' +
+        siteStatus.textContent = jobSucceeded ? '' : 'المرحلة الحالية: ' +
           (active?.label || 'تجهيز المخطط وتحليل متطلباته');
       }
       const loader = document.getElementById('globalLoader');
