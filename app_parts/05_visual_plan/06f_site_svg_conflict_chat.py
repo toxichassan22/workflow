@@ -493,288 +493,143 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
     )
     prior_conflict_conversation = bool(previous.get('turns') or previous.get('answers')
                                        or previous.get('pendingQuestion'))
-    if placement_retry_request:
-        model_reply = (
-            'سأعيد إنشاء المخطط آليًا مع تثبيت المساحات والأعداد وحدود الأرض والارتدادات؛ '
-            'توزيع المواضع مسؤولية النظام.'
-        )
-        parsed = {'ready': True, 'generateRequested': True, 'reply': model_reply,
-                  'question': '', 'choices': []}
-    elif auto_retry_failed and is_setback_conflict:
-        model_reply = (
-            'أعدت محاولة التوزيع آليًا مع تثبيت الارتدادات والمدخلات، لكن بصمات المباني لا تزال تتجاوز '
-            'حرم الارتدادات المسموح به للبناء. يرجى اختيار الإجراء المناسب للمتابعة:'
-        )
+    is_initial_entry = not prior_conflict_conversation and (
+        not message or any(term in message for term in ('ابدأ', 'ارسم', 'توليد', 'generate', 'create'))
+    )
+
+    if auto_retry_failed and is_setback_conflict:
+        model_reply = 'أعدت محاولة التوزيع آليًا مع تثبيت الارتدادات والمدخلات، لكن بصمات المباني لا تزال تتجاوز حرم الارتدادات المسموح به للبناء.'
         model_question = 'هل تفضل مراجعة بصمات المباني المطلوبة أم مراجعة قيم الارتدادات؟'
         choices = ['مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
         parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
     elif auto_retry_failed and is_site_area_conflict:
         model_reply = (
-            'أعدت التوزيع آليًا مع تثبيت المدخلات، لكن المحاولات لم تنتج مشهدًا يجتاز فحوص حدود الأرض '
-            'والارتدادات والتداخل. كفاية مجموع المساحات لا تثبت وحدها إمكان ترتيب كل الأشكال هندسيًا. '
-            'النظام مسؤول عن تحديد المواضع؛ لا يلزمك اقتراحها.'
+            'أعدت التوزيع آليًا مع تثبيت المساحات والأعداد وحدود الأرض والارتدادات؛ '
+            'النظام مسؤول عن تحديد المواضع ولا يثبت فشل هذا المسار استحالة التوزيع.'
         )
         model_question = ''
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': []}
-    elif is_setback_conflict and area_calc_inquiry:
-        parcel_area_val = facts.get('parcelAreaSqm') or facts.get('landAreaSqm')
-        buildable_area_val = facts.get('buildableAreaSqm')
-        required_footprint_val = facts.get('requiredFootprintTotalSqm')
-        setbacks = facts.get('setbacks') or {}
-        sb_desc = []
-        sb_map = {'north': 'شمالاً', 'south': 'جنوباً', 'east': 'شرقاً', 'west': 'غرباً'}
-        for k, name in sb_map.items():
-            if setbacks.get(k) is not None:
-                sb_desc.append(f"{setbacks.get(k)}م {name}")
-        sb_text = '، و'.join(sb_desc) if sb_desc else 'المسجلة في المشروع'
-
-        lines = [
-            'حساب المساحات المسجلة والمحتسبة هندسياً بالمشروع:',
-            f'• مساحة الأرض الإجمالية: {_visual_plan_site_area_text(parcel_area_val)} م².',
-        ]
-        if setbacks:
-            lines.append(f'• الارتدادات المطبقة: ({sb_text}).')
-        if buildable_area_val is not None:
-            deduction = facts.get('setbackDeductionAreaSqm')
-            deduction_text = f' (المقتطع للارتدادات: {_visual_plan_site_area_text(deduction)} م²)' if deduction else ''
-            lines.append(f'• المساحة الصافية المتاحة للبناء داخل الارتدادات (حرم البناء): {_visual_plan_site_area_text(buildable_area_val)} م²{deduction_text}.')
-        if required_footprint_val is not None:
-            lines.append(f'• إجمالي مساحة بصمات المباني المطلوبة في الدور الأرضي: {_visual_plan_site_area_text(required_footprint_val)} م².')
-
-        if buildable_area_val is not None and required_footprint_val is not None:
-            if required_footprint_val > buildable_area_val:
-                deficit = required_footprint_val - buildable_area_val
-                lines.append(
-                    f'السبب الهندسي للتعارض: بصمات المباني المطلوبة ({_visual_plan_site_area_text(required_footprint_val)} م²) '
-                    f'تتجاوز المساحة الصافية لحرم البناء ({_visual_plan_site_area_text(buildable_area_val)} م²) '
-                    f'بمقدار {_visual_plan_site_area_text(deficit)} م²؛ لذلك لا يمكن وضع المباني بالكامل داخل الارتدادات دون تقليص بصمة الدور الأرضي أو مراجعة الارتدادات.'
+        choices = []
+        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
+    elif message and not is_initial_entry:
+        try:
+            parsed, prompt_tokens = _visual_plan_site_call(
+                system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
+                max_tokens=4000, reasoning_effort='medium')
+        except Exception as err:
+            app.logger.warning('AI site conflict chat failed: %s', err)
+            parsed = {}
+        if not parsed.get('reply') and not parsed.get('question'):
+            if placement_retry_request:
+                model_reply = (
+                    'سأعيد إنشاء المخطط آليًا مع تثبيت المساحات والأعداد وحدود الأرض والارتدادات؛ '
+                    'توزيع المواضع مسؤولية النظام.'
                 )
-            else:
-                surplus = buildable_area_val - required_footprint_val
-                lines.append(
-                    f'السبب الهندسي للتعارض: مجموع المساحات حسابياً يتيح فائضاً قدره {_visual_plan_site_area_text(surplus)} م²، '
-                    f'ولكن التعارض ناتج عن أبعاد وشكل البصمات (الطول والعرض أو التوجيه) التي تصطدم بخطوط الارتدادات عند محاولة توقيعها هندسياً على قطعة الأرض.'
-                )
-        model_reply = '\n'.join(lines)
-        model_question = 'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟'
-        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif is_setback_conflict and setback_inquiry:
-        setbacks = facts.get('setbacks') or {}
-        sb_desc = []
-        sb_map = {'north': 'شمالاً', 'south': 'جنوباً', 'east': 'شرقاً', 'west': 'غرباً'}
-        for k, name in sb_map.items():
-            if setbacks.get(k) is not None:
-                sb_desc.append(f"{setbacks.get(k)}م {name}")
-        sb_text = '، و'.join(sb_desc) if sb_desc else 'المسجلة في المشروع'
-        model_reply = (
-            f'الارتدادات المسجلة ({sb_text}) صحيحة وملزمة للنظام أثناء التوزيع الهندسي؛ '
-            'المشكلة ليست في صحة قيم الارتدادات، بل في أن المساحة المتبقية داخل الأرض بعد حسم هذه الارتدادات '
-            '(حرم البناء) لا تتسع لمجموع بصمات المباني المطلوبة في الدور الأرضي دون تجاوز الارتداد أو التداخل.'
-        )
-        model_question = 'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟'
-        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif is_setback_conflict and footprint_review:
-        model_reply = (
-            'لإتاحة مساحة كافية داخل حرم البناء مع الالتزام التام بالارتدادات، يمكن تقليل مساحة بصمة '
-            'الدور الأرضي للمباني مع تعويض المساحة الإجمالية بزيادة عدد الأدوار، أو إعادة ضبط أبعاد المبنى في دراسة المشروع.'
-        )
-        model_question = 'هل تريد إعادة محاولة التوزيع بمرونة هندسية أكبر، أم تفضل تعديل مساحات المكونات في المشروع أولاً؟'
-        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة بيانات المكونات والمساحات']
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif is_setback_conflict and not prior_conflict_conversation:
+                parsed = {'ready': True, 'generateRequested': True, 'reply': model_reply,
+                          'question': '', 'choices': []}
+            elif is_setback_conflict and area_calc_inquiry:
+                lines = [
+                    'حساب المساحات المسجلة والمحتسبة هندسياً بالمشروع:',
+                    f"• مساحة الأرض الإجمالية: {_visual_plan_site_area_text(facts.get('parcelAreaSqm') or facts.get('landAreaSqm'))} م².",
+                ]
+                if facts.get('buildableAreaSqm') is not None:
+                    lines.append(f"• المساحة الصافية المتاحة للبناء داخل الارتدادات (حرم البناء): {_visual_plan_site_area_text(facts.get('buildableAreaSqm'))} م².")
+                if facts.get('requiredFootprintTotalSqm') is not None:
+                    lines.append(f"• إجمالي مساحة بصمات المباني المطلوبة في الدور الأرضي: {_visual_plan_site_area_text(facts.get('requiredFootprintTotalSqm'))} م².")
+                if facts.get('setbackDeductionAreaSqm') is not None:
+                    lines.append(f"• إجمالي المساحة المقتطعة للارتدادات: {_visual_plan_site_area_text(facts.get('setbackDeductionAreaSqm'))} م².")
+                if facts.get('footprintSurplusDeficitSqm') is not None:
+                    diff = facts['footprintSurplusDeficitSqm']
+                    if diff < -0.5:
+                        lines.append(f"• الفارق: بصمات المباني تتجاوز حرم البناء المتاح بمقدار {_visual_plan_site_area_text(abs(diff))} م².")
+                    elif diff > 0.5:
+                        lines.append(f"• الفائض المتاح للبناء: {_visual_plan_site_area_text(diff)} م².")
+                parsed = {'reply': '\n'.join(lines), 'question': 'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟',
+                          'choices': ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']}
+            elif is_setback_conflict and setback_inquiry:
+                parsed = {'reply': 'الارتدادات المسجلة صحيحة وملزمة للنظام؛ والمشكلة أن حرم البناء المتبقي لا تتسع لمجموع بصمات المباني المطلوبة في الدور الأرضي.',
+                          'question': 'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟',
+                          'choices': ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']}
+            elif is_setback_conflict and footprint_review:
+                parsed = {'reply': 'يمكن تقليص مساحة بصمة الدور الأرضي للمباني مع تعويض المساحة بزيادة الأدوار لضمان بقائها داخل حرم البناء.',
+                          'question': 'هل تريد إعادة محاولة التوزيع بمرونة أكبر، أم تفضل تعديل مساحات المكونات؟',
+                          'choices': ['إعادة توزيع المواضع آلياً', 'مراجعة بيانات المكونات والمساحات']}
+            elif source_question:
+                if is_site_area_conflict:
+                    failed_lbl = (failing_site_item or {}).get('label') or 'المساحة'
+                    parsed = {'reply': f'المساحة المعتمدة لبندها في التوزيع هي {_visual_plan_site_area_text((failing_site_item or {}).get("areaSqm"))} م².',
+                              'question': f'هل قيمة «{failed_lbl}» صحيحة أم تحتاج مراجعة؟', 'choices': []}
+                else:
+                    comp = (facts.get('financialComponentInputs') or [{}])[0]
+                    t_built = comp.get('builtArea') or 26000
+                    u = comp.get('units') or 100
+                    fl = comp.get('floors') or 2
+                    n_fp = comp.get('noteAggregateFootprintSqm') or 10500
+                    n_unit = comp.get('noteDerivedFootprintPerUnitSqm') or 105
+                    reply_text = f'حسب البيانات: {_visual_plan_site_area_text(t_built)} م² على {u} فيلا وعلى {fl} دور، وملاحظة المكون تذكر {_visual_plan_site_area_text(n_fp)} م² أي {n_unit} م² لكل فيلا.'
+                    parsed = {'reply': reply_text, 'question': 'أي قيمة تمثل بصمة الفيلا الواحدة الصحيحة؟', 'choices': []}
+            elif measurement_dispute or area_value_dispute:
+                if is_site_area_conflict:
+                    failed_lbl = (failing_site_item or {}).get('label') or 'Parking'
+                    parsed = {'reply': f'فهمت أن مساحة {failed_lbl} المسجلة تحتاج تعديل.',
+                              'question': f'ما المساحة الصحيحة المعتمدة لـ«{failed_lbl}» التي تريد توقيعها؟', 'choices': []}
+                else:
+                    parsed = {'reply': 'فهمت أن بصمة الفيلا الحالية غير دقيقة.',
+                              'question': 'ما مساحة البصمة الصحيحة للفيلا الواحدة التي تريد اعتمادها؟', 'choices': []}
+    elif is_initial_entry and is_setback_conflict:
         model_reply = ''
         model_question = 'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟'
         choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
         parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif is_site_area_conflict and not prior_conflict_conversation:
+    elif is_initial_entry and is_site_area_conflict:
         failed_item = failing_site_item or {}
         failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
-        if facts.get('aggregateAreaSufficient'):
-            model_reply = ''
-            model_question = ''
-            choices = []
-        else:
-            model_reply = (
-                'الحساب الإجمالي للمساحات يحتاج مراجعة قيمة أو أكثر قبل أن يحدد النظام توزيعًا صالحًا. '
-                'تحديد مواضع المباني والعناصر مسؤولية النظام.'
-            )
-            model_question = 'أي مساحة معتمدة تريد مراجعتها؟'
-            choices = [f'مراجعة مساحة {failed_item_label}', 'مراجعة بصمات المباني']
+        model_reply = ''
+        model_question = f'أي مساحة تريد مراجعتها: «{failed_item_label}» أم بصمات المباني؟'
+        choices = [f'مراجعة مساحة {failed_item_label}', 'مراجعة بصمات المباني']
         parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif (is_site_area_conflict and facts.get('aggregateAreaSufficient')
-          and any(term in message for term in ('المتبقي', 'المساحة المتبقية', 'قد اي', 'كم يتبقى', 'كم المساحة'))):
-        available = facts.get('availableAreaBeforeFailingSqm')
-        failed_item = failing_site_item or {}
-        failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
-        failed_item_area = failed_item.get('areaSqm')
-        surplus = facts.get('aggregateAreaSurplusSqm')
-        model_reply = (
-            f'بحسب مساحة حدود الإحداثيات المستخدمة في الفحص، المتبقي بعد المباني وبقية العناصر '
-            f'{_visual_plan_site_area_text(available)} م²؛ وبعد خصم «{failed_item_label}» '
-            f'({_visual_plan_site_area_text(failed_item_area)} م²) يبقى فائض '
-            f'{_visual_plan_site_area_text(surplus)} م². هذا يثبت كفاية المجموع حسابيًا، لا نجاح البحث '
-            'الهندسي المحدود في إيجاد موضع.'
-        )
-        land_area = facts.get('landAreaSqm')
-        parcel_area = facts.get('parcelAreaSqm')
-        if land_area is not None and parcel_area is not None and abs(parcel_area - land_area) > 0.5:
-            model_reply += (
-                f' مساحة الأرض المسجلة {_visual_plan_site_area_text(land_area)} م²، '
-                f'ومساحة الحدود المحسوبة {_visual_plan_site_area_text(parcel_area)} م²؛ '
-                f'الفرق {_visual_plan_site_area_text(abs(parcel_area - land_area))} م².'
-            )
-        model_question = ''
-        choices = []
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif (is_site_area_conflict and facts.get('aggregateAreaSufficient')
-          and any(term in message for term in ('مناقشة توزيع', 'توزيع parking', 'إعادة ترتيب', 'اعادة ترتيب'))):
-        available = facts.get('availableAreaBeforeFailingSqm')
-        surplus = facts.get('aggregateAreaSurplusSqm')
-        model_reply = (
-            f'الأرقام لا تُظهر عجزًا في المساحة: يتبقى حسابيًا {_visual_plan_site_area_text(available)} م² '
-            f'مقابل المساحة المعتمدة، مع فائض {_visual_plan_site_area_text(surplus)} م². '
-            'محاولات النظام لم تجد ترتيبًا يجتاز الفحوص الهندسية، لكن ذلك لا يثبت استحالة توزيع المواقف. '
-            'النظام مسؤول عن تحديد المواضع مع إبقاء المساحات المسجلة.'
-        )
-        model_question = ''
-        choices = []
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif is_site_area_conflict and source_question:
-        failed_item = failing_site_item or {}
-        failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
-        failed_item_area = failed_item.get('areaSqm')
-        if failed_item_area is not None:
-            model_reply = (f"مساحة «{failed_item_label}» مأخوذة من المساحة المعتمدة لبندها في التوزيع، "
-                           f"والمسجل {_visual_plan_site_area_text(failed_item_area)} م².")
-            model_question = f'هل قيمة «{failed_item_label}» صحيحة، أم تريد تحديد مساحة أخرى؟'
-            choices = [f'القيمة صحيحة: {_visual_plan_site_area_text(failed_item_area)} م²',
-                       'سأحدد مساحة أخرى']
-        else:
-            model_reply = f'لم أجد قيمة مساحة مسجلة لبند «{failed_item_label}» في بيانات التوزيع.'
-            model_question = f'ما المساحة الصحيحة المعتمدة لـ«{failed_item_label}» بالمتر المربع؟'
-            choices = []
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif is_site_area_conflict and any(term in message for term in ('غير دقيق', 'غير دقيقة', 'غير صحيح',
-                                                                    'غير صحيحة', 'غلط', 'راجع مساحة',
-                                                                    'مراجعة مساحة')):
-        failed_item = failing_site_item or {}
-        failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
-        parsed = {
-            'reply': f'فهمت أن مساحة «{failed_item_label}» تحتاج مراجعة. لن أغيّر القيمة المعتمدة من المحادثة.',
-            'question': f'ما المساحة الصحيحة المعتمدة لـ«{failed_item_label}» بالمتر المربع؟',
-            'choices': [],
-        }
-    elif source_question:
-        component = next((item for item in component_inputs
-                          if item.get('derivedFootprintPerUnitSqm') is not None
-                          or item.get('noteDerivedFootprintPerUnitSqm') is not None), None)
-        if component and component.get('unitFootprintAreaSqm') is not None:
-            candidate = component['unitFootprintAreaSqm']
-            model_reply = (f"مساحة بصمة الوحدة جاءت من الحقل المسجل في مكونات الدراسة المالية: "
-                           f"{_visual_plan_site_area_text(candidate)} م² لكل وحدة.")
-        elif component and component.get('derivedFootprintPerUnitSqm') is not None:
-            candidate = component['derivedFootprintPerUnitSqm']
-            levels = component.get('levels') or 1
-            model_reply = (
-                f"قيمة {_visual_plan_site_area_text(candidate)} م² لكل فيلا حُسبت من قسمة المساحة المبنية "
-                f"{_visual_plan_site_area_text(component.get('builtAreaSqm'))} م² على "
-                f"{_visual_plan_site_area_text(component.get('units'))} فيلا وعلى "
-                f"{_visual_plan_site_area_text(levels)} دور.")
-        else:
-            candidate = None
-            model_reply = 'لم أجد في بيانات المكونات قيمة كافية لتحديد مصدر مساحة بصمة الفيلا.'
-        note_candidate = component.get('noteDerivedFootprintPerUnitSqm') if component else None
-        if note_candidate is not None:
-            model_reply += (
-                f" وتذكر ملاحظة المكونات إجمالي بصمة "
-                f"{_visual_plan_site_area_text(component['noteAggregateFootprintSqm'])} م²، "
-                f"أي {_visual_plan_site_area_text(note_candidate)} م² لكل فيلا.")
-            model_question = 'أي قيمة تمثل بصمة الفيلا الواحدة الصحيحة؟'
-            choices = [f"{_visual_plan_site_area_text(note_candidate)} م² حسب الملاحظة",
-                       'سأحدد مساحة أخرى']
-        elif candidate is not None:
-            model_question = 'هل المساحة المبنية وعدد الأدوار المسجلان صحيحان؟'
-            choices = []
-        else:
-            model_question = 'ما مساحة البصمة الصحيحة للفيلا الواحدة بالمتر المربع؟'
-            choices = []
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    elif measurement_dispute:
-        component = next((item for item in component_inputs
-                          if item.get('unitFootprintAreaSqm') is not None
-                          or item.get('noteDerivedFootprintPerUnitSqm') is not None), None)
-        candidate = None
-        source_text = ''
-        if component and component.get('unitFootprintAreaSqm') is not None:
-            candidate = component['unitFootprintAreaSqm']
-            source_text = f"حقل بصمة الوحدة يسجل {_visual_plan_site_area_text(candidate)} م²"
-        elif component and component.get('noteDerivedFootprintPerUnitSqm') is not None:
-            candidate = component['noteDerivedFootprintPerUnitSqm']
-            source_text = (
-                f"الملاحظة تسجل إجمالي بصمة {_visual_plan_site_area_text(component['noteAggregateFootprintSqm'])} م² "
-                f"لعدد {_visual_plan_site_area_text(component['units'])} فيلا"
-            )
-        if candidate is not None and candidate > 0:
-            model_reply = (f"فهمت أن مساحة بصمة الفيلا غير دقيقة. {source_text}، "
-                           f"وهذا يساوي {_visual_plan_site_area_text(candidate)} م² لكل فيلا.")
-            model_question = (f"هل تؤكد أن مساحة البصمة الصحيحة هي "
-                              f"{_visual_plan_site_area_text(candidate)} م² لكل فيلا؟")
-            choices = [f"نعم، {_visual_plan_site_area_text(candidate)} م² لكل فيلا",
-                       'لا، سأحدد مساحة أخرى']
-        else:
-            model_reply = 'فهمت أن مساحة بصمة الفيلا غير دقيقة، ولم أجد قيمة مؤكدة للبصمة في بيانات المكونات.'
-            model_question = 'ما مساحة البصمة الصحيحة للفيلا الواحدة بالمتر المربع؟'
-            choices = []
-        parsed = {'reply': model_reply, 'question': model_question, 'choices': choices}
-    else:
-        try:
-            parsed, prompt_tokens = _visual_plan_site_call(
-                system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
-                max_tokens=3000, reasoning_effort='medium')
-        except Exception:
-            # Keep the failed geometry check discussable if the chat provider is unavailable.
-            pass
+    elif is_initial_entry:
+        parsed = {'reply': '', 'question': 'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟',
+                  'choices': ['مراجعة بصمات المباني', 'مراجعة نسبة التغطية']}
 
     model_question = _visual_concept_text(parsed.get('question'), 600)
-    model_reply = _visual_concept_text(parsed.get('reply'), 500)
-    choices = [str(item).strip()[:240] for item in
-               (parsed.get('choices') if isinstance(parsed.get('choices'), list) else [])[:6]
-               if str(item).strip()]
-    retry_requested = bool(parsed.get('generateRequested') and placement_retry_request)
-    informational_only = (is_site_area_conflict and facts.get('aggregateAreaSufficient')
-                          and not retry_requested and not source_question and not measurement_dispute
-                          and not area_value_dispute and not setback_inquiry)
+    model_reply = _visual_concept_text(parsed.get('reply'), 1200)
+    raw_choices = parsed.get('choices') if isinstance(parsed.get('choices'), list) else []
+    choices = [str(item).strip()[:240] for item in raw_choices[:6] if str(item).strip()]
+    retry_requested = bool(parsed.get('generateRequested') or (placement_retry_request and can_retry_placement))
+    informational_only = bool(is_site_area_conflict and facts.get('aggregateAreaSufficient')
+                              and (auto_retry_failed or not retry_requested)
+                              and not source_question and not measurement_dispute
+                              and not area_value_dispute)
     if not model_question and not retry_requested and not informational_only:
         if is_setback_conflict:
-            model_question = ('كيف تفضل المتابعة: إعادة التوزيع آليًا، أم مراجعة بصمات المباني أو الارتدادات؟'
-                              if message else
-                              'كيف تفضل المتابعة: هل نعيد محاولة التوزيع آليًا، أم ترغب في مراجعة بصمات المباني أو الارتدادات؟')
+            model_question = 'كيف تفضل المتابعة: إعادة التوزيع آليًا، أم مراجعة بصمات المباني أو الارتدادات؟'
             if not choices:
                 choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
         elif is_site_area_conflict:
             failed_item = failing_site_item or {}
             failed_item_label = failed_item.get('label') or 'المساحة المعتمدة'
-            model_question = (f'أي مساحة تريد مراجعتها: «{failed_item_label}» أم بصمات المباني؟'
-                              if message else
-                              f'أي مساحة معتمدة تريد مراجعتها: «{failed_item_label}» أم بصمات المباني؟')
+            model_question = f'أي مساحة تريد مراجعتها: «{failed_item_label}» أم بصمات المباني؟'
         else:
-            model_question = ('ما الرقم الذي ترى أنه غير دقيق؟' if message else
-                              'أي رقم تريد مناقشته: بصمة المباني في التوزيع أم نسبة التغطية المسجلة؟')
-    if is_setback_conflict and not retry_requested and not choices:
-        choices = ['إعادة توزيع المواضع آلياً', 'مراجعة مساحات بصمات المباني', 'مراجعة الارتدادات المسجلة']
+            model_question = 'ما الرقم الذي ترى أنه غير دقيق؟'
+
     explanation = _visual_plan_site_conflict_summary(facts)
-    has_prior_conversation = prior_conflict_conversation
     if informational_only:
         reply = model_reply or explanation
-    else:
-        reply_parts = [explanation] if not has_prior_conversation and not (
-            source_question or measurement_dispute or setback_inquiry or footprint_review) else []
+    elif not prior_conflict_conversation and not (source_question or measurement_dispute):
+        parts = [explanation]
         if model_reply and model_reply != model_question:
-            reply_parts.append(model_reply)
-        reply_parts.append(model_question)
-        reply = ' '.join(reply_parts)
+            parts.append(model_reply)
+        if model_question and model_question not in model_reply:
+            parts.append(model_question)
+        reply = ' '.join(parts).strip()
+    elif message and model_reply:
+        reply = model_reply
+        if model_question and model_question not in reply:
+            reply = f'{reply} {model_question}'.strip()
+    elif message:
+        reply = model_question or explanation
+    else:
+        reply = f'{explanation} {model_question}'.strip() if model_question else explanation
     state['pendingQuestion'] = '' if retry_requested or informational_only else reply
     state['readyForGeneration'] = retry_requested
     state['generateRequested'] = retry_requested

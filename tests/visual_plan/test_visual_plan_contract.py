@@ -13,6 +13,13 @@ from tests.workflow.test_meeting_requirements import MeetingRequirementsTests
 
 
 class VisualPlanContractBase(MeetingRequirementsTests):
+    def setUp(self):
+        super().setUp()
+        for target in ('_require_billing_balance', '_tenant_key_gate'):
+            patcher = patch.object(self.application_module, target, return_value=None)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def project(self):
         points = [
             {'point': '1', 'eastings': 500000, 'northings': 2000000},
@@ -986,7 +993,6 @@ try:
 except NameError:
     pass
 del _PARTS_DIR
-
 
 if __name__ == '__main__':
     unittest.main()

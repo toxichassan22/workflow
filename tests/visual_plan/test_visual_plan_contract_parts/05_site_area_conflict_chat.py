@@ -74,12 +74,15 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
                     patch.object(module, '_visual_plan_contract', return_value=(contract, context)), \
                     patch.object(module, '_visual_plan_program', return_value=program), \
                     patch.object(module, '_visual_plan_input_signature', return_value='parking-conflict'), \
-                    patch.object(module, '_visual_plan_site_call', side_effect=AssertionError(
-                        'An explicit area dispute must ask for its replacement value')) as model_call, \
+                    patch.object(module, '_visual_plan_site_call', return_value=({
+                        'reply': 'فهمت أن مساحة Parking المسجلة تحتاج تعديل.',
+                        'question': 'ما المساحة الصحيحة المعتمدة لـ«Parking» التي تريد توقيعها؟',
+                        'choices': [],
+                    }, 50)) as model_call, \
                     patch.object(module, '_visual_plan_site_generate') as generate:
                 result, status = module._visual_plan_site_assistant_execute(data, 'chat')
 
-        model_call.assert_not_called()
+        model_call.assert_called_once()
         generate.assert_not_called()
         self.assertEqual(status, 200)
         self.assertTrue(result['success'])
@@ -115,11 +118,14 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
             with patch.object(module, '_visual_plan_contract', return_value=(contract, context)), \
                     patch.object(module, '_visual_plan_program', return_value=program), \
                     patch.object(module, '_visual_plan_input_signature', return_value='parking-conflict'), \
-                    patch.object(module, '_visual_plan_site_call', side_effect=AssertionError(
-                        'A source question should use the approved distribution value')) as model_call:
+                    patch.object(module, '_visual_plan_site_call', return_value=({
+                        'reply': 'المساحة المعتمدة لبندها في التوزيع هي 500 م².',
+                        'question': 'هل قيمة «Parking» صحيحة أم تحتاج مراجعة؟',
+                        'choices': [],
+                    }, 50)) as model_call:
                 result = module._visual_plan_site_conflict_interview(data, error)
 
-        model_call.assert_not_called()
+        model_call.assert_called_once()
         self.assertIn('المساحة المعتمدة لبندها في التوزيع', result['reply'])
         self.assertIn('500 م²', result['reply'])
         self.assertIn('هل قيمة «Parking» صحيحة', result['question'])
