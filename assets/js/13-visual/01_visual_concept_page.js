@@ -2,6 +2,51 @@
 
     let visualConceptSiteAssistantBusy = false;
 
+    function retryVisualConceptImageLoad(image) {
+      if (!image || !image.isConnected) return;
+      const card = image.closest('.visual-concept-card[data-visual-slot], [data-sketch-card]');
+      const currentUrl = image.getAttribute('src') || '';
+      if (!card || !currentUrl.startsWith('/uploads/')) return;
+      const currentAttempt = Number(image.dataset.visualConceptLoadRetry || 0);
+      if (currentAttempt >= 2) return;
+
+      const nextAttempt = currentAttempt + 1;
+      const retryUrl = new URL(currentUrl, window.location.origin);
+      retryUrl.searchParams.set('t', Date.now() + '-' + nextAttempt);
+      const refreshedUrl = retryUrl.pathname + retryUrl.search + retryUrl.hash;
+      image.dataset.visualConceptLoadRetry = String(nextAttempt);
+      image.src = refreshedUrl;
+      const slotId = card.getAttribute('data-visual-slot') || card.getAttribute('data-sketch-card');
+      const slot = tenantVisualConceptState?.slots?.[slotId];
+      if (slot) {
+        if (card.hasAttribute('data-sketch-card')) {
+          const sketch = slot.sketch || (slot.sketch = emptyVisualConceptSketch());
+          if (sketch.imageUrl === currentUrl) sketch.imageUrl = refreshedUrl;
+          if (sketch.approvedImageUrl === currentUrl) sketch.approvedImageUrl = refreshedUrl;
+        } else {
+          if (slot.imageUrl === currentUrl) slot.imageUrl = refreshedUrl;
+          if (slot.approvedImageUrl === currentUrl) slot.approvedImageUrl = refreshedUrl;
+        }
+        markVisualConceptDirty();
+      }
+      const preview = image.closest('.visual-concept-preview');
+      if (preview) {
+        preview.dataset.visualZoom = refreshedUrl;
+        preview.querySelectorAll('[data-visual-zoom]').forEach(control => {
+          control.dataset.visualZoom = refreshedUrl;
+        });
+      }
+    }
+
+    // A transient media response can fail after generation has succeeded. Retry
+    // it in place so the user does not have to reopen the visual-concept view.
+    document.addEventListener('error', event => {
+      const image = event.target;
+      if (image instanceof HTMLImageElement && image.closest('.visual-concept-preview')) {
+        retryVisualConceptImageLoad(image);
+      }
+    }, true);
+
     // Card actions and the zoom lightbox are delegated once on the document:
     // every render replaces innerHTML, so listeners bound per-element died
     // silently whenever a subtree re-rendered after the binding pass.
