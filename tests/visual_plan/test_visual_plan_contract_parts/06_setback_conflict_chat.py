@@ -427,6 +427,85 @@ class VisualPlanContractTestsPart06(VisualPlanContractBase):
                 self.assertEqual(scene['openAreas'][0]['name'], 'Green Spaces')
                 model_call.assert_called_once()
 
+    def test_croquis_and_land_data_reach_contract_and_conflict_interview(self):
+        """Verify all croquis & land data reaches contract, design, and conflict facts without 0 or None."""
+        module = self.application_module
+        project_data = {
+            'project_name': 'Land Croquis Full Test',
+            'plot_number_croquis': 'قطعة 542',
+            'plan_number': 'مخطط 12/ب',
+            'deed_number': 'صك 987654321',
+            'deed_date': '1445-06-12',
+            'croquis_land_area': '1500',
+            'boundary_lengths': 'شمال 50م، جنوب 50م، شرق 30م، غرب 30م',
+            'surrounding_streets': 'شارع شمالي عرض 20م، شارع غربي عرض 15م',
+            'facades_count': 2,
+            'facades_directions': 'شمالية، غربية',
+            'allowed_uses': 'سكني وتجاري',
+            'regulatory_constraints': 'ارتداد أمامي 4م، جانبي 2م',
+            'setbacks': 'شمال 4م، جنوب 2م، شرق 2م، غرب 2م',
+            'city': 'الرياض',
+            'district': 'الملقا',
+            'location_address': 'https://maps.google.com/?q=24.8,46.6',
+            'survey_coordinates': [
+                {'point': '1', 'eastings': 0, 'northings': 0},
+                {'point': '2', 'eastings': 50, 'northings': 0},
+                {'point': '3', 'eastings': 50, 'northings': 30},
+                {'point': '4', 'eastings': 0, 'northings': 30},
+            ],
+            'financial_study_model': {
+                'components': [
+                    {'name': 'مبنى تجاري', 'units': 1, 'unitFootprintArea': 450, 'builtArea': 900, 'floors': 2}
+                ]
+            }
+        }
+        data = {
+            'projectData': project_data,
+            'message': 'طيب هي المساحه المطلوبه كام والمتاحه كام؟',
+            'plansWorkflow': {
+                'boundary': {'points': project_data['survey_coordinates']},
+                'siteAssistant': {},
+            }
+        }
+
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            contract, context = module._visual_plan_contract(data)
+
+            # 1. Assert all croquis and land data reached contract & context
+            self.assertEqual(contract['plotNumber'], 'قطعة 542')
+            self.assertEqual(contract['planNumber'], 'مخطط 12/ب')
+            self.assertEqual(contract['deedNumber'], 'صك 987654321')
+            self.assertEqual(contract['city'], 'الرياض')
+            self.assertEqual(contract['district'], 'الملقا')
+            self.assertIn('50م', contract['boundaryLengths'])
+            self.assertIn('شارع', contract['surroundingStreets'])
+            self.assertEqual(contract['allowedUses'], 'سكني وتجاري')
+
+            # 2. Test conflict interview when setback error occurs
+            error = module.visual_plan_geometry.PlanGeometryError('تعارض في الارتدادات', 'PLANS_SETBACK_CONFLICT')
+            mock_reply = {
+                'reply': 'مساحة الأرض 1,500 م²، وحرم البناء الصافي 1,125 م²، والمساحة المطلوبة للبصمات 450 م².',
+                'question': 'كيف تفضل المتابعة؟',
+                'choices': ['مراجعة الارتدادات', 'تعديل البصمات'],
+            }
+            with patch.object(module, '_visual_plan_site_call', return_value=(mock_reply, 80)) as model_call:
+                result = module._visual_plan_site_conflict_interview(data, error)
+                self.assertTrue(result['success'])
+                self.assertIn('1,500', result['reply'])
+                # Verify facts passed to user_packet had valid non-zero, non-None numbers
+                model_call.assert_called_once()
+                call_args = model_call.call_args[0]
+                user_packet = json.loads(call_args[1])
+                facts = user_packet.get('setbackConflict') or {}
+                self.assertIsNotNone(facts.get('buildableAreaSqm'))
+                self.assertGreater(facts.get('buildableAreaSqm'), 0)
+                self.assertIsNotNone(facts.get('requiredFootprintTotalSqm'))
+                self.assertGreater(facts.get('requiredFootprintTotalSqm'), 0)
+                self.assertEqual(facts.get('plotNumber'), 'قطعة 542')
+                self.assertEqual(facts.get('planNumber'), 'مخطط 12/ب')
+
+
 
 
 

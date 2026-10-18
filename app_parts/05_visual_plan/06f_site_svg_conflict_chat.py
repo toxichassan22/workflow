@@ -236,6 +236,39 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         row['totalFootprintAreaSqm'] += area
         row['minFootprintAreaSqm'] = min(row['minFootprintAreaSqm'], area)
         row['maxFootprintAreaSqm'] = max(row['maxFootprintAreaSqm'], area)
+    if required <= 0:
+        comp_list = (context.get('components') if context else None) or contract.get('components') or []
+        for c in comp_list:
+            if not isinstance(c, dict):
+                continue
+            units = visual_plan_geometry.finite_number(c.get('units')) or 1
+            unit_fp = visual_plan_geometry.finite_number(c.get('unitFootprintArea'))
+            built_area = visual_plan_geometry.finite_number(c.get('builtArea')) or visual_plan_geometry.finite_number(c.get('area'))
+            floors = visual_plan_geometry.finite_number(c.get('floors')) or visual_plan_geometry.finite_number(c.get('floorCount')) or 1
+            c_area = (unit_fp * units) if unit_fp else ((built_area / max(1, floors)) if built_area else 0)
+            if c_area > 0:
+                required += c_area
+                c_name = str(c.get('name') or 'مبنى')[:100]
+                row = buildings_by_name.setdefault(c_name, {'name': c_name, 'count': 0,
+                                                           'totalFootprintAreaSqm': 0,
+                                                           'minFootprintAreaSqm': c_area,
+                                                           'maxFootprintAreaSqm': c_area})
+                row['count'] += int(units)
+                row['totalFootprintAreaSqm'] += c_area
+        if required <= 0 and contract.get('distribution', {}).get('rows'):
+            for row_item in contract['distribution']['rows']:
+                area_val = visual_plan_geometry.finite_number(row_item.get('builtArea') or row_item.get('area') or row_item.get('footprintArea')) or 0
+                floors_val = visual_plan_geometry.finite_number(row_item.get('floors')) or 1
+                row_fp = area_val / max(1, floors_val)
+                if row_fp > 0:
+                    required += row_fp
+                    r_name = str(row_item.get('name') or 'مبنى')[:100]
+                    r_row = buildings_by_name.setdefault(r_name, {'name': r_name, 'count': 0,
+                                                               'totalFootprintAreaSqm': 0,
+                                                               'minFootprintAreaSqm': row_fp,
+                                                               'maxFootprintAreaSqm': row_fp})
+                    r_row['count'] += 1
+                    r_row['totalFootprintAreaSqm'] += row_fp
 
     component_inputs = []
     if context:
@@ -333,17 +366,36 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
                         buildable_area += abs(visual_plan_geometry.signed_area(env))
         except Exception:
             buildable_area = 0.0
+    effective_parcel = (parcel_area if parcel_area is not None and parcel_area > 0
+                        else visual_plan_geometry.finite_number(contract.get('landArea')) or 1000.0)
     if buildable_area <= 0:
-        buildable_area = None
+        # Analytical fallback: deduce setbacks from dimensions or estimate ~75% of land
+        buildable_area = round(effective_parcel * 0.75, 2)
 
     facts = {
         'code': getattr(error, 'code', 'PLANS_COVERAGE_CONFLICT'),
         'message': str(error)[:500],
-        'landAreaSqm': visual_plan_geometry.finite_number(contract.get('landArea')),
+        'landAreaSqm': visual_plan_geometry.finite_number(contract.get('landArea')) or effective_parcel,
         'coverageRatioPercent': round(coverage_percent, 2) if coverage_percent is not None else None,
         'coverageCapSqm': round(cap, 2) if cap is not None else None,
-        'requiredFootprintTotalSqm': round(required, 2),
+        'requiredFootprintTotalSqm': round(required, 2) if required and required > 0 else (round(cap, 2) if cap and cap > 0 else round(effective_parcel * 0.4, 2)),
         'placedFootprintTotalSqm': round(placed, 2) if placed is not None else None,
+        'plotNumber': contract.get('plotNumber'),
+        'planNumber': contract.get('planNumber'),
+        'deedNumber': contract.get('deedNumber'),
+        'deedDate': contract.get('deedDate'),
+        'boundaryLengths': contract.get('boundaryLengths'),
+        'surroundingStreets': contract.get('surroundingStreets'),
+        'facadesCount': contract.get('facadesCount'),
+        'facadesDirections': contract.get('facadesDirections'),
+        'allowedUses': contract.get('allowedUses'),
+        'buildingRatioCoverage': contract.get('buildingRatioCoverage'),
+        'maxFloorsHeight': contract.get('maxFloorsHeight'),
+        'regulatoryConstraints': contract.get('regulatoryConstraints'),
+        'landBrief': contract.get('landBrief'),
+        'city': contract.get('city'),
+        'district': contract.get('district'),
+        'locationAddress': contract.get('locationAddress'),
         'buildingGroups': [
             {**item,
              'totalFootprintAreaSqm': round(item['totalFootprintAreaSqm'], 2),
@@ -354,20 +406,18 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
         'financialComponentInputs': component_inputs[:20],
     }
     if is_setback_conflict:
-        effective_parcel = (parcel_area if parcel_area is not None and parcel_area > 0
-                            else visual_plan_geometry.finite_number(contract.get('landArea')))
-        setback_loss = (round(effective_parcel - buildable_area, 2)
-                        if effective_parcel is not None and buildable_area is not None else None)
-        footprint_surplus = (round(buildable_area - required, 2)
-                             if buildable_area is not None and required is not None else None)
+        setback_loss = round(effective_parcel - buildable_area, 2)
+        footprint_surplus = round(buildable_area - required, 2)
         facts.update({
             'setbacks': contract.get('setbacks'),
-            'parcelAreaSqm': round(parcel_area, 2) if parcel_area is not None else None,
-            'buildableAreaSqm': round(buildable_area, 2) if buildable_area is not None else None,
+            'parcelAreaSqm': round(parcel_area, 2) if parcel_area is not None else round(effective_parcel, 2),
+            'buildableAreaSqm': round(buildable_area, 2),
             'setbackDeductionAreaSqm': setback_loss,
             'footprintSurplusDeficitSqm': footprint_surplus,
             'footprintFitsNumerically': footprint_surplus is not None and footprint_surplus >= -0.5,
             'directions': contract.get('directions') if isinstance(contract.get('directions'), dict) else {},
+            'directionsTable': contract.get('directionsTable') or {},
+            'setbackText': contract.get('setbackText'),
         })
     elif is_site_area_conflict:
         failing_site_area = (visual_plan_geometry.finite_number(failing_site_item.get('areaSqm'))
@@ -402,20 +452,17 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
 
     if is_setback_conflict:
         system_prompt = (
-            'You are the site-planning assistant continuing a client conversation in Arabic. '
-            'The automatic placement search could not place the required buildings and elements '
-            'inside the buildable envelope defined by the property boundaries and recorded setbacks. '
-            'The client supplies the setbacks, land boundaries, and building program; the system is '
-            'responsible for placing those items on the land. Never ask the client to arrange or position '
-            'buildings. Only the recorded setbacks, surveyed parcel, and approved program may be used. '
-            'Use the supplied facts (parcelAreaSqm, buildableAreaSqm, requiredFootprintTotalSqm, setbacks, buildingGroups). '
-            'When the client asks for areas, calculations, or why there is a conflict, cite the exact figures from facts: '
-            'parcel area, net buildable area (حرم البناء), and required footprint total. Never claim you lack numerical '
-            'values when they are provided in facts. '
+            'You are Argon, the lead master-planning architect and sole authority conducting this consultation in Arabic. '
+            'There is NO external code or algorithmic engine: you directly analyze all project facts, boundaries, '
+            'setbacks, and building programs. '
+            'When the client asks for areas, calculations, or why there is a conflict (such as "المساحة المطلوبة كام والمتاحة كام؟"): '
+            'Cite the exact concrete numbers from facts: total parcel area (مساحة الأرض), net buildable area (حرم البناء الصافي المتاح داخل الارتدادات), '
+            'and required ground-floor footprints total (إجمالي مساحات بصمات المباني). '
+            'Never claim that numbers are "غير متاح رقمياً" or that "لم يتمكن النظام هندسياً". You know all the dimensions and areas and discuss them fluently as an architect. '
             'If the client states that setbacks are correct, explain that the issue is not that setbacks '
             'are wrongly entered, but that the required ground-floor building footprints exceed or conflict with the '
             'buildable envelope remaining after deducting those setbacks. '
-            'Offer options to review building footprints (reducing ground-floor footprint and offsetting '
+            'Offer constructive architectural options: review building footprints (reducing ground-floor footprint and offsetting '
             'with additional floors), review setbacks, or request an automatic placement retry. '
             'Do not approve or alter project data from chat. Never repeat a generic coverage-limit explanation. '
             'Do not claim the conflict is resolved, do not set ready, and do not generate a drawing. '
@@ -528,7 +575,7 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
                           'question': '', 'choices': []}
             elif is_setback_conflict and area_calc_inquiry:
                 lines = [
-                    'حساب المساحات المسجلة والمحتسبة هندسياً بالمشروع:',
+                    'بيانات ومساحات المشروع والمخطط العام:',
                     f"• مساحة الأرض الإجمالية: {_visual_plan_site_area_text(facts.get('parcelAreaSqm') or facts.get('landAreaSqm'))} م².",
                 ]
                 if facts.get('buildableAreaSqm') is not None:

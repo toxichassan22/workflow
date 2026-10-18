@@ -226,6 +226,18 @@ _VISUAL_PLAN_VOLATILE_FIELDS = (
     ('north_direction', ('north_direction',), 80, False),
     ('surrounding_streets', ('surrounding_streets',), 1800, False),
     ('setbacks', ('setbacks', 'building_ratio_setbacks'), 1800, False),
+    ('plot_number', ('plot_number_croquis', 'plot_number', 'plotNumber'), 80, False),
+    ('plan_number', ('plan_number', 'planNumber'), 80, False),
+    ('deed_number', ('deed_number', 'deedNumber'), 80, False),
+    ('deed_date', ('deed_date', 'deedDate'), 80, False),
+    ('boundary_lengths', ('boundary_lengths', 'boundaryLengths'), 1800, False),
+    ('facades_count', ('facades_count', 'facadesCount'), 40, False),
+    ('facades_directions', ('facades_directions', 'facadesDirections'), 200, False),
+    ('building_ratio_coverage', ('building_ratio_coverage', 'buildingRatioCoverage'), 1800, False),
+    ('max_floors_height', ('max_floors_height', 'maxFloorsHeight'), 1800, False),
+    ('allowed_uses', ('allowed_uses', 'allowedUses'), 1800, False),
+    ('regulatory_constraints', ('regulatory_constraints', 'regulatoryConstraints'), 4000, False),
+    ('location_address', ('location_address', 'locationAddress'), 500, False),
 )
 
 

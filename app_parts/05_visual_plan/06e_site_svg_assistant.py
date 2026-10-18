@@ -422,19 +422,48 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, program, context):
         })
 
     design_context = {
+        'projectName': contract.get('projectName'),
+        'projectIdea': contract.get('projectIdea'),
+        'plotNumber': contract.get('plotNumber'),
+        'planNumber': contract.get('planNumber'),
+        'deedNumber': contract.get('deedNumber'),
+        'deedDate': contract.get('deedDate'),
+        'city': contract.get('city'),
+        'district': contract.get('district'),
+        'locationAddress': contract.get('locationAddress'),
+        'landAreaSqm': contract.get('landArea'),
         'landParcelBoundary': parcel_polygon,
-        'setbacks': contract.get('setbacks') or {'north': 2, 'south': 2, 'east': 2, 'west': 2},
+        'boundaryLengths': contract.get('boundaryLengths'),
+        'directions': contract.get('directions'),
+        'directionsTable': contract.get('directionsTable'),
+        'surroundingStreets': contract.get('surroundingStreets'),
+        'facadesCount': contract.get('facadesCount'),
+        'facadesDirections': contract.get('facadesDirections'),
         'primaryFrontage': contract.get('primaryFrontage'),
+        'northDirection': contract.get('northDirection'),
+        'setbacks': contract.get('setbacks') or {'north': 2, 'south': 2, 'east': 2, 'west': 2},
+        'setbackText': contract.get('setbackText'),
         'coverageRatioPercent': contract.get('coverageRatio'),
+        'buildingRatioCoverage': contract.get('buildingRatioCoverage'),
+        'floorAreaRatio': contract.get('floorAreaRatio'),
+        'floorCount': contract.get('floorCount'),
+        'maxFloorsHeight': contract.get('maxFloorsHeight'),
+        'allowedUses': contract.get('allowedUses'),
+        'regulatoryConstraints': contract.get('regulatoryConstraints'),
+        'landBrief': contract.get('landBrief'),
+        'parkingRequirements': contract.get('parkingRequirements'),
+        'entrancesExitsRequirements': contract.get('entrancesExitsRequirements'),
+        'clientNotes': contract.get('clientNotes'),
         'buildingsToPlace': buildings_spec,
         'siteItemsToPlace': site_items_spec,
-        'projectName': contract.get('projectName'),
     }
 
     system_prompt = (
         'You are the lead architect and master site planner. You are the sole designer responsible for '
         'laying out the project on the parcel. There is no external layout algorithm: you determine the spatial '
         'positions, footprints, and geometry for all buildings, open spaces, parking, landscape, and access entries. '
+        'Take into full consideration all provided land and croquis data: boundaries, surrounding streets, street widths, '
+        'facades, setback rules, boundary lengths, orientation with north, and regulatory constraints. '
         'RULES:\n'
         '1. Place every building in buildingsToPlace inside landParcelBoundary with coordinates [x, y] in the '
         'exact coordinate system of landParcelBoundary.\n'

@@ -54,6 +54,8 @@ def _visual_concept_components(project_data):
     dynamic_rows = financial.get('dynamicRows') if isinstance(financial.get('dynamicRows'), dict) else {}
     rows = dynamic_rows.get('components')
     if not isinstance(rows, list):
+        rows = financial.get('components')
+    if not isinstance(rows, list):
         rows = _visual_concept_parse_json(_visual_concept_read(source, 'project_components_data'), [])
     output = []
     for item in rows or []:

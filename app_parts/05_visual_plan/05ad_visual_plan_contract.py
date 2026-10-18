@@ -164,6 +164,16 @@ def _visual_plan_contract(data, context=None):
     normalized = _visual_concept_plan_normalize_distribution(distribution, context, context.get('regulations') or {})
     contract['distribution'] = {'rows': normalized['rows'], 'totals': normalized['totals']}
     contract['clientNotes'] = _visual_plan_notes(data)
+    for field in ('plotNumber', 'planNumber', 'deedNumber', 'deedDate', 'boundaryLengths',
+                  'surroundingStreets', 'facadesCount', 'facadesDirections', 'allowedUses',
+                  'buildingRatioCoverage', 'maxFloorsHeight', 'regulatoryConstraints',
+                  'landBrief', 'city', 'district', 'locationAddress', 'parkingRequirements',
+                  'entrancesExitsRequirements'):
+        if not contract.get(field):
+            camel_to_snake = re.sub(r'([A-Z])', r'_\1', field).lower()
+            val = context.get(camel_to_snake) or project.get(camel_to_snake) or project.get(field)
+            if val is not None:
+                contract[field] = str(val).strip() if isinstance(val, (int, float, str)) else val
     return contract, context
 
 
