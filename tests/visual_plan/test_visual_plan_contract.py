@@ -122,9 +122,9 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertEqual(second_packet['validatedProjectData'], {})
         self.assertTrue(second_packet['sessionMemory'])
         self.assertEqual(second_packet['resolvedAnswers'][0]['answer'], 'West street')
-        self.assertEqual(model_call.call_args_list[0].kwargs['max_tokens'], 12000)
+        self.assertEqual(model_call.call_args_list[0].kwargs['max_tokens'], 66000)
         self.assertEqual(model_call.call_args_list[0].kwargs['reasoning_effort'], 'high')
-        self.assertEqual(model_call.call_args_list[1].kwargs['max_tokens'], 6000)
+        self.assertEqual(model_call.call_args_list[1].kwargs['max_tokens'], 66000)
         self.assertEqual(model_call.call_args_list[1].kwargs['reasoning_effort'], 'medium')
 
     def test_starting_site_plan_chat_analyzes_inputs_without_fabricating_a_user_message(self):
@@ -705,9 +705,9 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('reasoning_effort'), 'high')
         self.assertEqual(chat_call.call_args_list[1].kwargs.get('reasoning_effort'), 'high')
         self.assertEqual(chat_call.call_args_list[2].kwargs.get('reasoning_effort'), 'high')
-        self.assertEqual(chat_call.call_args_list[0].kwargs.get('max_tokens'), 12000)
-        self.assertEqual(chat_call.call_args_list[1].kwargs.get('max_tokens'), 8000)
-        self.assertEqual(chat_call.call_args_list[2].kwargs.get('max_tokens'), 24000)
+        self.assertEqual(chat_call.call_args_list[0].kwargs.get('max_tokens'), 66000)
+        self.assertEqual(chat_call.call_args_list[1].kwargs.get('max_tokens'), 66000)
+        self.assertEqual(chat_call.call_args_list[2].kwargs.get('max_tokens'), 66000)
         persisted_uri = persist_mock.call_args.args[0]
         self.assertTrue(persisted_uri.startswith('data:image/svg+xml;base64,'))
         persisted_svg = base64.b64decode(persisted_uri.split(',', 1)[1])

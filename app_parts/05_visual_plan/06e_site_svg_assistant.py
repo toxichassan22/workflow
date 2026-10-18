@@ -18,6 +18,7 @@ _VISUAL_PLAN_SITE_SECTIONS = (
 _VISUAL_PLAN_SITE_SECTION_IDS = {name for name, _description in _VISUAL_PLAN_SITE_SECTIONS}
 _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT = 900000
 _VISUAL_PLAN_SITE_RENDER_REVISION = 5
+_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS = 66000
 
 
 def _visual_plan_site_number(value):
@@ -89,7 +90,8 @@ def _visual_plan_site_reusable_checkpoints(previous, signature):
 
 
 
-def _visual_plan_site_call(system_prompt, user_prompt, data=None, max_tokens=12000,
+def _visual_plan_site_call(system_prompt, user_prompt, data=None,
+                           max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS,
                            reasoning_effort='high'):
     timeout = _visual_plan_job_call_timeout(1200)
     response = call_openrouter_chat(
@@ -194,7 +196,7 @@ def _visual_plan_site_interview(data, action='chat'):
     _visual_plan_report_site_chat_progress(3, 82)
     model_started = time.perf_counter()
     reasoning_effort = 'medium' if continuing else 'high'
-    max_tokens = 6000 if continuing else 12000
+    max_tokens = _VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS
     try:
         parsed, prompt_tokens = _visual_plan_site_call(
             system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
@@ -411,7 +413,7 @@ def _visual_plan_site_ai_design_scene(data, packet, contract):
 
     parsed, _tokens = _visual_plan_site_call(
         system_prompt, json.dumps(design_context, ensure_ascii=False),
-        data=data, max_tokens=8000, reasoning_effort='high')
+        data=data, max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS, reasoning_effort='high')
     if parsed.get('ready') is False or parsed.get('conflict'):
         return {'assistantDecision': parsed}
 
@@ -623,7 +625,8 @@ def _visual_plan_site_edit(data):
                    'resolvedAnswers': state['answers'], 'sessionMemory': state['summary'],
                    'recentTurns': state['turns'][-8:], 'request': instruction}
     parsed, prompt_tokens = _visual_plan_site_call(
-        system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data, max_tokens=24000)
+        system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
+        max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS)
     _visual_plan_site_record_tokens(state, prompt_tokens)
     if parsed.get('clear') is False:
         question = _visual_concept_text(parsed.get('question'), 800) or 'حدد العنصر المطلوب تعديله.'
