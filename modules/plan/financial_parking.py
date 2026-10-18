@@ -130,9 +130,16 @@ def _number_in_quote(number, quote):
     return number == 2 and bool(re.search(r'موقفان|موقفين|اثنان|اثنين|غرفتين|وحدتين|two', normalized))
 
 
+RULE_QUOTE_MAX_CHARS = 600
+
+
 def _rule_spaces(rule, component, snapshot, source_texts):
     quote = str(rule.get('sourceQuote') or '').strip()
     basis = rule.get('basis')
+    # The quote must be that component's own sentence, never a paste of the
+    # whole regulations text: a full-sentence quote is far shorter than this cap.
+    if len(_quote_text(quote)) > RULE_QUOTE_MAX_CHARS:
+        return None
     spaces, per = parking_number(rule.get('spaces')), parking_number(rule.get('per'))
     fixed = parking_number(rule.get('fixedSpaces', 0))
     threshold = parking_number(rule.get('threshold', 0))
@@ -221,6 +228,60 @@ def _requirement_summary(items, summing):
     if summing:
         return ' + '.join(parts)
     return parts[0] if len(parts) == 1 else 'الأكبر من: ' + '، أو '.join(parts)
+
+
+def _quote_rate_numbers(quote):
+    numbers = set()
+    for value in re.findall(r'\d+(?:\.\d+)?', _quote_text(quote).replace('٬', '').replace('٫', '.')):
+        number = parking_number(value)
+        if number is not None:
+            numbers.add(number)
+    return numbers
+
+
+def _verified_rate_numbers(item):
+    numbers = set()
+    for key in ('spacesPer', 'per', 'fixedSpaces', 'threshold'):
+        value = item.get(key)
+        if isinstance(value, bool):
+            continue
+        number = parking_number(value)
+        if number is not None and number > 0:
+            numbers.add(number)
+    return numbers
+
+
+def _drop_misattributed_quotes(staged):
+    """Drop a rule whose quote carries another component's distinctive rate.
+
+    Each requirement row must document its own component's clause: when one
+    quote pastes several components' clauses, the digits of a foreign rate
+    (an area rate such as 25/50/150 that is not this rule's own) give it away.
+    Small shared counts (1, 2) are exempt — a shared «whichever is more»
+    sentence stays with every alternative of its own component. The existing
+    verified/calculated count mismatch then routes the component to the
+    documented-missing path instead of showing everyone's text as its own."""
+    rate_sets = {}
+    for component, _selected, _calculated, verified in staged:
+        own_rates = set()
+        for item in verified:
+            own_rates |= {rate for rate in _verified_rate_numbers(item) if rate > 2}
+        rate_sets[component['id']] = own_rates
+    filtered = []
+    for component, selected, calculated, verified in staged:
+        foreign = set()
+        for other_id, rates in rate_sets.items():
+            if other_id != component['id']:
+                foreign |= rates
+        kept = []
+        for item in verified:
+            own = _verified_rate_numbers(item)
+            digits = _quote_rate_numbers(item.get('sourceQuote'))
+            if any(number > 2 and number not in own and number in foreign for number in digits):
+                continue
+            kept.append(item)
+        filtered.append((component, selected, calculated, kept))
+    return filtered
 
 
 def _requirement_notes(requirements, required, allocated):
@@ -334,11 +395,14 @@ def build_parking_plan(project, response, plan_id):
     requirements, missing, quantity_notes = [], [], []
     demand = [row for row in snapshot['components']
               if row['useType'] not in NON_PARKING_DEMAND_USES and not is_parking_component(row)]
+    staged = []
     for component in demand:
-        label = component['name'] or component['id']
         selected = [rule for rule in rules if isinstance(rule, dict) and rule.get('componentId') == component['id']]
         calculated = [_rule_spaces(rule, component, snapshot, source_texts) for rule in selected]
         verified = [item for item in calculated if item is not None]
+        staged.append((component, selected, calculated, verified))
+    for component, selected, calculated, verified in _drop_misattributed_quotes(staged):
+        label = component['name'] or component['id']
         computable = [item for item in verified if item['spaces'] is not None]
         summing = bool(selected) and all(rule.get('combination') == 'sum' for rule in selected)
         combined, first = None, verified[0] if verified else {}

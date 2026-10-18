@@ -311,7 +311,7 @@
     function printFinancialStudy() {
       calculateAll();
       const printAreaState = window.__financialProjection?.areaState;
-      if (printAreaState && !printAreaState.valid) { toast(printAreaState.builtExceeded ? 'لا يمكن الطباعة: مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض' : printAreaState.basementExceeded ? WFT('financial.print_blocked_basement_area', 'لا يمكن الطباعة: مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات') : WFT('financial.print_blocked_open_area', 'لا يمكن الطباعة: مجموع مساحات المكونات المفتوحة يتجاوز المساحات المفتوحة للأرض')); return }
+      if (printAreaState && !printAreaState.valid) { toast(printAreaState.builtExceeded ? 'لا يمكن الطباعة: مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض' : printAreaState.landShareExceeded ? 'لا يمكن الطباعة: مجموع الحصص الأرضية للمكونات يتجاوز مساحة البناء' : printAreaState.basementExceeded ? WFT('financial.print_blocked_basement_area', 'لا يمكن الطباعة: مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات') : WFT('financial.print_blocked_open_area', 'لا يمكن الطباعة: مجموع مساحات المكونات المفتوحة يتجاوز المساحات المفتوحة للأرض')); return }
       triggerAutoSaveDraft();
       const pd = (typeof tenantProjectData !== 'undefined' && tenantProjectData) || {};
       const projectName = String(pd.project_name || pd.projectName || val('projectName') || 'المشروع').trim();

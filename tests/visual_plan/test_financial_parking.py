@@ -247,6 +247,27 @@ class FinancialParkingTests(unittest.TestCase):
         self.assertFalse(plan['canApply'])
         self.assertIsNone(plan['requirements'][0]['spaces'])
 
+    def test_quote_carrying_another_components_rate_is_not_attributed(self):
+        blob = ('السكني: موقف واحد لكل وحدة. '
+                'التجاري: موقف واحد لكل 50 م² من المساحة المبنية.')
+        self.project['regulatory_constraints'] = blob
+        self.rules['rules'][0]['sourceQuote'] = blob
+        plan = self.build()
+        self.assertFalse(plan['canApply'])
+        self.assertIsNone(plan['requirements'][0]['spaces'])
+        self.assertTrue(any('شقق سكنية' in note for note in plan['missing']))
+        self.assertEqual(plan['requirements'][1]['spaces'], 30)
+
+    def test_pasted_regulations_blob_quote_is_rejected(self):
+        self.project['regulatory_constraints'] = (
+            'التجاري: موقف واحد لكل 50 م² من المساحة المبنية. '
+            'السكني: موقف واحد لكل وحدة. ' + 'أحكام تنظيمية عامة موثقة للمنطقة. ' * 40)
+        self.rules['rules'][0]['sourceQuote'] = self.project['regulatory_constraints']
+        plan = self.build()
+        self.assertFalse(plan['canApply'])
+        self.assertIsNone(plan['requirements'][0]['spaces'])
+        self.assertEqual(plan['requirements'][1]['spaces'], 30)
+
     def test_summed_rules_still_require_every_quantity(self):
         self._apartments_clause('وموقف لكل وحدة سكنية وموقف لكل 150 م² للصالات')
         self.project['financial_study_model']['dynamicRows']['components'][0]['units'] = ''

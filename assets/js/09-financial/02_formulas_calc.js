@@ -117,7 +117,7 @@
         const name = tr.querySelector('[data-field="name"] input')?.value?.trim() || `مكون ${idx + 1}`;
         const units = parseNumber(tr.querySelector('[data-field="units"] input')?.value);
         const unitArea = parseNumber(tr.querySelector('[data-field="unitArea"] input')?.value);
-        const unitFootprintArea = parseNumber(tr.querySelector('[data-field="unitFootprintArea"] input')?.value);
+        const landShareArea = parseNumber(tr.querySelector('[data-field="landShareArea"] input')?.value ?? tr.querySelector('[data-field="unitFootprintArea"] input')?.value);
         const builtArea = parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value);
         const revenueArea = parseNumber(tr.querySelector('[data-field="revenueArea"] input')?.value);
         const useType = tr.querySelector('[data-field="useType"] select')?.value || 'retail';
@@ -129,7 +129,7 @@
           parkingLocation: tr.querySelector('[data-field="parkingLocation"] select')?.value || 'aboveGround',
           parkingPlanId: tr.dataset.parkingPlanId || '', floorRange: tr.dataset.floorRange || ''
         } : {};
-        return { idx, id, name, useType, units, unitArea, unitFootprintArea, builtArea, revenueArea, totalArea: revenueArea, investmentModel, leasable, notes, ...parking };
+        return { idx, id, name, useType, units, unitArea, landShareArea, unitFootprintArea: landShareArea, builtArea, revenueArea, totalArea: revenueArea, investmentModel, leasable, notes, ...parking };
       });
     }
     function updateRevenueComponentOptions() {
@@ -311,16 +311,22 @@
       // the open-area budget (الأرض − المغطاة) instead of the above-ground BUA pool. A
       // «بدروم» component settles against the basement BUA input (مساحة البدرومات).
       const openLimit = Math.max(0, num('openArea')), basementLimit = Math.max(0, num('basementArea'));
-      let used = 0, openUsed = 0, basementUsed = 0;
+      let used = 0, openUsed = 0, basementUsed = 0, landShareUsed = 0;
       document.querySelectorAll('#componentsTable tbody tr').forEach(tr => {
         const area = Math.max(0, parseNumber(tr.querySelector('[data-field="builtArea"] input')?.value));
         const rowType = tr.querySelector('[data-field="useType"] select')?.value;
         const pool = financialComponentAreaPool({ useType: rowType, parkingLocation: tr.querySelector('[data-field="parkingLocation"] select')?.value });
         if (pool === 'surface') openUsed += area; else if (pool === 'basement') basementUsed += area; else used += area;
+        landShareUsed += Math.max(0, parseNumber(tr.querySelector('[data-field="landShareArea"] input')?.value ?? tr.querySelector('[data-field="unitFootprintArea"] input')?.value));
       });
+      // الحصة الأرضية للمكون كامل: مجموع حصص كل المكونات يجب ألا يتجاوز مساحة البناء
+      // (مساحة الأرض × نسبة تغطية البناء من قسم الأرض والكروكي).
+      const landShareLimit = Math.max(0, num('landArea') * num('coverageRate') / 100);
+      const landShareRemaining = landShareLimit - landShareUsed;
       const remaining = limit - used, openRemaining = openLimit - openUsed, basementRemaining = basementLimit - basementUsed;
       const builtExceeded = used > limit + .01, openExceeded = openUsed > openLimit + .01, basementExceeded = basementUsed > basementLimit + .01;
-      const valid = !builtExceeded && !openExceeded && !basementExceeded;
+      const landShareExceeded = landShareLimit > 0 && landShareUsed > landShareLimit + .01;
+      const valid = !builtExceeded && !openExceeded && !basementExceeded && !landShareExceeded;
       const openLine = openUsed > 0 || openExceeded ? `<br><span>المساحات المفتوحة:</span> <span>تم تخصيص</span> <b>${money(openUsed)}</b> <span>م²</span> <span>من أصل</span> <b>${money(openLimit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(openRemaining)}</b> <span>م²</span>.` : '';
       const basementLine = basementUsed > 0 || basementExceeded ? `<br><span>البدرومات:</span> <span>تم تخصيص</span> <b>${money(basementUsed)}</b> <span>م²</span> <span>من أصل</span> <b>${money(basementLimit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(basementRemaining)}</b> <span>م²</span>.` : '';
       const panel = document.getElementById('componentAreaValidation');
@@ -335,12 +341,15 @@
         const basementError = basementExceeded
           ? `<br><span>خطأ:</span> <span>مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات بمقدار</span> <b>${money(-basementRemaining)}</b> <span>م²</span>. <span>عدّل المساحات قبل اعتماد النتائج أو التصدير.</span>`
           : '';
-        panel.innerHTML = builtLine + (basementExceeded ? basementError : basementLine) + (openExceeded ? openError : openLine);
+        const landShareLine = landShareExceeded
+          ? `<br><span>خطأ:</span> <span>مجموع الحصص الأرضية للمكونات يتجاوز مساحة البناء بمقدار</span> <b>${money(-landShareRemaining)}</b> <span>م²</span>. <span>عدّل الحصص قبل اعتماد النتائج أو التصدير.</span>`
+          : (landShareLimit > 0 ? `<br><span>الحصص الأرضية:</span> <span>تم تخصيص</span> <b>${money(landShareUsed)}</b> <span>م²</span> <span>من أصل</span> <b>${money(landShareLimit)}</b> <span>م²</span> — <span>المتبقي</span> <b>${money(landShareRemaining)}</b> <span>م²</span>.` : '');
+        panel.innerHTML = builtLine + (basementExceeded ? basementError : basementLine) + (openExceeded ? openError : openLine) + landShareLine;
       }
       // The .area-invalid rule already exists in the stylesheet; without this toggle the block
       // never got its red border, so the only cue was the text panel.
       document.querySelector('#componentsTable')?.closest('.finance-block')?.classList.toggle('area-invalid', !valid);
-      return { valid, used, limit, remaining, openUsed, openLimit, openRemaining, basementUsed, basementLimit, basementRemaining, builtExceeded, openExceeded, basementExceeded };
+      return { valid, used, limit, remaining, openUsed, openLimit, openRemaining, basementUsed, basementLimit, basementRemaining, builtExceeded, openExceeded, basementExceeded, landShareUsed, landShareLimit, landShareRemaining, landShareExceeded };
     }
     function updateGraceRevenueOptions() { const select = document.getElementById('graceRevenueId'); if (!select) return; const current = select.value; const rows = [...document.querySelectorAll('#revenueTable tbody tr')].filter(tr => !isSaleRevenueRow(tr)); select.innerHTML = rows.map((tr, i) => `<option value="${tr.dataset.revenueKey}">${tr.querySelector('[data-field="name"] input')?.value || (trDynamicI18n('إيراد') + ' ' + (i + 1))}</option>`).join(''); if (rows.some(tr => tr.dataset.revenueKey === current)) select.value = current; refreshDynamicI18n(select); }
     document.addEventListener('wf:lang', () => {
@@ -760,6 +769,7 @@
         if (areaState.builtExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع المساحات المبنية للمكونات يتجاوز مسطحات البناء فوق الأرض.');
         if (areaState.openExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع مساحات المكونات المفتوحة يتجاوز المساحات المفتوحة للأرض.');
         if (areaState.basementExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع مساحات مكونات البدروم يتجاوز مساحة البدرومات.');
+        if (areaState.landShareExceeded) warnings.push('تم حجب اعتماد النتائج والطباعة لأن مجموع الحصص الأرضية للمكونات يتجاوز مساحة البناء.');
         renderAnalysisWarnings();
       }
 

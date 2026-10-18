@@ -297,7 +297,7 @@ def _visual_concept_plan_context_text(context, diagram_rules=True):
         parts = [item.get('name') or 'مكون غير مسمى']
         for label, key in (
             ('use', 'useType'), ('building', 'building'), ('floors', 'floorRange'),
-            ('units', 'units'), ('area', 'unitArea'), ('footprint per unit', 'unitFootprintArea'),
+            ('units', 'units'), ('area', 'unitArea'), ('land share (whole component)', 'landShareArea'),
             ('built area', 'builtArea'), ('notes', 'notes')):
             if item.get(key) not in (None, ''):
                 parts.append(f'{label}={item[key]}')

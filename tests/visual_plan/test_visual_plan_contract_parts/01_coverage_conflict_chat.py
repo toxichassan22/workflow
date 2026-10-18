@@ -27,6 +27,9 @@ class VisualPlanContractTestsPart01(VisualPlanContractBase):
 
         model_call.assert_called_once()
         self.assertFalse(hasattr(module, '_visual_plan_site_conflict_interview'))
+        system_prompt = model_call.call_args.args[0]
+        self.assertIn('landShareArea', system_prompt)
+        self.assertIn('whole', system_prompt)
         self.assertEqual(status, 200)
         self.assertTrue(result['needsClarification'])
         self.assertIn('إجمالي البصمات يتجاوز نسبة التغطية المسجلة.', result['reply'])
@@ -94,6 +97,29 @@ class VisualPlanContractTestsPart01(VisualPlanContractBase):
                          'البصمة الإجمالية 10500 م²')
         self.assertIn('البصمة الإجمالية 10500 م²',
                       sent['validatedProjectData']['distributionRows'][0]['notes'])
+
+    def test_individual_villa_program_divides_the_whole_component_land_share(self):
+        module = self.application_module
+        contract = {'distribution': {'rows': [{
+            'id': 'villa_row', 'building': 'الفلل', 'component': 'فلل سكنية',
+            'floor_range': 'G+1', 'units_per_floor': 100, 'floor_area_sqm': 13000,
+            'circulation': '',
+        }]}}
+        context = {'components': module._visual_concept_components({
+            'financial_study_model': {'dynamicRows': {'components': [{
+                'id': 'villa_component', 'name': 'فلل سكنية', 'useType': 'residential',
+                'units': 100, 'unitArea': 260, 'landShareArea': 10500,
+                'builtArea': 26000, 'floorRange': 'G+1',
+            }]}}
+        })}
+
+        self.assertEqual(context['components'][0]['landShareArea'], 10500)
+
+        program = module._visual_plan_program(contract, context)
+
+        self.assertEqual(len(program['buildings']), 100)
+        self.assertEqual(sum(item['footprintArea'] for item in program['buildings']), 10500)
+        self.assertTrue(all(item['footprintArea'] == 105 for item in program['buildings']))
 
     def test_footprint_correction_without_a_recorded_value_asks_for_the_unit_area(self):
         module = self.application_module

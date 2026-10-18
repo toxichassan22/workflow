@@ -58,7 +58,7 @@ function fixture() {
   context.addComponent = component => add(component);
   function add(component) {
     const controls = Object.fromEntries(Object.entries(component).map(([key, value]) => [key, field(value,
-      ['units', 'unitArea', 'unitFootprintArea', 'builtArea', 'revenueArea'].includes(key) ? 'number' : 'text')]));
+      ['units', 'unitArea', 'landShareArea', 'unitFootprintArea', 'builtArea', 'revenueArea'].includes(key) ? 'number' : 'text')]));
     const row = { dataset: { componentKey: component.id, parkingPlanId: component.parkingPlanId || '',
       floorRange: component.floorRange || '' },
       querySelector: selector => controls[selector.match(/data-field="([^"]+)"/)?.[1]] || null,
@@ -305,17 +305,82 @@ test('generated-row notes render escaped inside the editable textarea', () => {
   assert(!element.innerHTML.includes('<script>'));
 });
 
-test('component rows render and collect the per-unit footprint field', () => {
+test('component rows render and collect the whole-component land share', () => {
   const f = fixture();
   const controls = Object.fromEntries(Object.entries({ name: 'فلل', units: 100, unitArea: 260,
-    unitFootprintArea: 105, builtArea: 26000, revenueArea: 0, useType: 'residential',
+    landShareArea: 10500, builtArea: 26000, revenueArea: 0, useType: 'residential',
     investmentModel: 'nonRevenue', notes: '' }).map(([key, value]) => [key, field(value,
-      ['units', 'unitArea', 'unitFootprintArea', 'builtArea', 'revenueArea'].includes(key) ? 'number' : 'text')]));
+      ['units', 'unitArea', 'landShareArea', 'builtArea', 'revenueArea'].includes(key) ? 'number' : 'text')]));
   const element = { dataset: {}, innerHTML: '', querySelectorAll: () => [],
     querySelector: selector => controls[selector.match(/data-field="([^"]+)"/)?.[1]] || null };
   f.context.document.createElement = () => element;
   f.realAddComponent({ id: 'villa', name: 'فلل', units: 100, unitArea: 260,
-    unitFootprintArea: 105, builtArea: 26000 });
-  assert.match(element.innerHTML, /data-field="unitFootprintArea"><input type="number" value="105">/);
-  assert.equal(f.context.getComponentRowsData().at(-1).unitFootprintArea, 105);
+    landShareArea: 10500, builtArea: 26000 });
+  assert.match(element.innerHTML, /data-field="landShareArea"><input type="number" value="10500">/);
+  assert.equal(f.context.getComponentRowsData().at(-1).landShareArea, 10500);
+  const legacyControls = Object.fromEntries(Object.entries({ name: 'قديم', units: 2,
+    unitArea: 100, unitFootprintArea: 80, builtArea: 200 }).map(([key, value]) => [key,
+      field(value, ['units', 'unitArea', 'unitFootprintArea', 'builtArea'].includes(key) ? 'number' : 'text')]));
+  const legacyElement = { dataset: {}, innerHTML: '', querySelectorAll: () => [],
+    querySelector: selector => legacyControls[selector.match(/data-field="([^"]+)"/)?.[1]] || null };
+  f.context.document.createElement = () => legacyElement;
+  f.realAddComponent({ id: 'legacy', name: 'قديم', units: 2, unitArea: 100,
+    unitFootprintArea: 80, builtArea: 200 });
+  assert.match(legacyElement.innerHTML, /data-field="landShareArea"><input type="number" value="80">/);
+  assert.equal(f.context.getComponentRowsData().at(-1).landShareArea, 80);
+});
+
+test('the proposal summary keeps only the total required spaces', () => {
+  const f = fixture();
+  const html = f.context.financialParkingMarkup();
+  assert.match(html, /إجمالي المواقف المطلوبة/);
+  assert(!html.includes('المواقف المدخلة سابقًا'));
+  assert(!html.includes('المواقف الإضافية المقترحة'));
+  assert(!html.includes('مساحة المواقف المقترحة'));
+  assert(!html.includes('شاملة الحركة'));
+  assert(!html.includes('البدروم الإضافية المقترحة'));
+});
+
+test('parking requests carry timeouts instead of hanging the panel', async () => {
+  const f = fixture();
+  const calls = [];
+  f.context.apiWithTimeout = async (method, url, body, timeoutMs) => {
+    calls.push({ method, url, timeoutMs });
+    return { success: false, error: 'x' };
+  };
+  f.context.tenantProjectData.financial_study_model.parkingPlan = f.proposal();
+  assert.equal(await f.context.approveFinancialParking(), false);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /parking\/approval/);
+  assert.equal(calls[0].timeoutMs, 60000);
+  const pending = new Promise(() => {});
+  f.context.apiWithTimeout = async (method, url, body, timeoutMs) => {
+    calls.push({ method, url, timeoutMs });
+    return pending;
+  };
+  const first = f.context.suggestFinancialParking();
+  await until(() => calls.length === 2);
+  assert.match(calls[1].url, /parking\/suggest/);
+  assert.equal(calls[1].timeoutMs, 180000);
+  assert.equal(first, f.context.suggestFinancialParking());
+  assert.match(f.context.toasts.at(-1), /جاري إعداد اقتراح المواقف/);
+});
+
+test('land shares are capped by the building footprint area', () => {
+  const f = fixture();
+  f.rows[0].querySelector('[data-field="unitFootprintArea"] input').value = '';
+  f.add({ id: 'villas', name: 'فلل', useType: 'residential', units: 10, unitArea: 260,
+    landShareArea: 2000, builtArea: 0, revenueArea: 0, investmentModel: 'nonRevenue' });
+  f.add({ id: 'shops', name: 'محلات', useType: 'retail', units: 5, unitArea: 150,
+    landShareArea: 1500, builtArea: 0, revenueArea: 0, investmentModel: 'annualRent' });
+  const over = plain(f.context.validateComponentAreas());
+  assert.equal(over.landShareLimit, 3000);
+  assert.equal(over.landShareUsed, 3500);
+  assert.equal(over.landShareExceeded, true);
+  assert.equal(over.valid, false);
+  f.rows.at(-1).querySelector('[data-field="landShareArea"] input').value = '1000';
+  const ok = plain(f.context.validateComponentAreas());
+  assert.equal(ok.landShareUsed, 3000);
+  assert.equal(ok.landShareExceeded, false);
+  assert.equal(ok.valid, true);
 });

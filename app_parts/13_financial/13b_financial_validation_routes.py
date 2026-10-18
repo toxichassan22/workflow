@@ -114,7 +114,7 @@ def validate_financial_model(model):
 
     projection = model.get('projection') if isinstance(model, dict) else None
     if isinstance(projection, dict) and isinstance(projection.get('areaState'), dict) and projection['areaState'].get('valid') is False:
-        errors.append({'field': 'componentsTable', 'message': 'مجموع مساحات مكونات المشروع يتجاوز مسطحات البناء فوق الأرض أو مساحة البدرومات أو المساحات المفتوحة للأرض'})
+        errors.append({'field': 'componentsTable', 'message': 'مجموع مساحات مكونات المشروع يتجاوز مسطحات البناء فوق الأرض أو مساحة البدرومات أو المساحات المفتوحة للأرض أو مجموع الحصص الأرضية يتجاوز مساحة البناء'})
     parking_error = _financial_parking_model_error(model)
     if parking_error:
         errors.append(parking_error)

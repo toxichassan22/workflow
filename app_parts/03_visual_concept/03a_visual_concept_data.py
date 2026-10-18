@@ -65,7 +65,9 @@ def _visual_concept_components(project_data):
         if not name:
             continue
         component_id = _visual_concept_text(item.get('id') or item.get('componentId') or item.get('component_id'), 80)
-        unit_footprint = _visual_concept_number(
+        land_share = _visual_concept_number(
+            item.get('landShareArea') or item.get('land_share_area'))
+        legacy_footprint = _visual_concept_number(
             item.get('unitFootprintArea') or item.get('unit_footprint_area'))
         output.append({
             'id': component_id or f'component_{len(output) + 1}',
@@ -73,7 +75,8 @@ def _visual_concept_components(project_data):
             'useType': _visual_concept_text(item.get('useType') or item.get('type'), 80),
             'units': _visual_concept_number(item.get('units') or item.get('count')),
             'unitArea': _visual_concept_number(item.get('unitArea') or item.get('area_sqm')),
-            'unitFootprintArea': unit_footprint if unit_footprint and unit_footprint > 0 else None,
+            'landShareArea': land_share if land_share and land_share > 0 else None,
+            'unitFootprintArea': legacy_footprint if legacy_footprint and legacy_footprint > 0 else None,
             'builtArea': _visual_concept_number(item.get('builtArea') or item.get('totalArea') or item.get('area_sqm')),
             'floorRange': _visual_concept_text(
                 item.get('floorRange') or item.get('floor_range') or item.get('floor_span')

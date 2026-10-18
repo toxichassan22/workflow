@@ -116,11 +116,6 @@
         <div id="financialParkingDetails" hidden>
           <div class="grid four financial-parking-summary">
             <div><label for="parkingRequiredSpaces">إجمالي المواقف المطلوبة</label><input id="parkingRequiredSpaces" readonly></div>
-            <div><label for="parkingExistingSpaces">المواقف المدخلة سابقًا</label><input id="parkingExistingSpaces" readonly></div>
-            <div><label for="parkingAdditionalSpaces">المواقف الإضافية المقترحة</label><input id="parkingAdditionalSpaces" readonly></div>
-            <div><label for="parkingProposedArea">مساحة المواقف المقترحة م²</label><input id="parkingProposedArea" readonly></div>
-            <div><label for="parkingAreaPerSpace">مساحة الموقف شاملة الحركة م²</label><input id="parkingAreaPerSpace" readonly></div>
-            <div><label for="parkingAdditionalBasementArea">مساحة البدروم الإضافية المقترحة م²</label><input id="parkingAdditionalBasementArea" readonly></div>
           </div>
           <div class="table-wrap"><table id="parkingRequirementsTable"><thead><tr><th>المكون</th><th>طريقة الاحتساب</th><th>الكمية المعتمدة</th><th>عدد المواقف المطلوبة</th><th>الاشتراط الموثق</th></tr></thead><tbody></tbody></table></div>
           <div class="financial-parking-notes"><div id="financialParkingNotesWrap"><label for="financialParkingNotes">ملاحظات اقتراح المواقف</label><textarea id="financialParkingNotes" readonly rows="4"></textarea></div></div>
@@ -174,11 +169,6 @@
         : plan.approved && !error ? 'اقتراح المواقف معتمد.' : plan.canApply ? 'اقتراح المواقف بانتظار الاعتماد.' : 'اقتراح المواقف غير مكتمل.');
       const setValue = (id, value) => { const input = document.getElementById(id); if (input) input.value = !plan.id ? '' : value == null ? '—' : money(value); };
       setValue('parkingRequiredSpaces', plan.requiredSpaces);
-      setValue('parkingExistingSpaces', plan.existingSpaces);
-      setValue('parkingAdditionalSpaces', plan.additionalSpaces);
-      setValue('parkingProposedArea', plan.parkingArea);
-      setValue('parkingAreaPerSpace', plan.areaPerSpace);
-      setValue('parkingAdditionalBasementArea', plan.id ? Math.max(0, (plan.basementAreaTarget || 0) - (plan.baseBasementArea || 0)) : null);
       const body = document.querySelector('#parkingRequirementsTable tbody');
       if (body) body.innerHTML = (plan.requirements || []).map(row => {
         const basis = { units: 'عدد الوحدات', builtArea: 'المساحة المبنية م²', revenueArea: 'المساحة البيعية / التأجيرية م²', landArea: 'مساحة الأرض م²' }[row.basis] || 'غير موثق';
@@ -257,7 +247,10 @@
     }
 
     function runFinancialParkingAction(action) {
-      if (financialParkingRequestTask) return financialParkingRequestTask;
+      if (financialParkingRequestTask) {
+        if (typeof toast === 'function') toast(financialParkingText('جاري إعداد اقتراح المواقف...'));
+        return financialParkingRequestTask;
+      }
       financialParkingRequestTask = (async () => {
         if (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation') return false;
         financialParkingBusy = true;
@@ -275,7 +268,8 @@
           const plan = financialParkingPlan();
           const body = { draftId, expectedRevision: tenantDraftRevision };
           if (action === 'approval') Object.assign(body, { planId: plan.id, approved: !plan.approved });
-          const response = await api('POST', '/api/financial-study/parking/' + action, body);
+          const response = await parkingApi('POST', '/api/financial-study/parking/' + action, body,
+            action === 'suggest' ? 180000 : 60000);
           if (!response?.success) {
             toast(financialParkingText(response?.error || 'تعذر إعداد اقتراح المواقف.'));
             return false;
@@ -290,6 +284,15 @@
         }
       })().finally(() => { financialParkingRequestTask = null; });
       return financialParkingRequestTask;
+    }
+
+    // Parking calls must never hang the panel: suggest waits on the AI (the
+    // server caps it at 150s) while approval is a quick deterministic write.
+    // apiWithTimeout may be absent in unit harnesses, where the mocked api stands in.
+    function parkingApi(method, url, body, timeoutMs) {
+      return typeof apiWithTimeout === 'function'
+        ? apiWithTimeout(method, url, body, timeoutMs)
+        : api(method, url, body);
     }
 
     function suggestFinancialParking() { return runFinancialParkingAction('suggest'); }
