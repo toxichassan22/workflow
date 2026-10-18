@@ -327,6 +327,8 @@
         slot.approvedImageUrl = '';
         slot.status = 'pending';
         slot.chat = [];
+        workflow.scene = null;
+        workflow.sourceStamp = '';
       }
       if (response.assistantState && typeof response.assistantState === 'object') {
         workflow.siteAssistant = normalizeVisualConceptPlansWorkflow({ siteAssistant: response.assistantState }).siteAssistant;
@@ -447,7 +449,9 @@
           const notesCleared = await checkVisualConceptPlanNotes({ silent: true });
           if (!notesCleared) return;
         }
-        const payload = await collectVisualConceptPlansWorkflowPayload();
+        const payload = await collectVisualConceptPlansWorkflowPayload({
+          siteAssistantContext: true, assistantAction: 'chat'
+        });
         payload.planAssistantAction = 'chat';
         const response = await visualConceptPlanJobApi(
           'POST', '/api/visual-concept/site-plan-assistant', payload);
@@ -494,7 +498,11 @@
       renderVisualConceptPage();
       showLoader('جاري توليد التصور البصري', WFT('vc.generating_slot', 'يتم توليد {slot}...', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
       try {
-        const payload = sitePlan ? await collectVisualConceptPlansWorkflowPayload() : await collectVisualConceptPayload(slotId);
+        const payload = sitePlan
+          ? await collectVisualConceptPlansWorkflowPayload({
+            siteAssistantContext: true, assistantAction: 'generate'
+          })
+          : await collectVisualConceptPayload(slotId);
         if (sitePlan) {
           payload.planAssistantAction = 'generate';
           payload.siteSvgCode = liveSlot().svgCode || '';
@@ -729,9 +737,13 @@
             }
           }
         }
-        const payload = sitePlan ? await collectVisualConceptPlansWorkflowPayload() : await collectVisualConceptPayload(slotId);
+        const payload = sitePlan
+          ? await collectVisualConceptPlansWorkflowPayload({
+            siteAssistantContext: true, assistantAction: editImage ? 'edit' : 'chat'
+          })
+          : await collectVisualConceptPayload(slotId);
         payload.message = message;
-        if (editImage) payload.image = baseImage;
+        if (editImage && !sitePlan) payload.image = baseImage;
         if (refs.length) payload.editReferenceFileIds = refs.map(file => file.id);
         if (sitePlan) {
           payload.planAssistantAction = editImage ? 'edit' : 'chat';

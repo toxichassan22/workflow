@@ -28,14 +28,9 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
 
         self.assertEqual(packet['financialComponents'], [])
         self.assertEqual(packet['landAndRegulations']['financialComponents'], [])
-        source = packet['sourceProjectData']
-        self.assertEqual(source['project_components_data'], [])
-        self.assertEqual(source['financial_study_model']['dynamicRows']['components'], [])
-        self.assertEqual(source['financial_study_model']['components'], [])
-        self.assertEqual(source['financial_study_model']['financialCalcData']['components'], [])
-        self.assertEqual(source['financial_study_model']['tables']['componentsTable'], [])
-        self.assertEqual(source['financial_calc_data']['components'], [])
-        self.assertNotIn('visual_concept', source)
+        self.assertNotIn('sourceProjectData', packet)
+        self.assertNotIn('sourceDistribution', packet)
+        self.assertNotIn('sourceBoundary', packet)
         self.assertEqual(packet['distributionRows'][0]['notes'], 'ملاحظة محفوظة للمراجعة')
         self.assertEqual(packet['distributionNotes'], 'مراجعة الملاحظة المسجلة في التوزيع.')
 
@@ -80,7 +75,7 @@ class VisualPlanContractTestsPart05(VisualPlanContractBase):
         self.assertEqual(result['question'], model_reply['question'])
         sent = json.loads(model_call.call_args.args[1])
         self.assertEqual(sent['validatedProjectData']['financialComponents'], [])
-        self.assertEqual(sent['validatedProjectData']['sourceProjectData']['financial_study_model']['dynamicRows']['components'], [])
+        self.assertNotIn('deleted-villa', json.dumps(sent['validatedProjectData'], ensure_ascii=False))
         self.assertNotIn('ذاكرة إصدار قديم', sent['sessionMemory'])
         self.assertNotIn('الفلل القديمة', json.dumps(sent['recentTurns'], ensure_ascii=False))
 

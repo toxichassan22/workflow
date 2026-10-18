@@ -110,7 +110,8 @@
             component: String((row && row.component) || '').slice(0, 160),
             units_per_floor: (row && row.units_per_floor) ?? '',
             floor_area_sqm: (row && row.floor_area_sqm) ?? '',
-            circulation: String((row && row.circulation) || '').slice(0, 400)
+            circulation: String((row && row.circulation) || '').slice(0, 400),
+            notes: String((row && row.notes) || '').slice(0, 2000)
           })),
           totals: Array.isArray(distribution.totals) ? distribution.totals.slice(0, 60) : [],
           notes: Array.isArray(distribution.notes) ? distribution.notes.slice(0, 12) : [],

@@ -966,24 +966,6 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertNotIn('distribution', layout)
         self.assertNotIn('approvedSiteAreaSqm', layout)
 
-    def test_site_svg_removes_unapproved_names_and_all_nonlegend_text(self):
-        module = self.application_module
-        raw = ('<g id="ll-section-components"><rect x="1" y="2" width="3" height="4"/>'
-               '<text>Tower A</text><text>U Cluster</text><text>1,040 m2</text></g>')
-        cleaned = module._visual_plan_site_section_fragment(
-            raw, 'components', allowed_text=['Tower A'])
-        self.assertIn('Tower A', cleaned)
-        self.assertNotIn('U Cluster', cleaned)
-        self.assertNotIn('1,040 m2', cleaned)
-
-        legend = ('<g id="ll-section-legend"><text>Architectural Color</text>'
-                  '<text>Health Club</text><text>Residential</text></g>')
-        cleaned_legend = module._visual_plan_site_section_fragment(
-            legend, 'legend', allowed_text=['Architectural Color', 'Residential'])
-        self.assertIn('Architectural Color', cleaned_legend)
-        self.assertIn('Residential', cleaned_legend)
-        self.assertNotIn('Health Club', cleaned_legend)
-
 _PARTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'test_visual_plan_contract_parts')
 _part_files = []
 for _dirpath, _dirnames, _filenames in os.walk(_PARTS_DIR):

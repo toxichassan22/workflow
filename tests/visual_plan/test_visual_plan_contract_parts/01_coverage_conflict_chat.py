@@ -90,8 +90,8 @@ class VisualPlanContractTestsPart01(VisualPlanContractBase):
         self.assertIn('26,000 م²', result['reply'])
         self.assertIn('10,500 م²', result['reply'])
         sent = json.loads(model_call.call_args.args[1])
-        self.assertIn('البصمة الإجمالية 10500 م²',
-                      sent['validatedProjectData']['sourceProjectData']['financial_study_model']['dynamicRows']['components'][0]['notes'])
+        self.assertEqual(sent['validatedProjectData']['financialComponents'][0]['notes'],
+                         'البصمة الإجمالية 10500 م²')
         self.assertIn('البصمة الإجمالية 10500 م²',
                       sent['validatedProjectData']['distributionRows'][0]['notes'])
 

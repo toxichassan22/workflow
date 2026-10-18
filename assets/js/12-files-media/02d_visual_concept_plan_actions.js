@@ -157,7 +157,74 @@
       return { success: false, error: timeoutMessage, error_code: 'PLANS_JOB_EXPIRED' };
     }
 
-    async function collectVisualConceptPlansWorkflowPayload() {
+    function visualConceptSiteAssistantProjectData(value) {
+      const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      const fields = [
+        'project_name', 'project_idea', 'city', 'district', 'location_address',
+        'approved_financial_area', 'croquis_land_area', 'land_area', 'total_area_sqm',
+        'approved_coverage_ratio', 'coverage_ratio', 'approved_floor_area_ratio',
+        'floor_area_ratio', 'approved_floor_count', 'table_floors',
+        'approved_typical_floor_coverage', 'open_area', 'boundary_lengths',
+        'survey_coordinates', 'regulation_coordinates', 'directions_table', 'directions',
+        'setbacks', 'surrounding_streets', 'facades_count', 'facades_directions',
+        'main_facade_direction', 'primary_facade_direction', 'main_frontage_direction',
+        'north_direction', 'allowed_uses', 'regulatory_constraints',
+        'land_and_building_summary', 'land_documents_analysis'
+      ];
+      const compactKeys = new Set([
+        'rawtext', 'rawresponse', 'rawocrtext', 'ocrtext', 'pagetext',
+        'extractiondiagnostics', 'documentprocessing', 'pageimages',
+        'originalimage', 'imagedata', 'filedata', 'base64'
+      ]);
+      function compact(item, key = '', depth = 0) {
+        const normalized = String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+        if (compactKeys.has(normalized) || normalized.includes('base64') ||
+            /(?:imagedata|filecontent|rawbytes)$/.test(normalized)) return undefined;
+        if (Array.isArray(item)) {
+          if (depth >= 8) return [];
+          return item.slice(0, 80).map(child => compact(child, key, depth + 1))
+            .filter(child => child !== undefined);
+        }
+        if (item && typeof item === 'object') {
+          if (depth >= 8) return undefined;
+          const clean = {};
+          Object.entries(item).forEach(([childKey, child]) => {
+            const result = compact(child, childKey, depth + 1);
+            if (result !== undefined) clean[childKey] = result;
+          });
+          return clean;
+        }
+        return typeof item === 'string' && item.length > 12000 ? item.slice(0, 12000) : item;
+      }
+      const project = {};
+      fields.forEach(key => {
+        if (Object.prototype.hasOwnProperty.call(source, key)) {
+          let value = source[key];
+          if (key === 'land_documents_analysis' && typeof value === 'string') {
+            try { value = JSON.parse(value); } catch (error) { /* Keep the recorded text. */ }
+          }
+          const clean = compact(value, key);
+          if (clean !== undefined) project[key] = clean;
+        }
+      });
+      let components = source.project_components_data;
+      if (typeof components === 'string') {
+        try { components = JSON.parse(components); } catch (error) { components = null; }
+      }
+      if (!Array.isArray(components)) {
+        let financial = source.financial_study_model;
+        if (typeof financial === 'string') {
+          try { financial = JSON.parse(financial); } catch (error) { financial = null; }
+        }
+        financial = financial && typeof financial === 'object' ? financial : {};
+        components = Array.isArray(financial.dynamicRows?.components) ? financial.dynamicRows.components
+          : Array.isArray(financial.components) ? financial.components : [];
+      }
+      project.project_components_data = compact(components, 'project_components_data') || [];
+      return project;
+    }
+
+    async function collectVisualConceptPlansWorkflowPayload(options = {}) {
       const payload = await collectVisualConceptPayload('plan_site');
       payload.plansWorkflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
       // The plans endpoints read plansWorkflow and the project facts only, so the
@@ -166,6 +233,26 @@
       // is tenantProjectData, which must keep its own copy).
       payload.projectData = { ...payload.projectData };
       delete payload.projectData.visual_concept;
+      if (options.siteAssistantContext) {
+        const workflow = payload.plansWorkflow;
+        const assistant = { ...workflow.siteAssistant };
+        if (options.assistantAction !== 'generate') assistant.checkpoints = {};
+        payload.plansWorkflow = {
+          verification: { approved: workflow.verification.approved },
+          boundary: { points: workflow.boundary.points, approved: workflow.boundary.approved },
+          distribution: { rows: workflow.distribution.rows, approved: workflow.distribution.approved },
+          distributionNotes: workflow.distributionNotes,
+          clientNotes: workflow.clientNotes,
+          notesReview: workflow.notesReview,
+          scene: workflow.scene,
+          siteAssistant: assistant
+        };
+        return {
+          slotId: payload.slotId,
+          projectData: visualConceptSiteAssistantProjectData(payload.projectData),
+          plansWorkflow: payload.plansWorkflow
+        };
+      }
       return payload;
     }
 

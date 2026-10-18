@@ -8,6 +8,7 @@ const { test } = require('node:test');
 const registerJobErrorTests = require('./test_visual_plan_workflow_parts/01_job_error_details.js');
 const registerPlanStatusAndWiringTests = require('./test_visual_plan_workflow_parts/02_plan_status_and_wiring.js');
 const registerSiteChatDisplayTests = require('./test_visual_plan_workflow_parts/03_site_chat_display.js');
+const registerSiteAssistantPayloadTests = require('./test_visual_plan_workflow_parts/04_site_assistant_payload.js');
 
 const dir = path.resolve(__dirname, '../../assets/js/12-files-media');
 const source = fs.readdirSync(dir).filter(file => /^02.*\.js$/.test(file)).sort()
@@ -47,6 +48,7 @@ function fixture(includeVisualPage = false) {
 registerJobErrorTests({ test, fixture });
 registerPlanStatusAndWiringTests({ test, fixture, source, dir, fs, path, vm });
 registerSiteChatDisplayTests({ test, fixture, vm, path });
+registerSiteAssistantPayloadTests({ test, fixture });
 
 function installActiveSectionApproval(context) {
   const start = formSectionsSource.indexOf('    function activeProjectSectionKey()');
@@ -857,7 +859,7 @@ test('starting the site plan over clears only the chat memory and keeps analysis
   assert.equal(workflow.boundary.approved, true);
   assert.deepEqual(plain(workflow.boundary.points), [{ parcel_id: '', point: '1', eastings: 10, northings: 20, source: '' }]);
   assert.equal(workflow.distribution.approved, true);
-  assert.deepEqual(plain(workflow.distribution.rows), [{ id: 'old-row', building: '', floor_range: '', component: 'Old component', units_per_floor: '', floor_area_sqm: '', circulation: '' }]);
+  assert.deepEqual(plain(workflow.distribution.rows), [{ id: 'old-row', building: '', floor_range: '', component: 'Old component', units_per_floor: '', floor_area_sqm: '', circulation: '', notes: '' }]);
   assert.equal(workflow.clientNotes, 'Old instruction');
   assert.equal(workflow.scene.token, 'old-scene');
   assert.equal(workflow.siteAssistant.turns.length, 0);
@@ -949,5 +951,3 @@ test('starting the site plan chat submits analysis without a message from the cl
   ]);
   assert.equal(vm.runInContext('visualConceptSiteAssistantBusy', context), false);
 });
-
-\n

@@ -674,6 +674,12 @@ def _visual_plan_site_assistant_execute(data, action):
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     has_scene = isinstance(workflow.get('scene'), dict)
     scene_matches_inputs = _visual_plan_site_verify_scene(data) if has_scene else False
+    if has_scene and not scene_matches_inputs:
+        # Keep the fact that a prior plan existed for the redesign decision
+        # below, but do not let an obsolete scene reach Argon or the response.
+        workflow = dict(workflow)
+        workflow['scene'] = None
+        data['plansWorkflow'] = workflow
     if action == 'edit':
         assistant = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
         _packet, _contract, _context, signature = _visual_plan_site_packet(data)
