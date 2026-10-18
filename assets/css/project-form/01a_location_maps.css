@@ -352,17 +352,16 @@
     }
 
     .map-road-casing {
-      stroke-width: 1.8cqw;
+      stroke-width: var(--map-road-casing-width, .99cqw);
     }
 
     .map-road-path {
-      stroke-width: .9cqw;
+      stroke-width: var(--map-road-path-width, .495cqw);
     }
 
     polyline.map-road-path-selected,
     polyline.map-place-linked {
       stroke: #ffb020;
-      stroke-width: 1.6cqw;
     }
 
     .road-width-control {

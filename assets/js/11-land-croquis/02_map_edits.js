@@ -711,8 +711,10 @@
           (selectedRoadName && accessRoadNameKey(label) === accessRoadNameKey(selectedRoadName) ? ' map-road-path-selected' : '') +
           mapPlaceLinkClass('road', label);
         const widthScale = Math.max(0.3, Math.min(1.5, Number(path.path_width_scale) || 0.55));
-        return '<polyline class="map-road-casing" points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="' + (1.8 * widthScale).toFixed(2) + '" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline>' +
-          '<polyline data-road-path="' + escapeHtml(label) + '" class="' + pathClass + '" points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="' + (0.9 * widthScale).toFixed(2) + '" vector-effect="non-scaling-stroke" stroke-linejoin="round"><title>' + escapeHtml(label) + '</title></polyline>';
+        const casingWidth = (1.8 * widthScale).toFixed(2);
+        const pathWidth = (0.9 * widthScale).toFixed(2);
+        return '<polyline class="map-road-casing" style="--map-road-casing-width:' + casingWidth + 'cqw" points="' + roadPoints.join(' ') + '" fill="none" stroke="rgba(105,73,35,.55)" stroke-width="' + (1.8 * widthScale).toFixed(2) + '" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline>' +
+          '<polyline data-road-path="' + escapeHtml(label) + '" class="' + pathClass + '" style="--map-road-path-width:' + pathWidth + 'cqw" points="' + roadPoints.join(' ') + '" fill="none" stroke="#d4a359" stroke-width="' + (0.9 * widthScale).toFixed(2) + '" vector-effect="non-scaling-stroke" stroke-linejoin="round"><title>' + escapeHtml(label) + '</title></polyline>';
       }).join('') : '';
       const linkLinePairs = (showLandmarks && tenantLandmarksEditMode)
         ? landmarkItems.map(item => ['landmark', item])
