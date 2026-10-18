@@ -505,6 +505,108 @@ class VisualPlanContractTestsPart06(VisualPlanContractBase):
                 self.assertEqual(facts.get('plotNumber'), 'قطعة 542')
                 self.assertEqual(facts.get('planNumber'), 'مخطط 12/ب')
 
+    def test_argon_is_sole_architect_empowered_to_resolve_conflict_and_generate(self):
+        """Argon has full authority to resolve conflicts, answer inquiries,
+        and trigger site generation directly without mathematical code-engine veto."""
+        module = self.application_module
+        contract = {
+            'landArea': 1000,
+            'coverageRatio': 40,
+            'setbacks': {'north': 3.0, 'south': 3.0, 'east': 5.0, 'west': 3.0},
+            'geometry': {'parcels': [{'polygon': [[0, 0], [40, 0], [40, 25], [0, 25]]}]},
+            'distribution': {'rows': []},
+        }
+        context = {'components': []}
+        program = {
+            'buildings': [
+                {'id': 'b1', 'name': 'Main Building', 'footprintArea': 350, 'basementOnly': False},
+            ],
+            'siteItems': [],
+        }
+        error = module.visual_plan_geometry.PlanGeometryError(
+            'حرم البناء: غير متاح رقمياً بسبب تعارض خطوط الارتداد المسجلة', 'PLANS_SETBACK_CONFLICT')
+        data = {
+            'message': 'اعتمد التصميم ونفذ المخطط الآن',
+            'plansWorkflow': {
+                'siteAssistant': {
+                    'inputSignature': 'setback-sig',
+                    'pendingQuestion': 'كيف تفضل المتابعة؟',
+                    'turns': [{'role': 'assistant', 'text': 'كيف تفضل المتابعة؟'}],
+                }
+            },
+        }
+
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            mock_argon_decision = {
+                'ready': True,
+                'generateRequested': True,
+                'reply': 'قمت بتعديل تموضع المبنى ليتوافق مع الارتدادات النظامية وسأقوم برسم المخطط الآن.',
+                'question': '',
+                'choices': [],
+            }
+            generated_result = {
+                'success': True,
+                'image': '/uploads/creative/test.svg',
+                'svgCode': '<svg id="site-plan"></svg>',
+                'reply': 'تم إنشاء المخطط بنجاح.',
+            }
+            with patch.object(module, '_visual_plan_site_packet', side_effect=error), \
+                    patch.object(module, '_visual_plan_contract', return_value=(contract, context)), \
+                    patch.object(module, '_visual_plan_program', return_value=program), \
+                    patch.object(module, '_visual_plan_input_signature', return_value='setback-sig'), \
+                    patch.object(module, '_visual_plan_site_call', return_value=(mock_argon_decision, 120)), \
+                    patch.object(module, '_visual_plan_site_generate', return_value=generated_result) as generate_mock:
+                result, status = module._visual_plan_site_assistant_execute(data, 'chat')
+
+            self.assertEqual(status, 200)
+            self.assertTrue(result['success'])
+            generate_mock.assert_called_once()
+            self.assertEqual(result['image'], '/uploads/creative/test.svg')
+
+    def test_argon_reply_contains_no_mechanical_error_summary_when_model_answers(self):
+        """Mechanical code-engine error summaries must not override or pollute Argon's voice."""
+        module = self.application_module
+        contract = {
+            'landArea': 1000,
+            'coverageRatio': 40,
+            'setbacks': {'north': 3.0, 'south': 3.0, 'east': 5.0, 'west': 3.0},
+            'geometry': {'parcels': [{'polygon': [[0, 0], [40, 0], [40, 25], [0, 25]]}]},
+            'distribution': {'rows': []},
+        }
+        context = {'components': []}
+        error = module.visual_plan_geometry.PlanGeometryError(
+            'فشل البحث الهندسي في إيجاد موضع لبصمة المبنى داخل حرم البناء', 'PLANS_SETBACK_CONFLICT')
+        data = {
+            'message': 'وضح لي المشكلة بالتفصيل',
+            'plansWorkflow': {
+                'siteAssistant': {
+                    'inputSignature': 'setback-sig',
+                    'pendingQuestion': 'كيف تفضل المتابعة؟',
+                }
+            },
+        }
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            mock_argon_response = {
+                'ready': False,
+                'generateRequested': False,
+                'reply': 'المشكلة تكمن في أن أبعاد قطعة الأرض مع الارتداد الشرقي 5م تجعل عرض الحرم ضيقًا نسبيًا.',
+                'question': 'هل تفضل تقليص عرض بصمة المبنى أم تعديل الارتداد الشرقي؟',
+                'choices': ['تقليص عرض البصمة', 'مراجعة الارتداد'],
+            }
+            with patch.object(module, '_visual_plan_site_packet', side_effect=error), \
+                    patch.object(module, '_visual_plan_contract', return_value=(contract, context)), \
+                    patch.object(module, '_visual_plan_program', return_value={'buildings': [], 'siteItems': []}), \
+                    patch.object(module, '_visual_plan_input_signature', return_value='setback-sig'), \
+                    patch.object(module, '_visual_plan_site_call', return_value=(mock_argon_response, 90)):
+                result = module._visual_plan_site_conflict_interview(data, error)
+
+            self.assertTrue(result['success'])
+            self.assertIn(mock_argon_response['reply'], result['reply'])
+            self.assertIn(mock_argon_response['question'], result['reply'])
+            self.assertNotIn('فشل البحث الهندسي', result['reply'])
+
 
 
 

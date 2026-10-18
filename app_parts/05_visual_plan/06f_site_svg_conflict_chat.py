@@ -465,9 +465,11 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
             'Offer constructive architectural options: review building footprints (reducing ground-floor footprint and offsetting '
             'with additional floors), review setbacks, or request an automatic placement retry. '
             'Do not approve or alter project data from chat. Never repeat a generic coverage-limit explanation. '
-            'Do not claim the conflict is resolved, do not set ready, and do not generate a drawing. '
-            'Always return ready=false and generateRequested=false unless an automatic retry is requested. '
-            'Return JSON only: {"ready":false,"generateRequested":false,"question":"","choices":[],"reply":"","memory":""}.'
+            'If the client asks you to place, distribute, generate or draw the master plan ("وزع", "ارسم", "صمم", "ابدأ"), '
+            'or if you propose a viable architectural layout that fits, you are empowered to set ready=true, generateRequested=true, '
+            'and describe your architectural solution in "reply". '
+            'Otherwise, explain the situation constructively, set ready=false, and provide 2-5 actionable choices. '
+            'Return JSON only: {"ready":true|false,"generateRequested":true|false,"question":"","choices":[],"reply":"","memory":""}.'
         )
     elif is_site_area_conflict:
         system_prompt = (
@@ -485,9 +487,11 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
             'When totals are insufficient or the retry still fails, ask only whether a recorded area or '
             'project input needs review. Do not change or '
             'approve any project input, survey geometry, or approved distribution. Never repeat a generic '
-            'coverage-limit explanation. Do not claim the conflict is resolved, do not set ready, and do not '
-            'generate a drawing. Always return ready=false and generateRequested=false. Return JSON only: '
-            '{"ready":false,"generateRequested":false,'
+            'coverage-limit explanation. '
+            'If the client asks to distribute the items, generate or draw the master plan, set ready=true, '
+            'generateRequested=true, and describe the layout. '
+            'Return JSON only: '
+            '{"ready":true|false,"generateRequested":true|false,'
             '"question":"","choices":[],"reply":"","memory":""}.'
         )
     else:
@@ -500,14 +504,13 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
             'the data or drew the same plan: visual similarity does not remove the numeric coverage limit. '
             'Do not repeat the exact figures in reply; the server displays its calculation separately. Ask one '
             'specific follow-up about which source number is disputed. Do not change, approve, or reinterpret '
-            'any project input, survey geometry, or approved distribution. Do not claim the conflict is '
+            'any project input, survey geometry, or approved distribution. '
             'Financial component notes and the per-unit footprint field are client-provided facts; '
             'read them when the client disputes a building footprint, and ask for a precise replacement when '
             'the correct value is not explicit. Never repeat the full conflict summary after a client reply. '
-            'Do not claim the conflict is resolved, do not set ready, and do not generate a drawing. '
-            'Always return ready=false and '
-            'generateRequested=false. '
-            'Return JSON only: {"ready":false,"generateRequested":false,"question":"",'
+            'If the client requests to proceed or an architectural resolution is agreed upon, set ready=true, generateRequested=true, '
+            'and describe the layout. Otherwise, explain the numbers clearly in Arabic, set ready=false, and ask the specific question. '
+            'Return JSON only: {"ready":true|false,"generateRequested":true|false,"question":"",'
             '"choices":[],"reply":"","memory":""}.'
         )
     conflict_key = ('setbackConflict' if is_setback_conflict
@@ -642,7 +645,7 @@ def _visual_plan_site_conflict_interview(data, error, auto_retry_failed=False):
     model_reply = _visual_concept_text(parsed.get('reply'), 1200)
     raw_choices = parsed.get('choices') if isinstance(parsed.get('choices'), list) else []
     choices = [str(item).strip()[:240] for item in raw_choices[:6] if str(item).strip()]
-    retry_requested = bool(parsed.get('generateRequested') or (placement_retry_request and can_retry_placement))
+    retry_requested = bool(parsed.get('generateRequested') or (parsed.get('ready') and not model_question) or (placement_retry_request and can_retry_placement))
     informational_only = bool(is_site_area_conflict and facts.get('aggregateAreaSufficient')
                               and (auto_retry_failed or not retry_requested)
                               and not source_question and not measurement_dispute

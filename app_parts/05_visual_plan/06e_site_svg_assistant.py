@@ -86,13 +86,33 @@ def _visual_plan_site_reusable_checkpoints(previous, signature):
 
 
 
+_VISUAL_PLAN_SITE_CONFLICT_CODES = (
+    'PLANS_COVERAGE_CONFLICT',
+    'PLANS_SITE_AREA_CONFLICT',
+    'PLANS_SETBACK_CONFLICT',
+    'PLANS_FOOTPRINT_OUTSIDE',
+    'PLANS_BUILDING_OVERLAP',
+    'PLANS_LAYOUT_INVALID',
+    'PLANS_SITE_ITEMS_MISSING',
+    'PLANS_SITE_ITEMS_DUPLICATED',
+)
+
+
 def _visual_plan_site_packet(data):
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     has_sealed_scene = (isinstance(workflow.get('scene'), dict)
                         and bool(workflow['scene'].get('token')))
     if has_sealed_scene:
-        scene, contract, context, program = _visual_plan_scene_from_request(data)
-        signature = scene.get('inputSignature') or _visual_plan_input_signature(data, context)
+        try:
+            scene, contract, context, program = _visual_plan_scene_from_request(data)
+            signature = scene.get('inputSignature') or _visual_plan_input_signature(data, context)
+        except visual_plan_geometry.PlanGeometryError as error:
+            if error.code not in _VISUAL_PLAN_SITE_CONFLICT_CODES:
+                raise
+            contract, context = _visual_plan_contract(data)
+            program = _visual_plan_program(contract, context)
+            signature = _visual_plan_input_signature(data, context)
+            scene = workflow.get('scene')
     else:
         contract, context = _visual_plan_contract(data)
         program = _visual_plan_program(contract, context)
@@ -610,7 +630,7 @@ def _visual_plan_site_generate(data, interview):
     packet, contract, context, signature = _visual_plan_site_packet(data)
     state = interview['assistantState']
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
-    if not packet.get('drawingLayout') and not workflow.get('scene'):
+    if not packet.get('drawingLayout') or state.get('redesignRequested'):
         ai_scene = _visual_plan_site_ai_design_scene(data, packet, contract, packet.get('program') or {}, context)
         workflow = dict(workflow)
         workflow['scene'] = ai_scene
@@ -750,19 +770,6 @@ def _visual_plan_site_edit(data):
             'targetSection': section, 'model': GEMINI_TEXT_MODEL,
             'reply': reply,
             'assistantState': state, 'scene': workflow.get('scene')}
-
-
-_VISUAL_PLAN_SITE_CONFLICT_CODES = (
-    'PLANS_COVERAGE_CONFLICT',
-    'PLANS_SITE_AREA_CONFLICT',
-    'PLANS_SETBACK_CONFLICT',
-    'PLANS_FOOTPRINT_OUTSIDE',
-    'PLANS_BUILDING_OVERLAP',
-    'PLANS_LAYOUT_INVALID',
-    'PLANS_SITE_ITEMS_MISSING',
-    'PLANS_SITE_ITEMS_DUPLICATED',
-)
-
 
 def _visual_plan_site_assistant_execute(data, action):
     automatic_placement_retry = False
