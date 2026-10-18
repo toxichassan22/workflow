@@ -587,6 +587,41 @@ test('a changed parking plan invalidates the saved conflict review and approvals
   assert.equal(workflow.distribution.issues.length, 0);
 });
 
+test('deleted project components clear the stale site-plan chat and SVG cache', () => {
+  const context = fixture();
+  const before = {
+    project_components_data: [{ id: 'deleted-villa', name: 'فلل محذوفة', builtArea: 12000 }],
+    financial_study_model: { dynamicRows: { components: [
+      { id: 'deleted-villa', name: 'فلل محذوفة', builtArea: 12000 },
+    ] } },
+  };
+  context.tenantProjectData = before;
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({
+    slots: { plan_site: { imageUrl: '/uploads/old-site.svg', approvedImageUrl: '/uploads/old-site.svg',
+      svgCode: '<svg>فلل محذوفة</svg>', chat: [{ role: 'assistant', text: 'مبنى قديم' }] } },
+    plansWorkflow: { siteAssistant: { inputSignature: 'old-signature', summary: 'ذاكرة عن الفلل القديمة',
+      turns: [{ role: 'assistant', text: 'مبنى قديم' }], checkpoints: { components: '<g>فلل محذوفة</g>' } } },
+  });
+  context.tenantVisualConceptState.plansWorkflow.sourceStamp = context.visualConceptPlanInputStamp(before);
+
+  const after = {
+    project_components_data: [],
+    financial_study_model: { dynamicRows: { components: [] } },
+  };
+  context.syncVisualConceptPlanInputs(after);
+
+  const workflow = context.tenantVisualConceptState.plansWorkflow;
+  const site = context.tenantVisualConceptState.slots.plan_site;
+  assert.equal(workflow.siteAssistant.summary, '');
+  assert.deepEqual(plain(workflow.siteAssistant.turns), []);
+  assert.deepEqual(plain(workflow.siteAssistant.checkpoints), {});
+  assert.equal(site.svgCode, '');
+  assert.deepEqual(plain(site.chat), []);
+  assert.equal(site.imageUrl, '/uploads/old-site.svg');
+  assert.equal(site.approvedImageUrl, '');
+  assert.equal(site.status, 'review');
+});
+
 test('page preflight and image deletion keep the approved plan workflow on stage three', async () => {
   const context = fixture(true);
   const project = {};

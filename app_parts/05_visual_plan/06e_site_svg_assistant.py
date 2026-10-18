@@ -40,7 +40,9 @@ def _visual_plan_site_record_tokens(state, value):
 def _visual_plan_site_state(data, signature):
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     source = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
-    if source.get('inputSignature') and source.get('inputSignature') != signature:
+    old_revision = _visual_plan_site_number(source.get('renderRevision'))
+    if (source.get('inputSignature') != signature
+            or (old_revision and old_revision != _VISUAL_PLAN_SITE_RENDER_REVISION)):
         source = {}
     turns = []
     for item in (source.get('turns') if isinstance(source.get('turns'), list) else [])[-12:]:
@@ -145,7 +147,10 @@ def _visual_plan_site_interview(data, action='chat'):
         'The packet is included in full on every turn. Treat approvedFinancialAreaSqm as the declared project land area '
         'when supplied, and keep it distinct from croquisLandAreaSqm and surveyed coordinates. If these sources disagree, '
         'explain the discrepancy and ask the client which recorded source should govern; never silently replace one with another. '
-        'Use the supplied notes and distribution rows directly. No deterministic geometry or engineering engine analyzes, '
+        'Use the supplied notes and distribution rows directly. The current financialComponents list is the authority '
+        'for active program components. If a distribution row refers to a component absent from that list, identify it '
+        'as an unmatched or possibly deleted row and ask the client before treating it as active. Never restore a component '
+        'from old session memory or a stale financial snapshot. No deterministic geometry or engineering engine analyzes, '
         'calculates, distributes, validates, or rejects the design; all such reasoning is yours. '
         'Continue the discussion using sessionMemory, resolvedAnswers, and recentTurns while re-reading the full packet. '
         'RULES OF YOUR ARCHITECTURAL AUTHORITY:\n'
@@ -670,6 +675,17 @@ def _visual_plan_site_assistant_execute(data, action):
     has_scene = isinstance(workflow.get('scene'), dict)
     scene_matches_inputs = _visual_plan_site_verify_scene(data) if has_scene else False
     if action == 'edit':
+        assistant = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
+        _packet, _contract, _context, signature = _visual_plan_site_packet(data)
+        if (_visual_plan_site_number(assistant.get('renderRevision')) != _VISUAL_PLAN_SITE_RENDER_REVISION
+                or assistant.get('inputSignature') != signature):
+            workflow = dict(workflow)
+            workflow['siteAssistant'] = {}
+            workflow['scene'] = None
+            data['plansWorkflow'] = workflow
+            rebased = _visual_plan_site_interview(data, 'chat')
+            rebased['contextChanged'] = True
+            return rebased, 200
         return _visual_plan_site_edit(data), 200
     interview = None
     if action == 'generate':

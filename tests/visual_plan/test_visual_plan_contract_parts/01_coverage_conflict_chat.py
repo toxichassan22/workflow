@@ -104,6 +104,8 @@ class VisualPlanContractTestsPart01(VisualPlanContractBase):
                     'id': 'villa-row', 'component': 'فلل سكنية', 'floor_range': 'G+1',
                     'floor_area_sqm': 26000,
                 }]}, 'siteAssistant': {'pendingQuestion': 'ما الرقم غير الدقيق؟'}}}
+        data['plansWorkflow']['siteAssistant']['inputSignature'] = \
+            module._visual_plan_site_context_signature(data)
         model_reply = {'ready': False, 'reply': 'فهمت أن بصمة الفيلا الحالية غير دقيقة.',
                        'question': 'ما مساحة البصمة الصحيحة للفيلا الواحدة؟', 'choices': []}
 

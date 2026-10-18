@@ -289,6 +289,16 @@
       workflow.prompts = { site: '', uses: '', massing: '' };
       workflow.scene = null;
       workflow.sourceStamp = '';
+      workflow.siteAssistant = emptyVisualConceptPlansWorkflow().siteAssistant;
+      const siteSlot = tenantVisualConceptState?.slots?.plan_site;
+      if (siteSlot) {
+        siteSlot.chat = [];
+        siteSlot.svgCode = '';
+        if (siteSlot.imageUrl || siteSlot.approvedImageUrl) {
+          siteSlot.approvedImageUrl = '';
+          siteSlot.status = 'review';
+        }
+      }
       if (review) workflow.notesReview = emptyVisualConceptPlansWorkflow().notesReview;
       VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
         const slot = tenantVisualConceptState?.slots?.[definition.id];

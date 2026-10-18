@@ -1,4 +1,107 @@
 class VisualPlanContractTestsPart05(VisualPlanContractBase):
+    def test_json_empty_component_table_overrides_stale_financial_snapshots(self):
+        module = self.application_module
+        old_rows = [{'id': 'deleted-villa', 'name': 'فلل محذوفة', 'builtArea': 12000}]
+        project = {
+            'project_components_data': '[]',
+            'financial_study_model': json.dumps({
+                'dynamicRows': {'components': old_rows},
+                'components': old_rows,
+                'financialCalcData': {'components': old_rows},
+                'tables': {'componentsTable': old_rows},
+            }),
+            'financial_calc_data': json.dumps({'components': old_rows}),
+            'visual_concept': {'slots': {'plan_site': {
+                'svgCode': '<svg>فلل محذوفة</svg>',
+                'chat': [{'role': 'assistant', 'text': 'الفلل القديمة مسجلة.'}],
+            }}},
+        }
+        workflow = {
+            'distribution': {'rows': [{'component': 'فلل محذوفة', 'notes': 'ملاحظة محفوظة للمراجعة'}]},
+            'distributionNotes': 'مراجعة الملاحظة المسجلة في التوزيع.',
+        }
+        data = {'projectData': project, 'plansWorkflow': workflow}
+
+        with module.app.test_request_context('/'):
+            module.g.tenant_id = self.tenant_a
+            packet, _contract, _context, _signature = module._visual_plan_site_packet(data)
+
+        self.assertEqual(packet['financialComponents'], [])
+        self.assertEqual(packet['landAndRegulations']['financialComponents'], [])
+        source = packet['sourceProjectData']
+        self.assertEqual(source['project_components_data'], [])
+        self.assertEqual(source['financial_study_model']['dynamicRows']['components'], [])
+        self.assertEqual(source['financial_study_model']['components'], [])
+        self.assertEqual(source['financial_study_model']['financialCalcData']['components'], [])
+        self.assertEqual(source['financial_study_model']['tables']['componentsTable'], [])
+        self.assertEqual(source['financial_calc_data']['components'], [])
+        self.assertNotIn('visual_concept', source)
+        self.assertEqual(packet['distributionRows'][0]['notes'], 'ملاحظة محفوظة للمراجعة')
+        self.assertEqual(packet['distributionNotes'], 'مراجعة الملاحظة المسجلة في التوزيع.')
+
+    def test_legacy_site_chat_without_an_input_signature_discards_old_memory(self):
+        module = self.application_module
+
+        state = module._visual_plan_site_state({'plansWorkflow': {'siteAssistant': {
+            'summary': 'مكونات قديمة محذوفة من المشروع.',
+            'turns': [{'role': 'assistant', 'text': 'المبنى القديم مسجل بمساحة 12,000 م².'}],
+            'answers': [{'question': 'ما المساحة؟', 'answer': '12,000 م²'}],
+        }}}, 'current-input-signature')
+
+        self.assertEqual(state['summary'], '')
+        self.assertEqual(state['turns'], [])
+        self.assertEqual(state['answers'], [])
+
+    def test_edit_from_an_old_render_revision_rebases_to_the_current_chat(self):
+        module = self.application_module
+        project = {'project_components_data': '[]', 'financial_study_model': {
+            'dynamicRows': {'components': [{'id': 'deleted-villa', 'name': 'فلل محذوفة'}]},
+        }}
+        workflow = {'siteAssistant': {
+            'inputSignature': 'old-input', 'renderRevision': 4,
+            'summary': 'ذاكرة إصدار قديم عن فلل محذوفة.',
+            'turns': [{'role': 'assistant', 'text': 'الفلل القديمة مسجلة.'}],
+        }, 'scene': {'version': 1, 'inputSignature': 'old-input', 'buildings': []}}
+        data = {'projectData': project, 'plansWorkflow': workflow,
+                'planAssistantAction': 'edit', 'message': 'راجع المكونات الحالية.',
+                'siteSvgCode': '<svg>فلل محذوفة</svg>'}
+        model_reply = {'ready': False, 'reply': 'أراجع مكونات المشروع الحالية.',
+                       'question': 'هل توجد مكونات حالية تريد إضافتها؟', 'choices': []}
+
+        with module.app.test_request_context('/'):
+            module.g.tenant_id = self.tenant_a
+            with patch.object(module, '_visual_plan_site_edit', side_effect=AssertionError(
+                    'A stale render must be rebased through the current chat')), \
+                    patch.object(module, '_visual_plan_site_call', return_value=(model_reply, 30)) as model_call:
+                result, status = module._visual_plan_site_assistant_execute(data, 'edit')
+
+        self.assertEqual(status, 200)
+        self.assertTrue(result['contextChanged'])
+        self.assertEqual(result['question'], model_reply['question'])
+        sent = json.loads(model_call.call_args.args[1])
+        self.assertEqual(sent['validatedProjectData']['financialComponents'], [])
+        self.assertEqual(sent['validatedProjectData']['sourceProjectData']['financial_study_model']['dynamicRows']['components'], [])
+        self.assertNotIn('ذاكرة إصدار قديم', sent['sessionMemory'])
+        self.assertNotIn('الفلل القديمة', json.dumps(sent['recentTurns'], ensure_ascii=False))
+
+    def test_changing_assistant_cache_does_not_change_site_input_signature(self):
+        module = self.application_module
+        project = {'project_name': 'Current project', 'visual_concept': {
+            'slots': {'plan_site': {'svgCode': '<svg>old</svg>',
+                                    'chat': [{'role': 'assistant', 'text': 'old turn'}]}},
+        }}
+        first = {'projectData': project, 'plansWorkflow': {'siteAssistant': {'turns': []}}}
+        second = {'projectData': {
+            **project,
+            'visual_concept': {'slots': {'plan_site': {
+                'svgCode': '<svg>new</svg>',
+                'chat': [{'role': 'assistant', 'text': 'new turn'}],
+            }}},
+        }, 'plansWorkflow': {'siteAssistant': {'turns': [{'role': 'assistant', 'text': 'new turn'}]}}}
+
+        self.assertEqual(module._visual_plan_site_context_signature(first),
+                         module._visual_plan_site_context_signature(second))
+
     def test_parking_area_conflict_enters_the_site_chat_with_actionable_choices(self):
         module = self.application_module
         project = {'approved_financial_area': 1000, 'croquis_land_area': 1000,

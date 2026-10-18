@@ -2,8 +2,12 @@
 
 def _visual_plan_site_context_signature(data):
     project = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
-    project = {key: value for key, value in project.items()
-               if key not in ('draftId', 'draft_id')}
+    session_fields = {
+        'draftId', 'draft_id', 'visual_concept', 'tenantCreativeImages',
+        'tenant_creative_images', 'creative_images', 'plans2d',
+        'plans_workflow', 'plansWorkflow',
+    }
+    project = {key: value for key, value in project.items() if key not in session_fields}
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     inputs = {
         'projectData': project,
@@ -15,6 +19,47 @@ def _visual_plan_site_context_signature(data):
     encoded = json.dumps(inputs, sort_keys=True, ensure_ascii=False, default=str,
                          separators=(',', ':'))
     return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
+
+
+def _visual_plan_site_current_components(project, financial):
+    source = project.get('project_components_data')
+    components = source if isinstance(source, list) else _visual_concept_parse_json(source, None)
+    if not isinstance(components, list):
+        dynamic_rows = financial.get('dynamicRows') if isinstance(financial.get('dynamicRows'), dict) else {}
+        components = dynamic_rows.get('components')
+    if not isinstance(components, list):
+        components = financial.get('components')
+    return copy.deepcopy(components) if isinstance(components, list) else []
+
+
+def _visual_plan_site_project_data_with_current_components(project, components):
+    clean = copy.deepcopy(project)
+    for key in ('visual_concept', 'tenantCreativeImages', 'tenant_creative_images',
+                'creative_images', 'plans2d', 'plans_workflow', 'plansWorkflow'):
+        clean.pop(key, None)
+    clean['project_components_data'] = copy.deepcopy(components)
+
+    financial = _visual_concept_parse_json(clean.get('financial_study_model'), None)
+    if isinstance(financial, dict):
+        financial = copy.deepcopy(financial)
+        dynamic_rows = financial.get('dynamicRows')
+        if isinstance(dynamic_rows, dict):
+            dynamic_rows['components'] = copy.deepcopy(components)
+        tables = financial.get('tables')
+        if isinstance(tables, dict) and 'componentsTable' in tables:
+            tables['componentsTable'] = copy.deepcopy(components)
+        if 'components' in financial:
+            financial['components'] = copy.deepcopy(components)
+        financial_calc = financial.get('financialCalcData')
+        if isinstance(financial_calc, dict) and 'components' in financial_calc:
+            financial_calc['components'] = copy.deepcopy(components)
+        clean['financial_study_model'] = financial
+
+    legacy_calc = _visual_concept_parse_json(clean.get('financial_calc_data'), None)
+    if isinstance(legacy_calc, dict) and 'components' in legacy_calc:
+        legacy_calc['components'] = copy.deepcopy(components)
+        clean['financial_calc_data'] = legacy_calc
+    return clean
 
 
 def _visual_plan_site_boundary_polygon(project, workflow):
@@ -93,13 +138,7 @@ def _visual_plan_site_prompt_contract(project, workflow):
     boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
     financial = _visual_concept_parse_json(project.get('financial_study_model'), {})
     financial = financial if isinstance(financial, dict) else {}
-    dynamic_rows = financial.get('dynamicRows') if isinstance(financial.get('dynamicRows'), dict) else {}
-    components = project.get('project_components_data')
-    if not isinstance(components, list):
-        components = dynamic_rows.get('components')
-    if not isinstance(components, list):
-        components = financial.get('components')
-    components = components if isinstance(components, list) else []
+    components = _visual_plan_site_current_components(project, financial)
     directions = project.get('directions_table') or project.get('directions') or {}
     analysis = _visual_concept_parse_json(project.get('land_documents_analysis'), {})
     analysis = analysis if isinstance(analysis, dict) else {}
@@ -182,7 +221,11 @@ def _visual_plan_site_packet(data):
     packet = {
         'project': {'name': prompt_contract.get('projectName'), 'idea': prompt_contract.get('projectIdea')},
         'landAndRegulations': prompt_contract,
-        'sourceProjectData': project,
+        # The form's project_components_data list is the current table. Keep all
+        # other project facts, but rewrite component mirrors so stale financial
+        # snapshots cannot reintroduce rows the client deleted from that table.
+        'sourceProjectData': _visual_plan_site_project_data_with_current_components(
+            project, prompt_contract.get('financialComponents') or []),
         'sourceDistribution': workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {},
         'sourceBoundary': workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {},
         'existingGeneratedLayout': clean_scene,
