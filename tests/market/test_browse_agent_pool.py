@@ -565,6 +565,7 @@ class ProviderOrderTests(unittest.TestCase):
     def test_providers_default_to_the_new_order(self):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop('BROWSER_SEARCH_PROVIDER', None)
+            os.environ.pop('SEARXNG_URL', None)
             self.assertEqual(browser._providers(), ['brave', 'yahoo', 'bing'])
 
     def test_ddg_stays_a_pinnable_provider(self):

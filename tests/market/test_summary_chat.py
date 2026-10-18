@@ -912,7 +912,7 @@ class SummaryChatApiTests(unittest.TestCase):
         })
 
         def stop_for_credit(_data, tenant_id=None, progress=None,
-                            resume_state=None, checkpoint=None):
+                            resume_state=None, checkpoint=None, **kwargs):
             self.assertEqual(tenant_id, self.tenant)
             self.assertEqual(resume_state, initial_state)
             checkpoint(saved_state)

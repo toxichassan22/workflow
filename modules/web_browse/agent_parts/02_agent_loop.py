@@ -5,7 +5,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                      evidence_pool=None, deadline=None, session=None,
                      on_event=None, server_tools=None, local_tools=True,
                      tool_choice=None, search_provider=None, cancel_event=None,
-                     research_mode=False, allowed_hosts=None):
+                     research_mode=False, allowed_hosts=None, plugins=None):
     """Drive one OpenRouter tool-call loop against a real browser session.
 
     ``model`` is the caller's own task model — the same model that would have
@@ -64,6 +64,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     final_finish = ''
     msg = None
     error = None
+    response = None
     if max_steps is None:
         try:
             max_steps = int(os.environ.get('BROWSER_MAX_STEPS') or _DEFAULT_MAX_STEPS)
@@ -98,7 +99,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
             budget, research_mode=research_mode) if local_tools else _NATIVE_PREAMBLE},
         {'role': 'user', 'content': str(task or '')},
     ]
-    request_tools = [] if allowed_hosts is not None else list(server_tools or [])
+    request_tools = list(server_tools or []) if (allowed_hosts is None or not local_tools) else []
     if local_tools:
         request_tools = list(_BROWSER_TOOLS) + request_tools
     session_cm = None
@@ -134,6 +135,8 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                 kwargs['model'] = model
             if effort and not effort_disabled:
                 kwargs['reasoning_effort'] = effort
+            if plugins:
+                kwargs['plugins'] = plugins
             response = openrouter_chat(messages, **kwargs)
             if _browse_fatal_provider_response(response):
                 if cancel_event is not None:
@@ -161,6 +164,12 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
             _compact_tool_history(messages)
             _emit({'phase': 'round', 'step': step + 1, 'max_steps': max_steps,
                    'searches': search_state['count'], 'pages': len(pages)})
+            if not local_tools and plugins and step == 0:
+                _emit({'phase': 'tool', 'step': step + 1, 'max_steps': max_steps,
+                       'tool': 'openrouter_web_search',
+                       'hint': f'بحث ويب طرفي ({", ".join(allowed_hosts or [])})' if allowed_hosts else 'بحث ويب طرفي',
+                       'arguments': {'plugins': plugins},
+                       'searches': search_state['count'], 'pages': len(pages)})
             response = _round()
             fatal_response = _browse_fatal_provider_response(response)
             if _cancel_requested() and not fatal_response:
@@ -226,6 +235,40 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                 completion_tokens += int(usage_meta.get('completion_tokens') or 0)
             except (TypeError, ValueError):
                 pass
+            if not local_tools:
+                raw_msg = (msg or {}).get('raw_message') or {}
+                raw_choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
+                provider_anns = raw_msg.get('annotations') or raw_choice.get('annotations') or []
+                found_count = 0
+                for _ann in provider_anns:
+                    _ann = _ann if isinstance(_ann, dict) else {}
+                    _cit = _ann.get('url_citation') or {}
+                    _url = str(_cit.get('url') or _ann.get('url') or '').strip()
+                    if allowed_hosts is not None and not _source_url_allowed(_url, allowed_hosts):
+                        continue
+                    if _url and _url not in pages:
+                        _title = str(_cit.get('title') or _ann.get('title') or '')
+                        _content = str(_cit.get('content') or _ann.get('content') or '')
+                        pages[_url] = {'url': _url, 'title': _title, 'content': _content}
+                        trace.append({'url': _url, 'title': _title, 'status': 200, 'via': 'openrouter_native'})
+                        if evidence_pool is not None:
+                            try:
+                                evidence_pool.add_page(
+                                    _url, title=_title, content=_content,
+                                    final_url=_url, via='openrouter_native')
+                            except Exception:
+                                pass
+                        found_count += 1
+                if provider_anns or found_count:
+                    search_state['count'] = max(search_state['count'], 1)
+                if plugins and step == 0:
+                    _emit({'phase': 'tool_done', 'step': step + 1, 'max_steps': max_steps,
+                           'tool': 'openrouter_web_search',
+                           'hint': f'بحث ويب طرفي ({", ".join(allowed_hosts or [])})' if allowed_hosts else 'بحث ويب طرفي',
+                           'arguments': {'plugins': plugins},
+                           'searches': search_state['count'], 'pages': len(pages),
+                           'result': {'citations': found_count, 'urls': list(pages.keys())},
+                           'ok': error is None and found_count > 0})
             if not msg['tool_calls']:
                 final_text = str(msg.get('content') or '').strip()
                 if (not compact_retried and _truncated_reply(response)
@@ -325,7 +368,10 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
     # open) ride on the final message itself — union them so a native-only run
     # keeps its evidence instead of shipping an empty annotation list.
     _seen_urls = set(pages)
-    for _ann in ((msg or {}).get('raw_message') or {}).get('annotations') or []:
+    raw_msg = (msg or {}).get('raw_message') or {}
+    raw_choice = (response.get('choices') or [{}])[0] if isinstance(response, dict) else {}
+    fallback_anns = raw_msg.get('annotations') or raw_choice.get('annotations') or []
+    for _ann in fallback_anns:
         _ann = _ann if isinstance(_ann, dict) else {}
         _cit = _ann.get('url_citation')
         _cit = _cit if isinstance(_cit, dict) else {}

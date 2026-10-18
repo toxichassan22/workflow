@@ -45,7 +45,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 'url': url, 'title': 'صفحة بيانات', 'content': 'دليل'} }],
         }}]}
 
-    def test_individual_researcher_uses_haiku_playwright_and_only_searxng(self):
+    def test_individual_researcher_uses_haiku_with_native_openrouter_search(self):
         module = self.module
         captured = {}
 
@@ -57,7 +57,9 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         group = next(item for item in module._SUMMARY_RESEARCH_GROUPS
                      if item['key'] == 'transactions_and_rents')
         with patch.object(module, '_browse_agent_call', side_effect=fake_browse), \
-                patch.object(module, '_new_evidence_pool', return_value=None):
+                patch.object(module, '_new_evidence_pool', return_value=None), \
+                patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('BROWSER_USE_LOCAL_TOOLS', None)
             on_event = lambda _event: None
             outcome = module._run_summary_researcher(
                 group, ['rei.rega.gov.sa'], {
@@ -70,8 +72,8 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertTrue(outcome['searched'])
         self.assertEqual(captured['model'], module._SUMMARY_RESEARCHER_MODEL)
         self.assertEqual(captured['model'], 'anthropic/claude-haiku-5.5')
-        self.assertTrue(captured['local_tools'])
-        self.assertEqual(captured['search_provider'], 'searxng')
+        self.assertFalse(captured['local_tools'])
+        self.assertEqual(captured['plugins'], [{'id': 'web', 'max_results': 5}])
         self.assertEqual(captured['max_steps'], 1000)
         self.assertEqual(captured['search_budget'], 1000)
         self.assertTrue(captured['research_mode'])
@@ -81,15 +83,77 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIs(captured['on_event'], on_event)
         self.assertIn('site:rei.rega.gov.sa', captured['prompt'])
         self.assertIn('https://rei.rega.gov.sa/ar/advanced-search/deals', captured['prompt'])
-        self.assertIn('فتح الموقع أو الرابط وحده لا يُعد بحثًا مكتملًا', captured['prompt'])
-        self.assertIn('افحص كل التبويبات والجداول', captured['prompt'])
-        self.assertIn('تستنفد البيانات المتاحة للنطاق', captured['prompt'])
+        self.assertIn('ابحث في المصادر الموكلة إليك', captured['prompt'])
         self.assertIn('الروضة', captured['prompt'])
         self.assertIn('فترة البيانات المطلوبة إلزاميًا: من 2025-10-17 إلى 2026-10-17',
                       captured['prompt'])
         self.assertIn('عدد غرف نوم الشقة', captured['prompt'])
         self.assertIn('أعلى سعر مرصود', captured['prompt'])
         self.assertNotIn('server_tools', captured)
+
+    def test_individual_researcher_falls_back_to_local_tools_when_env_set(self):
+        module = self.module
+        captured = {}
+
+        def fake_browse(system, prompt, usage_ctx, **kwargs):
+            captured.update({'system': system, 'prompt': prompt,
+                             'usage_ctx': usage_ctx, **kwargs})
+            return self._opened_reply()
+
+        group = next(item for item in module._SUMMARY_RESEARCH_GROUPS
+                     if item['key'] == 'transactions_and_rents')
+        with patch.object(module, '_browse_agent_call', side_effect=fake_browse), \
+                patch.object(module, '_new_evidence_pool', return_value=None), \
+                patch.dict(os.environ, {'BROWSER_USE_LOCAL_TOOLS': '1'}):
+            outcome = module._run_summary_researcher(
+                group, ['rei.rega.gov.sa'], {
+                    'city': 'جدة', 'projectType': 'سكني',
+                }, 'جدة', 'الروضة',
+                {'tenant_id': 't1'}, time.time() + 30)
+
+        self.assertTrue(outcome['searched'])
+        self.assertTrue(captured['local_tools'])
+        self.assertEqual(captured['search_provider'], 'searxng')
+        self.assertNotIn('plugins', captured)
+
+    def test_individual_researcher_populates_evidence_pool_from_native_citations(self):
+        module = self.module
+        pool = evidence.EvidencePool()
+
+        def fake_chat(messages, **kwargs):
+            return {'choices': [{'message': {
+                'role': 'assistant',
+                'content': json.dumps({
+                    'group': 'transactions_and_rents',
+                    'findings': [{
+                        'metric': 'متوسط سعر المتر', 'value': 4500, 'unit': 'SAR/m2',
+                        'city': 'جدة', 'district': 'الروضة', 'source_url': 'https://rei.rega.gov.sa/deals/1',
+                    }],
+                    'sources': [{'name': 'الهيئة العامة للعقار', 'url': 'https://rei.rega.gov.sa/deals/1'}],
+                }),
+                'annotations': [{'url_citation': {
+                    'url': 'https://rei.rega.gov.sa/deals/1',
+                    'title': 'صفقة الروضة',
+                    'content': 'تفاصيل الصفقة السكنية 4500 ريال للمتر',
+                }}],
+            }}], 'usage': {'prompt_tokens': 100, 'completion_tokens': 50}}
+
+        group = next(item for item in module._SUMMARY_RESEARCH_GROUPS
+                     if item['key'] == 'transactions_and_rents')
+        import agent
+        with patch.object(agent, 'openrouter_chat', side_effect=fake_chat), \
+                patch.object(module, '_new_evidence_pool', return_value=pool):
+            outcome = module._run_summary_researcher(
+                group, ['rei.rega.gov.sa'], {
+                    'city': 'جدة', 'projectType': 'سكني',
+                }, 'جدة', 'الروضة',
+                {'tenant_id': 't1'}, time.time() + 30)
+
+        self.assertTrue(outcome['searched'])
+        self.assertEqual(len(outcome['pages']), 1)
+        self.assertEqual(outcome['pages'][0]['url'], 'https://rei.rega.gov.sa/deals/1')
+        self.assertEqual(len(pool.pages()), 1)
+        self.assertEqual(pool.pages()[0]['url'], 'https://rei.rega.gov.sa/deals/1')
 
     def test_final_summary_preserves_available_residential_transaction_breakdown(self):
         prompt = market_study.build_summary_user_prompt(

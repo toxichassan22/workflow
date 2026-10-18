@@ -444,8 +444,12 @@ def _normalize_reply(response):
 def _assistant_echo(msg):
     """Rebuild the assistant turn for the wire: original tool_calls verbatim
     (arguments stay serialized), reasoning_details ride along when present."""
-    out = {'role': 'assistant', 'content': msg.get('content') or None}
     raw = msg.get('raw_message') or {}
+    if raw:
+        out = dict(raw)
+        out.setdefault('role', 'assistant')
+        return out
+    out = {'role': 'assistant', 'content': msg.get('content') or None}
     if raw.get('tool_calls'):
         out['tool_calls'] = raw['tool_calls']
     if raw.get('reasoning_details'):

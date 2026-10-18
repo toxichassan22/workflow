@@ -418,13 +418,17 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         'المصدر الموكّل لهذا الباحث:\n' + requested_sites + '\n'
         + requested_pages
         + listings_block
-        + 'فتح الموقع أو الرابط وحده لا يُعد بحثًا مكتملًا. تفاعل فعليًا مع المصدر واجمع كل البيانات ذات الصلة '
-        'بالمدينة/الحي والفترة والنشاط الموكّل لك: افتح كل صفحة محددة، افحص عناصرها، اكتب المدينة أو الحي '
-        'والتاريخ ونوع المؤشر في الحقول، اختر القيم من القوائم، واضغط بحث/تطبيق. افحص كل التبويبات والجداول '
-        'والرسوم، افتح التفاصيل، تنقّل بين الصفحات والنتائج، ووسّع الفلاتر ذات الصلة حتى تستنفد البيانات '
-        'المتاحة للنطاق. استخدم click_element وtype_text مع submit=true وscroll_page وinspect_page؛ '
-        'لا تكتفِ بالمقتطفات أو أول صفحة ولا تنتقِ رقمًا واحدًا إذا كان المصدر يعرض مؤشرات أخرى. '
-        'سجّل كل المؤشرات والتقسيمات ذات الصلة، والفترة وعدد السجلات أو الصفحات التي ظهرت. إذا تعذّر '
+        + ('فتح الموقع أو الرابط وحده لا يُعد بحثًا مكتملًا. تفاعل فعليًا مع المصدر واجمع كل البيانات ذات الصلة '
+           'بالمدينة/الحي والفترة والنشاط الموكّل لك: افتح كل صفحة محددة، افحص عناصرها، اكتب المدينة أو الحي '
+           'والتاريخ ونوع المؤشر في الحقول، اختر القيم من القوائم، واضغط بحث/تطبيق. افحص كل التبويبات والجداول '
+           'والرسوم، افتح التفاصيل، تنقّل بين الصفحات والنتائج، ووسّع الفلاتر ذات الصلة حتى تستنفد البيانات '
+           'المتاحة للنطاق. استخدم click_element وtype_text مع submit=true وscroll_page وinspect_page؛ '
+           'لا تكتفِ بالمقتطفات أو أول صفحة ولا تنتقِ رقمًا واحدًا إذا كان المصدر يعرض مؤشرات أخرى.\n'
+           if os.environ.get('BROWSER_USE_LOCAL_TOOLS', '').strip() in ('1', 'true', 'yes') else
+           'ابحث في المصادر الموكلة إليك واجمع كل البيانات والمؤشرات ذات الصلة بالمدينة/الحي والفترة والنشاط الموكّل لك. '
+           'في كل استعلام بحث قيّد البحث بواحد من هذه النطاقات: ' + site_queries + '. '
+           'استخرج أحدث المؤشرات والأرقام والصفقات المنشورة والروابط المحددة.\n')
+        + 'سجّل كل المؤشرات والتقسيمات ذات الصلة، والفترة وعدد السجلات أو الصفحات التي ظهرت. إذا تعذّر '
         'استنفاد النتائج أو تصديرها، حدّد ما جُمِع وما بقي غير متاح بدل ادعاء اكتمال المصدر. '
         'في كل محرك بحث قيّد الاستعلام بواحد من هذه النطاقات: ' + site_queries + '. لا تدّعِ '
         'استخراج نتائج من لوحة لم تعرضها الصفحة فعلًا. ابدأ بالصفحات الحكومية والمصدر الأصلي، واستخدم مصدرًا '
@@ -466,16 +470,32 @@ def _run_summary_researcher(group, hosts, payload, city, district,
                 continue
     prompt = _summary_research_prompt(payload, group, hosts, city, district,
                                       offer_lang=offer_lang)
+    use_local = os.environ.get('BROWSER_USE_LOCAL_TOOLS', '').strip() in ('1', 'true', 'yes')
+    system_prompt = (
+        'أنت باحث ويب تستخدم أدوات المتصفح المحلي. لا تخترع نتائج ولا تنهِ المهمة قبل فتح صفحات مصادر.'
+        if use_local else
+        'أنت باحث سوق تستخدم بحث الويب المباشر. استخرج أرقامًا وبيانات محددة من المصادر الموكلة إليك واذكر الروابط المحددة.'
+    )
+    browse_kwargs = {
+        'model': _SUMMARY_RESEARCHER_MODEL,
+        'evidence_pool': worker_pool,
+        'deadline': deadline,
+        'local_tools': use_local,
+        'search_budget': _SUMMARY_RESEARCH_SEARCH_BUDGET,
+        'max_steps': _SUMMARY_RESEARCH_MAX_STEPS,
+        'max_tokens': _SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS,
+        'reasoning_effort': 'low',
+        'cancel_event': cancel_event,
+        'research_mode': True,
+        'allowed_hosts': hosts,
+        'on_event': on_event,
+    }
+    if use_local:
+        browse_kwargs['search_provider'] = 'searxng'
+    else:
+        browse_kwargs['plugins'] = [{'id': 'web', 'max_results': 5}]
     result = _browse_agent_call(
-        'أنت باحث ويب تستخدم أدوات المتصفح المحلي. لا تخترع نتائج ولا تنهِ المهمة قبل فتح صفحات مصادر.',
-        prompt, dict(usage_ctx or {}), model=_SUMMARY_RESEARCHER_MODEL, evidence_pool=worker_pool,
-        deadline=deadline, local_tools=True, search_provider='searxng',
-        search_budget=_SUMMARY_RESEARCH_SEARCH_BUDGET,
-        max_steps=_SUMMARY_RESEARCH_MAX_STEPS,
-        max_tokens=_SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS,
-        reasoning_effort='low', cancel_event=cancel_event, research_mode=True,
-        allowed_hosts=hosts,
-        on_event=on_event)
+        system_prompt, prompt, dict(usage_ctx or {}), **browse_kwargs)
     pages = worker_pool.pages() if worker_pool is not None else []
     parsed, parse_error = _parse_market_model_json(result)
     parsed, filtered_sources = _summary_restrict_research_result(parsed, hosts)
