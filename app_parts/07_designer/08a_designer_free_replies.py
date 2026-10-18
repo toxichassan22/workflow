@@ -210,6 +210,8 @@ def _client_safe_llm_error(exc_or_text, fallback='تعذر تنفيذ الطلب
     raise — carry model slugs, key ids and upstream URLs, so they collapse to
     the fallback instead of reaching the client."""
     text = str(exc_or_text or '').strip()
+    if text.startswith('رصيد الشركة المسجل يغطي التقدير المبدئي لهذه العملية:'):
+        return text
     if _is_company_credit_error(text):
         estimate = re.search(
             r'تقدير النظام المبدئي لهذه العملية:\s*([0-9]+(?:\.[0-9]+)?)\s*دولار\s*'
@@ -218,8 +220,8 @@ def _client_safe_llm_error(exc_or_text, fallback='تعذر تنفيذ الطلب
         if estimate and text.startswith(_COMPANY_CREDIT_EXHAUSTED_MSG):
             return (
                 _COMPANY_CREDIT_EXHAUSTED_MSG
-                + f' تقدير النظام المبدئي لهذه العملية: {format_precise_number(estimate.group(1), grouped=False)} دولار '
-                + f'(نحو {format_precise_number(estimate.group(2), grouped=False)} نقطة). التكلفة الفعلية قد تختلف.'
+                + f' تقدير النظام المبدئي لهذه العملية: {estimate.group(1)} دولار '
+                + f'(نحو {estimate.group(2)} نقطة). التكلفة الفعلية قد تختلف.'
             )
         return _COMPANY_CREDIT_EXHAUSTED_MSG
     lowered = text.lower()

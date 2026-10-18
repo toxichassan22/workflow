@@ -1,6 +1,6 @@
 # OpenRouter chat and streaming request paths.
 
-def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, tool_choice=None, usage_ctx=None):
+def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, tool_choice=None, usage_ctx=None, _credit_recovery_attempted=False):
     gate = _tenant_key_gate(usage_ctx)
     if gate is not None:
         return {"error": gate}
@@ -67,6 +67,20 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
             _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id)
             fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
             if fatal is not None:
+                if (fatal.get('error_code') == 'INSUFFICIENT_CREDITS'
+                        and not _credit_recovery_attempted
+                        and _repair_tenant_key_limit_after_refusal(usage_ctx)):
+                    return call_openrouter_chat(
+                        system_prompt, user_content,
+                        temperature=temperature, max_tokens=max_tokens,
+                        model=model, timeout=timeout,
+                        reasoning_effort=reasoning_effort,
+                        response_format=response_format, provider=provider,
+                        image_references=image_references, tools=tools,
+                        plugins=plugins, max_tool_calls=max_tool_calls,
+                        tool_choice=tool_choice, usage_ctx=usage_ctx,
+                        _credit_recovery_attempted=True,
+                    )
                 return {"error": fatal}
             if isinstance(error, dict) and 'message' in error:
                 error['message'] = f"[{response.status_code}] {error['message']}"

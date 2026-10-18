@@ -111,11 +111,23 @@ def _provider_credit_error_dict(error, status_code, usage_ctx=None):
     refusal = {'fatal': True, 'provider_message': msg or combined}
     estimate = _billing_estimate_for_usage_ctx(usage_ctx)
     if _ai_call_uses_tenant_key(usage_ctx):
-        message = _COMPANY_CREDIT_EXHAUSTED_MSG
-        if estimate:
+        headroom_usd = _tenant_provider_headroom_for_usage_ctx(usage_ctx)
+        wallet_covers_estimate = (
+            estimate is not None and headroom_usd is not None
+            and headroom_usd >= estimate['estimated_required_usd'])
+        if wallet_covers_estimate:
+            message = (
+                'رصيد الشركة المسجل يغطي التقدير المبدئي لهذه العملية: '
+                f"{estimate['estimated_required_usd']:.2f} دولار "
+                f"(نحو {format_precise_number(estimate['estimated_required_sar'], grouped=False)} نقطة)، "
+                'لكن مفتاح مزود الذكاء الاصطناعي رفض الطلب. قد يكون سقف المفتاح أو رصيد المزود سبب الرفض.'
+            )
+        else:
+            message = _COMPANY_CREDIT_EXHAUSTED_MSG
+        if estimate and not wallet_covers_estimate:
             message += (
                 f" تقدير النظام المبدئي لهذه العملية: "
-                f"{format_precise_number(estimate['estimated_required_usd'], grouped=False)} دولار "
+                f"{estimate['estimated_required_usd']:.2f} دولار "
                 f"(نحو {format_precise_number(estimate['estimated_required_sar'], grouped=False)} نقطة). "
                 'التكلفة الفعلية قد تختلف.'
             )

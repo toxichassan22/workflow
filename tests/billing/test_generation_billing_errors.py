@@ -93,6 +93,89 @@ class GenerationBillingErrorTests(unittest.TestCase):
         self.assertEqual(err.get('http_status'), 402)
         self.assertEqual(err.get('message'), module._COMPANY_CREDIT_EXHAUSTED_MSG)
 
+    def test_funded_company_key_refusal_does_not_claim_wallet_is_empty(self):
+        module = self.application_module
+        with patch.object(module, '_ai_call_uses_tenant_key', return_value=True), \
+             patch.object(module, '_billing_estimate_for_usage_ctx', return_value={
+                 'estimated_required_usd': 1.0,
+                 'estimated_required_sar': 3.75,
+             }), \
+             patch.object(module, '_tenant_provider_headroom_for_usage_ctx',
+                          return_value=5.0):
+            err = module._provider_credit_error_dict(
+                {'message': 'Insufficient credits'}, 402,
+                {'tenant_id': self.tenant_id, 'billing_flow': 'market_summary'})
+        self.assertIn('رصيد الشركة المسجل يغطي', err['message'])
+        self.assertNotIn('اشحن المحفظة', err['message'])
+        self.assertIn('1.00 دولار', err['message'])
+        with module.app.app_context():
+            response, status = module._ai_fatal_http_response(err)
+        self.assertEqual(status, 402)
+        self.assertIn('رصيد الشركة المسجل يغطي', response.get_json()['error'])
+
+    def test_funded_key_cap_is_repaired_and_request_retried_once(self):
+        module = self.application_module
+        usage_ctx = {
+            'tenant_id': self.tenant_id,
+            'billing_flow': 'market_summary',
+        }
+        success = {'choices': [{'message': {'content': 'summary'}}]}
+        with self.app.app_context(), \
+             patch.object(module, '_tenant_key_gate', return_value=None), \
+             patch.object(module, '_has_any_openrouter_key', return_value=True), \
+             patch.object(module, '_openrouter_headers', return_value={}), \
+             patch.object(module, '_ai_call_uses_tenant_key', return_value=True), \
+             patch.object(module, '_repair_tenant_key_limit_after_refusal',
+                          return_value=True) as repair, \
+             patch.object(module.requests, 'post', side_effect=[
+                 _FakeResponse({'error': {'message': 'Insufficient credits'}}, 402),
+                 _FakeResponse(success),
+             ]) as post:
+            result = module.call_openrouter_chat(
+                'sys', 'hi', max_tokens=10, usage_ctx=usage_ctx)
+        self.assertEqual(result, success)
+        self.assertEqual(post.call_count, 2)
+        repair.assert_called_once_with(usage_ctx)
+
+    def test_key_cap_recovery_only_runs_when_wallet_entitlement_covers_estimate(self):
+        module = self.application_module
+        with self.app.app_context():
+            tenant_id = db.create_tenant(
+                'Recovery Co', 'recovery@example.test', 'hash', 'recovery-co')
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-recovery-test-aaaaaaaaaaaa',
+                provenance='auto', openrouter_key_hash='recovery-hash')
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+             patch.object(module, '_sync_tenant_credit_to_openrouter') as sync, \
+             patch.object(module, '_openrouter_key_status') as key_status:
+            recovered = module._repair_tenant_key_limit_after_refusal({
+                'tenant_id': tenant_id, 'billing_flow': 'market_summary'})
+        self.assertFalse(recovered)
+        sync.assert_not_called()
+        key_status.assert_not_called()
+
+    def test_key_cap_recovery_syncs_and_confirms_live_headroom(self):
+        module = self.application_module
+        with self.app.app_context():
+            tenant_id = db.create_tenant(
+                'Funded Recovery Co', 'funded-recovery@example.test',
+                'hash', 'funded-recovery-co')
+            db.update_tenant(tenant_id, credit_balance=300.0)
+            db.set_tenant_openrouter_key(
+                tenant_id, 'sk-or-v1-funded-recovery-aaaaaaaaaaaa',
+                provenance='auto', openrouter_key_hash='funded-recovery-hash')
+        with patch.object(module, '_openrouter_management_key', return_value='mgmt-test'), \
+             patch.object(module, '_openrouter_key_status', side_effect=[
+                 {'limit_remaining': 0.0}, {'usage': 0.0},
+                 {'limit_remaining': 50.0},
+             ]), \
+             patch.object(module, '_openrouter_update_managed_key',
+                          return_value={'ok': True}) as update_key:
+            recovered = module._repair_tenant_key_limit_after_refusal({
+                'tenant_id': tenant_id, 'billing_flow': 'market_summary'})
+        self.assertTrue(recovered)
+        update_key.assert_called_once()
+
     def test_market_summary_refusal_includes_configured_estimate(self):
         module = self.application_module
         usage_ctx = {
