@@ -1,0 +1,65 @@
+{
+  "city": "جدة",
+  "source": "منصة سكني - شبكة إيجار (المؤشر الإيجاري)",
+  "source_url": "https://sakani.sa/reports-and-data",
+  "period": "الفترة الإيجارية الجارية 2026",
+  "period_from": "2026-01-01",
+  "period_to": "2026-10-18",
+  "residential": [
+    {
+      "unit_type": "شقة سكنية (إيجار)",
+      "deal_count": 603,
+      "average_price_sar": 51047,
+      "unit": "ريال سنوياً",
+      "price_ranges_count": 3
+    },
+    {
+      "unit_type": "استديو (إيجار)",
+      "deal_count": 22,
+      "average_price_sar": 9680,
+      "unit": "ريال سنوياً",
+      "price_ranges_count": 2
+    },
+    {
+      "unit_type": "دوبلاكس (إيجار)",
+      "deal_count": 10,
+      "average_price_sar": 117222,
+      "unit": "ريال سنوياً",
+      "price_ranges_count": 3
+    },
+    {
+      "unit_type": "فله سكنية (إيجار)",
+      "deal_count": 298,
+      "average_price_sar": 125224,
+      "unit": "ريال سنوياً",
+      "price_ranges_count": 3
+    },
+    {
+      "unit_type": "دور سكني (إيجار)",
+      "deal_count": 1,
+      "average_price_sar": 25000,
+      "unit": "ريال سنوياً",
+      "price_ranges_count": 1
+    }
+  ],
+  "commercial": [
+    {
+      "unit_type": "محل تجاري (إيجار)",
+      "deal_count": 185,
+      "average_price_sqm_sar": 1255,
+      "unit": "ريال/م² سنوياً"
+    },
+    {
+      "unit_type": "مكتب تجاري (إيجار)",
+      "deal_count": 961,
+      "average_price_sqm_sar": 791,
+      "unit": "ريال/م² سنوياً"
+    },
+    {
+      "unit_type": "معرض تجاري (إيجار)",
+      "deal_count": 285,
+      "average_price_sqm_sar": 1375,
+      "unit": "ريال/م² سنوياً"
+    }
+  ]
+}

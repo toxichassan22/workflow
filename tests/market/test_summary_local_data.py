@@ -120,6 +120,43 @@ class SummaryLocalDataTests(unittest.TestCase):
                          {'فيلا', 'دور'})
         self.assertNotIn('source_record_id', str(result))
 
+    def test_historical_benchmark_fallback_preserves_rawdah_when_outside_recent_bounds(self):
+        with patch.object(market_study, '_summary_benchmark_files', return_value=[]), \
+                patch.object(market_study, '_summary_benchmark_csv_files',
+                             wraps=_REAL_SUMMARY_CSV_FILES):
+            result = market_study.build_summary_local_benchmarks({
+                'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
+                'dataPeriodBounds': {'from': '2025-10-18', 'to': '2026-10-18'},
+            })
+        districts = {group['district'] for group in result['groups']}
+        self.assertIn('الروضة', districts)
+        rawdah_group = next(g for g in result['groups'] if g['district'] == 'الروضة')
+        self.assertEqual(rawdah_group['deal_count_in_file'], 96)
+        self.assertEqual(rawdah_group['period_to'], '2025-08-11')
+        self.assertEqual(rawdah_group['median_price_sqm_sar'], 9074)
+
+    def test_rental_benchmarks_are_loaded_from_sakani_indicators(self):
+        with patch.object(market_study, '_summary_benchmark_files', return_value=[]), \
+                patch.object(market_study, '_summary_benchmark_csv_files', return_value=[]):
+            result = market_study.build_summary_local_benchmarks({
+                'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
+            })
+        self.assertTrue(result['available'])
+        rental_groups = result.get('rental_groups') or []
+        self.assertEqual(len(rental_groups), 8)
+        unit_types = {r['unit_type']: r for r in rental_groups}
+        self.assertIn('معرض تجاري (إيجار)', unit_types)
+        showroom = unit_types['معرض تجاري (إيجار)']
+        self.assertEqual(showroom['deal_count_in_file'], 285)
+        self.assertEqual(showroom['median_price_sqm_sar'], 1375)
+        self.assertIn('سكني', showroom['sources'][0])
+
+        self.assertIn('فله سكنية (إيجار)', unit_types)
+        villa = unit_types['فله سكنية (إيجار)']
+        self.assertEqual(villa['deal_count_in_file'], 298)
+        self.assertEqual(villa['median_deal_value_sar'], 125224)
+
 
 if __name__ == '__main__':
     unittest.main()
+

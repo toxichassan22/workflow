@@ -278,17 +278,20 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'كله.\n')
         local_data_rules = (
             'انسب صفقات الملفات إلى أسماء المصادر كما تظهر حرفيًا في حقل sources لكل مجموعة؛ إذا ظهر «وزارة العدل» '
-            'فسمّها «صفقات وزارة العدل». هذه سجلات مرجعية محدودة بالأحياء والفئات والتواريخ الموجودة في الملفات، '
-            'ولا تحدد أسماء مشاريع منافسة.\n')
+            'فسمّها «صفقات وزارة العدل»، وإذا ظهر «منصة سكني - شبكة إيجار» فسمّها «المؤشر الإيجاري لشبكة إيجار ومنصة سكني». '
+            'استفد من صفقات البيع المنفذة وصفقات المؤشر الإيجاري الموثقة للأنشطة السكنية والتجارية (المعارض، المكاتب، المحلات، الفلل، الشقق) '
+            'في إثراء أداء القطاع والعرض والطلب وتحديد الأسعار المرجعية.\n')
         narrative_rules = (
-            'اكتب كل محور بلغة استشارية رسمية ومهنية، ونظّمه في أسطر قصيرة ذات عناوين وصفية واضحة. افصل كل '
-            'نشاط ونوع عقار وفئة وحدات متاحة في سطر مستقل؛ وامنح الشقق والفلل والفنادق وكل نشاط مختار عمقًا '
-            'تحليليًا متقاربًا بحسب الأدلة، مع كل الأرقام المتاحة دون حد للكلمات أو اختصار مخل. اشرح دلالة الدليل '
-            'وأثره العملي دون تكرار إنشائي. لا تذكر أسماء المصادر داخل نص المحاور؛ اجمعها في sources فقط. يجوز أن يستفيد '
+            'اكتب كل محور بلغة استشارية عقارية رسمية وفورمال ومسترسلة (Professional Fluent Advisory Tone). '
+            'اجعل الصياغة متماسكة ومترابطة تحلل السوق بعين استثمارية خبيرة وتربط مؤشرات الأسعار والصفقات بمكونات المشروع وجدواه، '
+            'مع تجنب التقطيع الآلي أو رص البيانات الجافة كعناوين منعزلة. '
+            'امنح الشقق والفلل والفنادق والمعارض وكل نشاط مختار عمقًا تحليليًا متقاربًا بحسب الأدلة، '
+            'مع إدراج كل الأرقام المتاحة دون حد للكلمات أو اختصار مخل. اشرح دلالة الدليل وأثره العملي في سياق سردي متدفق. '
+            'لا تذكر أسماء المصادر داخل نص المحاور؛ اجمعها في sources فقط. يجوز أن يستفيد '
             'محور المنافسة من جدول المنافسين المرفق؛ أما بقية المحاور فتحلل الأنشطة والمكونات المحددة في نطاق المشروع '
             'الملزم فقط. اذكر قطاعًا آخر كسياق موجز فقط إذا كان يخدم نشاطًا مختارًا بوضوح. '
             'في project_evaluation وضح المدخلات التي لا تكفي للحكم ولا تخترع حالة مالية. اجعل one_block_summary '
-            'فقرة تنفيذية متماسكة كاملة بلا حد للكلمات؛ وتبقى محاور التحليل التفصيلية منظمة في أسطر مستقلة.\n')
+            'فقرة تنفيذية متماسكة ومسترسلة رفيعة الصياغة بلا حد للكلمات؛ وتبقى محاور التحليل التفصيلية متدفقة ومكتملة الأركان.\n')
         decision = 'قيم القرار المسموحة: ' + '، '.join(DECISION_OPTIONS) + '.\n'
         current = (
             'الملخص والمصادر وSWOT السابقة للسياق فقط؛ تحقق من كل معلومة ستبقيها على الدليل الحالي.\n'
@@ -298,15 +301,17 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
     if en:
         final_output_rules = (
             '\nFinal output rules override any earlier conflicting instruction. Use a formal real-estate advisory tone. '
-            'Keep the detailed axes in short labeled lines, with every selected activity, property type, and available unit category separated. '
+            'Keep the narrative cohesive, fluent, and well-structured, with every selected activity and property type thoroughly analyzed. '
+            'Ensure natural phrasing for monetary figures in SAR without mechanical currency repetitions. '
             'Give every evidence-supported category comparable depth and include all useful figures; impose no word limit. '
             'Omit unavailable subcategories without saying they were missing, inaccessible, or unavailable; use an empty string for an axis with no evidence. '
             'All monetary values in the study and source notes must be SAR. Convert other currencies using a verified exchange rate for the data date; omit an amount when the rate cannot be verified. '
             'Never mention the access date in narrative or source notes. State the study issue date and source publication/data date when available; accessed_at is metadata only.\n')
     else:
         final_output_rules = (
-            '\nقواعد الإخراج النهائية تتقدم على أي تعليمات سابقة تتعارض معها. استخدم صياغة استشارية عقارية رسمية. '
-            'نظّم محاور التحليل التفصيلية في أسطر قصيرة ذات عناوين وصفية، وافصل كل نشاط مختار ونوع عقار وفئة وحدات متاحة. '
+            '\nقواعد الإخراج النهائية تتقدم على أي تعليمات سابقة تتعارض معها. استخدم صياغة استشارية عقارية رسمية وفورمال ومسترسلة. '
+            'حافظ على ترابط الفقرات وتدفقها السلس مع إبراز كل نشاط ونوع عقار وفئة وحدات دون تجزئة جافة مخلة. '
+            'اكتب اسم العملة «ريال» أو «ريال سعودي» بأسلوب لغوي سليم، وتجنب تماماً أي تكرار ميكانيكي أو لفظي مثل «ريال سعودي سعوديًا». '
             'امنح كل فئة تدعمها الأدلة عمقًا متقاربًا، وأدرج الأرقام المفيدة كاملة دون حد للكلمات. '
             'احذف الفئات الفرعية غير المتاحة دون القول إنها مفقودة أو متعذرة أو غير متاحة؛ وأعد قيمة فارغة للمحور الذي لا يسنده دليل. '
             'كل القيم المالية في الدراسة وملاحظات المصادر بالريال السعودي. حوّل العملات الأخرى بسعر صرف موثق لتاريخ البيانات؛ واحذف المبلغ إذا تعذر التحقق من السعر. '
@@ -321,7 +326,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
         + narrative_rules + lang + '\n' + decision
         + 'الأدلة وصفحات المصادر المفتوحة من الباحثين:\n' + evidence + '\n\n'
         + local_data_rules
-        + 'بيانات الصفقات المرجعية من ملفات المالك، إن وجدت؛ يتضمن كل سجل اسم مصدره ضمن حقل sources:\n'
+        + 'بيانات الصفقات المرجعية والمؤشرات الرسمية من ملفات المالك وشبكة إيجار وسكني، إن وجدت؛ يتضمن كل سجل اسم مصدره ضمن حقل sources:\n'
         + json.dumps(local, ensure_ascii=False, indent=2, default=str) + '\n\n'
         + 'مدخلات المشروع لتحديد النشاط والنطاق والتقييم المحايد:\n'
         + _project_input_block(payload) + '\n\n'

@@ -163,7 +163,7 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
             order.append('plan')
             plan_calls.update(plan=plan, pool=pool, fetch_http=fetch_http,
                               session=session, deadline=deadline)
-            pool.add_page('https://plan.sa/dataset', title='داتا',
+            pool.add_page('https://rei.rega.gov.sa/deals/dataset', title='داتا',
                           content='نص الصفحة', via='http')
             return {'fetched': 1, 'skipped': 0, 'failed': 0}
 
@@ -197,12 +197,19 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
         self.assertIs(plan_calls['fetch_http'], module._market_source_fetch_http)
         self.assertIsNotNone(plan_calls['pool'])
         self.assertIs(plan_calls['session'], workers[0])
+        matching_calls = [
+            call for call in agent_calls
+            if any('rei.rega.gov.sa' in str(h) for h in (call.get('allowed_hosts') or []))
+        ]
+        self.assertTrue(matching_calls)
+        for call in matching_calls:
+            worker_pool = call.get('evidence_pool')
+            self.assertIn('https://rei.rega.gov.sa/deals/dataset',
+                          [page.get('url') for page in worker_pool.pages()])
         for call in agent_calls:
             worker_pool = call.get('evidence_pool')
             self.assertIsNotNone(worker_pool)
             self.assertIsNot(worker_pool, plan_calls['pool'])
-            self.assertIn('https://plan.sa/dataset',
-                          [page.get('url') for page in worker_pool.pages()])
             self.assertNotIn('session', call)
         # The plan stage runs under its own capped sub-deadline
         # (MARKET_SOURCE_PLAN_BUDGET), never the job's full budget — a chain
@@ -224,7 +231,7 @@ class SummaryEvidenceSeamTests(unittest.TestCase):
         self.assertEqual(workers[0].closed, 1)
         # Citation collection unions the pool's fetched pages.
         citation_arg = cite_spy.call_args.args[1]
-        self.assertIn('https://plan.sa/dataset', citation_arg)
+        self.assertIn('https://rei.rega.gov.sa/deals/dataset', citation_arg)
         self.assertIn('https://sakani.sa/reports-and-data/rent-index-q3',
                       citation_arg)
         stats = result.get('searchStats')

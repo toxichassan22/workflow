@@ -921,7 +921,8 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
     if evidence_pool is not None:
         citations.extend(page.get('url') for page in evidence_pool.pages()
                          if isinstance(page, dict))
-    for local_group in ((payload.get('summaryLocalBenchmarks') or {}).get('groups') or []):
+    local_bench = payload.get('summaryLocalBenchmarks') or {}
+    for local_group in (local_bench.get('groups') or []) + (local_bench.get('rental_groups') or []):
         citations.extend(local_group.get('source_urls') or [])
     return {
         'success': True,
