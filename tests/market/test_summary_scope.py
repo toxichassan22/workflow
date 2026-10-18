@@ -142,6 +142,27 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('وزارة العدل', prompt)
         self.assertNotIn('مجهولة الهوية', prompt)
 
+    def test_dynamic_district_and_rental_completeness_prompt_rules(self):
+        prompt = market_study.build_summary_user_prompt({
+            'city': 'جدة',
+            'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
+            'summaryLocalBenchmarks': {'groups': [{'district': 'العزيزية'}, {'district': 'الروضة'}]},
+        }, [])
+        self.assertIn('قاعدة تحليل الأحياء في الصفقات المرجعية (قاعدة ديناميكية وشاملة)', prompt)
+        self.assertIn('يُمنع منعًا باتًا دمج أي حيين واردين في البيانات داخل فقرة واحدة', prompt)
+        self.assertIn('أفرده بفقرة تحليلية مستقلة وكاملة', prompt)
+        self.assertIn('قاعدة المؤشر الإيجاري لشبكة إيجار وسكني (شمولية القيمة والعدد)', prompt)
+        self.assertIn('تجنب تماماً أي تكرار ميكانيكي أو لفظي مثل «ريال سعودي سعوديًا»', prompt)
+        self.assertIn('بل اسرد التحليل بفقرات متماسكة تبدأ بجمل افتتاحية استشارية متصلة', prompt)
+
+        en_prompt = market_study.build_summary_user_prompt({
+            'city': 'Jeddah',
+            'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': []}]},
+        }, [], offer_lang='en')
+        self.assertIn('Dynamic District Rule: For every district present in summaryLocalBenchmarks groups', en_prompt)
+        self.assertIn('Rental Benchmark Rule: In rental_groups from Ejar and Sakani', en_prompt)
+        self.assertIn('Avoid robotic colon-separated bullet headers', en_prompt)
+
     def test_english_scope_and_research_prompt(self):
         block = market_study._summary_scope_block(
             {'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': ['Al Narjis']}]}}, 'en')

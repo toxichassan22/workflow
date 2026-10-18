@@ -389,6 +389,7 @@ def merge_generated_competitors(existing, generated, mode='generate', offer_lang
 
 
 _SUMMARY_MONEY_NUMBER = r'(?:\d{1,3}(?:[,٬]\d{3})+|\d+)(?:[.٫]\d+)?'
+_AR_TANWEEN = r'(?:[\u064b-\u0652]*[اى]?[\u064b-\u0652]*)'
 _SUMMARY_CURRENCY_TOKEN = (
     r'(?:US\$|(?<![A-Za-z])(?:AED|AFN|ALL|AMD|ANG|AOA|ARS|AUD|AWG|AZN|'
     r'BAM|BBD|BDT|BGN|BHD|BIF|BMD|BND|BOB|BRL|BSD|BTN|BWP|BYN|BZD|CAD|CDF|'
@@ -400,10 +401,13 @@ _SUMMARY_CURRENCY_TOKEN = (
     r'RUB|RWF|SAR|SBD|SCR|SDG|SEK|SGD|SHP|SLE|SOS|SRD|SSP|STN|SYP|SZL|THB|'
     r'TJS|TMT|TND|TOP|TRY|TTD|TWD|TZS|UAH|UGX|USD|UYU|UZS|VES|VND|VUV|WST|'
     r'XAF|XCD|XOF|XPF|YER|ZAR|ZMW|ZWL)(?![A-Za-z])|[$€£¥₹₺₽]|ر\.?\s?س\.?|'
-    r'(?:ريال(?:ات)?(?:\s+سعودي(?:ة)?)?|دولار(?:ات)?(?:\s+أمريكي(?:ة)?)?|يورو|'
-    r'درهم(?:ات)?(?:\s+(?:إماراتي|مغربي))?|جنيه(?:ات)?(?:\s+(?:إسترليني|مصري))?|'
-    r'دينار(?:ات)?(?:\s+(?:كويتي|بحريني|أردني|عراقي|ليبي|تونسي|جزائري))?|'
-    r'فرنك\s+سويسري|ليرة(?:ات)?(?:\s+(?:تركية|لبنانية|سورية))?|ين\s+ياباني|يوان|روبية)'
+    rf'(?:ريال(?:ات)?{_AR_TANWEEN}(?:\s+سعودي(?:ة)?{_AR_TANWEEN})*|'
+    rf'دولار(?:ات)?{_AR_TANWEEN}(?:\s+أمريكي(?:ة)?{_AR_TANWEEN})*|يورو|'
+    rf'درهم(?:ات)?{_AR_TANWEEN}(?:\s+(?:إماراتي|مغربي)(?:ة)?{_AR_TANWEEN})*|'
+    rf'جنيه(?:ات)?{_AR_TANWEEN}(?:\s+(?:إسترليني|مصري)(?:ة)?{_AR_TANWEEN})*|'
+    rf'دينار(?:ات)?{_AR_TANWEEN}(?:\s+(?:كويتي|بحريني|أردني|عراقي|ليبي|تونسي|جزائري)(?:ة)?{_AR_TANWEEN})*|'
+    rf'فرنك\s+سويسري{_AR_TANWEEN}|ليرة(?:ات)?{_AR_TANWEEN}(?:\s+(?:تركية|لبنانية|سورية){_AR_TANWEEN})*|'
+    rf'ين\s+ياباني{_AR_TANWEEN}|ين{_AR_TANWEEN}|يوان{_AR_TANWEEN}|روبية{_AR_TANWEEN})'
     r'(?:[\u064b-\u065f]*ا?)?|'
     r'dollars?|euros?|pounds?|dirhams?|riyals?|yen|yuan|rupees?)'
 )

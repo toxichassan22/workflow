@@ -155,6 +155,22 @@ class SummaryLocalDataTests(unittest.TestCase):
         villa = unit_types['فله سكنية (إيجار)']
         self.assertEqual(villa['deal_count_in_file'], 298)
         self.assertEqual(villa['median_deal_value_sar'], 125224)
+        self.assertEqual(villa['average_deal_value_sar'], 125224)
+        self.assertEqual(showroom['median_price_sqm_sar'], 1375)
+        self.assertEqual(showroom['average_price_sqm_sar'], 1375)
+
+    def test_normalize_summary_currency_handles_tanween_and_deduplicates(self):
+        text = 'بلغ 361 ريالاً سعودياً للغرفة مقابل 402 ريال سعودي، وكان المسجل 563 ريال سعودي سعوديًا لليلة'
+        normalized = market_study.normalize_summary_currency(text)
+        self.assertEqual(normalized, 'بلغ 361 ريال سعودي للغرفة مقابل 402 ريال سعودي، وكان المسجل 563 ريال سعودي لليلة')
+        self.assertNotIn('سعودي سعودي', normalized)
+        self.assertNotIn('سعوديً', normalized)
+
+        single = market_study.normalize_summary_currency('القيمة 100 دولاراً أمريكياً')
+        self.assertEqual(single, 'القيمة 375 ريال سعودي')
+
+        repeated = market_study.normalize_summary_currency('سجل 240 ريال سعودي سعودية')
+        self.assertEqual(repeated, 'سجل 240 ريال سعودي')
 
 
 if __name__ == '__main__':
