@@ -107,4 +107,22 @@ module.exports = function registerSiteAssistantPayloadTests({ test, fixture }) {
     assert.equal(context.tenantVisualConceptState.slots.plan_site.svgCode, '');
     assert.equal(context.tenantVisualConceptState.slots.plan_site.imageUrl, '');
   });
+
+  test('long Argon site-plan replies survive response handling and draft normalization', () => {
+    const context = fixture(true);
+    const fullReply = ('تفصيل المخطط الحالي. '.repeat(900)).trim();
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: { plan_site: { chat: [] } }, plansWorkflow: { siteAssistant: { turns: [] } },
+    });
+    context.markVisualConceptDirty = () => {};
+
+    context.applyVisualConceptSiteAssistantResponse({
+      reply: fullReply,
+      assistantState: { turns: [{ role: 'assistant', text: fullReply.slice(0, 4000), choices: [] }] },
+    });
+
+    const restored = context.normalizeVisualConceptState(context.tenantVisualConceptState);
+    assert.equal(restored.slots.plan_site.chat[0].text.length, fullReply.length);
+    assert.equal(restored.slots.plan_site.chat[0].text.slice(-80), fullReply.slice(-80));
+  });
 };

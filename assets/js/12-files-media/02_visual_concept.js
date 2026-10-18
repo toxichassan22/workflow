@@ -257,13 +257,17 @@
           || visualConceptPlanSeed(plans.find(plan => plan.id === id))
           || (workflowDefinition ? visualConceptWorkflowPlanSeed(workflowDefinition, plansWorkflow) : null)
           || emptyVisualConceptSlot(id);
-        const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => ({
-          role: entry.role === 'assistant' ? 'assistant' : 'user',
-          text: String(entry.text).slice(0, 4000),
-          choices: Array.isArray(entry.choices) ? entry.choices.slice(0, 6).map(choice => String(choice).slice(0, 240)) : [],
-          attachments: (Array.isArray(entry.attachments) ? entry.attachments : [])
-            .map(name => String(name).slice(0, 120)).slice(0, 5)
-        })) : [];
+        const chat = Array.isArray(slot.chat) ? slot.chat.filter(entry => entry && typeof entry.text === 'string').slice(-30).map(entry => {
+          const role = entry.role === 'assistant' ? 'assistant' : 'user';
+          const textLimit = id === 'plan_site' && role === 'assistant' ? 300000 : 4000;
+          return {
+            role,
+            text: String(entry.text).slice(0, textLimit),
+            choices: Array.isArray(entry.choices) ? entry.choices.slice(0, 6).map(choice => String(choice).slice(0, 240)) : [],
+            attachments: (Array.isArray(entry.attachments) ? entry.attachments : [])
+              .map(name => String(name).slice(0, 120)).slice(0, 5)
+          };
+        }) : [];
         // A blob: URL is a handle into the tab that created it, so a stored one is dead and is
         // dropped here; repairVisualConceptStoredImages republishes it from the file id.
         const approved = durableImageUrl(slot.approvedImageUrl);

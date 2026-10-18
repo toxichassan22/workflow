@@ -19,6 +19,7 @@ _VISUAL_PLAN_SITE_SECTION_IDS = {name for name, _description in _VISUAL_PLAN_SIT
 _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT = 900000
 _VISUAL_PLAN_SITE_RENDER_REVISION = 5
 _VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS = 66000
+_VISUAL_PLAN_SITE_REPLY_MAX_CHARS = 300000
 
 
 def _visual_plan_site_number(value):
@@ -208,7 +209,7 @@ def _visual_plan_site_interview(data, action='chat'):
     choices = [str(item).strip()[:240] for item in raw_choices[:6] if str(item).strip()]
     ready = bool(parsed.get('ready')) and not question
     generate_requested = bool(parsed.get('generateRequested')) or state['generateRequested'] or action == 'generate'
-    reply = _visual_concept_text(parsed.get('reply'), 1200)
+    reply = _visual_concept_text(parsed.get('reply'), _VISUAL_PLAN_SITE_REPLY_MAX_CHARS)
     if question:
         reply = reply or question
         state['pendingQuestion'] = question
@@ -516,7 +517,7 @@ def _visual_plan_site_generate(data, interview):
         ai_scene = _visual_plan_site_ai_design_scene(data, packet, contract)
         decision = ai_scene.get('assistantDecision') if isinstance(ai_scene, dict) else None
         if isinstance(decision, dict):
-            reply = _visual_concept_text(decision.get('reply'), 1200)
+            reply = _visual_concept_text(decision.get('reply'), _VISUAL_PLAN_SITE_REPLY_MAX_CHARS)
             question = _visual_concept_text(decision.get('question'), 800)
             raw_choices = decision.get('choices') if isinstance(decision.get('choices'), list) else []
             choices = [str(item).strip()[:240] for item in raw_choices[:6] if str(item).strip()]
@@ -664,7 +665,7 @@ def _visual_plan_site_edit(data):
     image = persist_generated_image('data:image/svg+xml;base64,' + encoded, g.tenant_id)
     state['checkpoints'][section] = replacement
     state['status'] = 'review'
-    reply = _visual_concept_text(parsed.get('reply'), 1200) or 'Updated the requested SVG section.'
+    reply = _visual_concept_text(parsed.get('reply'), _VISUAL_PLAN_SITE_REPLY_MAX_CHARS) or 'Updated the requested SVG section.'
     if sanitized_sections:
         reply += ' حُذفت تسميات غير إنجليزية من القسم المعدل.'
     state['turns'].append({'role': 'assistant', 'text': reply})

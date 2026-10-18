@@ -78,6 +78,23 @@ class VisualPlanContractTestsPart06(VisualPlanContractBase):
             self.assertEqual(facts['financialComponents'][0]['notes'],
                              'The eastern wing has a separate entrance.')
 
+    def test_site_chat_returns_long_argon_replies_without_truncating_them(self):
+        module = self.application_module
+        full_reply = ('تفصيل معتمد للمخطط. ' * 900).strip()
+        data = {'message': 'اشرح التفاصيل كاملة.', 'plansWorkflow': {'siteAssistant': {}}}
+        model_reply = {'ready': False, 'reply': full_reply, 'choices': [], 'memory': 'التفاصيل محفوظة.'}
+
+        with module.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            with patch.object(module, '_visual_plan_site_packet',
+                              return_value=({}, {}, {}, 'same-input')), \
+                    patch.object(module, '_visual_plan_site_call',
+                                 return_value=(model_reply, 120)):
+                result = module._visual_plan_site_interview(data)
+
+        self.assertEqual(result['reply'], full_reply)
+        self.assertEqual(result['assistantState']['turns'][-1]['text'], full_reply)
+
     def test_argon_controls_conflict_reply_and_the_renderer_uses_its_coordinates(self):
         module = self.application_module
         contract = {
