@@ -299,8 +299,86 @@ class FinancialMurabahaTermsTests(unittest.TestCase):
         self.assertNotIn('row.murabahaPct / financeMurabahaPctTotal', calc_src)
         # Fixed interest term strictly respects repayment years
         self.assertIn('withinFixedInterestTerm = year >= firstDrawYear && year < firstDrawYear + financeRepaymentYears;', calc_src)
-        # Total finance interest metric is fixed to baseMurabaha
         self.assertIn('totalFinanceInterest = financeOn ? baseMurabaha : 0', calc_src)
+
+    def test_financial_sections_order_fund_precedes_financing(self):
+        """Fund management (section 9) precedes financing (section 10) in the study order."""
+        form_src = self._read('assets/js/09-financial/01_financial_format.js')
+        self.assertIn('<h3>9. الصندوق وأتعاب إدارة الصندوق</h3>', form_src)
+        self.assertIn('<h3>10. التمويل</h3>', form_src)
+        self.assertLess(
+            form_src.index('id="fundBlock"'),
+            form_src.index('id="financeBlock"'),
+            "fundBlock must precede financeBlock in DOM order"
+        )
+        self.assertLess(
+            form_src.index('<h3>9. الصندوق وأتعاب إدارة الصندوق</h3>'),
+            form_src.index('<h3>10. التمويل</h3>'),
+            "Section 9 (Fund) must precede Section 10 (Financing)"
+        )
+
+        # Report collector ordering
+        report_src = self._read('assets/js/10-financial-report-timeline/01_report_collect.js')
+        self.assertIn('<h3>8. أتعاب إدارة الصندوق</h3>', report_src)
+        self.assertIn('<h3>9. هيكل تمويل</h3>', report_src)
+        self.assertLess(
+            report_src.index('${fundReportSection}'),
+            report_src.index('${financeReportSection}'),
+            "fundReportSection must precede financeReportSection in report template"
+        )
+
+        # Export ordering
+        export_src = self._read('app_parts/13_financial/13_financial_study_export.py')
+        self.assertIn('8. الصندوق وأتعابه', export_src)
+        self.assertIn('9. التمويل', export_src)
+        self.assertLess(
+            export_src.index('8. الصندوق وأتعابه'),
+            export_src.index('9. التمويل'),
+            "Fund export section must precede finance export section"
+        )
+
+        # i18n auto dictionary
+        i18n_src = self._read('assets/i18n/05_dict_en_auto_financial.js')
+        self.assertIn('"9. الصندوق وأتعاب إدارة الصندوق": "9. Fund and fund management fees"', i18n_src)
+        self.assertIn('"10. التمويل": "10. Financing"', i18n_src)
+
+    def test_fund_cost_included_and_finance_base_with_fund(self):
+        """Test 'fundCostIncluded' field and 'withFund' option in financeBase."""
+        # 1. UI form contains fundCostIncluded and withFund option in financeBase
+        form_src = self._read('assets/js/09-financial/01_financial_format.js')
+        self.assertIn('هل تكلفة الصندوق ضمن المشروع؟', form_src)
+        self.assertIn('<select id="fundCostIncluded" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select>', form_src)
+        self.assertIn('<option value="withFund">إجمالي تكلفة المشروع شامل تكاليف الصندوق</option>', form_src)
+
+        # 2. Formulas calculation logic
+        calc_src = self._read('assets/js/09-financial/02_formulas_calc.js')
+        # Gating withFund option based on fundCostIncluded
+        self.assertIn("val('fundCostIncluded') === 'yes'", calc_src)
+        self.assertIn("document.querySelector('#financeBase option[value=\"withFund\"]')", calc_src)
+        self.assertIn("withFundOpt.hidden = !fundCostIncludedOn;", calc_src)
+        self.assertIn("withFundOpt.disabled = !fundCostIncludedOn;", calc_src)
+        self.assertIn("val('financeBase') === 'withFund'", calc_src)
+        # Conditional visibility in fundMainGrid starts at nth-child(n+4) for fee items
+        self.assertIn("setConditionalSelector('#fundBlock .grid.four>div:nth-child(n+4),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', feesOn);", calc_src)
+        # financeBaseAmount calculation includes fund fees when withFund is selected
+        self.assertIn("financeBase === 'withFund' ? projectCost + fundFeesSnapshot", calc_src)
+        self.assertIn("Math.abs(totalFundFees - fundFeesSnapshot) > 0.01 && !window.__calcRecursing", calc_src)
+        # Projection and hidden JSON export include fundCostIncluded
+        self.assertIn("fundCostIncluded: val('fundCostIncluded')", calc_src)
+
+        # 3. Report collector includes fundCostIncluded
+        report_src = self._read('assets/js/10-financial-report-timeline/01_report_collect.js')
+        self.assertIn("['هل تكلفة الصندوق ضمن المشروع', reportFieldValue('fundCostIncluded')]", report_src)
+
+        # 4. Change tracking descriptor
+        diff_src = self._read('modules/platform/change_tracking_parts/01_diff_descriptors.py')
+        self.assertIn("'fundCostIncluded': 'هل تكلفة الصندوق ضمن المشروع'", diff_src)
+
+        # 5. Translations
+        i18n_src = self._read('assets/i18n/05_dict_en_auto_financial.js')
+        self.assertIn('"هل تكلفة الصندوق ضمن المشروع؟": "Is fund cost included in project?"', i18n_src)
+        self.assertIn('"هل تكلفة الصندوق ضمن المشروع": "Fund cost included in project"', i18n_src)
+        self.assertIn('"إجمالي تكلفة المشروع شامل تكاليف الصندوق": "Total project cost including fund costs"', i18n_src)
 
 
 if __name__ == '__main__':

@@ -942,6 +942,8 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         }
         with self.app.app_context():
             html = self.application_module.build_financial_report_html('مشروع مالي', model, {}, self.tenant_a)
+        self.assertNotIn('8. الصندوق وأتعابه', html)
+        self.assertNotIn('9. التمويل', html)
         self.assertNotIn('8. التمويل', html)
         self.assertNotIn('9. الصندوق وأتعابه', html)
         self.assertIn('12. النتائج المالية', html)

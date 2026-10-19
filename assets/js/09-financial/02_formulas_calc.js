@@ -234,7 +234,21 @@
       const resSaleExitCard = document.getElementById('resSaleExitCard');
       if (resSaleExitCard) resSaleExitCard.classList.toggle('dynamic-off', !saleExitActive);
       setWrapVisible('roiEndYearWrap', val('roiPeriod') === 'custom'); setWrapVisible('irrEndYearWrap', val('irrPeriod') === 'custom');
-      const fundOn = val('fundFeesEnabled') !== 'no'; const fundBase = val('fundFeeBase') || 'fundCapital';
+      const fundHasFund = val('fundEnabled') === 'yes';
+      const fundOn = fundHasFund && val('fundFeesEnabled') !== 'no';
+      const fundBase = val('fundFeeBase') || 'fundCapital';
+      const fundCostIncludedOn = fundHasFund && val('fundCostIncluded') === 'yes';
+      const fundCostIncludedEl = document.getElementById('fundCostIncluded');
+      if (fundCostIncludedEl) fundCostIncludedEl.disabled = !fundHasFund;
+      const withFundOpt = document.querySelector('#financeBase option[value="withFund"]');
+      if (withFundOpt) {
+        withFundOpt.hidden = !fundCostIncludedOn;
+        withFundOpt.disabled = !fundCostIncludedOn;
+      }
+      if (!fundCostIncludedOn && val('financeBase') === 'withFund') {
+        const fbEl = document.getElementById('financeBase');
+        if (fbEl) fbEl.value = 'withLand';
+      }
       setWrapVisible('fundCapitalInputWrap', fundOn && ['fundCapital', 'investedCapital'].includes(fundBase)); setWrapVisible('fundNavInputWrap', fundOn && fundBase === 'nav'); setWrapVisible('fundManagementRateWrap', fundOn && fundBase !== 'fixed'); setWrapVisible('fundFixedAnnualFeeWrap', fundOn && fundBase === 'fixed');
       ['fundFeeStartYear', 'fundFeeEndYear', 'fundFeeFrequency', 'fundFeeTiming', 'fundFeeGrowthRate'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = !fundOn });
       const fundExitOn = val('fundExitFeeEnabled') === 'yes'; setWrapVisible('fundExitFeeRateWrap', fundExitOn && val('fundExitFeeBase') !== 'fixed'); setWrapVisible('fundExitFixedFeeWrap', fundExitOn && val('fundExitFeeBase') === 'fixed');
@@ -399,7 +413,7 @@
 
       setConditionalSelector('#financeBlock .grid.four>div:not(:first-child),#financeBlock h4,#financeBlock .table-wrap,#financeBlock p.help', financeOn);
       setConditionalSelector('#fundBlock .grid.four>div:not(:first-child),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', fundOn);
-      setConditionalSelector('#fundBlock .grid.four>div:nth-child(n+3),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', feesOn);
+      setConditionalSelector('#fundBlock .grid.four>div:nth-child(n+4),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', feesOn);
       setConditionalVisibility('fundExitPerformanceGrid', feesOn);
       setConditionalVisibility('fundExitFeeEnabledWrap', feesOn);
       setConditionalVisibility('fundExitFeeBaseWrap', fundExitEnabled);
@@ -558,7 +572,8 @@
       const exitOn = val('exitEnabled') === 'yes', exitMethod = exitOn && modeFlags.rental ? val('exitMethod') : 'none', exitInput = num('exitInput'), saleExitMethod = exitOn && modeFlags.sales ? (val('saleExitMethod') || 'none') : 'none', saleExitYear = Math.max(1, Math.min(totalYears, Math.round(num('saleExitYear') || totalYears))), operatingExitYear = Math.max(1, Math.min(totalYears, Math.round(num('operatingExitYear') || totalYears))), saleExitCostRate = Math.max(0, num('saleExitCostRate')) / 100, operatingExitCostRate = Math.max(0, num('operatingExitCostRate')) / 100, settleDebtAtExit = val('settleDebtAtExit') !== 'no';
       const activeExitYears = []; if (saleExitMethod !== 'none') activeExitYears.push(saleExitYear); if (exitMethod !== 'none') activeExitYears.push(operatingExitYear);
       const equityDistributionYear = activeExitYears.length ? Math.max(...activeExitYears) : totalYears;
-      const financeOn = val('financeEnabled') === 'yes', financeShare = financeOn ? Math.max(0, Math.min(100, num('financingRate'))) / 100 : 0, financeBase = val('financeBase') || 'withLand', financeBaseAmount = Math.max(0, financeBase === 'withoutLand' ? projectCost - landCostIncluded : projectCost), facilityAmount = financeBaseAmount * financeShare, arrangementFee = financeOn ? facilityAmount * (num('financeArrangementFeeRate') / 100) : 0, annualFinanceRate = financeOn ? num('annualFinanceRate') / 100 : 0, financeInterestMethod = val('financeInterestMethod') || 'declining', financeDrawYears = Math.max(0, Math.min(20, Math.round(num('financeDrawYears'))));
+      const fundFeesSnapshot = parseNumber(document.getElementById('fundFeesTotal')?.value) || 0;
+      const financeOn = val('financeEnabled') === 'yes', financeShare = financeOn ? Math.max(0, Math.min(100, num('financingRate'))) / 100 : 0, financeBase = val('financeBase') || 'withLand', financeBaseAmount = Math.max(0, financeBase === 'withFund' ? projectCost + fundFeesSnapshot : (financeBase === 'withoutLand' ? projectCost - landCostIncluded : projectCost)), facilityAmount = financeBaseAmount * financeShare, arrangementFee = financeOn ? facilityAmount * (num('financeArrangementFeeRate') / 100) : 0, annualFinanceRate = financeOn ? num('annualFinanceRate') / 100 : 0, financeInterestMethod = val('financeInterestMethod') || 'declining', financeDrawYears = Math.max(0, Math.min(20, Math.round(num('financeDrawYears'))));
       if (document.querySelectorAll('#financeDrawTable tbody tr').length !== financeDrawYears) syncFinanceDrawPlan();
       const financePlan = [...document.querySelectorAll('#financeDrawTable tbody tr')].map(tr => ({ tr, year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1, drawPct: Math.max(0, parseNumber(tr.querySelector('[data-field="drawPct"] input')?.value)) }));
       const financeDrawPctTotal = financePlan.reduce((sum, row) => sum + row.drawPct, 0);
@@ -797,6 +812,11 @@
       setVal('fundManagementFeesTotal', money(totalFundManagementFees));
       setVal('performanceFeeTotal', money(performanceFeeTotal));
       setVal('fundFeesTotal', money(totalFundFees));
+      if (financeBase === 'withFund' && Math.abs(totalFundFees - fundFeesSnapshot) > 0.01 && !window.__calcRecursing) {
+        window.__calcRecursing = true;
+        try { calculateAll(); } finally { window.__calcRecursing = false; }
+        return;
+      }
       setVal('graceTotalDiscount', money(totalGraceDiscount));
 
       const areaState = validateComponentAreas();
@@ -835,7 +855,7 @@
         financeBase, financeBaseAmount, financeDrawYears, financeInterestMethod, financePlan: financePlan.map(({ year, drawPct }) => ({ year, drawPct })),
         financeRepaymentStartYear, financeRepaymentYears, financeRepaymentPlan: financeRepaymentPlan.map(({ year, repaymentPct }) => ({ year, repaymentPct })),
         financeMurabahaStartYear, financeMurabahaYears, financeMurabahaPlan: financeMurabahaPlan.map(({ year, murabahaPct }) => ({ year, murabahaPct })),
-        landEquityContribution, cashEquityRequired: totalCashEquity, equityRequired: totalEquityRequired, totalEquityDistributions, developmentYears, operationYears, totalYears, operationStartYear, salesStartYear, salesYears, totalGraceDiscount, modeFlags, areaState
+        landEquityContribution, cashEquityRequired: totalCashEquity, equityRequired: totalEquityRequired, totalEquityDistributions, developmentYears, operationYears, totalYears, operationStartYear, salesStartYear, salesYears, totalGraceDiscount, modeFlags, areaState, fundCostIncluded: val('fundCostIncluded')
       };
       applyConditionalVisibility(modeFlags);
       reorderResultCards();
@@ -853,7 +873,7 @@
             roi, projectIrr, equityIrr: irrVal, payback, equityPayback, totalEquityRequired
           }),
            components: componentRows,
-           unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), financeMurabahaStartYear: num('financeMurabahaStartYear'), financeMurabahaYears: num('financeMurabahaYears'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
+           unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), financeMurabahaStartYear: num('financeMurabahaStartYear'), financeMurabahaYears: num('financeMurabahaYears'), fundEnabled: val('fundEnabled'), fundCostIncluded: val('fundCostIncluded'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
          });
        }
        // Dynamic visibility toggles rewrite .disabled for their own reasons and rows added

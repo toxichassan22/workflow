@@ -381,6 +381,8 @@
         ['إجمالي حقوق الملكية', reportFieldValue('equityRequired')]
       ]);
       const fundSummary = reportRows([
+        ['وجود صندوق للمشروع', reportFieldValue('fundEnabled')],
+        ['هل تكلفة الصندوق ضمن المشروع', reportFieldValue('fundCostIncluded')],
         ['تطبيق أتعاب إدارة الصندوق', reportFieldValue('fundFeesEnabled')],
         ['أساس احتساب الأتعاب', reportFieldValue('fundFeeBase')],
         ['رأس مال الصندوق', reportFieldValue('fundCapitalInput')],
@@ -460,8 +462,8 @@
       const resultSummary = reportRows(resultsList);
       const graceReportSection = reportFlags.rental && val('graceEnabled') === 'yes' ? `<section class="section"><h3>5. فترة السماح</h3>${reportRows([['طريقة الاحتساب', reportFieldValue('graceMethod')], ['نطاق السماح', reportFieldValue('graceScope')], ['بداية السماح', reportFieldValue('graceStartYear')], ['مدة السماح بالأشهر', reportFieldValue('graceDurationMonths')], ['إجمالي الخصم', reportFieldValue('graceTotalDiscount')]])}${val('graceMethod') === 'schedule' ? reportTableSnapshot('graceScheduleTable', true, true) : ''}</section>` : '';
       const developerPaymentsReportSection = val('developerPaymentsEnabled') === 'yes' ? `<section class="section"><h3>6. مراحل التطوير ودفعات المطور</h3>${reportTableSnapshot('scheduleTable', false)}</section>` : '';
-      const financeReportSection = val('financeEnabled') === 'yes' ? `<section class="section"><h3>8. هيكل تمويل</h3>${financeSummary}<h4>خطة سحب التمويل</h4>${reportTableSnapshot('financeDrawTable', false)}<h4>خطة سداد أصل التمويل</h4>${reportTableSnapshot('financeRepaymentTable', false)}<h4>خطة المرابحة</h4>${reportTableSnapshot('financeMurabahaTable', false)}<h4>حركة رصيد التمويل السنوية</h4>${reportTableSnapshot('debtScheduleTable', false)}</section>` : '';
-      const fundReportSection = val('fundEnabled') === 'yes' && val('fundFeesEnabled') === 'yes' ? `<section class="section page-break"><h3>9. أتعاب إدارة الصندوق</h3>${fundSummary}<h4>الأتعاب الإضافية الاختيارية</h4>${reportTableSnapshot('fundAdditionalFeesTable', true, true)}<h4>جدول أتعاب الصندوق السنوي</h4>${reportTableSnapshot('fundFeeScheduleTable', false)}</section>` : '';
+      const fundReportSection = val('fundEnabled') === 'yes' && val('fundFeesEnabled') === 'yes' ? `<section class="section page-break"><h3>8. أتعاب إدارة الصندوق</h3>${fundSummary}<h4>الأتعاب الإضافية الاختيارية</h4>${reportTableSnapshot('fundAdditionalFeesTable', true, true)}<h4>جدول أتعاب الصندوق السنوي</h4>${reportTableSnapshot('fundFeeScheduleTable', false)}</section>` : '';
+      const financeReportSection = val('financeEnabled') === 'yes' ? `<section class="section"><h3>9. هيكل تمويل</h3>${financeSummary}<h4>خطة سحب التمويل</h4>${reportTableSnapshot('financeDrawTable', false)}<h4>خطة سداد أصل التمويل</h4>${reportTableSnapshot('financeRepaymentTable', false)}<h4>خطة المرابحة</h4>${reportTableSnapshot('financeMurabahaTable', false)}<h4>حركة رصيد التمويل السنوية</h4>${reportTableSnapshot('debtScheduleTable', false)}</section>` : '';
       const bonusReportSection = reportFlags.sales && val('developerBonusEnabled') === 'yes' ? `<section class="section"><h3>10. علاوة حسن أداء المطور</h3>${bonusSummary}</section>` : '';
       const externalReportSection = val('externalEnabled') === 'yes' ? `<section class="section"><h3>11. البنود الخارجية المرنة</h3>${reportTableSnapshot('externalTable', true, true)}</section>` : '';
       const clarificationText = val('financialClarifications').trim();
@@ -533,8 +535,8 @@
         <section class="section page-break"><h3>5. تكاليف المشروع وأتعاب المطور</h3>${costSummary}<h4>تفاصيل بنود التكلفة</h4>${reportTableSnapshot('costTable', true, true)}</section>
         ${developerPaymentsReportSection}
         <section class="section page-break"><h3>7. المصروفات التشغيلية</h3>${reportTableSnapshot('opexTable', true, true)}</section>
-        ${financeReportSection}
         ${fundReportSection}
+        ${financeReportSection}
         ${bonusReportSection}
         ${externalReportSection}
         <section class="section page-break"><h3>12. ملخص النتائج المالية</h3>${resultSummary}</section>

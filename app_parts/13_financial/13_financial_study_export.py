@@ -517,11 +517,11 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
             grace_html += _financial_report_table(tables.get('graceScheduleTable'))
         grace_html += '</section>'
         sections.append(grace_html)
+    if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
+        sections.append('<section><h2>8. الصندوق وأتعابه</h2>' + rows([('fundFeeBase', 'أساس الأتعاب'), ('fundCapitalInput', 'رأس مال الصندوق'), ('fundManagementRate', 'نسبة الإدارة'), ('fundFeeStartYear', 'بداية الاحتساب'), ('fundFeeEndYear', 'نهاية الاحتساب')]) + _financial_report_table(tables.get('fundAdditionalFeesTable')) + '</section>')
     if inputs.get('financeEnabled') == 'yes':
         murabaha_table_html = _financial_report_table(tables.get('financeMurabahaTable')) if tables.get('financeMurabahaTable') else ''
-        sections.append('<section><h2>8. التمويل</h2>' + rows([('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'), ('annualFinanceRate', 'معدل المرابحة'), ('financeInterestMethod', 'طريقة المرابحة'), ('financeDrawYears', 'سنوات السحب'), ('financeRepaymentYears', 'سنوات السداد')]) + _financial_report_table(tables.get('financeDrawTable')) + _financial_report_table(tables.get('financeRepaymentTable')) + murabaha_table_html + '</section>')
-    if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
-        sections.append('<section><h2>9. الصندوق وأتعابه</h2>' + rows([('fundFeeBase', 'أساس الأتعاب'), ('fundCapitalInput', 'رأس مال الصندوق'), ('fundManagementRate', 'نسبة الإدارة'), ('fundFeeStartYear', 'بداية الاحتساب'), ('fundFeeEndYear', 'نهاية الاحتساب')]) + _financial_report_table(tables.get('fundAdditionalFeesTable')) + '</section>')
+        sections.append('<section><h2>9. التمويل</h2>' + rows([('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'), ('annualFinanceRate', 'معدل المرابحة'), ('financeInterestMethod', 'طريقة المرابحة'), ('financeDrawYears', 'سنوات السحب'), ('financeRepaymentYears', 'سنوات السداد')]) + _financial_report_table(tables.get('financeDrawTable')) + _financial_report_table(tables.get('financeRepaymentTable')) + murabaha_table_html + '</section>')
     if inputs.get('externalEnabled') == 'yes' and tables.get('externalTable'):
         sections.append('<section><h2>10. البنود الخارجية</h2>' + _financial_report_table(tables.get('externalTable')) + '</section>')
     if inputs.get('exitEnabled') == 'yes':
@@ -885,8 +885,15 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         ])
         if inputs.get('graceMethod') == 'schedule' and tables.get('graceScheduleTable'):
             draw_data_table(tables.get('graceScheduleTable'), 'جدول خصومات فترة السماح')
+    if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
+        draw_text('8. الصندوق وأتعابه', 12)
+        draw_kv_table([
+            ('أساس الأتعاب', inputs.get('fundFeeBase'), 'fundFeeBase'),
+            ('نسبة الإدارة', inputs.get('fundManagementRate'), 'fundManagementRate'),
+        ])
+        draw_data_table(tables.get('fundAdditionalFeesTable'), 'أتعاب إضافية')
     if inputs.get('financeEnabled') == 'yes':
-        draw_text('8. التمويل', 12)
+        draw_text('9. التمويل', 12)
         draw_kv_table([
             ('أساس التمويل', inputs.get('financeBase'), 'financeBase'),
             ('نسبة التمويل', inputs.get('financingRate'), 'financingRate'),
@@ -898,13 +905,6 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         draw_data_table(tables.get('financeRepaymentTable'), 'خطة السداد')
         if tables.get('financeMurabahaTable'):
             draw_data_table(tables.get('financeMurabahaTable'), 'خطة المرابحة')
-    if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
-        draw_text('9. الصندوق وأتعابه', 12)
-        draw_kv_table([
-            ('أساس الأتعاب', inputs.get('fundFeeBase'), 'fundFeeBase'),
-            ('نسبة الإدارة', inputs.get('fundManagementRate'), 'fundManagementRate'),
-        ])
-        draw_data_table(tables.get('fundAdditionalFeesTable'), 'أتعاب إضافية')
     if inputs.get('externalEnabled') == 'yes' and tables.get('externalTable'):
         draw_text('10. البنود الخارجية', 12)
         draw_data_table(tables.get('externalTable'), 'البنود الخارجية')

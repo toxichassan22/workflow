@@ -8,6 +8,7 @@
 window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN_AUTO_BEGIN*/{
   "1. بيانات المشروع": "1. Project data",
   "1. طبيعة وحدات المشروع": "1. Project Unit Mix & Typology",
+  "10. التمويل": "10. Financing",
   "10. الصندوق وأتعاب إدارة الصندوق": "10. Fund and fund management fees",
   "10. علاوة حسن أداء المطور": "10. Developer Performance Incentive (Promote)",
   "11. البنود الخارجية المرنة": "11. Flexible External Line Items",
@@ -31,9 +32,12 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "7. المصروفات التشغيلية": "7. Operating expenses",
   "7. مراحل التطوير ودفعات المطور": "7. Development phases and developer payments",
   "8. المصروفات التشغيلية": "8. Operating expenses",
+  "8. أتعاب إدارة الصندوق": "8. Fund management fees",
   "8. هيكل تمويل": "8. Capital & Financing Structure",
   "9. أتعاب إدارة الصندوق": "9. Fund management fees",
   "9. التمويل": "9. Financing",
+  "9. الصندوق وأتعاب إدارة الصندوق": "9. Fund and fund management fees",
+  "9. هيكل تمويل": "9. Capital & Financing Structure",
   "NOI أول سنة تشغيل": "First Operating Year NOI",
   "NOI عند 100% إشغال": "NOI at 100% Stabilized Occupancy",
   "NOI عند الوصول 100% للإشغال المستهدف": "NOI at 100% Target Occupancy",
@@ -566,5 +570,8 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "توجد اشتراطات متعارضة أو بيانات إضافية غير موثقة.": "There are conflicting regulations or additional undocumented inputs.",
   "غير موثق": "Not documented",
   "نسبة المرابحة %": "Murabaha rate %",
-  "قيمة المرابحة المحسوبة": "Calculated Murabaha value"
+  "قيمة المرابحة المحسوبة": "Calculated Murabaha value",
+  "هل تكلفة الصندوق ضمن المشروع؟": "Is fund cost included in project?",
+  "هل تكلفة الصندوق ضمن المشروع": "Fund cost included in project",
+  "إجمالي تكلفة المشروع شامل تكاليف الصندوق": "Total project cost including fund costs"
 }/*I18N_EN_AUTO_END*/);

@@ -334,43 +334,11 @@
           <br><button type="button" class="btn ghost" onclick="addOpex()">+ إضافة مصروف</button>
         </div>
 
-        <div class="finance-block" id="financeBlock">
-          <h3>9. التمويل</h3>
-          <div class="grid four">
-            <div><label>استخدام تمويل؟</label><select id="financeEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
-            <div><label>أساس احتساب التمويل</label><select id="financeBase" onchange="calculateAll()"><option value="withLand">إجمالي تكلفة المشروع مع قيمة الأرض</option><option value="withoutLand">إجمالي تكلفة المشروع بدون قيمة الأرض</option></select></div>
-            <div><label>نسبة التمويل من تكلفة المشروع %</label><input id="financingRate" type="number" oninput="calculateAll()"></div>
-            <div><label>رسوم ترتيب التمويل %</label><input id="financeArrangementFeeRate" type="number" oninput="calculateAll()"></div>
-            <div><label>طريقة احتساب المرابحة</label><select id="financeInterestMethod" onchange="calculateAll()"><option value="fixed">ثابتة على أصل التسهيل</option><option value="declining">متناقصة على الرصيد المتبقي</option></select></div>
-            <div><label>معدل المرابحة السنوي %</label><input id="annualFinanceRate" type="number" oninput="calculateAll()"></div>
-            <div><label>عدد سنوات سحب التمويل</label><input id="financeDrawYears" type="number" min="1" oninput="syncFinanceDrawPlan();calculateAll()"></div>
-            <div><label>سنة بدء سداد التمويل</label><input id="financeRepaymentStartYear" type="number" min="1" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
-            <div><label>عدد سنوات التمويل والسداد</label><input id="financeRepaymentYears" type="number" min="1" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
-            <div><label>سنة بدء المرابحة</label><input id="financeMurabahaStartYear" type="number" min="1" oninput="syncFinanceMurabahaPlan();calculateAll()"></div>
-            <div><label>عدد سنوات المرابحة</label><input id="financeMurabahaYears" type="number" min="1" oninput="syncFinanceMurabahaPlan();calculateAll()"></div>
-            <div><label>قيمة أساس التمويل</label><input id="financeBaseAmount" readonly></div>
-            <div><label>قيمة التسهيل التمويلي</label><input id="facilityAmount" readonly></div>
-            <div><label>رسوم ترتيب التمويل</label><input id="arrangementFeeTotal" readonly></div>
-            <div><label>إجمالي المرابحة</label><input id="financeInterestTotal" readonly></div>
-            <div><label>مساهمة الأرض العينية</label><input id="landEquityContribution" readonly></div>
-            <div><label>الضخ النقدي المطلوب</label><input id="cashEquityRequired" readonly></div>
-            <div><label>إجمالي حقوق الملكية</label><input id="equityRequired" readonly></div>
-          </div>
-          <br>
-          <h4>خطة سحب التمويل</h4>
-          <div class="table-wrap"><table id="financeDrawTable"><thead><tr><th>سنة السحب</th><th>نسبة السحب من التسهيل %</th><th>قيمة السحب المحسوبة</th></tr></thead><tbody></tbody></table></div>
-          <h4>خطة سداد أصل التمويل</h4>
-          <div class="table-wrap"><table id="financeRepaymentTable"><thead><tr><th>سنة السداد</th><th>نسبة السداد من أصل التسهيل %</th><th>قيمة السداد المحسوبة</th></tr></thead><tbody></tbody></table></div>
-          <h4>خطة المرابحة</h4>
-          <div class="table-wrap"><table id="financeMurabahaTable"><thead><tr><th>سنة الاستحقاق</th><th>نسبة المرابحة %</th><th>قيمة المرابحة المحسوبة</th></tr></thead><tbody></tbody></table></div>
-          <h4>حركة رصيد التمويل السنوية</h4>
-          <div class="table-wrap"><table id="debtScheduleTable"><thead><tr><th>السنة</th><th>الرصيد الافتتاحي</th><th>السحب</th><th>المرابحة</th><th>رسوم التمويل</th><th>سداد أصل التمويل</th><th>الرصيد الختامي</th></tr></thead><tbody></tbody></table></div>
-        </div>
-
         <div class="finance-block" id="fundBlock">
-          <h3>10. الصندوق وأتعاب إدارة الصندوق</h3>
+          <h3>9. الصندوق وأتعاب إدارة الصندوق</h3>
           <div class="grid four" id="fundMainGrid">
             <div><label>وجود صندوق للمشروع؟</label><select id="fundEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
+            <div><label>هل تكلفة الصندوق ضمن المشروع؟</label><select id="fundCostIncluded" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div>
             <div><label>تطبيق أتعاب إدارة الصندوق</label><select id="fundFeesEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
             <div><label>أساس احتساب الأتعاب</label><select id="fundFeeBase" onchange="calculateAll()"><option value="fundCapital">رأس مال الصندوق</option><option value="investedCapital">رأس المال المستثمر فعليًا</option><option value="nav">صافي قيمة الأصول</option><option value="projectCost">إجمالي تكلفة المشروع</option><option value="fixed">مبلغ ثابت</option></select></div>
             <div id="fundCapitalInputWrap"><label>رأس مال الصندوق</label><input id="fundCapitalInput" type="number" oninput="calculateAll()"></div>
@@ -406,6 +374,39 @@
           </div>
           <h4>جدول أتعاب الصندوق السنوي</h4>
           <div class="table-wrap"><table id="fundFeeScheduleTable"><thead><tr><th>السنة</th><th>أتعاب الإدارة</th><th>الأتعاب الإضافية</th><th>أتعاب التخارج</th><th>حافز الأداء</th><th>إجمالي أتعاب الصندوق</th><th>دورية السداد</th><th>توقيت السداد</th></tr></thead><tbody></tbody></table></div>
+        </div>
+
+        <div class="finance-block" id="financeBlock">
+          <h3>10. التمويل</h3>
+          <div class="grid four">
+            <div><label>استخدام تمويل؟</label><select id="financeEnabled" onchange="calculateAll()"><option value="yes">نعم</option><option value="no">لا</option></select></div>
+            <div><label>أساس احتساب التمويل</label><select id="financeBase" onchange="calculateAll()"><option value="withLand">إجمالي تكلفة المشروع مع قيمة الأرض</option><option value="withoutLand">إجمالي تكلفة المشروع بدون قيمة الأرض</option><option value="withFund">إجمالي تكلفة المشروع شامل تكاليف الصندوق</option></select></div>
+            <div><label>نسبة التمويل من تكلفة المشروع %</label><input id="financingRate" type="number" oninput="calculateAll()"></div>
+            <div><label>رسوم ترتيب التمويل %</label><input id="financeArrangementFeeRate" type="number" oninput="calculateAll()"></div>
+            <div><label>طريقة احتساب المرابحة</label><select id="financeInterestMethod" onchange="calculateAll()"><option value="fixed">ثابتة على أصل التسهيل</option><option value="declining">متناقصة على الرصيد المتبقي</option></select></div>
+            <div><label>معدل المرابحة السنوي %</label><input id="annualFinanceRate" type="number" oninput="calculateAll()"></div>
+            <div><label>عدد سنوات سحب التمويل</label><input id="financeDrawYears" type="number" min="1" oninput="syncFinanceDrawPlan();calculateAll()"></div>
+            <div><label>سنة بدء سداد التمويل</label><input id="financeRepaymentStartYear" type="number" min="1" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
+            <div><label>عدد سنوات التمويل والسداد</label><input id="financeRepaymentYears" type="number" min="1" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
+            <div><label>سنة بدء المرابحة</label><input id="financeMurabahaStartYear" type="number" min="1" oninput="syncFinanceMurabahaPlan();calculateAll()"></div>
+            <div><label>عدد سنوات المرابحة</label><input id="financeMurabahaYears" type="number" min="1" oninput="syncFinanceMurabahaPlan();calculateAll()"></div>
+            <div><label>قيمة أساس التمويل</label><input id="financeBaseAmount" readonly></div>
+            <div><label>قيمة التسهيل التمويلي</label><input id="facilityAmount" readonly></div>
+            <div><label>رسوم ترتيب التمويل</label><input id="arrangementFeeTotal" readonly></div>
+            <div><label>إجمالي المرابحة</label><input id="financeInterestTotal" readonly></div>
+            <div><label>مساهمة الأرض العينية</label><input id="landEquityContribution" readonly></div>
+            <div><label>الضخ النقدي المطلوب</label><input id="cashEquityRequired" readonly></div>
+            <div><label>إجمالي حقوق الملكية</label><input id="equityRequired" readonly></div>
+          </div>
+          <br>
+          <h4>خطة سحب التمويل</h4>
+          <div class="table-wrap"><table id="financeDrawTable"><thead><tr><th>سنة السحب</th><th>نسبة السحب من التسهيل %</th><th>قيمة السحب المحسوبة</th></tr></thead><tbody></tbody></table></div>
+          <h4>خطة سداد أصل التمويل</h4>
+          <div class="table-wrap"><table id="financeRepaymentTable"><thead><tr><th>سنة السداد</th><th>نسبة السداد من أصل التسهيل %</th><th>قيمة السداد المحسوبة</th></tr></thead><tbody></tbody></table></div>
+          <h4>خطة المرابحة</h4>
+          <div class="table-wrap"><table id="financeMurabahaTable"><thead><tr><th>سنة الاستحقاق</th><th>نسبة المرابحة %</th><th>قيمة المرابحة المحسوبة</th></tr></thead><tbody></tbody></table></div>
+          <h4>حركة رصيد التمويل السنوية</h4>
+          <div class="table-wrap"><table id="debtScheduleTable"><thead><tr><th>السنة</th><th>الرصيد الافتتاحي</th><th>السحب</th><th>المرابحة</th><th>رسوم التمويل</th><th>سداد أصل التمويل</th><th>الرصيد الختامي</th></tr></thead><tbody></tbody></table></div>
         </div>
 
         <div class="finance-block" id="developerBonusBlock"><h3>11. علاوة حسن أداء المطور</h3><div class="section-switch"><label>تطبيق علاوة حسن أداء المطور؟</label><select id="developerBonusEnabled" onchange="calculateAll()"><option value="no">لا</option><option value="yes">نعم</option></select></div><div id="developerBonusDetails" class="grid four"><div><label>نسبة المطور من الزيادة في سعر البيع %</label><input id="developerUpliftShare" type="number" oninput="calculateAll()"></div></div></div>
