@@ -360,8 +360,8 @@ class FinancialMurabahaTermsTests(unittest.TestCase):
         self.assertIn("val('financeBase') === 'withFund'", calc_src)
         # Conditional visibility in fundMainGrid starts at nth-child(n+4) for fee items
         self.assertIn("setConditionalSelector('#fundBlock .grid.four>div:nth-child(n+4),#fundBlock h4,#fundBlock .table-wrap,#fundBlock button', feesOn);", calc_src)
-        # financeBaseAmount calculation includes fund fees when withFund is selected
-        self.assertIn("financeBase === 'withFund' ? projectCost + fundFeesSnapshot", calc_src)
+        # financeBaseAmount calculation includes fund fees without land cost when withFund is selected
+        self.assertIn("financeBase === 'withFund' ? (projectCost - landCostIncluded) + fundFeesSnapshot", calc_src)
         self.assertIn("Math.abs(totalFundFees - fundFeesSnapshot) > 0.01 && !window.__calcRecursing", calc_src)
         # Projection and hidden JSON export include fundCostIncluded
         self.assertIn("fundCostIncluded: val('fundCostIncluded')", calc_src)

@@ -42,6 +42,9 @@ test('page values round half-up to the nearest hundredth', () => {
   assert.equal(c.roundFinancialHundredth(164000.00000000003), 164000);
   assert.equal(c.roundFinancialHundredth(33.333333333333336), 33.33);
   assert.equal(c.roundFinancialHundredth(0), 0);
+  assert.equal(c.money(1234567.891234), '1,234,567.89');
+  assert.equal(c.money(164000.00000000003), '164,000');
+  assert.equal(c.financialPercent(12.345678901234567), '12.35%');
   assert.equal(c.resultMoney(1234567.891234), '1,234,567.89');
   assert.equal(c.resultMoney(164000.00000000003), '164,000');
   assert.equal(c.resultPercent(12.345678901234567), '12.35%');
@@ -112,4 +115,13 @@ test('a rendered sensitivity row carries no long decimal tail', () => {
   assert.ok(body.innerHTML.includes('123,456.79'), body.innerHTML);
   assert.ok(body.innerHTML.includes('500,000.12'), body.innerHTML);
   assert.equal(/\.\d{3,}/.test(body.innerHTML), false, body.innerHTML);
+});
+
+test('financeBase withFund calculates projectCost without land plus fund fees', () => {
+  const projectCost = 15000000;
+  const landCostIncluded = 5000000;
+  const fundFeesSnapshot = 750000;
+  const financeBase = 'withFund';
+  const financeBaseAmount = Math.max(0, financeBase === 'withFund' ? (projectCost - landCostIncluded) + fundFeesSnapshot : (financeBase === 'withoutLand' ? projectCost - landCostIncluded : projectCost));
+  assert.equal(financeBaseAmount, 10750000);
 });

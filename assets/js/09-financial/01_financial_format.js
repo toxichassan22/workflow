@@ -9,22 +9,21 @@
     // mismatched columns. Keeping a single table removes that whole class of bug.
 
     // S4: Financial Study Model (Extracted from THE-VIEW-Financial-Model-FINAL-v2.html)
-    function formatFinancialResultNumber(value, grouped = true) {
-      return formatExactSystemNumber(value, grouped);
-    }
-    function money(n) { return formatFinancialResultNumber(n, true) }
-    function financialPercent(n) { return formatFinancialResultNumber(n, false) + '%' }
-    // صفحة النتائج: كل قيمة معروضة عليها تتقرب دائمًا لأقرب جزء من مئة (خانتان عشريتان)
-    // مع بقاء الإشارة، وبقية أقسام الدراسة المالية تعرض القيمة كما حُفظت.
     function roundFinancialHundredth(value) {
+      if (value === null || value === undefined || value === '') return value;
       const number = Number(value);
-      if (!Number.isFinite(number)) return number;
+      if (!Number.isFinite(number)) return value;
       const sign = number < 0 ? -1 : 1;
       // الضرب في (1 + EPSILON) يعالج الحالات التي يهبط فيها تمثيل الفاصلة العائمة جزءًا
       // واحدًا تحت النصف (1.005 مثلًا)، فتبقى القيمة مقربة لأعلى عند المنتصف.
       const scaled = Math.abs(number) * 100 * (1 + Number.EPSILON);
       return sign * Math.round(scaled) / 100;
     }
+    function formatFinancialResultNumber(value, grouped = true) {
+      return formatExactSystemNumber(roundFinancialHundredth(value), grouped);
+    }
+    function money(n) { return formatFinancialResultNumber(n, true) }
+    function financialPercent(n) { return formatFinancialResultNumber(n, false) + '%' }
     function resultMoney(n) { return money(roundFinancialHundredth(n)) }
     function resultPercent(n) { return financialPercent(roundFinancialHundredth(n)) }
     function resultNumber(n, grouped = false) { return formatFinancialResultNumber(roundFinancialHundredth(n), grouped) }
@@ -50,6 +49,7 @@
           childKey, preserveFinancialResults(childValue)
         ]));
       }
+      if (typeof value === 'number') return roundFinancialHundredth(value);
       return value;
     }
     function financialControlContext(control) {
