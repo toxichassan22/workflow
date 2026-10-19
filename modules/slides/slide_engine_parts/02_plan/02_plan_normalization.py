@@ -1249,7 +1249,7 @@ _FINANCIAL_INDICATOR_LABELS = (
     ('totalGraceDiscount', 'إجمالي خصم فترة السماح'),
     ('facilityAmount', 'قيمة التسهيل التمويلي'),
     ('arrangementFee', 'رسوم ترتيب التمويل'),
-    ('totalFinanceInterest', 'إجمالي فوائد التمويل'),
+    ('totalFinanceInterest', 'إجمالي المرابحة'),
     ('totalFinanceCost', 'إجمالي كلفة التمويل'),
     ('totalFundFees', 'إجمالي أتعاب الصندوق'),
     ('saleExitValue', 'صافي التخارج البيعي'),

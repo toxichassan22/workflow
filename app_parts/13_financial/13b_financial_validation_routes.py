@@ -36,7 +36,7 @@ def validate_financial_model(model):
         for key, label in (
             ('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'),
             ('financeArrangementFeeRate', 'رسوم ترتيب التمويل'),
-            ('financeInterestMethod', 'طريقة احتساب الفائدة'), ('annualFinanceRate', 'معدل الفائدة'),
+            ('financeInterestMethod', 'طريقة احتساب المرابحة'), ('annualFinanceRate', 'معدل المرابحة'),
             ('financeDrawYears', 'سنوات سحب التمويل'),
             ('financeRepaymentStartYear', 'سنة بدء السداد'),
             ('financeRepaymentYears', 'سنوات السداد'),

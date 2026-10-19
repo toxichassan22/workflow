@@ -14,6 +14,20 @@
     }
     function money(n) { return formatFinancialResultNumber(n, true) }
     function financialPercent(n) { return formatFinancialResultNumber(n, false) + '%' }
+    // صفحة النتائج: كل قيمة معروضة عليها تتقرب دائمًا لأقرب جزء من مئة (خانتان عشريتان)
+    // مع بقاء الإشارة، وبقية أقسام الدراسة المالية تعرض القيمة كما حُفظت.
+    function roundFinancialHundredth(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return number;
+      const sign = number < 0 ? -1 : 1;
+      // الضرب في (1 + EPSILON) يعالج الحالات التي يهبط فيها تمثيل الفاصلة العائمة جزءًا
+      // واحدًا تحت النصف (1.005 مثلًا)، فتبقى القيمة مقربة لأعلى عند المنتصف.
+      const scaled = Math.abs(number) * 100 * (1 + Number.EPSILON);
+      return sign * Math.round(scaled) / 100;
+    }
+    function resultMoney(n) { return money(roundFinancialHundredth(n)) }
+    function resultPercent(n) { return financialPercent(roundFinancialHundredth(n)) }
+    function resultNumber(n, grouped = false) { return formatFinancialResultNumber(roundFinancialHundredth(n), grouped) }
     function rawNum(n) { return Number(n || 0) }
     function parseNumber(value) {
       let cleaned = String(value ?? '').trim();
@@ -327,15 +341,17 @@
             <div><label>أساس احتساب التمويل</label><select id="financeBase" onchange="calculateAll()"><option value="withLand">إجمالي تكلفة المشروع مع قيمة الأرض</option><option value="withoutLand">إجمالي تكلفة المشروع بدون قيمة الأرض</option></select></div>
             <div><label>نسبة التمويل من تكلفة المشروع %</label><input id="financingRate" type="number" oninput="calculateAll()"></div>
             <div><label>رسوم ترتيب التمويل %</label><input id="financeArrangementFeeRate" type="number" oninput="calculateAll()"></div>
-            <div><label>طريقة احتساب الفائدة</label><select id="financeInterestMethod" onchange="calculateAll()"><option value="fixed">ثابتة على أصل التسهيل</option><option value="declining">متناقصة على الرصيد المتبقي</option></select></div>
-            <div><label>معدل الفائدة السنوي %</label><input id="annualFinanceRate" type="number" oninput="calculateAll()"></div>
+            <div><label>طريقة احتساب المرابحة</label><select id="financeInterestMethod" onchange="calculateAll()"><option value="fixed">ثابتة على أصل التسهيل</option><option value="declining">متناقصة على الرصيد المتبقي</option></select></div>
+            <div><label>معدل المرابحة السنوي %</label><input id="annualFinanceRate" type="number" oninput="calculateAll()"></div>
             <div><label>عدد سنوات سحب التمويل</label><input id="financeDrawYears" type="number" min="1" oninput="syncFinanceDrawPlan();calculateAll()"></div>
             <div><label>سنة بدء سداد التمويل</label><input id="financeRepaymentStartYear" type="number" min="1" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
             <div><label>عدد سنوات التمويل والسداد</label><input id="financeRepaymentYears" type="number" min="1" oninput="syncFinanceRepaymentPlan();calculateAll()"></div>
+            <div><label>سنة بدء المرابحة</label><input id="financeMurabahaStartYear" type="number" min="1" oninput="syncFinanceMurabahaPlan();calculateAll()"></div>
+            <div><label>عدد سنوات المرابحة</label><input id="financeMurabahaYears" type="number" min="1" oninput="syncFinanceMurabahaPlan();calculateAll()"></div>
             <div><label>قيمة أساس التمويل</label><input id="financeBaseAmount" readonly></div>
             <div><label>قيمة التسهيل التمويلي</label><input id="facilityAmount" readonly></div>
             <div><label>رسوم ترتيب التمويل</label><input id="arrangementFeeTotal" readonly></div>
-            <div><label>إجمالي فوائد التمويل</label><input id="financeInterestTotal" readonly></div>
+            <div><label>إجمالي المرابحة</label><input id="financeInterestTotal" readonly></div>
             <div><label>مساهمة الأرض العينية</label><input id="landEquityContribution" readonly></div>
             <div><label>الضخ النقدي المطلوب</label><input id="cashEquityRequired" readonly></div>
             <div><label>إجمالي حقوق الملكية</label><input id="equityRequired" readonly></div>
@@ -345,8 +361,10 @@
           <div class="table-wrap"><table id="financeDrawTable"><thead><tr><th>سنة السحب</th><th>نسبة السحب من التسهيل %</th><th>قيمة السحب المحسوبة</th></tr></thead><tbody></tbody></table></div>
           <h4>خطة سداد أصل التمويل</h4>
           <div class="table-wrap"><table id="financeRepaymentTable"><thead><tr><th>سنة السداد</th><th>نسبة السداد من أصل التسهيل %</th><th>قيمة السداد المحسوبة</th></tr></thead><tbody></tbody></table></div>
+          <h4>خطة المرابحة</h4>
+          <div class="table-wrap"><table id="financeMurabahaTable"><thead><tr><th>سنة الاستحقاق</th><th>نسبة المرابحة %</th><th>قيمة المرابحة المحسوبة</th></tr></thead><tbody></tbody></table></div>
           <h4>حركة رصيد التمويل السنوية</h4>
-          <div class="table-wrap"><table id="debtScheduleTable"><thead><tr><th>السنة</th><th>الرصيد الافتتاحي</th><th>السحب</th><th>الفائدة</th><th>رسوم التمويل</th><th>سداد أصل التمويل</th><th>الرصيد الختامي</th></tr></thead><tbody></tbody></table></div>
+          <div class="table-wrap"><table id="debtScheduleTable"><thead><tr><th>السنة</th><th>الرصيد الافتتاحي</th><th>السحب</th><th>المرابحة</th><th>رسوم التمويل</th><th>سداد أصل التمويل</th><th>الرصيد الختامي</th></tr></thead><tbody></tbody></table></div>
         </div>
 
         <div class="finance-block" id="fundBlock">
@@ -455,7 +473,7 @@
           </div>
           <h4>نطاق احتساب المؤشرات</h4>
           <div class="table-wrap"><table class="compact-table"><thead><tr><th>المؤشر</th><th>معالجة التمويل</th><th>الفترة</th></tr></thead><tbody>
-            <tr><td>ROI</td><td>يشمل رسوم ترتيب التمويل والفوائد</td><td id="scopeROI">—</td></tr>
+            <tr><td>ROI</td><td>يشمل رسوم ترتيب التمويل والمرابحة</td><td id="scopeROI">—</td></tr>
             <tr><td>Project IRR</td><td>قبل التمويل وأتعاب الصندوق</td><td id="scopeProjectIRR">—</td></tr>
             <tr><td>Equity IRR</td><td>بعد التمويل وأتعاب الصندوق وحافز الأداء</td><td id="scopeEquityIRR">—</td></tr>
             <tr><td>استرداد المشروع</td><td>تكلفة شاملة التمويل</td><td>كامل الدراسة</td></tr>
@@ -465,7 +483,7 @@
           <h3>جدول التدفقات النقدية</h3>
           <div class="table-wrap">
             <table id="cashflowTable">
-              <thead><tr><th>السنة</th><th>المرحلة</th><th class="cf-rental">الوصول للإشغال %</th><th class="cf-sales">المبيعات</th><th class="cf-rental">إيرادات التأجير</th><th class="cf-grace">خصم فترة السماح</th><th>تكلفة التطوير</th><th>دفعة المطور</th><th class="cf-rental">المصروفات</th><th>إيجار الأرض</th><th class="cf-fund">أتعاب الصندوق</th><th class="cf-finance">سحب التمويل</th><th class="cf-finance">فائدة ورسوم التمويل</th><th class="cf-finance">سداد أصل التمويل</th><th>صافي تدفق المشروع</th><th>الرصيد التراكمي</th><th>السيولة</th></tr></thead>
+              <thead><tr><th>السنة</th><th>المرحلة</th><th class="cf-rental">الوصول للإشغال %</th><th class="cf-sales">المبيعات</th><th class="cf-rental">إيرادات التأجير</th><th class="cf-grace">خصم فترة السماح</th><th>تكلفة التطوير</th><th>دفعة المطور</th><th class="cf-rental">المصروفات</th><th>إيجار الأرض</th><th class="cf-fund">أتعاب الصندوق</th><th class="cf-finance">سحب التمويل</th><th class="cf-finance">مرابحة ورسوم التمويل</th><th class="cf-finance">سداد أصل التمويل</th><th>صافي تدفق المشروع</th><th>الرصيد التراكمي</th><th>السيولة</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -766,6 +784,26 @@
         addFinanceRepaymentYear(found || { year, repaymentPct: 100 / years });
       }
     }
+    function addFinanceMurabahaYear(d = {}) {
+      const tb = document.querySelector('#financeMurabahaTable tbody'); if (!tb) return; const tr = document.createElement('tr');
+      tr.innerHTML = `<td data-field="year"><input type="number" min="1" value="${financialInputNumber(d.year, 1)}" readonly></td><td data-field="murabahaPct"><input type="number" min="0" value="${financialInputNumber(d.murabahaPct, 0)}"></td><td class="row-result financeMurabahaAmount">0</td>`;
+      tb.appendChild(tr); tr.querySelectorAll('input').forEach(x => x.addEventListener('input', calculateAll)); enhanceNumericInputs(tr);
+    }
+    function syncFinanceMurabahaPlan(plan) {
+      const startYear = Math.max(1, Math.min(60, Math.round(num('financeMurabahaStartYear') || 1)));
+      const years = Math.max(0, Math.min(40, Math.round(num('financeMurabahaYears'))));
+      const tb = document.querySelector('#financeMurabahaTable tbody'); if (!tb) return;
+      const existing = Array.isArray(plan) ? plan : [...tb.querySelectorAll('tr')].map(tr => ({
+        year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1,
+        murabahaPct: parseNumber(tr.querySelector('[data-field="murabahaPct"] input')?.value)
+      }));
+      tb.innerHTML = '';
+      for (let index = 0; index < years; index++) {
+        const year = startYear + index;
+        const found = existing.find(r => Number(r.year) === year);
+        addFinanceMurabahaYear(found || { year, murabahaPct: years ? 100 / years : 0 });
+      }
+    }
     function addFundAdditionalFee(d = {}) {
       const tb = document.querySelector('#fundAdditionalFeesTable tbody'); if (!tb) return; const tr = document.createElement('tr');
       tr.innerHTML = `<td data-field="name"><input value="${d.name || ''}" placeholder="مثال: أتعاب التأسيس والهيكلة"></td><td data-field="method"><select>${selectHtml(fundAdditionalFeeMethods, d.method || 'fixed')}</select><span class="help formula fundAdditionalFeeFormula"></span></td><td data-field="value"><input type="number" min="0" value="${financialInputNumber(d.value, 0)}"></td><td data-field="startYear"><input type="number" min="1" value="${financialInputNumber(d.startYear, 1)}"></td><td data-field="endYear"><input type="number" min="1" value="${financialInputNumber(d.endYear, financialInputNumber(d.startYear, 1))}"></td><td data-field="recurrence"><select><option value="once" ${d.recurrence === 'annual' ? '' : 'selected'}>مرة واحدة</option><option value="annual" ${d.recurrence === 'annual' ? 'selected' : ''}>سنوي</option></select></td><td class="row-result fundAdditionalFeeResult">0</td><td>${rowActionsHtml()}</td>`;
@@ -788,9 +826,13 @@
     function lastYearCarryingValue(projected, fields) {
       return projected.reduce((last, row) => fields.some(field => Math.abs(Number(row[field]) || 0) > FINANCIAL_ROW_EPSILON) ? row.year : last, 0);
     }
-    function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears) {
+    function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears, murabahaStartYear, murabahaYears) {
       if (!financeOn) return [];
-      const plannedEnd = Math.max(1, Math.round(repaymentStartYear || 1)) + Math.max(1, Math.round(repaymentYears || 1)) - 1;
+      const repaymentEnd = Math.max(1, Math.round(repaymentStartYear || 1)) + Math.max(1, Math.round(repaymentYears || 1)) - 1;
+      const murabahaEnd = Math.max(0, Math.round(murabahaYears || 0)) > 0
+        ? Math.max(1, Math.round(murabahaStartYear || 1)) + Math.round(murabahaYears) - 1
+        : 0;
+      const plannedEnd = Math.max(repaymentEnd, murabahaEnd);
       return projected.filter(row => row.year <= plannedEnd);
     }
     function fundFeeScheduleRows(projected, fundFeesOn, feeEndYear) {

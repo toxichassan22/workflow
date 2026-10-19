@@ -42,7 +42,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "طريق": "Road",
   "عدد الشرائح الافتراضي": "Default slide count",
   "عرض تقديمي": "Presentation",
-  "فائدة ورسوم التمويل": "Financing interest and fees",
+  "مرابحة ورسوم التمويل": "Financing murabaha and fees",
   "فرعي": "Secondary",
   "قالب التصميم": "Design template",
   "قسم المشروع غير صالح": "Invalid project section",

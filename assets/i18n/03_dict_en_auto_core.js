@@ -665,7 +665,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "معاينة ومقارنة": "Preview and compare",
   "معدل التمويل": "Financing Rate",
   "معدل الرسملة عند التخارج": "Exit Capitalization Rate (Cap Rate)",
-  "معدل الفائدة السنوي": "Annual Interest Rate %",
+  "معدل المرابحة السنوي": "Annual Murabaha Rate %",
   "مقارنة": "Benchmark / Comparison",
   "مقبول": "Approved",
   "مكتب": "Office",

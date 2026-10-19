@@ -303,7 +303,7 @@ def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
             })
 
     # 3. Finance Cost (تكلفة التمويل)
-    has_fin = any(any(kw in str(it.get('name', '')).lower() for kw in ('تمويل', 'فوائد التمويل', 'رسوم التمويل', 'finance')) for it in items)
+    has_fin = any(any(kw in str(it.get('name', '')).lower() for kw in ('تمويل', 'مرابحة', 'رسوم التمويل', 'finance')) for it in items)
     if not has_fin:
         fin_val = _clean_numeric_val(
             inputs.get('totalFinanceCost')
@@ -319,7 +319,7 @@ def _extract_waterfall_chart_data(part_or_table, model=None, project_data=None):
         if fin_val <= 0 and isinstance(tables.get('debtScheduleTable'), list):
             for dr in tables['debtScheduleTable']:
                 if isinstance(dr, dict):
-                    fin_val += _clean_numeric_val(dr.get('الفائدة')) + _clean_numeric_val(dr.get('رسوم التمويل'))
+                    fin_val += _clean_numeric_val(dr.get('المرابحة') or dr.get('الفائدة')) + _clean_numeric_val(dr.get('رسوم التمويل'))
         if fin_val > 0:
             seen_names.add('تكلفة التمويل')
             items.append({

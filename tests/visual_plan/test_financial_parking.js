@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const root = path.resolve(__dirname, '..', '..');
-const files = ['09-financial/01_financial_format.js', '09-financial/02_formulas_calc.js',
+const files = ['04-market.js', '09-financial/01_financial_format.js', '09-financial/02_formulas_calc.js',
   '09-financial/03_parking_planning.js', '10-financial-report-timeline/01_report_collect.js'];
 const source = files.map(file => fs.readFileSync(path.join(root, 'assets/js', file), 'utf8')).join('\n');
 const plain = value => JSON.parse(JSON.stringify(value));

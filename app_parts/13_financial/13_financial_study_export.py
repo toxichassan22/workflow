@@ -27,7 +27,7 @@ def _financial_report_cell(rendered, value=None):
 
 
 _FINANCIAL_PERCENT_KEYS = {
-    'coverageRate', 'occupancy', 'costPct', 'devPct', 'drawPct', 'repaymentPct',
+    'coverageRate', 'occupancy', 'costPct', 'devPct', 'drawPct', 'repaymentPct', 'murabahaPct',
     'growth', 'occupancyReach', 'reachPct', 'financingRate', 'annualFinanceRate',
     'developerRate', 'financeArrangementFeeRate', 'fundManagementRate',
     'operatingExitCostRate', 'developerUpliftShare', 'roi', 'projectIrr', 'equityIrr',
@@ -36,6 +36,7 @@ _FINANCIAL_YEAR_KEYS = {
     'year', 'startYear', 'endYear', 'studyYear', 'operationYear', 'developmentYears',
     'operationYears', 'salesStartYear', 'salesYears', 'landContributionYear',
     'financeDrawYears', 'financeRepaymentStartYear', 'financeRepaymentYears',
+    'financeMurabahaStartYear', 'financeMurabahaYears',
     'fundFeeStartYear', 'fundFeeEndYear', 'performanceCrystallizationYear',
     'saleExitYear', 'operatingExitYear',
 }
@@ -172,7 +173,7 @@ FINANCIAL_RESULT_LABELS = (
     ('totalGraceDiscount', 'إجمالي خصم فترة السماح'),
     ('facilityAmount', 'قيمة التسهيل التمويلي'),
     ('arrangementFee', 'رسوم ترتيب التمويل'),
-    ('totalFinanceInterest', 'إجمالي فوائد التمويل'),
+    ('totalFinanceInterest', 'إجمالي المرابحة'),
     ('totalFinanceCost', 'إجمالي كلفة التمويل'),
     ('totalFundFees', 'إجمالي أتعاب الصندوق'),
     ('saleExitValue', 'صافي التخارج البيعي'),
@@ -270,7 +271,7 @@ def _filter_cashflow_columns(rows, inputs):
     if not fund_on:
         drop_columns.update({'fundFeesAnnual', 'أتعاب الصندوق', 'fundManagementFee', 'additionalFundFees', 'fundExitFee', 'performanceFee'})
     if not finance_on:
-        drop_columns.update({'financeDraw', 'سحب التمويل', 'financeInterest', 'فائدة التمويل', 'financeFee', 'رسوم التمويل', 'financeRepayment', 'سداد أصل التمويل', 'openingDebt', 'closingDebt', 'فائدة ورسوم التمويل'})
+        drop_columns.update({'financeDraw', 'سحب التمويل', 'financeInterest', 'فائدة التمويل', 'مرابحة التمويل', 'financeFee', 'رسوم التمويل', 'financeRepayment', 'سداد أصل التمويل', 'openingDebt', 'closingDebt', 'فائدة ورسوم التمويل', 'مرابحة ورسوم التمويل'})
     if not exit_on:
         drop_columns.update({'terminal', 'قيمة التخارج', 'saleExit', 'operatingExit'})
 
@@ -311,7 +312,7 @@ FINANCIAL_COLUMN_LABELS = {
     'qty': 'الكمية / المساحة', 'price': 'السعر / النسبة', 'period': 'الفترة',
     'occupancy': 'الإشغال المستهدف %', 'class': 'التصنيف', 'duration': 'المدة',
     'year': 'السنة', 'costPct': 'نسبة تكلفة التطوير %', 'devPct': 'نسبة دفعة المطور %',
-    'drawPct': 'نسبة السحب %', 'repaymentPct': 'نسبة السداد %',
+    'drawPct': 'نسبة السحب %', 'repaymentPct': 'نسبة السداد %', 'murabahaPct': 'نسبة المرابحة %',
     'value': 'المبلغ / النسبة', 'startYear': 'سنة البداية', 'endYear': 'سنة النهاية',
     'recurrence': 'التكرار', 'type': 'نوع البند', 'base': 'القيمة الأساسية', 'growth': 'النمو %',
     'amount': 'القيمة', 'phase': 'المرحلة', 'occupancyReach': 'الوصول للإشغال %',
@@ -320,7 +321,7 @@ FINANCIAL_COLUMN_LABELS = {
     'graceDiscount': 'خصم فترة السماح', 'developmentCost': 'تكلفة التطوير',
     'developerPayment': 'دفعة المطور', 'opex': 'المصروفات', 'landRent': 'إيجار الأرض',
     'fundFeesAnnual': 'أتعاب الصندوق', 'financeDraw': 'سحب التمويل',
-    'financeInterest': 'فائدة التمويل', 'financeFee': 'رسوم التمويل',
+    'financeInterest': 'مرابحة التمويل', 'financeFee': 'رسوم التمويل',
     'financeRepayment': 'سداد أصل التمويل', 'final': 'صافي تدفق المشروع',
     'cumulative': 'الرصيد التراكمي', 'cashReserve': 'السيولة',
     'openingDebt': 'الرصيد الافتتاحي', 'closingDebt': 'الرصيد الختامي',
@@ -340,7 +341,7 @@ FINANCIAL_COLUMN_LABELS = {
 FINANCIAL_REPORT_DROP_COLUMNS = {
     'ترتيب / حذف', 'حذف', 'ترتيب', 'مرتبط بمكون', 'المكون المرتبط',
     'idx', 'id', 'component', 'componentId', 'leasable', 'totalArea',
-    'projected', 'cashflows', 'projectCashflows', 'financePlan', 'financeRepaymentPlan',
+    'projected', 'cashflows', 'projectCashflows', 'financePlan', 'financeRepaymentPlan', 'financeMurabahaPlan',
     'modeFlags', 'areaState',
 }
 
@@ -517,7 +518,8 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
         grace_html += '</section>'
         sections.append(grace_html)
     if inputs.get('financeEnabled') == 'yes':
-        sections.append('<section><h2>8. التمويل</h2>' + rows([('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'), ('annualFinanceRate', 'معدل الفائدة'), ('financeInterestMethod', 'طريقة الفائدة'), ('financeDrawYears', 'سنوات السحب'), ('financeRepaymentYears', 'سنوات السداد')]) + _financial_report_table(tables.get('financeDrawTable')) + _financial_report_table(tables.get('financeRepaymentTable')) + '</section>')
+        murabaha_table_html = _financial_report_table(tables.get('financeMurabahaTable')) if tables.get('financeMurabahaTable') else ''
+        sections.append('<section><h2>8. التمويل</h2>' + rows([('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'), ('annualFinanceRate', 'معدل المرابحة'), ('financeInterestMethod', 'طريقة المرابحة'), ('financeDrawYears', 'سنوات السحب'), ('financeRepaymentYears', 'سنوات السداد')]) + _financial_report_table(tables.get('financeDrawTable')) + _financial_report_table(tables.get('financeRepaymentTable')) + murabaha_table_html + '</section>')
     if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
         sections.append('<section><h2>9. الصندوق وأتعابه</h2>' + rows([('fundFeeBase', 'أساس الأتعاب'), ('fundCapitalInput', 'رأس مال الصندوق'), ('fundManagementRate', 'نسبة الإدارة'), ('fundFeeStartYear', 'بداية الاحتساب'), ('fundFeeEndYear', 'نهاية الاحتساب')]) + _financial_report_table(tables.get('fundAdditionalFeesTable')) + '</section>')
     if inputs.get('externalEnabled') == 'yes' and tables.get('externalTable'):
@@ -888,12 +890,14 @@ def generate_financial_pdf_from_model(project_name, model, output_path):
         draw_kv_table([
             ('أساس التمويل', inputs.get('financeBase'), 'financeBase'),
             ('نسبة التمويل', inputs.get('financingRate'), 'financingRate'),
-            ('معدل الفائدة', inputs.get('annualFinanceRate'), 'annualFinanceRate'),
+            ('معدل المرابحة', inputs.get('annualFinanceRate'), 'annualFinanceRate'),
             ('قيمة أساس التمويل', inputs.get('financeBaseAmount') or projection.get('financeBaseAmount'), 'financeBaseAmount'),
             ('قيمة التسهيل التمويلي', inputs.get('facilityAmount') or projection.get('facilityAmount'), 'facilityAmount'),
         ])
         draw_data_table(tables.get('financeDrawTable'), 'خطة السحب')
         draw_data_table(tables.get('financeRepaymentTable'), 'خطة السداد')
+        if tables.get('financeMurabahaTable'):
+            draw_data_table(tables.get('financeMurabahaTable'), 'خطة المرابحة')
     if inputs.get('fundEnabled') == 'yes' and inputs.get('fundFeesEnabled') == 'yes':
         draw_text('9. الصندوق وأتعابه', 12)
         draw_kv_table([

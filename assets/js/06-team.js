@@ -936,6 +936,7 @@
         hydrateFinancialTableRows('scheduleTable', rows.schedule, addScheduleStage);
         hydrateFinancialTableRows('financeDrawTable', rows.financeDraw, addFinanceDrawYear);
         hydrateFinancialTableRows('financeRepaymentTable', rows.financeRepayment, addFinanceRepaymentYear);
+        hydrateFinancialTableRows('financeMurabahaTable', rows.financeMurabaha, addFinanceMurabahaYear);
         hydrateFinancialTableRows('fundAdditionalFeesTable', rows.fundAdditionalFees, addFundAdditionalFee);
         hydrateFinancialTableRows('occupancyRampTable', rows.occupancyRamp, addOccupancyRampYear);
         hydrateFinancialTableRows('costTable', rows.costs, addCost);

@@ -243,8 +243,8 @@
       ['hurdleRate', 'hurdleMethod', 'performanceFeeRate', 'performanceFeeBase', 'catchupEnabled', 'catchupRate', 'performanceCrystallizationYear'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = !perfOn });
       const catchup = document.getElementById('catchupRate'); if (catchup) catchup.disabled = !perfOn || val('catchupEnabled') !== 'yes';
       const financeOn = val('financeEnabled') !== 'no';
-      ['financeBase', 'financingRate', 'financeArrangementFeeRate', 'financeInterestMethod', 'annualFinanceRate', 'financeDrawYears', 'financeRepaymentStartYear', 'financeRepaymentYears'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = !financeOn; });
-      document.querySelectorAll('#financeDrawTable input').forEach(el => el.disabled = !financeOn); document.querySelectorAll('#financeRepaymentTable input').forEach(el => el.disabled = !financeOn);
+      ['financeBase', 'financingRate', 'financeArrangementFeeRate', 'financeInterestMethod', 'annualFinanceRate', 'financeDrawYears', 'financeRepaymentStartYear', 'financeRepaymentYears', 'financeMurabahaStartYear', 'financeMurabahaYears'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = !financeOn; });
+      document.querySelectorAll('#financeDrawTable input').forEach(el => el.disabled = !financeOn); document.querySelectorAll('#financeRepaymentTable input').forEach(el => el.disabled = !financeOn); document.querySelectorAll('#financeMurabahaTable input').forEach(el => el.disabled = !financeOn);
 
       updateRevenueComponentOptions();
       document.querySelectorAll('#componentsTable tbody tr').forEach(tr => { tr.querySelectorAll('input,select').forEach(x => { if (!x.dataset.boundComponentRefresh) { x.addEventListener('input', () => { updateRevenueComponentOptions(); calculateAll(); }); x.dataset.boundComponentRefresh = '1'; } }); });
@@ -568,6 +568,39 @@
       const financeRepaymentPlan = [...document.querySelectorAll('#financeRepaymentTable tbody tr')].map(tr => ({ tr, year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1, repaymentPct: Math.max(0, parseNumber(tr.querySelector('[data-field="repaymentPct"] input')?.value)) }));
       const financeRepaymentPctTotal = financeRepaymentPlan.reduce((sum, row) => sum + row.repaymentPct, 0);
       financeRepaymentPlan.forEach(row => { const amount = financeRepaymentPctTotal ? facilityAmount * (row.repaymentPct / financeRepaymentPctTotal) : 0; const c = row.tr.querySelector('.financeRepaymentAmount'); if (c) c.textContent = money(amount); });
+      const financeMurabahaStartYear = Math.max(1, Math.min(totalYears, Math.round(num('financeMurabahaStartYear') || 1))), financeMurabahaYears = Math.max(0, Math.min(40, Math.round(num('financeMurabahaYears'))));
+      if (document.querySelectorAll('#financeMurabahaTable tbody tr').length !== financeMurabahaYears) syncFinanceMurabahaPlan();
+      const financeMurabahaPlan = [...document.querySelectorAll('#financeMurabahaTable tbody tr')].map(tr => ({ tr, year: parseNumber(tr.querySelector('[data-field="year"] input')?.value) || 1, murabahaPct: Math.max(0, parseNumber(tr.querySelector('[data-field="murabahaPct"] input')?.value)) }));
+      const financeMurabahaPctTotal = financeMurabahaPlan.reduce((sum, row) => sum + row.murabahaPct, 0);
+
+      let baseMurabaha = 0;
+      if (financeOn) {
+        if (financeInterestMethod === 'fixed') {
+          baseMurabaha = facilityAmount * annualFinanceRate * Math.max(1, (financeMurabahaYears || financeRepaymentYears || 1));
+        } else {
+          let simDebt = 0, totalSimDrawn = 0;
+          for (let y = 1; y <= totalYears; y++) {
+            const planRow = financePlan.find(row => row.year === y);
+            const plannedDraw = financeDrawPctTotal && planRow ? facilityAmount * (planRow.drawPct / financeDrawPctTotal) : 0;
+            const draw = y <= financeDrawYears ? Math.min(Math.max(0, facilityAmount - totalSimDrawn), plannedDraw) : 0;
+            totalSimDrawn += draw;
+            const outstanding = simDebt + draw;
+            if (outstanding > 0) baseMurabaha += outstanding * annualFinanceRate;
+            const repaymentRow = financeRepaymentPlan.find(row => row.year === y);
+            const plannedRepayment = financeRepaymentPctTotal && repaymentRow ? facilityAmount * (repaymentRow.repaymentPct / financeRepaymentPctTotal) : 0;
+            let repayment = Math.min(outstanding, plannedRepayment);
+            if (y === totalYears || (settleDebtAtExit && exitMethod !== 'none' && y === operatingExitYear)) repayment = outstanding;
+            simDebt = Math.max(0, outstanding - repayment);
+          }
+        }
+      }
+      const useMurabahaPlan = financeOn && financeMurabahaYears > 0 && financeMurabahaPlan.length > 0;
+      financeMurabahaPlan.forEach(row => {
+        const amount = financeMurabahaPctTotal ? baseMurabaha * (row.murabahaPct / financeMurabahaPctTotal) : 0;
+        row.amount = amount;
+        const c = row.tr.querySelector('.financeMurabahaAmount');
+        if (c) c.textContent = money(amount);
+      });
 
       const scheduleRows = val('developerPaymentsEnabled') === 'yes' ? [...document.querySelectorAll('#scheduleTable tbody tr')].map(tr => {
         const startYear = Math.max(1, Math.min(developmentYears, Math.round(parseNumber(tr.dataset.stageYear) || 1)));
@@ -641,8 +674,9 @@
         const projectOutflow = developmentCost + developerPayment + landPayment, unlevered = saleRevenue + operatingRevenue + tv - projectOutflow - opexAnnual - annualLandRent, openingDebt = debtBalance;
         const planRow = financePlan.find(row => row.year === year), plannedDraw = financeDrawPctTotal && planRow ? facilityAmount * (planRow.drawPct / financeDrawPctTotal) : 0, draw = (financeOn && year <= financeDrawYears) ? Math.min(Math.max(0, facilityAmount - totalDrawn), plannedDraw) : 0;
         totalDrawn += draw;
-        const outstandingBeforeRepayment = openingDebt + draw, firstDrawYear = financePlan.filter(row => row.drawPct > 0).reduce((min, row) => Math.min(min, row.year), 1), withinFixedInterestTerm = year >= firstDrawYear && year < firstDrawYear + financeRepaymentYears;
-        const interest = financeOn ? (financeInterestMethod === 'fixed' ? (withinFixedInterestTerm ? facilityAmount * annualFinanceRate : 0) : (outstandingBeforeRepayment > 0 ? outstandingBeforeRepayment * annualFinanceRate : 0)) : 0, fee = year === firstDrawYear ? arrangementFee : 0;
+        const outstandingBeforeRepayment = openingDebt + draw, firstDrawYear = financePlan.filter(row => row.drawPct > 0).reduce((min, row) => Math.min(min, row.year), 1), withinFixedInterestTerm = year >= firstDrawYear && year < firstDrawYear + (financeMurabahaYears || financeRepaymentYears);
+        const murabahaPlanRow = useMurabahaPlan ? financeMurabahaPlan.find(row => row.year === year) : null;
+        const interest = financeOn ? (useMurabahaPlan ? (murabahaPlanRow ? murabahaPlanRow.amount : 0) : (financeInterestMethod === 'fixed' ? (withinFixedInterestTerm ? facilityAmount * annualFinanceRate : 0) : (outstandingBeforeRepayment > 0 ? outstandingBeforeRepayment * annualFinanceRate : 0))) : 0, fee = year === firstDrawYear ? arrangementFee : 0;
         const repaymentRow = financeRepaymentPlan.find(row => row.year === year), plannedRepayment = financeRepaymentPctTotal && repaymentRow ? facilityAmount * (repaymentRow.repaymentPct / financeRepaymentPctTotal) : 0;
         let repayment = financeOn ? Math.min(openingDebt + draw, plannedRepayment) : 0;
         if (financeOn && settleDebtAtExit && exitMethod !== 'none' && year === operatingExitYear) repayment = openingDebt + draw;
@@ -710,42 +744,43 @@
       setVal('developerBaseAmount', money(developerBaseAmount));
       setVal('developerCostValue', money(developerCost));
 
-      setTxt('resLeasable', money(leasable) + ' م²');
-      setTxt('resRevenueY1', money(revenueY1));
-      setTxt('resProjectCostBeforeFinance', money(projectCost));
-      setTxt('resProjectCost', money(projectCostWithFinance));
-      setTxt('resNOIY1', money(noiY1));
-      setTxt('resFullOccupancyRevenue', money(fullOccupancyRevenue));
-      setTxt('resFullOccupancyOpex', money(fullOccupancyOpex));
-      setTxt('resFullOccupancyNOI', money(fullOccupancyNOI));
-      setTxt('resSaleExitGross', money(saleExitGross));
-      setTxt('resSaleExit', money(saleExitValue));
-      setTxt('resOperatingExitGross', money(operatingExitGross));
-      setTxt('resOperatingExit', money(operatingExitValue));
-      setHtml('resSaleExitScope', saleExitMethod === 'none' ? '<span>غير مفعل</span>' : `<span>السنة</span> ${saleExitYear} | <span>تكلفة التخارج</span> ${financialPercent(saleExitCostRate * 100)}`);
+      // صفحة «النتائج»: كل قيمة معروضة فيها تتقرب لأقرب جزء من مئة قبل العرض.
+      setTxt('resLeasable', resultMoney(leasable) + ' م²');
+      setTxt('resRevenueY1', resultMoney(revenueY1));
+      setTxt('resProjectCostBeforeFinance', resultMoney(projectCost));
+      setTxt('resProjectCost', resultMoney(projectCostWithFinance));
+      setTxt('resNOIY1', resultMoney(noiY1));
+      setTxt('resFullOccupancyRevenue', resultMoney(fullOccupancyRevenue));
+      setTxt('resFullOccupancyOpex', resultMoney(fullOccupancyOpex));
+      setTxt('resFullOccupancyNOI', resultMoney(fullOccupancyNOI));
+      setTxt('resSaleExitGross', resultMoney(saleExitGross));
+      setTxt('resSaleExit', resultMoney(saleExitValue));
+      setTxt('resOperatingExitGross', resultMoney(operatingExitGross));
+      setTxt('resOperatingExit', resultMoney(operatingExitValue));
+      setHtml('resSaleExitScope', saleExitMethod === 'none' ? '<span>غير مفعل</span>' : `<span>السنة</span> ${saleExitYear} | <span>تكلفة التخارج</span> ${resultPercent(saleExitCostRate * 100)}`);
       renderSaleExitStatus({ modeFlags, exitOn, saleExitMethod, saleAreaTotal, saleExitGross, saleExitValue });
-      setHtml('resOperatingExitScope', exitMethod === 'none' ? '<span>غير مفعل</span>' : `<span>السنة</span> ${operatingExitYear} | <span>تكلفة التخارج</span> ${financialPercent(operatingExitCostRate * 100)}`);
-      setTxt('resTerminal', money(terminal));
+      setHtml('resOperatingExitScope', exitMethod === 'none' ? '<span>غير مفعل</span>' : `<span>السنة</span> ${operatingExitYear} | <span>تكلفة التخارج</span> ${resultPercent(operatingExitCostRate * 100)}`);
+      setTxt('resTerminal', resultMoney(terminal));
       setTxt('resYear0', '0');
-      setTxt('resLandRent', money(landRent));
-      setTxt('resDevCost', money(developerCost));
-      setTxt('resSaleRevenue', money(saleRevenueTotal));
-      setTxt('resFinanceCost', money(totalFinanceCost));
-      setTxt('resFundFees', money(totalFundFees));
-      setTxt('resTotalInvestmentCost', money(adjustedProjectCost));
-      setTxt('resROI', roi === null ? 'غير متاح' : financialPercent(roi * 100));
-      setTxt('resProjectIRR', projectIrr === null ? 'غير متاح' : financialPercent(projectIrr * 100));
-      setTxt('resIRR', irrVal === null ? 'غير متاح' : financialPercent(irrVal * 100));
-      setHtml('resPayback', payback === null ? '<span>لا يسترد خلال الفترة</span>' : formatFinancialResultNumber(payback, false) + ' <span>سنة</span>');
-      setHtml('resEquityPayback', equityPayback === 0 ? '<span>لا يتطلب ضخًا صافياً</span>' : equityPayback === null ? '<span>لا يسترد خلال الفترة</span>' : formatFinancialResultNumber(equityPayback, false) + ' <span>سنة</span>');
+      setTxt('resLandRent', resultMoney(landRent));
+      setTxt('resDevCost', resultMoney(developerCost));
+      setTxt('resSaleRevenue', resultMoney(saleRevenueTotal));
+      setTxt('resFinanceCost', resultMoney(totalFinanceCost));
+      setTxt('resFundFees', resultMoney(totalFundFees));
+      setTxt('resTotalInvestmentCost', resultMoney(adjustedProjectCost));
+      setTxt('resROI', roi === null ? 'غير متاح' : resultPercent(roi * 100));
+      setTxt('resProjectIRR', projectIrr === null ? 'غير متاح' : resultPercent(projectIrr * 100));
+      setTxt('resIRR', irrVal === null ? 'غير متاح' : resultPercent(irrVal * 100));
+      setHtml('resPayback', payback === null ? '<span>لا يسترد خلال الفترة</span>' : resultNumber(payback) + ' <span>سنة</span>');
+      setHtml('resEquityPayback', equityPayback === 0 ? '<span>لا يتطلب ضخًا صافياً</span>' : equityPayback === null ? '<span>لا يسترد خلال الفترة</span>' : resultNumber(equityPayback) + ' <span>سنة</span>');
       setHtml('resROIScope', roiScope + ' | <span>يشمل التمويل وتكاليف الصندوق</span>');
       setHtml('resProjectIRRScope', irrScope + ' | <span>قبل التمويل وأتعاب الصندوق</span>');
       setHtml('resEquityIRRScope', irrScope + ' | <span>بعد التمويل وأتعاب الصندوق</span>');
       setHtml('scopeROI', roiScope);
       setHtml('scopeProjectIRR', irrScope);
       setHtml('scopeEquityIRR', irrScope);
-      setTxt('resTotalOperatingCF', money(totalOperatingCF));
-      setTxt('resFinalCF', money(finalCF));
+      setTxt('resTotalOperatingCF', resultMoney(totalOperatingCF));
+      setTxt('resFinalCF', resultMoney(finalCF));
 
       setVal('financeBaseAmount', money(financeBaseAmount));
       setVal('facilityAmount', money(facilityAmount));
@@ -755,9 +790,9 @@
       setVal('cashEquityRequired', money(totalCashEquity));
       setVal('equityRequired', money(totalEquityRequired));
 
-      setTxt('resLandEquity', money(landEquityContribution));
-      setTxt('resCashEquity', money(totalCashEquity));
-      setTxt('resEquityRequired', money(totalEquityRequired));
+      setTxt('resLandEquity', resultMoney(landEquityContribution));
+      setTxt('resCashEquity', resultMoney(totalCashEquity));
+      setTxt('resEquityRequired', resultMoney(totalEquityRequired));
 
       setVal('fundManagementFeesTotal', money(totalFundManagementFees));
       setVal('performanceFeeTotal', money(performanceFeeTotal));
@@ -776,14 +811,14 @@
       const tb = document.querySelector('#cashflowTable tbody');
       if (tb) {
         tb.innerHTML = projected.map(r => `<tr>
-          <td>${r.year}</td><td>${r.phase}</td><td class="cf-rental">${r.operationYear ? financialPercent(r.occupancyReach * 100) : '—'}</td><td class="cf-sales">${money(r.saleRevenue)}</td><td class="cf-rental">${money(r.operatingRevenue)}</td><td class="cf-grace">${money(r.graceDiscount)}</td>
-          <td>${money(r.developmentCost)}</td><td>${money(r.developerPayment)}</td><td class="cf-rental">${money(r.opex)}</td><td>${money(r.landRent)}</td><td class="cf-fund">${money(r.fundFeesAnnual)}</td>
-          <td class="cf-finance">${money(r.financeDraw)}</td><td class="cf-finance">${money(r.financeInterest + r.financeFee)}</td><td class="cf-finance">${money(r.financeRepayment)}</td>
-          <td class="row-result">${r.final < 0 ? '(' + money(Math.abs(r.final)) + ')' : money(r.final)}</td><td class="row-result">${r.cumulative < 0 ? '(' + money(Math.abs(r.cumulative)) + ')' : money(r.cumulative)}</td><td>${money(r.cashReserve)}</td>
+          <td>${r.year}</td><td>${r.phase}</td><td class="cf-rental">${r.operationYear ? resultPercent(r.occupancyReach * 100) : '—'}</td><td class="cf-sales">${resultMoney(r.saleRevenue)}</td><td class="cf-rental">${resultMoney(r.operatingRevenue)}</td><td class="cf-grace">${resultMoney(r.graceDiscount)}</td>
+          <td>${resultMoney(r.developmentCost)}</td><td>${resultMoney(r.developerPayment)}</td><td class="cf-rental">${resultMoney(r.opex)}</td><td>${resultMoney(r.landRent)}</td><td class="cf-fund">${resultMoney(r.fundFeesAnnual)}</td>
+          <td class="cf-finance">${resultMoney(r.financeDraw)}</td><td class="cf-finance">${resultMoney(r.financeInterest + r.financeFee)}</td><td class="cf-finance">${resultMoney(r.financeRepayment)}</td>
+          <td class="row-result">${r.final < 0 ? '(' + resultMoney(Math.abs(r.final)) + ')' : resultMoney(r.final)}</td><td class="row-result">${r.cumulative < 0 ? '(' + resultMoney(Math.abs(r.cumulative)) + ')' : resultMoney(r.cumulative)}</td><td>${resultMoney(r.cashReserve)}</td>
         </tr>`).join('');
       }
       const debtTb = document.querySelector('#debtScheduleTable tbody');
-      if (debtTb) debtTb.innerHTML = financeMovementRows(projected, financeOn, financeRepaymentStartYear, financeRepaymentYears).map(r => `<tr><td>${r.year}</td><td>${money(r.openingDebt)}</td><td>${money(r.financeDraw)}</td><td>${money(r.financeInterest)}</td><td>${money(r.financeFee)}</td><td>${money(r.financeRepayment)}</td><td>${money(r.closingDebt)}</td></tr>`).join('');
+      if (debtTb) debtTb.innerHTML = financeMovementRows(projected, financeOn, financeRepaymentStartYear, financeRepaymentYears, financeMurabahaStartYear, financeMurabahaYears).map(r => `<tr><td>${r.year}</td><td>${money(r.openingDebt)}</td><td>${money(r.financeDraw)}</td><td>${money(r.financeInterest)}</td><td>${money(r.financeFee)}</td><td>${money(r.financeRepayment)}</td><td>${money(r.closingDebt)}</td></tr>`).join('');
       const fundTb = document.querySelector('#fundFeeScheduleTable tbody');
       if (fundTb) fundTb.innerHTML = fundFeeScheduleRows(projected, fundFeesOn, fundFeeEndYear).map(r => `<tr><td>${r.year}</td><td>${money(r.fundManagementFee)}</td><td>${money(r.additionalFundFees)}</td><td>${money(r.fundExitFee)}</td><td>${money(r.performanceFee)}</td><td>${money(r.fundFeesAnnual)}</td><td>${reportFieldValue('fundFeeFrequency')}</td><td>${reportFieldValue('fundFeeTiming')}</td></tr>`).join('');
 
@@ -799,6 +834,7 @@
         saleRevenueTotal, saleAreaTotal, facilityAmount, arrangementFee, totalFinanceInterest, totalFinanceCost,
         financeBase, financeBaseAmount, financeDrawYears, financeInterestMethod, financePlan: financePlan.map(({ year, drawPct }) => ({ year, drawPct })),
         financeRepaymentStartYear, financeRepaymentYears, financeRepaymentPlan: financeRepaymentPlan.map(({ year, repaymentPct }) => ({ year, repaymentPct })),
+        financeMurabahaStartYear, financeMurabahaYears, financeMurabahaPlan: financeMurabahaPlan.map(({ year, murabahaPct }) => ({ year, murabahaPct })),
         landEquityContribution, cashEquityRequired: totalCashEquity, equityRequired: totalEquityRequired, totalEquityDistributions, developmentYears, operationYears, totalYears, operationStartYear, salesStartYear, salesYears, totalGraceDiscount, modeFlags, areaState
       };
       applyConditionalVisibility(modeFlags);
@@ -817,7 +853,7 @@
             roi, projectIrr, equityIrr: irrVal, payback, equityPayback, totalEquityRequired
           }),
            components: componentRows,
-           unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
+           unitRevenueMode: val('unitRevenueMode'), developmentYears, salesStartYear, salesYears, operationYears, landArea: num('landArea'), coverageRate: num('coverageRate'), floorCount: num('floorCount'), builtUpAreaAbove: num('builtUpAreaAbove'), basementArea: num('basementArea'), landValueMethod: val('landValueMethod'), landPricePerM2: num('landPricePerM2'), manualLandValue: num('manualLandValue'), landStatus: val('landStatus'), landContributionType: val('landContributionType'), landRentMethod: val('landRentMethod'), landRentRate: num('landRentRate'), developerRate: num('developerRate'), developerBase: val('developerBase'), financeEnabled: val('financeEnabled'), financingRate: num('financingRate'), annualFinanceRate: num('annualFinanceRate'), financeMurabahaStartYear: num('financeMurabahaStartYear'), financeMurabahaYears: num('financeMurabahaYears'), fundEnabled: val('fundEnabled'), fundFeesEnabled: val('fundFeesEnabled'), exitEnabled: val('exitEnabled'), exitMethod: val('exitMethod'), exitInput: num('exitInput'), roiPeriod: val('roiPeriod'), irrPeriod: val('irrPeriod')
          });
        }
        // Dynamic visibility toggles rewrite .disabled for their own reasons and rows added
