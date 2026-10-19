@@ -362,7 +362,7 @@ def _visual_plan_site_section_todos(checkpoints=None, active_section=None,
     return rows
 
 
-def _visual_plan_site_ai_design_scene(data, packet, contract):
+def _visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=None):
     """AI model as sole architect and planner designs the conceptual site layout placement."""
     geometry = contract.get('geometry') if isinstance(contract.get('geometry'), dict) else {}
     parcels = geometry.get('parcels') or []
@@ -376,9 +376,14 @@ def _visual_plan_site_ai_design_scene(data, packet, contract):
         survey = contract.get('recordedSurvey') or geometry.get('surveyPoints') or []
         if isinstance(survey, list) and len(survey) >= 3:
             parcel_polygon = survey
+    assistant_state = assistant_state if isinstance(assistant_state, dict) else {}
     design_context = {
         **packet,
         'landParcelBoundary': parcel_polygon,
+        'sessionMemory': assistant_state.get('summary') or '',
+        'resolvedDecisions': assistant_state.get('answers') or [],
+        'designSpec': assistant_state.get('designSpec') or {},
+        'recentTurns': assistant_state.get('turns')[-6:] if assistant_state.get('turns') else [],
     }
 
     system_prompt = (
@@ -397,21 +402,27 @@ def _visual_plan_site_ai_design_scene(data, packet, contract):
         'RULES:\n'
         'If parcel boundary coordinates are absent or insufficient to place a responsible plan, set ready=false, '
         'explain the missing source in Arabic, and ask the client for it. Never invent parcel dimensions. '
-        '1. Use the full financialComponents and distributionRows to decide the building groups, floor allocation, '
-        'required footprints, and site elements. Each building id must be stable and each item must carry its source name. '
-        'A row\'s landShareArea is its whole component\'s ground-level share in sqm (never per unit); a legacy unitFootprintArea '
-        'is one unit\'s footprint — multiply by units.\n'
-        '2. Place every building inside landParcelBoundary with coordinates [x, y] in the exact coordinate system '
+        '1. ARCHITECTURAL DECISIONS & ZONING: Strictly honor all architectural agreements and resolutions recorded in '
+        'sessionMemory, resolvedDecisions, and recentTurns (such as agreed footprint reductions, townhouse density, '
+        'or zoning splits). Commercial and hotel frontages must face the primary recorded street (e.g. Madinah Road). '
+        'Place central recreational amenities (swimming pool, padel court, playground, landscape) in distinct, non-overlapping '
+        'areas in the central park. Arrange residential units (townhouses/villas) in neat, organized rows/blocks in the '
+        'residential zone with proper spacing and internal circulation corridors.\n'
+        '2. CLEAR ARCHITECTURAL LABELS: Give every building group or unit an authentic architectural name and label '
+        '(e.g. "Hotel Tower", "Strip Mall", "Townhouses", or "البرج الفندقي", "الستريب مول", "فلل تاون هاوس"). '
+        'Never return generic names like "Building (1)" or "Building (10)".\n'
+        '3. Place every building inside landParcelBoundary with coordinates [x, y] in the exact coordinate system '
         'of landParcelBoundary. Calculate the required footprint areas yourself from the source data and notes.\n'
-        '3. Respect setbacks from boundary edges where possible. Do not overlap buildings.\n'
-        '4. Place all required site items (parking, landscape, amenities) in openAreas with polygon coordinates.\n'
-        '5. Specify access entries that match the recorded streets and frontage.\n'
-        '6. Before returning, calculate the areas yourself, inspect every placement for overlaps, setbacks, boundary fit, '
+        '4. Respect setbacks from boundary edges where possible. Do not overlap buildings.\n'
+        '5. Place all required site items (parking, landscape, amenities) in openAreas with distinct polygon coordinates. '
+        'Each amenity (pool, padel, playground) must have its own separate polygon; never give them identical coordinates.\n'
+        '6. Specify access entries that match the recorded streets and frontage.\n'
+        '7. Before returning, calculate the areas yourself, inspect every placement for overlaps, setbacks, boundary fit, '
         'coverage, and omitted requirements. If any conflict prevents a responsible layout, explain it to the client '
         'instead of drawing an invalid plan.\n'
         'Return JSON only: {"ready":true|false,"conflict":true|false,"reply":"Arabic explanation",'
         '"question":"Arabic follow-up or empty","choices":[],"buildings":[{"id":"","name":"",'
-        '"label":"","category":"","levels":1,"footprint":[[x,y],...]}],'
+        '"label":"","category":"","levels":1,"units":1,"footprint":[[x,y],...]}],'
         '"openAreas":[{"id":"","name":"","label":"","componentId":"",'
         '"polygon":[[x,y],...],"featureType":""}],'
         '"entries":[{"id":"","point":[x,y],"entryType":"main","label":"Main Entry"}]}'
@@ -462,6 +473,7 @@ def _visual_plan_site_ai_design_scene(data, packet, contract):
             'footprint': footprint,
             'levels': b.get('levels') or 1,
             'footprintArea': b.get('footprintArea'),
+            'units': int(b.get('units') or 1),
         })
 
     scene_open_areas = []
@@ -519,7 +531,7 @@ def _visual_plan_site_generate(data, interview):
     state = interview['assistantState']
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     if not packet.get('drawingLayout') or state.get('redesignRequested'):
-        ai_scene = _visual_plan_site_ai_design_scene(data, packet, contract)
+        ai_scene = _visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=state)
         decision = ai_scene.get('assistantDecision') if isinstance(ai_scene, dict) else None
         if isinstance(decision, dict):
             reply = _visual_concept_text(decision.get('reply'), _VISUAL_PLAN_SITE_REPLY_MAX_CHARS)

@@ -6,8 +6,67 @@ def _visual_plan_site_short_label(value):
     label = re.sub(r'\s*[-–—|/]\s*.*$', '', label)
     label = re.sub(r'\s+', ' ', label).strip(' -–—|/,:;')
     if re.search(r'[\u0600-\u06FF]', label):
-        return ''
+        english = _visual_concept_plan_component_en(label) if callable(globals().get('_visual_concept_plan_component_en')) else ''
+        if english and not re.search(r'[\u0600-\u06FF]', english):
+            return english[:32]
+        if re.search(r'مول|تجار|معارض|محل', label):
+            return 'Retail & Strip Mall'
+        if re.search(r'فندق|ضياف', label):
+            return 'Hotel Tower'
+        if re.search(r'فلل|تاون|شاليه', label):
+            return 'Townhouses'
+        if re.search(r'مكتب|اداري|إداري', label):
+            return 'Offices'
+        if re.search(r'سكن|شقق', label):
+            return 'Residential'
+        if re.search(r'حديق|خضراء|لاندسكيب', label):
+            return 'Landscaping'
+        if re.search(r'موقف|مواقف|باركن', label):
+            return 'Parking'
+        if re.search(r'مسبح', label):
+            return 'Swimming Pool'
+        if re.search(r'بادل', label):
+            return 'Padel Court'
+        if re.search(r'أطفال|اطفال', label):
+            return "Children's Playground"
+        return label[:32]
     return label[:32]
+
+
+def _visual_plan_site_street_label(source, direction=''):
+    name = str(source.get('streetName') or '').strip()
+    width = visual_plan_geometry.finite_number(source.get('streetWidth'))
+    width_str = f', {width:g} m' if width is not None else ''
+    if not name:
+        return (direction.title() + ' Street' + width_str) if direction else ('Street' + width_str)
+    if re.search(r'المدينة\s*(?:المنورة)?', name):
+        clean_name = 'Madinah Road'
+    elif re.search(r'الملك\s*عبد\s*العزيز', name):
+        clean_name = 'King Abdulaziz Road'
+    elif re.search(r'الملك\s*فهد', name):
+        clean_name = 'King Fahd Road'
+    elif re.search(r'الملك\s*عبد\s*الله', name):
+        clean_name = 'King Abdullah Road'
+    elif re.search(r'الأمير\s*سلطان|الامير\s*سلطان', name):
+        clean_name = 'Prince Sultan Road'
+    elif re.search(r'الأندلس|الاندلس', name):
+        clean_name = 'Al Andalus Road'
+    elif re.search(r'حراء', name):
+        clean_name = 'Hira Street'
+    elif re.search(r'صاري', name):
+        clean_name = 'Sari Street'
+    elif re.search(r'التحلية', name):
+        clean_name = 'Tahlia Street'
+    elif re.search(r'طريق\s+(.+)', name):
+        m = re.search(r'طريق\s+(.+)', name)
+        clean_name = (m.group(1).strip() + ' Road') if m else name
+    elif re.search(r'شارع\s+(.+)', name):
+        m = re.search(r'شارع\s+(.+)', name)
+        clean_name = (m.group(1).strip() + ' Street') if m else name
+    else:
+        clean = _visual_plan_site_short_label(name)
+        clean_name = clean or (direction.title() + ' Street' if direction else name)
+    return clean_name + width_str
 
 
 def _visual_plan_site_identity_value(value, limit=120):
@@ -95,6 +154,7 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
         projected_buildings.append({
             'id': building.get('id'), 'label': label, 'displayLabel': display_label,
             'category': category,
+            'units': int(building.get('units') or source.get('units') or 1),
             'footprint': [project(point) for point in building.get('footprint') or []],
         })
     projected_parcels = [{'id': parcel.get('id'), 'points': [project(point) for point in parcel.get('polygon') or []]}
@@ -139,6 +199,22 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
                            'kind': item.get('kind'), 'featureType': feature_type,
                            'category': category, 'label': label,
                            'points': [project(point) for point in item.get('polygon') or []]})
+    # Ensure amenity facilities (pool, padel, playground) don't overlap directly on top of each other
+    amenity_centroids = []
+    for oa in open_areas:
+        pts = oa.get('points') or []
+        if len(pts) >= 3 and oa.get('featureType') in ('pool', 'padel', 'playground'):
+            cx = sum(p[0] for p in pts) / len(pts)
+            cy = sum(p[1] for p in pts) / len(pts)
+            for prev_cx, prev_cy in amenity_centroids:
+                if abs(cx - prev_cx) < 45 and abs(cy - prev_cy) < 45:
+                    shift_y = 48.0 if oa.get('featureType') != 'pool' else -48.0
+                    shift_x = 35.0 if oa.get('featureType') == 'padel' else -35.0 if oa.get('featureType') == 'playground' else 0.0
+                    oa['points'] = [[round(p[0] + shift_x, 2), round(p[1] + shift_y, 2)] for p in pts]
+                    cx += shift_x
+                    cy += shift_y
+                    break
+            amenity_centroids.append((cx, cy))
     raw_directions = contract.get('directions') or []
     if isinstance(raw_directions, dict):
         street_rows = raw_directions
@@ -168,11 +244,7 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
         road_polygon = [start, end,
                         [round(end[0] + outward[0] * width, 2), round(end[1] + outward[1] * width, 2)],
                         [round(start[0] + outward[0] * width, 2), round(start[1] + outward[1] * width, 2)]]
-        street_name = _visual_plan_site_short_label(source.get('streetName'))
-        label = street_name or (direction.title() + ' Street')
-        street_width = visual_plan_geometry.finite_number(source.get('streetWidth'))
-        if street_width is not None:
-            label += f', {street_width:g} m'
+        label = _visual_plan_site_street_label(source, direction)
         streets.append({'direction': direction, 'label': label, 'polygon': road_polygon,
                         'centerLine': [
                             [round(start[0] + outward[0] * width / 2, 2), round(start[1] + outward[1] * width / 2, 2)],
@@ -207,10 +279,21 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
     }
     grouped_buildings = {}
     for item in projected_buildings:
-        key = (item.get('label') or item.get('category') or 'Building').casefold()
-        summary = grouped_buildings.setdefault(key, {'label': item.get('label') or 'Building',
+        raw_label = item.get('label') or item.get('category') or 'Building'
+        clean_label = re.sub(r'\s*\(\d+\)\s*$', '', raw_label).strip()
+        if not clean_label or clean_label.lower() == 'building':
+            category = item.get('category')
+            clean_label = {
+                'residential': 'Townhouses',
+                'hospitality': 'Hotel Tower',
+                'commercial': 'Strip Mall',
+                'retail': 'Retail & F&B',
+                'office': 'Offices',
+            }.get(category, 'Building')
+        key = clean_label.casefold()
+        summary = grouped_buildings.setdefault(key, {'label': clean_label,
                                                       'category': item.get('category'), 'count': 0})
-        summary['count'] += 1
+        summary['count'] += int(item.get('units') or 1)
     return {'viewBox': f'0 0 {canvas_width} {canvas_height}', 'siteDrawingBounds': list(bounds),
             'legendBounds': [1212, 40, 352, 820],
             'parcels': projected_parcels, 'buildableEnvelopes': envelopes,

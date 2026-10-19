@@ -204,6 +204,7 @@ def _visual_plan_site_landscape_fragment(layout):
     colors = {str(item.get('category') or ''): str(item.get('color') or '')
               for item in layout.get('architecturalColorLegend') or [] if isinstance(item, dict)}
     labeled_parking_components = set()
+    placed_label_centers = []
     for area in layout.get('openAreas') or []:
         points = area.get('points') if isinstance(area, dict) else None
         if not isinstance(points, list) or len(points) < 3:
@@ -260,8 +261,13 @@ def _visual_plan_site_landscape_fragment(layout):
         elif feature_type == 'parking':
             labeled_parking_components.add(component_id)
         if label_value:
+            render_y = center_y
+            for prev_x, prev_y in placed_label_centers:
+                if abs(center_x - prev_x) < 55 and abs(render_y - prev_y) < 22:
+                    render_y = prev_y + 18
+            placed_label_centers.append((center_x, render_y))
             label = etree.SubElement(root, '{%s}text' % namespace, {
-                'x': f'{center_x:g}', 'y': f'{center_y:g}', 'fill': '#07182C',
+                'x': f'{center_x:g}', 'y': f'{render_y:g}', 'fill': '#07182C',
                 'font-size': '10', 'font-weight': '600', 'text-anchor': 'middle',
                 'paint-order': 'stroke', 'stroke': '#FFFFFF', 'stroke-width': '2.5',
             })
@@ -324,7 +330,8 @@ def _visual_plan_site_legend_fragment(layout):
             'fill': color, 'stroke': '#07182C', 'stroke-width': '0.7',
         })
         count = int(item.get('count') or 0)
-        add_text(f"{item.get('label') or 'Building'} ({count})", x + 40, row_y,
+        clean_sched_label = re.sub(r'\s*\(\d+\)\s*$', '', str(item.get('label') or 'Building')).strip()
+        add_text(f"{clean_sched_label} ({count})", x + 40, row_y,
                  12, '500', '#07182C', 43, parent=identity_group)
     if len(schedule) > len(visible_schedule):
         add_text(f'Additional building groups: {len(schedule) - len(visible_schedule)}',

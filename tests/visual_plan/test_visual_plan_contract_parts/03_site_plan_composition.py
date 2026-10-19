@@ -191,3 +191,81 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
 
         self.assertIn('مشروع النخيل', preserved)
         self.assertIn('شركة النخيل', preserved)
+
+    def test_site_svg_assistant_passes_chat_memory_to_ai_design_scene(self):
+        module = self.application_module
+        project = self.project()
+        workflow = self.workflow(project)
+        data = {'projectData': project, 'plansWorkflow': workflow}
+        packet, contract, _context, _signature = module._visual_plan_site_packet(data)
+        assistant_state = {
+            'summary': 'Agreed on 100 townhouses 85m² footprint each, hotel tower on Madinah road, central pool.',
+            'answers': [{'question': 'reduce footprints?', 'answer': 'reduce villa footprints to 85 sqm'}],
+            'designSpec': {'palette': {'residential': '#DCE6F0'}},
+            'turns': [{'role': 'user', 'text': 'ارسم المخطط الآن وفق هذا التعديل'}],
+        }
+        with patch.object(module, '_visual_plan_site_call', return_value=({
+            'ready': True, 'conflict': False,
+            'buildings': [{'id': 'th_1', 'name': 'Townhouses', 'label': 'Townhouses', 'category': 'residential', 'units': 100,
+                           'footprint': [[5, 5], [25, 5], [25, 15], [5, 15]]}],
+            'openAreas': [{'id': 'pool_1', 'name': 'Swimming Pool', 'label': 'Swimming Pool', 'featureType': 'pool',
+                           'polygon': [[30, 5], [40, 5], [40, 15], [30, 15]]}],
+            'entries': [{'id': 'main_e', 'point': [0, 10], 'entryType': 'main', 'label': 'Main Entry'}],
+        }, 120)) as mock_call, self.app.test_request_context():
+            from flask import g
+            g.tenant_id = self.tenant_a
+            scene = module._visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=assistant_state)
+            self.assertEqual(mock_call.call_count, 1)
+            payload = json.loads(mock_call.call_args[0][1])
+            self.assertIn('100 townhouses 85m²', payload['sessionMemory'])
+            self.assertEqual(payload['resolvedDecisions'][0]['answer'], 'reduce villa footprints to 85 sqm')
+            self.assertEqual(len(scene['buildings']), 1)
+            self.assertEqual(scene['buildings'][0]['units'], 100)
+
+    def test_street_label_and_arabic_short_labels_preservation(self):
+        module = self.application_module
+        # Test Saudi street translation
+        street_madinah = {'streetName': 'طريق المدينة المنورة', 'streetWidth': 58}
+        self.assertEqual(module._visual_plan_site_street_label(street_madinah, 'east'), 'Madinah Road, 58 m')
+
+        # Test Arabic short label mapping without returning empty string
+        self.assertEqual(module._visual_plan_site_short_label('فندق 5 نجوم'), 'Five-Star Hotel')
+        self.assertEqual(module._visual_plan_site_short_label('ستريب مول تجاري'), 'Retail')
+        self.assertEqual(module._visual_plan_site_short_label('فلل سكنية تاون هاوس'), 'Villas')
+        self.assertEqual(module._visual_plan_site_short_label('تاون هاوس فاخرة'), 'Villas')
+        self.assertEqual(module._visual_plan_site_short_label('مسبح خارجي كبير'), 'Swimming Pool')
+
+    def test_grouped_buildings_schedule_and_amenity_anti_collision(self):
+        module = self.application_module
+        polygon = [[0, 0], [100, 0], [100, 80], [0, 80]]
+        contract = {'geometry': {'parcels': [{'id': 'p1', 'polygon': polygon}]}}
+        scene = {
+            'geometry': contract['geometry'],
+            'buildings': [
+                {'id': 'b1', 'label': 'Building (10)', 'category': 'residential', 'units': 10,
+                 'footprint': [[5, 5], [20, 5], [20, 20], [5, 20]]},
+                {'id': 'b2', 'label': 'Building (1)', 'category': 'hospitality', 'units': 1,
+                 'footprint': [[25, 5], [40, 5], [40, 20], [25, 20]]},
+            ],
+            'openAreas': [
+                {'id': 'pool', 'label': 'Swimming Pool', 'featureType': 'pool',
+                 'polygon': [[50, 30], [60, 30], [60, 40], [50, 40]]},
+                {'id': 'padel', 'label': 'Padel Court', 'featureType': 'padel',
+                 'polygon': [[50, 30], [60, 30], [60, 40], [50, 40]]},
+            ],
+            'entries': [],
+        }
+        with patch.object(module.visual_plan_scene, 'buildable_envelopes', return_value=[]):
+            layout = module._visual_plan_site_projected_layout(scene, contract, {})
+
+        # Schedule labels must be clean (no trailing '(10)' or '(1)' in label) and count units properly
+        schedule_map = {item['label']: item['count'] for item in layout['buildingSchedule']}
+        self.assertEqual(schedule_map.get('Townhouses'), 10)
+        self.assertEqual(schedule_map.get('Hotel Tower'), 1)
+        self.assertNotIn('Building (10)', schedule_map)
+
+        # Amenity anti-collision must have shifted the identical padel court polygon away from pool
+        pool_pts = next(oa['points'] for oa in layout['openAreas'] if oa['featureType'] == 'pool')
+        padel_pts = next(oa['points'] for oa in layout['openAreas'] if oa['featureType'] == 'padel')
+        self.assertNotEqual(pool_pts, padel_pts)
+
