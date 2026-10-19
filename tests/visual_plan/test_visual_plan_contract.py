@@ -698,13 +698,13 @@ class VisualPlanContractTests(VisualPlanContractBase):
                     self.assertEqual(after_sections[section], before_sections[section])
         self.assertEqual(render.status_code, 200, render.get_json())
         body = render.get_json()
-        self.assertEqual(body['model'], 'google/gemini-4-argon')
+        self.assertEqual(body['model'], module.VISUAL_PLAN_SITE_MODEL)
         self.assertEqual(chat_call.call_count, 3)
-        self.assertTrue(all(call.kwargs.get('model') == 'google/gemini-4-argon'
+        self.assertTrue(all(call.kwargs.get('model') == module.VISUAL_PLAN_SITE_MODEL
                             for call in chat_call.call_args_list))
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('reasoning_effort'), 'high')
-        self.assertEqual(chat_call.call_args_list[1].kwargs.get('reasoning_effort'), 'high')
-        self.assertEqual(chat_call.call_args_list[2].kwargs.get('reasoning_effort'), 'high')
+        self.assertEqual(chat_call.call_args_list[1].kwargs.get('reasoning_effort'), 'max')
+        self.assertEqual(chat_call.call_args_list[2].kwargs.get('reasoning_effort'), 'max')
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('max_tokens'), 66000)
         self.assertEqual(chat_call.call_args_list[1].kwargs.get('max_tokens'), 66000)
         self.assertEqual(chat_call.call_args_list[2].kwargs.get('max_tokens'), 66000)

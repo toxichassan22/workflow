@@ -20,6 +20,7 @@ _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT = 900000
 _VISUAL_PLAN_SITE_RENDER_REVISION = 5
 _VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS = 66000
 _VISUAL_PLAN_SITE_REPLY_MAX_CHARS = 300000
+VISUAL_PLAN_SITE_MODEL = (os.environ.get('VISUAL_PLAN_SITE_MODEL') or 'openai/gpt-6.1-sol').strip()
 
 
 def _visual_plan_site_number(value):
@@ -93,11 +94,11 @@ def _visual_plan_site_reusable_checkpoints(previous, signature):
 
 def _visual_plan_site_call(system_prompt, user_prompt, data=None,
                            max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS,
-                           reasoning_effort='high'):
+                           reasoning_effort='max'):
     timeout = _visual_plan_job_call_timeout(1200)
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=max_tokens,
-        model=GEMINI_TEXT_MODEL, reasoning_effort=reasoning_effort, timeout=timeout,
+        model=VISUAL_PLAN_SITE_MODEL, reasoning_effort=reasoning_effort, timeout=timeout,
         response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data or {}))
     fatal = _ai_fatal_error_dict(response)
     if fatal is not None:
@@ -108,7 +109,7 @@ def _visual_plan_site_call(system_prompt, user_prompt, data=None,
             _client_safe_llm_error(_chat_error_message(response)), 'PLANS_PROVIDER_FAILED')
     parsed = parse_json_object(_get_chat_response_text(response))
     if not isinstance(parsed, dict):
-        raise visual_plan_geometry.PlanGeometryError('ردّ Argon غير مكتمل أو غير منظم.', 'PLANS_PROVIDER_FAILED')
+        raise visual_plan_geometry.PlanGeometryError('ردّ الموديل غير مكتمل أو غير منظم.', 'PLANS_PROVIDER_FAILED')
     usage = response.get('usage') if isinstance(response, dict) and isinstance(response.get('usage'), dict) else {}
     return parsed, _visual_plan_site_number(usage.get('prompt_tokens') or usage.get('input_tokens'))
 
@@ -460,7 +461,7 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=No
 
     parsed, _tokens = _visual_plan_site_call(
         system_prompt, json.dumps(design_context, ensure_ascii=False),
-        data=data, max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS, reasoning_effort='high')
+        data=data, max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS, reasoning_effort='max')
     if (parsed.get('ready') is False or parsed.get('conflict')) and not parsed.get('svgCode'):
         return {'assistantDecision': parsed}
 
@@ -676,7 +677,7 @@ def _visual_plan_site_generate(data, interview):
                 'slotId': 'plan_site',
                 'image': image,
                 'svgCode': sanitized,
-                'model': GEMINI_TEXT_MODEL,
+                'model': VISUAL_PLAN_SITE_MODEL,
                 'reply': reply,
                 'assistantState': state,
                 'scene': workflow.get('scene'),
@@ -732,7 +733,7 @@ def _visual_plan_site_generate(data, interview):
         98, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints, signature)
     reply = 'تم إنشاء المخطط لمراجعته.'
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': svg,
-            'model': GEMINI_TEXT_MODEL, 'reply': reply,
+            'model': VISUAL_PLAN_SITE_MODEL, 'reply': reply,
             'assistantState': state, 'scene': workflow.get('scene')}
 
 
@@ -805,7 +806,7 @@ def _visual_plan_site_edit(data):
         reply = _visual_concept_text(parsed.get('reply'), _VISUAL_PLAN_SITE_REPLY_MAX_CHARS) or 'تم تحديث المخطط.'
         state['turns'].append({'role': 'assistant', 'text': reply})
         return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
-                'model': GEMINI_TEXT_MODEL, 'reply': reply,
+                'model': VISUAL_PLAN_SITE_MODEL, 'reply': reply,
                 'assistantState': state, 'scene': workflow.get('scene')}
     section = str(parsed.get('targetSection') or '')
     if section not in _VISUAL_PLAN_SITE_SECTION_IDS:
@@ -838,7 +839,7 @@ def _visual_plan_site_edit(data):
         reply += ' حُذفت تسميات غير إنجليزية من القسم المعدل.'
     state['turns'].append({'role': 'assistant', 'text': reply})
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
-            'targetSection': section, 'model': GEMINI_TEXT_MODEL,
+            'targetSection': section, 'model': VISUAL_PLAN_SITE_MODEL,
             'reply': reply,
             'assistantState': state, 'scene': workflow.get('scene')}
 
