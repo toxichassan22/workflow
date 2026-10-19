@@ -301,6 +301,54 @@ def _basement_footprint(geometry, area):
     return _rect_search([parcel['polygon'] for parcel in geometry['parcels']], area)
 
 
+def fit_footprint_inside_parcels(polygon, parcels, wanted_area=None, blocked=()):
+    """Auto-fit or nudge a proposed footprint polygon inside the parcels.
+
+    If the polygon is already wholly inside a parcel, returns it unchanged.
+    Otherwise, shifts the polygon towards the parcel centroid in fractional steps.
+    If translation does not fit, searches for an exact-area rectangle within the
+    parcels avoiding blocked footprints."""
+    if not polygon or not parcels:
+        return polygon
+    for parcel in parcels:
+        p_poly = parcel.get('polygon') if isinstance(parcel, dict) else parcel
+        if polygon_inside(polygon, p_poly):
+            return polygon
+
+    target_parcel = parcels[0]
+    p_poly = target_parcel.get('polygon') if isinstance(target_parcel, dict) else target_parcel
+    cx = sum(pt[0] for pt in p_poly) / len(p_poly)
+    cy = sum(pt[1] for pt in p_poly) / len(p_poly)
+    fx = sum(pt[0] for pt in polygon) / len(polygon)
+    fy = sum(pt[1] for pt in polygon) / len(polygon)
+    dx, dy = cx - fx, cy - fy
+
+    for step in (0.02, 0.05, 0.08, 0.12, 0.16, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0):
+        shifted = [[pt[0] + dx * step, pt[1] + dy * step] for pt in polygon]
+        for parcel in parcels:
+            poly = parcel.get('polygon') if isinstance(parcel, dict) else parcel
+            if polygon_inside(shifted, poly):
+                return shifted
+
+    parcel_polys = [p.get('polygon') if isinstance(p, dict) else p for p in parcels]
+    if wanted_area:
+        rect = _rect_search(parcel_polys, wanted_area, blocked=blocked)
+        if rect is not None:
+            return rect
+        rect_no_block = _rect_search(parcel_polys, wanted_area, blocked=())
+        if rect_no_block is not None:
+            return rect_no_block
+    else:
+        for scale in (0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1):
+            scaled = [[cx + (pt[0] - fx) * scale, cy + (pt[1] - fy) * scale] for pt in polygon]
+            for parcel in parcels:
+                poly = parcel.get('polygon') if isinstance(parcel, dict) else parcel
+                if polygon_inside(scaled, poly):
+                    return scaled
+
+    return polygon
+
+
 def buildable_envelopes(contract):
     """Per-parcel buildable region after the recorded setbacks — handed to the
     layout model and to the deterministic fallback so footprints start inside
@@ -721,6 +769,7 @@ def make_scene(contract, program, layout, version=1):
                 named.setdefault(variant.strip(), building['id'])
                 named.setdefault(variant.strip().casefold(), building['id'])
     buildings = []
+    occupied = []
     for raw in proposed:
         bid = raw.get('id') if isinstance(raw, dict) else None
         if isinstance(bid, str) and bid not in by_id:
@@ -730,8 +779,15 @@ def make_scene(contract, program, layout, version=1):
         facades = raw.get('facades') or {}
         if not isinstance(facades, dict) or set(facades) - set(DIRECTION_VECTORS):
             raise PlanGeometryError('نتيجة تخطيط إحدى الواجهات غير صالحة.', 'PLANS_LAYOUT_INVALID')
-        buildings.append({**copy.deepcopy(by_id[bid]),
-                          'footprint': validate_polygon(raw.get('footprint'), 24),
+        rec = by_id[bid]
+        footprint = validate_polygon(raw.get('footprint'), 24)
+        if not rec.get('basementOnly'):
+            footprint = fit_footprint_inside_parcels(
+                footprint, contract['geometry']['parcels'],
+                wanted_area=rec.get('footprintArea'), blocked=occupied)
+            occupied.append(footprint)
+        buildings.append({**copy.deepcopy(rec),
+                          'footprint': footprint,
                           'facades': {side: facade_style(style) for side, style in facades.items()}})
     placed = {building['id'] for building in buildings}
     for item in program['buildings']:
@@ -744,11 +800,21 @@ def make_scene(contract, program, layout, version=1):
     if not entries and buildings and any(row['street'] and row['direction'] == contract['primaryFrontage']['direction'] for row in contract['directions']):
         entries = [{'id': 'main_entry', 'buildingId': buildings[0]['id'], 'kind': 'main',
                     'side': contract['primaryFrontage']['direction'], 'position': 0.5}]
+
+    open_areas = copy.deepcopy(layout.get('openAreas') or [])
+    for area in open_areas:
+        if isinstance(area, dict) and 'polygon' in area:
+            area_poly = validate_polygon(area['polygon'], 24)
+            area['polygon'] = fit_footprint_inside_parcels(
+                area_poly, contract['geometry']['parcels'],
+                wanted_area=abs(signed_area(area_poly)) if abs(signed_area(area_poly)) > 0 else None,
+                blocked=occupied)
+
     scene = {'version': version, 'geometry': copy.deepcopy(contract['geometry']),
              'primaryFrontage': copy.deepcopy(contract['primaryFrontage']),
              'setbacks': copy.deepcopy(contract['setbacks']), 'directions': copy.deepcopy(contract['directions']),
              'buildings': buildings, 'siteItems': copy.deepcopy(program['siteItems']),
-             'entries': entries, 'openAreas': copy.deepcopy(layout.get('openAreas') or [])}
+             'entries': entries, 'openAreas': open_areas}
     return validate_scene(scene, contract, program)
 
 

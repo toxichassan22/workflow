@@ -3,9 +3,10 @@ import unittest
 import math
 from unittest.mock import patch
 
-from visual_plan_geometry import (PlanGeometryError, boundary_geometry, polygons_overlap,
-                                  signed_area, validate_footprint)
+from visual_plan_geometry import (PlanGeometryError, boundary_geometry, polygon_inside,
+                                  polygons_overlap, signed_area, validate_footprint)
 from visual_plan_scene import (buildable_envelopes, check_program_feasibility, fallback_scene,
+                               fit_footprint_inside_parcels, make_scene,
                                rebase_scene_context, validate_scene)
 
 
@@ -270,6 +271,22 @@ class VisualPlanSceneTests(unittest.TestCase):
         scene = fallback_scene(contract, program)
         validated = validate_scene(scene, contract, program)
         self.assertIsNotNone(validated)
+
+    def test_make_scene_fits_footprint_crossing_parcel_boundary(self):
+        contract = _contract(setbacks={})
+        program = _program(_building(1, 100))
+        # Proposed footprint starts at (35, 25) with size 10x10 -> extends to (45, 35), crossing the 40x30 boundary
+        spilling_layout = {
+            'buildings': [{'id': 'b1', 'footprint': [[35, 25], [45, 25], [45, 35], [35, 35]]}],
+            'entries': [],
+            'openAreas': []
+        }
+        scene = make_scene(contract, program, spilling_layout)
+        fitted = scene['buildings'][0]['footprint']
+        # The fitted footprint must be wholly inside the parcel
+        parcel_poly = contract['geometry']['parcels'][0]['polygon']
+        self.assertTrue(polygon_inside(fitted, parcel_poly))
+        self.assertAlmostEqual(abs(signed_area(fitted)), 100.0, places=1)
 
 
 if __name__ == '__main__':
