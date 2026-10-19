@@ -93,9 +93,23 @@ def _visual_plan_report_site_chat_timing(name, started_at):
 def _visual_plan_execute(kind, data, slot_id=''):
     try:
         if kind == 'prepare':
-            scene, context, reference_url = _visual_plan_create_scene(data)
+            workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+            posted_scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
+            scene = None
+            context = None
+            reference_url = None
+            if (posted_scene and posted_scene.get('version') == VISUAL_PLAN_SCENE_VERSION
+                    and isinstance(posted_scene.get('token'), str) and posted_scene['token'].strip()):
+                try:
+                    scene, contract, context, _program = _visual_plan_scene_from_request(data)
+                    reference_url = _visual_concept_render_plan_boundary_reference(
+                        contract['geometry']['surveyPoints'], g.tenant_id)
+                except Exception:
+                    scene = None
+            if not scene:
+                scene, context, reference_url = _visual_plan_create_scene(data, context=context)
             context['client_notes'] = _visual_plan_notes(data)
-            distribution = (data.get('plansWorkflow') or {}).get('distribution') or {}
+            distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
             model = (_visual_concept_plan_model_from_distribution(distribution, context, context.get('regulations') or {})
                      or _visual_concept_plan_model(context, context.get('regulations') or {}))
             result = {'success': True, 'scene': scene,

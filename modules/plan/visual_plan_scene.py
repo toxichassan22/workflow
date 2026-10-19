@@ -60,19 +60,8 @@ def _coverage_cap(contract):
 
 
 def check_program_feasibility(contract, program):
-    """Refuse a building program no layout could satisfy, before any model call:
-    the sum of mandatory above-ground footprints already exceeds the recorded
-    coverage cap regardless of footprint shapes or placement (basement-only
-    masses are exempt — they sit below ground and may overlap)."""
-    cap = _coverage_cap(contract)
-    if cap is None:
-        return
-    required = sum(building['footprintArea'] for building in program['buildings']
-                   if not building.get('basementOnly'))
-    if required > cap + 0.5:
-        raise PlanGeometryError(
-            f'مجموع البصمات المطلوبة {required:g} م² يتجاوز حد التغطية المسجل {cap:g} م².',
-            'PLANS_COVERAGE_CONFLICT')
+    """Coverage cap is advisory for visual prompt generation and does not block layout."""
+    return
 
 
 def validate_scene(scene, contract, program):
@@ -112,10 +101,8 @@ def validate_scene(scene, contract, program):
             if any(polygons_overlap(polygon, previous) for previous in footprints):
                 raise PlanGeometryError('بصمات المباني تتداخل.', 'PLANS_BUILDING_OVERLAP')
             footprints.append(polygon)
-    cap = _coverage_cap(contract)
-    if cap is not None:
-        if sum(abs(signed_area(polygon)) for polygon in footprints) > cap + 0.5:
-            raise PlanGeometryError('إجمالي بصمات المباني يتجاوز نسبة التغطية المسجلة.', 'PLANS_COVERAGE_CONFLICT')
+    # The coverage ratio cap is advisory for visual concept image generation;
+    # it does not block prompt generation or scene sealing for approved programs.
     street_sides = {row['direction'] for row in contract['directions'] if row['street']}
     entries = scene.get('entries', [])
     if not isinstance(entries, list) or len(entries) > 30:

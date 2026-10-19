@@ -5,7 +5,8 @@ from unittest.mock import patch
 
 from visual_plan_geometry import (PlanGeometryError, boundary_geometry, polygons_overlap,
                                   signed_area, validate_footprint)
-from visual_plan_scene import buildable_envelopes, fallback_scene, rebase_scene_context, validate_scene
+from visual_plan_scene import (buildable_envelopes, check_program_feasibility, fallback_scene,
+                               rebase_scene_context, validate_scene)
 
 
 SETBACKS = {'west': 5, 'east': 3, 'north': 3, 'south': 3}
@@ -252,6 +253,23 @@ class VisualPlanSceneTests(unittest.TestCase):
             rebase_scene_context(scene, changed_contract, program)
 
         self.assertEqual(caught.exception.code, 'PLANS_SETBACK_CONFLICT')
+
+    def test_check_program_feasibility_is_advisory_and_permits_coverage_exceeded(self):
+        contract = _contract(setbacks={})
+        contract['landArea'] = '1000'
+        contract['coverageRatio'] = '50%'  # cap is 500 m2
+        program = _program(_building(1, 400), _building(2, 300))  # total 700 m2 > cap
+        # Must not raise PlanGeometryError
+        check_program_feasibility(contract, program)
+
+    def test_validate_scene_allows_footprints_exceeding_coverage_cap(self):
+        contract = _contract(setbacks={})
+        contract['landArea'] = '1200'
+        contract['coverageRatio'] = '30%'  # cap is 360 m2
+        program = _program(_building(1, 400))  # 400 m2 > 360 m2 cap
+        scene = fallback_scene(contract, program)
+        validated = validate_scene(scene, contract, program)
+        self.assertIsNotNone(validated)
 
 
 if __name__ == '__main__':
