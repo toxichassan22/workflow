@@ -711,7 +711,7 @@ def _visual_concept_plan_model_from_distribution(distribution, context, regulati
         label_en = _visual_concept_plan_component_en(group['name'])
         if not label_en or re.search(r'[\u0600-\u06FF]', label_en):
             label_en = (block_bands[0]['label'] if block_bands
-                        else f'Block {chr(66 + index)}')
+                        else f'Building {index + 1}')
         category = block_bands[0]['category'] if block_bands else 'amenity'
         blocks.append({
             'label': label_en,
@@ -734,6 +734,9 @@ def _visual_concept_plan_model_from_distribution(distribution, context, regulati
     street_dirs, _other_dirs, sea_dir = _visual_concept_plan_direction_scan(context)
     main_dir, res_dir, svc_dir = _visual_concept_plan_entry_dirs(street_dirs, sea_dir, high_sector, context)
     all_bands = bands + [band for block in blocks for band in block['bands']]
+    tower_label = _visual_concept_plan_component_en(tower['name'])
+    if not tower_label or re.search(r'[\u0600-\u06FF]', tower_label):
+        tower_label = (bands[0]['label'] if bands else 'Main Building')
     return {
         'bands': bands,
         'below': below,
@@ -749,5 +752,6 @@ def _visual_concept_plan_model_from_distribution(distribution, context, regulati
         'sea_dir': sea_dir,
         'has_residential': any(band['category'] == 'residential' for band in all_bands),
         'block_label': blocks[0]['label'] if blocks else 'Low Block',
+        'tower_name': tower_label,
         'from_distribution': True,
     }

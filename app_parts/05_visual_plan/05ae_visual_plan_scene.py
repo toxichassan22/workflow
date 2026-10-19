@@ -823,8 +823,9 @@ def _visual_plan_render_response(data, slot_id):
     image_prompt = (prompt
         + ('\nThe first attached image is the current approved illustration of this plan — '
            'keep its look and every unrequested detail identical. ' if base_image else '\n')
-        + (('\nThe attached site plan illustration is the approved layout for this project — '
-            'strictly follow the building masses, open areas, and orientations established in it.\n')
+        + (('\nCRITICAL ARCHITECTURAL CONFORMITY: The attached site plan illustration is the approved 2D layout (Plan 1) — '
+            'you MUST strictly extrude the exact 2D building footprints and masses established in it into 3D isometric volumes! '
+            'Do NOT invent new buildings, do NOT change their locations, and do NOT alter the site arrangement.\n')
            if site_image else '')
         + 'The attached outline is the true surveyed parcel boundary — trace it exactly and '
         'draw only the buildings, entries and open areas the prompt describes, nothing else.')

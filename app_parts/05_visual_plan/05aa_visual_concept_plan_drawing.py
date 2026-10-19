@@ -227,7 +227,7 @@ def _visual_concept_plan_distribution_spec(context, model, regulations, kind=Non
         masses = [f'(1) {tower}']
         for index, block in enumerate(model.get('blocks') or [], 2):
             cap_text = f"{block['cap']}-storey " if block.get('cap') else 'low-rise '
-            on_part = f" on the {block['direction']} part" if (block.get('direction') and kind != 'uses') else ''
+            on_part = f" on the {block['direction']} part" if (block.get('direction') and kind not in ('uses', 'massing')) else ''
             masses.append(f"({index}) a {cap_text}{block.get('use') or 'mixed-use'} "
                           f"'{block['label']}'{on_part}")
         if model.get('below'):
@@ -423,54 +423,39 @@ def _visual_concept_plan_massing_body(context, model, regulations):
         'flat pastel architectural style on a white background. Isometric view from a high '
         'corner' + (
             f", rotated so the {model['main_dir']} edge faces front-left"
-            if model and model['main_dir'] else '')
+            if model and model.get('main_dir') else '')
         + '. The attached reference image is the TRUE surveyed parcel outline — the parcel plate '
         'must match its exact shape and proportions. ']
     if model:
-        high_dir = model['high_sector']['direction'] if model['high_sector'] else ''
-        tiers = []
-        last = len(model['bands']) - 1
-        for position, band in enumerate(model['bands']):
-            color = band['color'] or 'muted'
-            noun = _VISUAL_PLAN_USE_LABEL.get(band['category'], 'Amenities').lower()
-            if position == 0:
-                storey = f"{band['floors']}-storey " if band['floors'] else ''
-                if model.get('from_distribution'):
-                    base_noun = 'ground band'
-                else:
-                    base_noun = ('podium base' if len(model['bands']) > 1
-                                 and (band['floors'] or 0) <= 8 else 'base')
-                tiers.append(f'{color} {storey}{base_noun}')
-            elif position == last:
-                tiers.append(f'{color} {noun} crown')
-            else:
-                tiers.append(f'{color} {noun} band')
-        if model.get('from_distribution'):
-            tower_name = 'building'
-        else:
-            tower_name = (f"{model['floor_count']}-storey tower" if model['floor_count'] else 'tower')
         parts.append(
-            'On it, extrude only the approved masses as simple matte boxes with thin white '
-            'horizontal floor lines and dark navy outlines: the ' + tower_name
-            + (f' on the {high_dir} part' if high_dir else '')
-            + ', shown as one volume banded by use (' + ', '.join(tiers) + ')')
+            'STRICT 3D EXTRUSION OF PLAN 1: Extrude ONLY the building footprints established in the approved '
+            'conceptual site plan (Plan 1) into 3D conceptual volumes with thin white horizontal floor lines '
+            'and dark navy outlines. Keep every building footprint, location, orientation, and landscaped open '
+            'space strictly identical to the site plan illustration — do NOT invent new buildings, do NOT shift '
+            'their positions, and do NOT alter the site arrangement. ')
+        building_bits = []
+        if model.get('bands'):
+            b_label = model.get('tower_name') or 'Main Building'
+            b_floors = model.get('floor_count') or sum(b['floors'] for b in model['bands'])
+            building_bits.append(f"{b_label} ({b_floors} floors)")
         for block in model.get('blocks') or []:
-            cap_text = f"{block['cap']}-storey " if block.get('cap') else 'low '
-            on_part = f" on the {block['direction']} part" if block.get('direction') else ''
-            parts.append(f" plus the separate {cap_text}{block.get('color') or 'muted'} "
-                         f"'{block['label']}'{on_part}")
-        parts.append('. Pale-green landscaping with round trees fills the open areas')
-        if model['sea_dir']:
-            parts.append(f"; a pale-cyan 'Sea' band runs beyond the {model['sea_dir']} edge")
-        callouts = [band['label'] + (' Podium' if i == 0 and not model.get('from_distribution')
-                                     and len(model['bands']) > 1
-                                     and (band['floors'] or 0) <= 8 else '')
-                    for i, band in enumerate(model['bands'])]
+            b_name = block.get('label') or block.get('use') or 'Building'
+            b_cap = block.get('cap') or 'low-rise'
+            building_bits.append(f"{b_name} ({b_cap} floors)")
+        if building_bits:
+            parts.append('Approved building heights to extrude: ' + ', '.join(building_bits) + '. ')
+        parts.append('Color each volume strictly with the fixed pastel color code by its approved use: '
+                     'Residential = soft blue; Hotel = soft yellow; Retail & F&B = soft teal; '
+                     'Amenities = soft pink; Parking/Service = light grey; Landscaping = pale green. '
+                     'Pale-green landscaping with round trees fills the open areas between buildings exactly as in Plan 1. ')
+        if model.get('sea_dir'):
+            parts.append(f"A pale-cyan 'Sea' band runs beyond the {model['sea_dir']} edge. ")
+        callouts = [band['label'] for band in model.get('bands') or []]
         callouts += [block['label'] for block in model.get('blocks') or [] if block.get('label')]
-        parts.append('. English callout labels on dotted leader lines: '
-                     + ', '.join(f"'{label}'" for label in callouts)
-                     + '. Edge labels: each recorded street and neighbor named with its '
-                     'recorded name and width. ')
+        if callouts:
+            parts.append('English callout labels on dotted leader lines: '
+                         + ', '.join(f"'{l}'" for l in list(dict.fromkeys(callouts))) + '. ')
+        parts.append('Edge labels: each recorded street and neighbor named with its recorded name and width. ')
     else:
         parts.append('No approved masses are recorded — do not extrude speculative volumes; show '
                      'a restrained dashed development field labeled "Approved building footprints '
