@@ -651,6 +651,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "plans.action_label": "Action",
   "plans.building_unnamed": "Unnamed building",
   "plans.building_items_count": "Items: {count}",
+  "plans.add_building_item": "Add item",
   "plans.verification_review_needed": "No direct conflicts. Some results need review.",
   "plans.verification_not_run": "Conflicts have not been checked.",
   "plans.verification_issues_title": "Verification notes",

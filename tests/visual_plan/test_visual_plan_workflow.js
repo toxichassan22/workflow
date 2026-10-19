@@ -734,6 +734,32 @@ test('distribution rows are grouped by building and use a contained sticky-heade
   assert.match(styles, /\.plans-workflow-distribution-panel\s*\{[^}]*padding-bottom:\s*72px/s);
 });
 
+test('building groups have direct add-item actions and addVisualConceptDistributionRow targets the building group', () => {
+  const context = fixture();
+  context.tenantVisualConceptState = context.normalizeVisualConceptState({
+    slots: {},
+    plansWorkflow: {
+      distribution: {
+        rows: [
+          { id: 'row_1', building: 'المبنى الرئيسي', floor_range: 'بدروم 1', component: 'مواقف' },
+          { id: 'row_2', building: 'البرج الفندقي', floor_range: 'أرضي', component: 'فندق' },
+        ],
+        totals: []
+      }
+    }
+  });
+  const html = context.visualConceptDistributionEditorHtml(context.tenantVisualConceptState.plansWorkflow.distribution);
+  assert.ok(html.includes('data-dist-building="المبنى الرئيسي"'));
+  assert.ok(html.includes('data-dist-building="البرج الفندقي"'));
+  assert.ok(html.includes('إضافة بند'));
+
+  context.addVisualConceptDistributionRow('المبنى الرئيسي');
+  const rows = context.tenantVisualConceptState.plansWorkflow.distribution.rows;
+  assert.equal(rows.length, 3);
+  assert.equal(rows[1].building, 'المبنى الرئيسي');
+  assert.equal(rows[2].id, 'row_2');
+});
+
 function panelsOf(root) {
   root.querySelectorAll('[data-plans-workflow-stage]');
   return root.panels;

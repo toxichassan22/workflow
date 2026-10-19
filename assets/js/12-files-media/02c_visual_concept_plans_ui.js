@@ -64,11 +64,20 @@
         '<td><input data-dist-field="circulation" data-dist-id="' + escapeHtml(row.id) + '" value="' + escapeHtml(row.circulation) + '"></td>' +
         '<td><button type="button" class="btn ghost small" data-dist-remove="' + escapeHtml(row.id) + '">حذف</button></td>' +
         '</tr>';
-      const body = rows.length ? Array.from(groups.entries()).map(([building, buildingRows]) =>
-        '<tr class="plans-distribution-building"><th colspan="7"><span>' + escapeHtml(building) +
-        '</span><span class="plans-distribution-building-count">' +
-        escapeHtml(WFT('plans.building_items_count', 'عدد البنود: {count}', { count: buildingRows.length })) + '</span></th></tr>' +
-        buildingRows.map(rowHtml).join('')).join('')
+      const body = rows.length ? Array.from(groups.entries()).map(([building, buildingRows]) => {
+        const isUnnamed = building === WFT('plans.building_unnamed', 'مبنى غير محدد');
+        const bNameAttr = isUnnamed ? '' : escapeHtml(building);
+        return '<tr class="plans-distribution-building"><th colspan="7">' +
+          '<div class="plans-distribution-building-header">' +
+          '<span>' + escapeHtml(building) + '</span>' +
+          '<div class="plans-distribution-building-meta">' +
+          '<span class="plans-distribution-building-count">' +
+          escapeHtml(WFT('plans.building_items_count', 'عدد البنود: {count}', { count: buildingRows.length })) + '</span>' +
+          (!isUnnamed ? '<button type="button" class="btn ghost small plans-dist-add-item-btn" data-plans-workflow-action="add-distribution-row" data-dist-building="' + bNameAttr + '">' +
+          escapeHtml(WFT('plans.add_building_item', 'إضافة بند')) + '</button>' : '') +
+          '</div></div></th></tr>' +
+          buildingRows.map(rowHtml).join('');
+      }).join('')
         : '<tr><td colspan="7" class="plans-workflow-empty">لم يُقترح توزيع بعد.</td></tr>';
       return '<div class="plans-workflow-table-wrap plans-distribution-table-wrap"><table class="plans-workflow-table plans-distribution-table">' +
         head + '<tbody>' + body + '</tbody>' +
@@ -377,11 +386,26 @@
           else if (action === 'revise-distribution') reviseVisualConceptPlansDistribution();
           else if (action === 'check-distribution') checkVisualConceptPlansDistribution('ai');
           else if (action === 'check-notes') checkVisualConceptPlanNotes();
-          else if (action === 'add-distribution-row') addVisualConceptDistributionRow();
+          else if (action === 'add-distribution-row') {
+            const building = actionBtn.getAttribute('data-dist-building') || '';
+            addVisualConceptDistributionRow(building);
+          }
           else if (action === 'approve-distribution') approveVisualConceptPlansDistribution();
           else if (action === 'prepare-prompts') prepareVisualConceptPlansPrompts();
         });
         root.addEventListener('input', event => {
+          const distFieldInput = event.target.closest('[data-dist-field]');
+          if (distFieldInput) {
+            const state = visualConceptPlansWorkflowState();
+            const id = distFieldInput.getAttribute('data-dist-id');
+            const field = distFieldInput.getAttribute('data-dist-field');
+            const row = (state.distribution.rows || []).find(item => item.id === id);
+            if (row) {
+              row[field] = distFieldInput.value;
+              markVisualConceptDirty();
+            }
+            return;
+          }
           const revisionInput = event.target.closest('[data-plans-distribution-revision]');
           if (revisionInput) {
             const state = visualConceptPlansWorkflowState();
@@ -422,11 +446,15 @@
           const field = input.getAttribute('data-dist-field');
           const row = (state.distribution.rows || []).find(item => item.id === id);
           if (!row) return;
+          const prevBuilding = String(row.building || '').trim();
           row[field] = input.value;
           invalidateVisualConceptDistributionReview(state);
           invalidateVisualConceptPlanGeneration(state);
           markVisualConceptDirty();
           scheduleVisualConceptDistributionCheck();
+          if (field === 'building' && prevBuilding !== String(input.value || '').trim()) {
+            renderVisualConceptPage();
+          }
         });
       }
     }

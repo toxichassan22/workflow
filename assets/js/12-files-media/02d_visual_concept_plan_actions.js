@@ -324,13 +324,33 @@
       }, 700);
     }
 
-    function addVisualConceptDistributionRow() {
+    function addVisualConceptDistributionRow(building = '') {
       const workflow = visualConceptPlansWorkflowState();
-      workflow.distribution.rows.push({
-        id: 'row_' + Date.now().toString(36),
-        building: '', floor_range: '', component: '',
+      const targetBuilding = typeof building === 'string' ? building.trim() : '';
+      const newRow = {
+        id: 'row_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6),
+        building: targetBuilding,
+        floor_range: '', component: '',
         units_per_floor: '', floor_area_sqm: '', circulation: ''
-      });
+      };
+      const rows = workflow.distribution.rows || [];
+      if (targetBuilding) {
+        let lastIdx = -1;
+        for (let i = rows.length - 1; i >= 0; i--) {
+          if (String(rows[i].building || '').trim() === targetBuilding) {
+            lastIdx = i;
+            break;
+          }
+        }
+        if (lastIdx >= 0) {
+          rows.splice(lastIdx + 1, 0, newRow);
+        } else {
+          rows.push(newRow);
+        }
+      } else {
+        rows.push(newRow);
+      }
+      workflow.distribution.rows = rows;
       invalidateVisualConceptDistributionReview(workflow);
       invalidateVisualConceptPlanGeneration(workflow);
       markVisualConceptDirty();

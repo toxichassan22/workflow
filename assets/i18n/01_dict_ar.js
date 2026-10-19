@@ -651,6 +651,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "plans.action_label": "إجراء",
   "plans.building_unnamed": "مبنى غير محدد",
   "plans.building_items_count": "عدد البنود: {count}",
+  "plans.add_building_item": "إضافة بند",
   "plans.verification_review_needed": "لا توجد تعارضات مباشرة. توجد نتائج تحتاج مراجعة.",
   "plans.verification_not_run": "لم يتم فحص التعارضات بعد.",
   "plans.verification_issues_title": "ملاحظات التحقق",

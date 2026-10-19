@@ -293,13 +293,45 @@
       background: #eef2f7;
       border-top: 2px solid var(--line);
       color: var(--p);
+      padding: 6px 12px;
+    }
+
+    .plans-distribution-building-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .plans-distribution-building-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
     }
 
     .plans-distribution-building-count {
-      float: left;
       color: var(--muted);
       font-size: 11px;
       font-weight: 600;
+    }
+
+    .plans-dist-add-item-btn {
+      padding: 2px 8px;
+      font-size: 11px;
+      line-height: 1.4;
+      font-weight: 600;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      color: var(--p);
+      cursor: pointer;
+    }
+
+    .plans-dist-add-item-btn:hover {
+      background: #f1f5f9;
+      border-color: var(--teal);
+      color: var(--teal);
     }
 
     .plans-workflow-result-block {
