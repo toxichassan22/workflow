@@ -145,7 +145,7 @@
         },
         planContext: source.planContext && typeof source.planContext === 'object' ? source.planContext : null,
         viewStage: ['verify', 'boundary', 'generate', 'other'].includes(source.viewStage) ? source.viewStage : 'verify',
-        promptReady: Boolean(scene && scene.token && (source.promptReady || (prompts.site && prompts.uses && prompts.massing))),
+        promptReady: Boolean(source.promptReady || (prompts.uses && prompts.massing)),
         promptsError: String(source.promptsError || '').slice(0, 400),
         jobError: String(source.jobError || '').slice(0, 1200),
         jobTodos: (Array.isArray(source.jobTodos) ? source.jobTodos : []).slice(0, 8).map((item, index) => ({
