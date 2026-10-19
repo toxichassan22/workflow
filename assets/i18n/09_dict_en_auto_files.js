@@ -58,6 +58,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "معاينة الصورة": "Image preview",
   "معاينة المستند": "Document Preview",
   "معاينة مكبرة": "Expanded Preview",
+  "عرض بالحجم الكامل": "View full size",
   "مقفل حتى اعتماد الصورة الرئيسية": "Locked until hero image is approved",
   "مقفل حتى اعتماد الصورة الرئيسية.": "Locked until the hero image is approved.",
   "التصورات الخارجية مقفلة حتى اعتماد قسم المخططات.": "Exterior visuals are locked until the plans section is approved.",

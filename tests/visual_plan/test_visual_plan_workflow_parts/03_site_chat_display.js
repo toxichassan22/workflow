@@ -134,4 +134,16 @@ module.exports = function registerSiteChatDisplayTests({ test, fixture, vm, path
     await context.sendVisualConceptChat('plan_site');
     assert.equal(apiCalls, 0);
   });
+
+  test('site plan preview places full size zoom in actions toolbar and not stray on preview', () => {
+    const context = fixture();
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: { plan_site: { imageUrl: '/uploads/creative/sample.svg' } },
+      plansWorkflow: {}
+    });
+    const card = context.renderVisualConceptSitePlanCard();
+    assert.doesNotMatch(card, /class="visual-concept-zoom-btn"/);
+    assert.match(card, /<button[^>]*data-visual-zoom="\/uploads\/creative\/sample\.svg"[^>]*>عرض بالحجم الكامل<\/button>/);
+    assert.ok(card.indexOf('عرض بالحجم الكامل') > card.indexOf('<div class="visual-concept-actions">'));
+  });
 };

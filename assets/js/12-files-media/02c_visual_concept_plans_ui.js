@@ -258,8 +258,11 @@
       const assistantStatus = assistantBusy
         ? (chatMessages.length ? assistantProgressMarkup : '') : '';
       const preview = image
-        ? '<div class="visual-plan-site-preview" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '"><img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '"><button type="button" class="visual-concept-zoom-btn" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">تكبير</button></div>'
+        ? '<div class="visual-plan-site-preview" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '"><img src="' + escapeHtml(image) + '" alt="' + escapeHtml(title) + '"></div>'
         : '<div class="visual-plan-site-preview-empty">لا توجد معاينة بعد.</div>';
+      const zoom = image
+        ? '<button type="button" class="btn ghost small" data-visual-zoom="' + escapeHtml(image) + '" data-visual-title="' + escapeHtml(title) + '">عرض بالحجم الكامل</button>'
+        : '';
       const approve = image || approved
         ? '<button type="button" class="btn primary small" data-visual-action="' + (approved ? 'unapprove' : 'approve') + '" data-visual-slot="plan_site" ' + (locked ? 'disabled' : '') + '>' + (approved ? 'إلغاء الاعتماد' : 'اعتماد') + '</button>'
         : '';
@@ -277,7 +280,7 @@
         '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="plan_site" ' + (!canCompose ? 'disabled' : '') + '>إرسال</button></div>' +
         '</section>' +
         '<aside class="visual-plan-site-preview-panel"><h4>معاينة المخطط</h4>' + preview +
-        '<div class="visual-concept-actions">' + approve + remove + '</div></aside>' +
+        '<div class="visual-concept-actions">' + zoom + approve + remove + '</div></aside>' +
         '</div></article>';
     }
 

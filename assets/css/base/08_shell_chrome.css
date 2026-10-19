@@ -408,6 +408,7 @@
 
 .visual-plan-site-preview,
 .visual-plan-site-preview-empty {
+  position: relative;
   display: grid;
   min-height: 380px;
   max-height: min(68vh, 720px);
@@ -416,6 +417,9 @@
   border: 1px solid var(--soft);
   border-radius: 10px;
   background: #fff;
+}
+
+.visual-plan-site-preview {
   cursor: zoom-in;
 }
 
@@ -426,11 +430,6 @@
   object-fit: contain;
 }
 
-.visual-plan-site-preview .visual-concept-zoom-btn {
-  bottom: 8px;
-  left: 8px;
-}
-
 .visual-plan-site-preview-empty {
   padding: 20px;
   color: var(--muted);
@@ -439,6 +438,10 @@
 
 .visual-plan-site-preview-panel .visual-concept-actions {
   margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 760px) {
