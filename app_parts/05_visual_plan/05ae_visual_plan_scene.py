@@ -687,11 +687,25 @@ def _visual_plan_sanitize_svg(svg):
         if etree.QName(root).namespace != 'http://www.w3.org/2000/svg':
             root.set('xmlns', 'http://www.w3.org/2000/svg')
         if not root.get('viewBox'):
-            root.set('viewBox', '0 0 1600 900')
+            root.set('viewBox', '0 0 1600 1000')
         if not root.get('width'):
             root.set('width', '1600')
         if not root.get('height'):
-            root.set('height', '900')
+            root.set('height', '1000')
+        style = root.get('style') or ''
+        if any(d in style.lower() for d in ('#0d1b2a', '#0f172a', '#1e293b', '#000000', 'rgb(13, 27, 42)')):
+            style = re.sub(r'background-color:\s*[^;]+', 'background-color: #ffffff', style, flags=re.IGNORECASE)
+            root.set('style', style)
+        for elem in root.iter():
+            if not isinstance(elem.tag, str):
+                continue
+            fill = (elem.get('fill') or '').strip().lower()
+            tag = etree.QName(elem).localname.lower()
+            if tag == 'rect' and any(d in fill for d in ('#0d1b2a', '#0f172a', '#1e293b')):
+                w = elem.get('width', '')
+                h = elem.get('height', '')
+                if w in ('100%', '1600', '1400') or h in ('100%', '1000', '900', '840'):
+                    elem.set('fill', '#ffffff')
         repaired = etree.tostring(root, encoding='unicode', xml_declaration=False)
         # Recovery must still produce strict, self-contained XML. This final
         # parse keeps malformed provider output from reaching image storage.
