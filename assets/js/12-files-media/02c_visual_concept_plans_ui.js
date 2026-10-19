@@ -382,7 +382,7 @@
         '<div data-plans-workflow-prompts>' + sitePlanCard + '</div>' +
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="other"' + (activeStage !== 'other' ? ' hidden' : '') + '>' +
-        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.stage_other_title', 'مخططا الاستخدامات والكتلة')) + '</h4>' + (promptReady ? '' : '<button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_other_prepare', 'تجهيز المخططات')) + '</button>') + '</div>' +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.stage_other_title', 'مخططا الاستخدامات والكتلة')) + '</h4>' + (promptReady ? '<button type="button" class="btn ghost small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_other_refresh', 'إعادة تجهيز المخططات')) + '</button>' : '<button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_other_prepare', 'تجهيز المخططات')) + '</button>') + '</div>' +
         '<p class="tenant-hint">' + escapeHtml(promptReady ? WFT('plans.stage_other_ready', 'مخططا الاستخدامات والكتلة جاهزان للتوليد.') : (workflow.promptsError ? WFT('plans.stage_other_error', 'تعذر تجهيز المخططات: {error}', { error: workflow.promptsError }) : WFT('plans.stage_other_not_ready', 'مخططا الاستخدامات والكتلة غير جاهزين للتوليد.'))) + '</p>' +
         '<div data-plans-workflow-prompts>' + otherPlanCards + '</div>' +
         '</section>' +

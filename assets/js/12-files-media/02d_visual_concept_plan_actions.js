@@ -675,7 +675,7 @@
         hideLoader();
         if (stamp !== visualConceptPlanInputStamp()) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
         const workflow = visualConceptPlansWorkflowState();
-        if (!response?.success || !response.prompts || !response.scene) {
+        if (!response?.success || !response.prompts) {
           workflow.promptsError = String(response?.error || WFT('plans.prompts_failed', 'تعذر تجهيز توليد المخططات'));
           markVisualConceptDirty();
           renderVisualConceptPage();
@@ -683,18 +683,21 @@
           return;
         }
         workflow.prompts = { ...workflow.prompts, ...response.prompts };
-        workflow.scene = response.scene;
+        if (response.scene) workflow.scene = response.scene;
         workflow.sourceStamp = stamp;
-        workflow.promptReady = VISUAL_CONCEPT_PLAN_KINDS.every(item => Boolean(workflow.prompts[item.kind])) && Boolean(response.scene.token);
-        workflow.promptsError = workflow.promptReady ? '' : WFT('plans.prompts_incomplete', 'تجهيز المخططات الثلاثة غير مكتمل');
+        workflow.promptReady = Boolean(workflow.prompts.uses && workflow.prompts.massing);
+        workflow.promptsError = workflow.promptReady ? '' : WFT('plans.prompts_incomplete', 'تجهيز المخططين غير مكتمل');
         workflow.status = workflow.promptReady ? 'ready' : 'verified';
         VISUAL_CONCEPT_PLAN_KINDS.forEach(definition => {
+          if (definition.kind === 'site') return;
           const slot = tenantVisualConceptState.slots[definition.id] || (tenantVisualConceptState.slots[definition.id] = emptyVisualConceptSlot(definition.id));
           slot.label = definition.label;
           slot.prompt = workflow.prompts[definition.kind] || slot.prompt;
           slot.caption = definition.label;
-          slot.approvedImageUrl = '';
-          slot.status = slot.imageUrl ? 'review' : 'pending';
+          if (!slot.imageUrl) {
+            slot.approvedImageUrl = '';
+            slot.status = 'pending';
+          }
         });
         markVisualConceptDirty();
         renderVisualConceptPage();

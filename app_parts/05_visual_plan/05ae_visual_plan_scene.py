@@ -785,19 +785,66 @@ def _visual_plan_render_site_svg(prompt, contract, data, base_image='', extra_re
 
 
 def _visual_plan_render_response(data, slot_id):
-    scene, contract, context, _program = _visual_plan_scene_from_request(data)
     kind = _visual_concept_plan_kind(slot_id)
-    workflow = data.get('plansWorkflow') or {}
-    prompt = _visual_plan_slot_prompt(workflow, kind, context)
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     if kind == 'site':
+        scene, contract, context, _program = _visual_plan_scene_from_request(data)
+        prompt = _visual_plan_slot_prompt(workflow, kind, context)
         image, reference_count, model_used = _visual_plan_render_site_svg(prompt, contract, data)
-    else:
-        image, reference_count = _visual_plan_illustrate(prompt, contract, data)
-        model_used = VISUAL_CONCEPT_IMAGE_MODEL
+        return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
+                'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry',
+                'model': model_used, 'geometryMode': 'surveyed_xy_schematic_z',
+                'referenceCount': reference_count}
+
+    # Stage 4 diagrams (uses and massing) built directly on Plan 1 and distribution
+    context = _visual_plan_prompt_context(data)
+    prompt = _visual_plan_slot_prompt(workflow, kind, context)
+    base_image = _visual_concept_edit_base_image(data, g.tenant_id)
+    references = [base_image] if base_image else []
+
+    plan_images = data.get('planImages') if isinstance(data.get('planImages'), dict) else {}
+    site_image = (plan_images.get('site')
+                  or (workflow.get('slots', {}).get('plan_site', {}).get('imageUrl'))
+                  or (data.get('projectData', {}).get('visual_concept', {}).get('slots', {}).get('plan_site', {}).get('imageUrl'))
+                  or '')
+    if site_image and site_image not in references:
+        site_uris = _visual_concept_reference_uris(urls=[site_image], tenant_id=g.tenant_id)
+        references.extend(site_uris)
+
+    boundary_points = (workflow.get('boundary') or {}).get('points') or context.get('survey_points')
+    if boundary_points:
+        try:
+            boundary_url = _visual_concept_render_plan_boundary_reference(boundary_points, g.tenant_id)
+            if boundary_url:
+                references += _visual_concept_reference_uris(urls=[boundary_url], tenant_id=g.tenant_id)
+        except Exception:
+            pass
+
+    image_prompt = (prompt
+        + ('\nThe first attached image is the current approved illustration of this plan — '
+           'keep its look and every unrequested detail identical. ' if base_image else '\n')
+        + (('\nThe attached site plan illustration is the approved layout for this project — '
+            'strictly follow the building masses, open areas, and orientations established in it.\n')
+           if site_image else '')
+        + 'The attached outline is the true surveyed parcel boundary — trace it exactly and '
+        'draw only the buildings, entries and open areas the prompt describes, nothing else.')
+
+    image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
+                            timeout=_visual_plan_job_call_timeout(180),
+                            usage_ctx=_usage_ctx('image', data))
+    if not image:
+        err = last_images_api_error() or {}
+        if err.get('fatal') or err.get('error_code') in _FATAL_AI_ERROR_CODES:
+            raise FatalAICallError(err.get('message'), error_code=err.get('error_code'),
+                                   http_status=err.get('http_status'),
+                                   provider_message=err.get('provider_message'))
+        raise visual_plan_geometry.PlanGeometryError(
+            _client_safe_llm_error(err.get('message') or 'تعذر توليد صورة المخطط.'),
+            'PLANS_PROVIDER_FAILED')
+
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
-            'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry',
-            'model': model_used, 'geometryMode': 'surveyed_xy_schematic_z',
-            'referenceCount': reference_count}
+            'prompt': prompt, 'model': VISUAL_CONCEPT_IMAGE_MODEL,
+            'referenceCount': len(references)}
 
 
 def _visual_plan_edit_scene(data, slot_id):

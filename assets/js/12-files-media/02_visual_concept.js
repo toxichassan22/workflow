@@ -482,9 +482,16 @@
 
     function visualConceptLockMessage(slotId) {
       if (isVisualConceptWorkflowPlan(slotId)) {
+        if (slotId !== 'plan_site') {
+          const wf = tenantVisualConceptState?.plansWorkflow;
+          if (!wf?.distribution?.approved) return WFT('plans.dist_required_lock', 'مقفل حتى اعتماد توزيع المكونات.');
+          if (!wf?.promptReady && !(wf?.prompts && wf.prompts[visualConceptPlanKind(slotId)]) && !tenantVisualConceptState?.slots?.[slotId]?.prompt) {
+            return WFT('plans.prompt_not_prepared', 'غير مجهز للتوليد — يتطلب تجهيز المخططات.');
+          }
+        }
         return typeof visualConceptPlanScenePending !== 'undefined' && visualConceptPlanScenePending
-          ? WFT('plans.scene_busy', 'المشهد الهندسي قيد المعالجة.')
-          : WFT('plans.scene_required', 'المشهد الهندسي غير جاهز.');
+          ? WFT('plans.scene_busy', 'المخطط قيد المعالجة.')
+          : WFT('plans.scene_required', 'المخطط غير جاهز.');
       }
       if (isVisualConceptInteriorSlot(slotId)) {
         if (!visualConceptSectionApproved('external')) return visualConceptSectionLockReason('internal');
@@ -498,13 +505,15 @@
     }
 
     function visualConceptSlotLocked(slotId) {
-      // Stage three starts the scene through its first chat turn, so the site
-      // plan composer must remain available before a scene token exists.
-      // Other workflow diagrams still require that shared scene first.
+      // Stage three site plan remains available through its own assistant.
+      // Stage four diagrams require approved distribution and prepared prompts.
       if (isVisualConceptPlanSlot(slotId)) {
         if (!isVisualConceptWorkflowPlan(slotId)) return false;
         if (Boolean(visualConceptPlanScenePending)) return true;
-        return slotId !== 'plan_site' && !tenantVisualConceptState?.plansWorkflow?.scene?.token;
+        if (slotId === 'plan_site') return false;
+        const wf = tenantVisualConceptState?.plansWorkflow;
+        if (!wf?.distribution?.approved) return true;
+        return !wf?.promptReady && !(wf?.prompts && wf.prompts[visualConceptPlanKind(slotId)]) && !tenantVisualConceptState?.slots?.[slotId]?.prompt;
       }
       if (isVisualConceptInteriorSlot(slotId)) {
         // Interior renders consume the approved hero as their building

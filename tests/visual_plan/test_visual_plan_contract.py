@@ -292,6 +292,31 @@ class VisualPlanContractTests(VisualPlanContractBase):
         sealed: the model writes the Arabic reason the drawn layout was refused."""
         module = self.application_module
         project = self.project()
+    def test_prepare_generates_prompts_directly_from_distribution_without_setback_recalculation(self):
+        """Stage 4 is decoupled from the geometric axis — preparing prompts builds
+        directly on the approved distribution without running setback solvers or refusing."""
+        module = self.application_module
+        project = self.project()
+        project['approved_coverage_ratio'] = 90
+        workflow = self.workflow(project)
+        workflow['distribution']['rows'][0]['floor_area_sqm'] = 900
+        client = self.app.test_client()
+        response = client.post('/api/visual-concept/plans-prompts',
+            headers=self._headers(self.token_a),
+            json={'projectData': project, 'plansWorkflow': workflow})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()
+        self.assertTrue(body['success'])
+        self.assertIn('uses', body['prompts'])
+        self.assertIn('massing', body['prompts'])
+        self.assertIn('VERTICAL PROGRAM DISTRIBUTION', body['prompts']['uses'])
+        self.assertIn('CONCEPTUAL MASSING', body['prompts']['massing'])
+
+    def test_create_scene_still_refuses_when_proposal_violates_setbacks(self):
+        """The standalone create_scene helper still verifies setback compliance
+        when a geometric scene is explicitly built."""
+        module = self.application_module
+        project = self.project()
         bad_layout = json.dumps({'buildings': [{'id': 'b1',
             'footprint': [[0, 0], [10, 0], [10, 10], [0, 10]]}],
             'entries': [], 'openAreas': []})
@@ -302,39 +327,12 @@ class VisualPlanContractTests(VisualPlanContractBase):
                           side_effect=[bad_body, bad_body, explain_body]) as chat, \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
-            response = self.app.test_client().post('/api/visual-concept/plans-prompts',
-                headers=self._headers(self.token_a),
-                json={'projectData': project, 'plansWorkflow': self.workflow(project)})
-        self.assertEqual(response.status_code, 400, response.get_json())
-        self.assertEqual(chat.call_count, 3)
-        self.assertEqual(chat.call_args_list[2].kwargs.get('model'), 'google/gemini-4-argon')
-        self.assertEqual(response.get_json()['error_code'], 'PLANS_SETBACK_CONFLICT')
-        self.assertEqual(response.get_json()['error'], reply)
-        self.assertNotIn('scene', response.get_json())
-
-    def test_prepare_still_refuses_when_nothing_can_fit_the_setbacks(self):
-        """A program whose footprints cannot fit inside the setback envelope is
-        refused with the model's own explanation, never a placed fallback."""
-        module = self.application_module
-        project = self.project()
-        project['approved_coverage_ratio'] = 90
-        workflow = self.workflow(project)
-        workflow['distribution']['rows'][0]['floor_area_sqm'] = 900
-        bad_layout = json.dumps({'buildings': [{'id': 'b1',
-            'footprint': [[0, 0], [10, 0], [10, 10], [0, 10]]}]})
-        bad_body = {'choices': [{'message': {'content': bad_layout}}]}
-        reply = 'مساحة المبنى المطلوبة لا تتسع داخل منطقة البناء بعد الارتدادات؛ قلّل المساحة المعتمدة.'
-        explain_body = {'choices': [{'message': {'content': json.dumps({'reply': reply})}}]}
-        with patch.object(module, 'call_openrouter_chat',
-                          side_effect=[bad_body, bad_body, explain_body]), \
-                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
-                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
-            response = self.app.test_client().post('/api/visual-concept/plans-prompts',
-                headers=self._headers(self.token_a),
-                json={'projectData': project, 'plansWorkflow': workflow})
-        self.assertEqual(response.status_code, 400, response.get_json())
-        self.assertEqual(response.get_json()['error'], reply)
-        self.assertNotIn('scene', response.get_json())
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                with self.assertRaises(module.visual_plan_geometry.PlanGeometryError) as err:
+                    module._visual_plan_create_scene({'projectData': project, 'plansWorkflow': self.workflow(project)})
+                self.assertEqual(err.exception.code, 'PLANS_SETBACK_CONFLICT')
+                self.assertEqual(str(err.exception), reply)
 
     def test_sealed_scene_survives_a_draft_relabel(self):
         """The scene token used to bind the client-minted draftId — a draft
@@ -352,15 +350,12 @@ class VisualPlanContractTests(VisualPlanContractBase):
             'entries': [], 'openAreas': []})
         with patch.object(module, 'call_openrouter_chat', return_value={
             'choices': [{'message': {'content': layout}}]
-        }) as prepare_call, patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
-            prepared = client.post('/api/visual-concept/plans-prompts',
-                headers=self._headers(self.token_a),
-                json={'projectData': project, 'plansWorkflow': self.workflow(project)})
-        self.assertEqual(prepared.status_code, 200, prepared.get_json())
-        self.assertEqual(prepare_call.call_args.kwargs.get('model'), 'google/gemini-4-argon')
-        self.assertEqual(prepare_call.call_args.kwargs.get('reasoning_effort'), 'medium')
-        scene = prepared.get_json()['scene']
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                scene, _context, _ref = module._visual_plan_create_scene({
+                    'projectData': project, 'plansWorkflow': self.workflow(project)})
         workflow = {**self.workflow(project), 'scene': scene}
 
         # The signature covers every input the scene depends on — a relabeled

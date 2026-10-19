@@ -90,30 +90,64 @@ def _visual_plan_report_site_chat_timing(name, started_at):
         callback(timing={name: max(0, round((time.perf_counter() - started_at) * 1000))})
 
 
+def _visual_plan_edit_diagram(data, slot_id, kind_type):
+    instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
+    if not instruction:
+        raise visual_plan_geometry.PlanGeometryError('طلب تعديل المخطط غير متوفر.', 'MESSAGE_REQUIRED')
+    context = _visual_plan_prompt_context(data)
+    workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    prompt = _visual_plan_slot_prompt(workflow, kind_type, context)
+    base_image = _visual_concept_edit_base_image(data, g.tenant_id)
+    if not base_image:
+        raise visual_plan_geometry.PlanGeometryError('لا توجد صورة حالية قابلة للتعديل.', 'IMAGE_REQUIRED')
+    references = [base_image]
+    plan_images = data.get('planImages') if isinstance(data.get('planImages'), dict) else {}
+    site_image = plan_images.get('site') or ''
+    if site_image and site_image not in references:
+        site_uris = _visual_concept_reference_uris(urls=[site_image], tenant_id=g.tenant_id)
+        references.extend(site_uris)
+    edit_prompt = (
+        f"{prompt}\n\nUSER MODIFICATION INSTRUCTION: Apply this specific change to the attached current plan: {instruction}. "
+        "Keep all other details, building layout, and colors consistent."
+    )
+    image = call_images_api(edit_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
+                            timeout=_visual_plan_job_call_timeout(180),
+                            usage_ctx=_usage_ctx('image', data))
+    if not image:
+        err = last_images_api_error() or {}
+        if err.get('fatal') or err.get('error_code') in _FATAL_AI_ERROR_CODES:
+            raise FatalAICallError(err.get('message'), error_code=err.get('error_code'),
+                                   http_status=err.get('http_status'),
+                                   provider_message=err.get('provider_message'))
+        raise visual_plan_geometry.PlanGeometryError(
+            _client_safe_llm_error(err.get('message') or 'تعذر تعديل صورة المخطط.'),
+            'PLANS_PROVIDER_FAILED')
+    return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
+            'prompt': prompt, 'reply': 'تم تعديل المخطط.', 'model': VISUAL_CONCEPT_IMAGE_MODEL}
+
+
 def _visual_plan_execute(kind, data, slot_id=''):
     try:
         if kind == 'prepare':
             workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
-            posted_scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
-            scene = None
-            context = None
-            reference_url = None
-            if (posted_scene and posted_scene.get('version') == VISUAL_PLAN_SCENE_VERSION
-                    and isinstance(posted_scene.get('token'), str) and posted_scene['token'].strip()):
-                try:
-                    scene, contract, context, _program = _visual_plan_scene_from_request(data)
-                    reference_url = _visual_concept_render_plan_boundary_reference(
-                        contract['geometry']['surveyPoints'], g.tenant_id)
-                except Exception:
-                    scene = None
-            if not scene:
-                scene, context, reference_url = _visual_plan_create_scene(data, context=context)
+            context = _visual_plan_prompt_context(data)
             context['client_notes'] = _visual_plan_notes(data)
             distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
             model = (_visual_concept_plan_model_from_distribution(distribution, context, context.get('regulations') or {})
                      or _visual_concept_plan_model(context, context.get('regulations') or {}))
+            prompts = _visual_concept_plan_prompt_templates(context, model)
+            scene = workflow.get('scene')
+            reference_url = None
+            if isinstance(scene, dict):
+                reference_url = scene.get('referenceUrl')
+            if not reference_url and context.get('survey_points'):
+                try:
+                    reference_url = _visual_concept_render_plan_boundary_reference(
+                        context['survey_points'], g.tenant_id)
+                except Exception:
+                    reference_url = None
             result = {'success': True, 'scene': scene,
-                      'prompts': _visual_concept_plan_prompt_templates(context, model),
+                      'prompts': prompts,
                       'context': context, 'referenceUrl': reference_url}
         elif kind == 'prompt':
             # The drawing prompt is fully derived from the fixed context and the
@@ -141,7 +175,11 @@ def _visual_plan_execute(kind, data, slot_id=''):
             review, frontage = _visual_plan_review_notes(data)
             result = {'success': True, 'notesReview': review, 'primaryFrontage': frontage}
         elif kind == 'edit':
-            result = _visual_plan_edit_scene(data, slot_id)
+            kind_type = _visual_concept_plan_kind(slot_id)
+            if kind_type in ('uses', 'massing'):
+                result = _visual_plan_edit_diagram(data, slot_id, kind_type)
+            else:
+                result = _visual_plan_edit_scene(data, slot_id)
         elif kind == 'render':
             result = _visual_plan_render_response(data, slot_id)
         elif kind in ('site_chat', 'site_generate', 'site_edit'):

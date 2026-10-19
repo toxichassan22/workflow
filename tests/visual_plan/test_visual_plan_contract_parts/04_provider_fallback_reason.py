@@ -13,13 +13,11 @@ class VisualPlanContractTestsPart04(VisualPlanContractBase):
                 patch.object(module, '_prepare_image_reference_for_model',
                              return_value='ref:parcel'), \
                 patch.object(module, '_require_billing_balance', return_value=None):
-            response = self.app.test_client().post(
-                '/api/visual-concept/plans-prompts',
-                headers=self._headers(self.token_a),
-                json={'projectData': project, 'plansWorkflow': workflow})
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                with self.assertRaises(module.visual_plan_geometry.PlanGeometryError) as err:
+                    module._visual_plan_create_scene({'projectData': project, 'plansWorkflow': workflow})
+                self.assertEqual(err.exception.code, 'PLANS_PROVIDER_FAILED')
+                self.assertNotIn('راجع', str(err.exception))
+                self.assertNotIn('قلّل', str(err.exception))
 
-        self.assertNotEqual(response.status_code, 200, response.get_json())
-        self.assertEqual(response.get_json()['error_code'], 'PLANS_PROVIDER_FAILED')
-        self.assertNotIn('scene', response.get_json())
-        self.assertNotIn('راجع', response.get_json()['error'])
-        self.assertNotIn('قلّل', response.get_json()['error'])

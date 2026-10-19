@@ -32,19 +32,17 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
                              return_value='/uploads/creative/reference.png'), \
                 patch.object(module, '_prepare_image_reference_for_model',
                              return_value='ref:parcel'):
-            response = client.post('/api/visual-concept/plans-prompts',
-                headers=self._headers(self.token_a),
-                json={'projectData': project, 'plansWorkflow': workflow})
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                scene, _context, _ref = module._visual_plan_create_scene({
+                    'projectData': project, 'plansWorkflow': workflow})
 
-        body = response.get_json()
-        self.assertEqual(response.status_code, 200, body)
-        self.assertTrue(body['success'], body)
         self.assertEqual(model_call.call_count, 2)
         retry_prompt = model_call.call_args_list[1].args[1]
         self.assertIn('pool_row', retry_prompt)
         self.assertIn('every nonparking componentId exactly once', retry_prompt)
         self.assertIn('Surface parking may use multiple openAreas', retry_prompt)
-        pool_area = next(item for item in body['scene']['openAreas']
+        pool_area = next(item for item in scene['openAreas']
                          if item['componentId'] == 'pool_row')
         self.assertAlmostEqual(abs(module.visual_plan_geometry.signed_area(pool_area['polygon'])), 40)
 
