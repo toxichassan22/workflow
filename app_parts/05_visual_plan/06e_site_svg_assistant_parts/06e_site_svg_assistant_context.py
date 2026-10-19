@@ -132,6 +132,49 @@ def _visual_plan_site_render_directions(value):
     return result
 
 
+def _visual_plan_site_geometric_facts(polygon, contract=None):
+    if not isinstance(polygon, list) or len(polygon) < 3:
+        return {}
+    n = len(polygon)
+    edges = []
+    shoelace = 0.0
+    for i in range(n):
+        p1 = polygon[i]
+        p2 = polygon[(i + 1) % n]
+        if not (isinstance(p1, (list, tuple)) and isinstance(p2, (list, tuple)) and len(p1) >= 2 and len(p2) >= 2):
+            continue
+        p1_0, p1_1 = float(p1[0]), float(p1[1])
+        p2_0, p2_1 = float(p2[0]), float(p2[1])
+        dx = p2_0 - p1_0
+        dy = p2_1 - p1_1
+        d = math.hypot(dx, dy)
+        ang = math.degrees(math.atan2(dy, dx))
+        edges.append({'fromPoint': i + 1, 'toPoint': ((i + 1) % n) + 1, 'lengthM': round(d, 2), 'angleDeg': round(ang, 2)})
+        shoelace += (p1_0 * p2_1 - p2_0 * p1_1)
+    area = abs(shoelace) / 2.0
+    valid_points = [p for p in polygon if isinstance(p, (list, tuple)) and len(p) >= 2]
+    min_x = min(float(p[0]) for p in valid_points) if valid_points else 0.0
+    max_x = max(float(p[0]) for p in valid_points) if valid_points else 0.0
+    min_y = min(float(p[1]) for p in valid_points) if valid_points else 0.0
+    max_y = max(float(p[1]) for p in valid_points) if valid_points else 0.0
+    long_edges = sorted(edges, key=lambda e: e['lengthM'], reverse=True)[:2]
+    rotation = long_edges[0]['angleDeg'] if long_edges else 0.0
+    return {
+        'calculatedShoelaceAreaSqm': round(area, 2),
+        'boundaryEdgeDimensions': edges,
+        'boundingSpanMeters': {'spanX': round(max_x - min_x, 2), 'spanY': round(max_y - min_y, 2)},
+        'principalRotationDeg': round(rotation, 2),
+        'recommendedCanvasViewBox': '0 0 1400 840',
+        'architecturalZoningDepths': {
+            'frontParkingDepthM': 15.0,
+            'commercialTowersDepthM': 30.0,
+            'residentialAndCourtyardDepthM': 205.0,
+            'rearCirculationDrivewayM': 6.5,
+            'courtyardAmenities': 'Olympic Swimming Pool (20x40m), 2 Padel Courts, Health Club, Children Playground, Green Landscape'
+        }
+    }
+
+
 def _visual_plan_site_prompt_contract(project, workflow):
     approved_area = project.get('approved_financial_area')
     croquis_source = (project.get('croquis_land_area') or project.get('land_area')
@@ -214,7 +257,7 @@ def _visual_plan_site_packet(data):
     }
     context = {'components': prompt_contract.get('financialComponents') or []}
     drawing_layout = None
-    if (scene_is_current and isinstance(scene.get('buildings'), list)):
+    if (scene_is_current and isinstance(scene.get('buildings'), list) and len(scene.get('buildings')) > 0):
         try:
             tenant = getattr(g, 'tenant', {})
             tenant = tenant if isinstance(tenant, dict) else {}
@@ -229,6 +272,7 @@ def _visual_plan_site_packet(data):
     packet = {
         'project': {'name': prompt_contract.get('projectName'), 'idea': prompt_contract.get('projectIdea')},
         'landAndRegulations': prompt_contract,
+        'geometricFacts': _visual_plan_site_geometric_facts(parcel_polygon, prompt_contract),
         # `landAndRegulations` is the compact, authoritative prompt contract.
         # Do not append full project/financial snapshots or duplicate workflow
         # objects: they can contain removed components and make model calls time out.

@@ -135,33 +135,59 @@
       const rows = Array.isArray(distribution.rows) ? distribution.rows : [];
       const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
       const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
-      // A «مطابق» verdict is not a finding — only conflicts and open items
-      // render, so a clean row never shows inside the warning box.
-      const findings = checks.filter(item => item.result !== 'مطابق').map(item => {
-          const label = item.result === 'متعارض' && item.fixable === false
-            ? 'متعارض — مصدره بيانات المشروع المعتمدة أو الاشتراطات'
-            : (item.result || '');
-          return (label ? label + ': ' : '') + (item.detail || item.item || '');
-        })
-        .concat(issues.flatMap(item =>
-          (Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''])))
-        .filter(Boolean);
+
+      const realConflicts = [];
+      const advisoryNotices = [];
+
+      checks.filter(item => item.result !== 'مطابق').forEach(item => {
+        const text = (item.detail || item.item || '');
+        const isAdvisory = typeof isAdvisoryOrCompliantNotice === 'function' && isAdvisoryOrCompliantNotice(text + ' ' + (item.item || ''));
+        const label = item.result === 'متعارض' && !isAdvisory
+          ? (item.fixable === false ? 'متعارض — مصدره بيانات المشروع المعتمدة أو الاشتراطات' : 'متعارض')
+          : (isAdvisory ? 'ملاحظة تنظيمية' : (item.result || 'ملاحظة'));
+        const entry = (label ? label + ': ' : '') + text;
+        if (item.result === 'متعارض' && !isAdvisory) {
+          realConflicts.push(entry);
+        } else {
+          advisoryNotices.push(entry);
+        }
+      });
+
+      issues.forEach(item => {
+        const points = Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''];
+        points.filter(Boolean).forEach(point => {
+          const full = (item.title ? item.title + ': ' : '') + point;
+          const isAdvisory = typeof isAdvisoryOrCompliantNotice === 'function' && isAdvisoryOrCompliantNotice(full);
+          if (item.severity === 'high' && !isAdvisory) {
+            realConflicts.push(full);
+          } else {
+            advisoryNotices.push(full);
+          }
+        });
+      });
+
       const reviewed = Boolean(distribution.aiReviewed);
-      const findingsHtml = findings.length
-        ? '<div class="plans-workflow-notice"><ul class="plans-issue-list">' +
-          findings.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>'
-        : (rows.length
-          ? (reviewed
+      let resultsHtml = '';
+      if (realConflicts.length) {
+        resultsHtml += '<div class="plans-workflow-notice"><ul class="plans-issue-list">' +
+          realConflicts.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>';
+      }
+      if (advisoryNotices.length) {
+        resultsHtml += '<div class="plans-workflow-info"><ul class="plans-issue-list">' +
+          advisoryNotices.map(point => '<li>' + escapeHtml(point) + '</li>').join('') + '</ul></div>';
+      }
+      if (!realConflicts.length && !advisoryNotices.length) {
+        if (rows.length) {
+          resultsHtml = reviewed
             ? '<p class="plans-workflow-success">لا توجد تعارضات في التوزيع.</p>'
-            : '<p class="tenant-hint">لم يُفحص بعد.</p>')
-          : '');
-      // Findings and pending notes keep the button live — approving through
-      // them routes via the responsibility warning dialog instead of a dead
-      // disabled control.
+            : '<p class="tenant-hint">لم يُفحص بعد.</p>';
+        }
+      }
+
       const canApprove = rows.length > 0 && reviewed;
-      const resultHtml = findingsHtml || rows.length
+      const resultHtml = resultsHtml || rows.length
         ? '<div class="plans-workflow-result-block plans-distribution-review-result"><h5>' +
-          escapeHtml(WFT('plans.distribution_result_heading', 'نتيجة فحص التوزيع')) + '</h5>' + findingsHtml + '</div>'
+          escapeHtml(WFT('plans.distribution_result_heading', 'نتيجة فحص التوزيع')) + '</h5>' + resultsHtml + '</div>'
         : '';
       return resultHtml +
         '<div class="visual-concept-actions">' +
@@ -174,8 +200,15 @@
     function visualConceptDistributionBlocking(distribution) {
       const checks = Array.isArray(distribution.checks) ? distribution.checks : [];
       const issues = Array.isArray(distribution.issues) ? distribution.issues : [];
-      return checks.filter(item => item.result === 'متعارض' || item.severity === 'high')
-        .concat(issues.filter(item => item.severity === 'high'));
+      return checks.filter(item => {
+        if (item.result !== 'متعارض' && item.severity !== 'high') return false;
+        const text = (item.detail || '') + ' ' + (item.item || '');
+        return typeof isAdvisoryOrCompliantNotice === 'function' ? !isAdvisoryOrCompliantNotice(text) : true;
+      }).concat(issues.filter(item => {
+        if (item.severity !== 'high') return false;
+        const text = (item.title || '') + ' ' + (Array.isArray(item.points) ? item.points.join(' ') : '');
+        return typeof isAdvisoryOrCompliantNotice === 'function' ? !isAdvisoryOrCompliantNotice(text) : true;
+      }));
     }
 
     function renderVisualConceptSitePlanCard() {
@@ -262,7 +295,8 @@
         ? (verified ? 'boundary' : 'verify')
         : (requestedStage === 'boundary' && !verified ? 'verify' : requestedStage);
       const checks = Array.isArray(verification.checks) ? verification.checks : [];
-      const conflicts = checks.filter(item => item.result === 'متعارض');
+      const conflicts = checks.filter(item => item.result === 'متعارض'
+        && !(typeof isAdvisoryOrCompliantNotice === 'function' && isAdvisoryOrCompliantNotice((item.detail || '') + ' ' + (item.item || '') + ' ' + (item.suggestion || ''))));
       const checkFindings = checks.filter(item => item && item.result && item.result !== 'مطابق');
       const verificationIssues = Array.isArray(verification.issues) ? verification.issues : [];
       const hasVerificationResult = checks.length > 0 || verificationIssues.length > 0
@@ -271,14 +305,18 @@
       // responsibility warning dialog, same as the distribution approval does.
       const canApprove = checks.length > 0 || verification.canProceed
         || (Array.isArray(verification.issues) && verification.issues.length > 0);
-      const checkRows = checkFindings.map(item =>
-        '<tr><td>' + escapeHtml(item.item || '') +
-        ((item.section || item.field) ? '<div class="plans-conflict-location">' + escapeHtml(item.section || '') + (item.field ? ' — ' + escapeHtml(item.field) : '') + '</div>' : '') +
-        '</td><td>' + escapeHtml(item.project || '') + '</td><td>' + escapeHtml(item.regulatory || '') + '</td><td><span class="plans-check-result plans-check-' + escapeHtml(item.result || '') + '">' + escapeHtml(item.result || '') + '</span></td><td>' +
-        (Array.isArray(item.issues) && item.issues.length ? '<ul class="plans-issue-list">' + item.issues.map(issue => '<li>' + escapeHtml(issue) + '</li>').join('') + '</ul>' : '') +
-        (item.suggestion ? '<div class="plans-conflict-solution"><strong>' + escapeHtml(WFT('plans.proposed_solution', 'الحل المقترح:')) + '</strong> ' + escapeHtml(item.suggestion) + '</div>' : '') +
-        escapeHtml(item.action || '') + '</td></tr>'
-      ).join('');
+      const checkRows = checkFindings.map(item => {
+        const isAdvisory = typeof isAdvisoryOrCompliantNotice === 'function'
+          && isAdvisoryOrCompliantNotice((item.detail || '') + ' ' + (item.item || '') + ' ' + (item.suggestion || ''));
+        const displayResult = (item.result === 'متعارض' && isAdvisory) ? 'ملاحظة تنظيمية' : (item.result || '');
+        const badgeClass = isAdvisory ? 'plans-check-notice' : ('plans-check-' + escapeHtml(item.result || ''));
+        return '<tr><td>' + escapeHtml(item.item || '') +
+          ((item.section || item.field) ? '<div class="plans-conflict-location">' + escapeHtml(item.section || '') + (item.field ? ' — ' + escapeHtml(item.field) : '') + '</div>' : '') +
+          '</td><td>' + escapeHtml(item.project || '') + '</td><td>' + escapeHtml(item.regulatory || '') + '</td><td><span class="plans-check-result ' + badgeClass + '">' + escapeHtml(displayResult) + '</span></td><td>' +
+          (Array.isArray(item.issues) && item.issues.length ? '<ul class="plans-issue-list">' + item.issues.map(issue => '<li>' + escapeHtml(issue) + '</li>').join('') + '</ul>' : '') +
+          (item.suggestion ? '<div class="plans-conflict-solution"><strong>' + escapeHtml(WFT('plans.proposed_solution', 'الحل المقترح:')) + '</strong> ' + escapeHtml(item.suggestion) + '</div>' : '') +
+          escapeHtml(item.action || '') + '</td></tr>';
+      }).join('');
       const issuePoints = verificationIssues.flatMap(item => {
         const points = Array.isArray(item.points) && item.points.length ? item.points : [item.title || ''];
         return points.filter(Boolean).map(point => (item.title ? item.title + ': ' : '') + point);
@@ -419,8 +457,6 @@
             const notes = String(distNotesInput.value || '').slice(0, 1000000);
             if (state.distributionNotes !== notes) {
               state.distributionNotes = notes;
-              invalidateVisualConceptDistributionReview(state);
-              invalidateVisualConceptPlanGeneration(state);
             }
             markVisualConceptDirty();
             return;
@@ -431,12 +467,8 @@
           const state = visualConceptPlansWorkflowState();
           const notesHost = root.querySelector('[data-plans-notes-results]');
           if (notesHost) notesHost.innerHTML = visualConceptPlanNotesResultsHtml(state);
-          const resultsHost = root.querySelector('[data-plans-distribution-results]');
-          if (resultsHost) resultsHost.innerHTML = visualConceptDistributionResultsHtml(state.distribution);
           const check = root.querySelector('[data-plans-workflow-action="check-notes"]');
           if (check) check.disabled = !state.clientNotes.trim();
-          const generate = root.querySelector('[data-plans-workflow-tab="generate"]');
-          if (generate) generate.disabled = true;
         });
         root.addEventListener('change', event => {
           const input = event.target.closest('[data-dist-field]');

@@ -171,13 +171,10 @@ def _visual_plan_site_interview(data, action='chat'):
         '3. ACCEPTING MODIFICATIONS: When the client requests adjustments, changes, or revisions, accept them, update '
         'your sessionMemory and designSpec, and respond constructively. '
         '4. DESIGN & GENERATION: When the client asks to generate or draw the master plan ("ارسم", "صمم", "ولد المخطط", '
-        '"وزع المباني على الأرض"), set generateRequested=true. If the current layout must change to satisfy the request, '
-        'set redesignRequested=true and describe your design decision. If ready=true with no blocking conflicts, the server '
-        'only renders your layout. If approved project inputs changed since the existing layout, set redesignRequested=true. '
-        'Otherwise ask the blocking question first. '
-        'Never generate code in this interview response. '
+        '"وزع المباني على الأرض"), set generateRequested=true. You have full architectural authority to design the master site plan '
+        'layout and provide the complete SVG in "svgCode" when ready, or describe your zoning decisions. '
         'Return JSON only: {"ready":true|false,"generateRequested":true|false,"conflict":true|false,"question":"",'
-        '"redesignRequested":true|false,"choices":[],"reply":"","memory":"",'
+        '"redesignRequested":true|false,"choices":[],"reply":"","svgCode":"","memory":"",'
         '"designSpec":{"palette":{},"layoutNotes":""}}.'
     )
     compact_mode = state['promptTokens'] >= _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT
@@ -242,6 +239,7 @@ def _visual_plan_site_interview(data, action='chat'):
     return {'success': True, 'readyForGeneration': ready, 'generateRequested': generate_requested,
             'needsClarification': bool(question),
             'question': question, 'choices': choices, 'reply': reply,
+            'svgCode': str(parsed.get('svgCode') or ''),
             'assistantState': state, 'scene': workflow.get('scene'),
             'contextChanged': bool(previous_assistant.get('inputSignature')
                                                             and previous_assistant.get('inputSignature') != signature)
@@ -391,47 +389,61 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=No
         'laying out the project on the parcel. There is no external layout algorithm: you determine the spatial '
         'positions, footprints, geometry, calculations, distribution, conflict checks, and client-facing explanation '
         'for all buildings, open spaces, parking, landscape, and access entries. No engineering or geometry engine '
-        'will calculate, validate, rearrange, reject, or repair your design. '
+        'will calculate, validate, rearrange, reject, or repair your design.\n'
+        'You are fully empowered to generate the complete, production-ready master plan SVG directly in the "svgCode" '
+        'property of your response!\n'
         'Take into full consideration all provided land and croquis data: boundaries, surrounding streets, street widths, '
         'facades, setback rules, boundary lengths, orientation with north, regulatory constraints, financial components, '
-        'the complete floor-distribution table, every row note, distributionNotes, clientNotes, and all area sources. '
-        'Use projectMeasurements.landAreaSqm as the declared project area when provided, while keeping the source visible. '
-        'If the survey coordinates, approved financial area, croquis area, footprint requirements, or regulations conflict, '
-        'do not silently choose or alter a value. Return ready=false, conflict=true, explain the specific discrepancy in '
-        'Arabic, and ask one useful question in question. '
-        'RULES:\n'
-        'If parcel boundary coordinates are absent or insufficient to place a responsible plan, set ready=false, '
-        'explain the missing source in Arabic, and ask the client for it. Never invent parcel dimensions. '
-        '1. ARCHITECTURAL DECISIONS & ZONING: Strictly honor all architectural agreements and resolutions recorded in '
-        'sessionMemory, resolvedDecisions, and recentTurns (such as agreed footprint reductions, townhouse density, '
-        'or zoning splits). Commercial and hotel frontages must face the primary recorded street (e.g. Madinah Road). '
-        'Place central recreational amenities (swimming pool, padel court, playground, landscape) in distinct, non-overlapping '
-        'areas in the central park. Arrange residential units (townhouses/villas) in neat, organized rows/blocks in the '
-        'residential zone with proper spacing and internal circulation corridors.\n'
-        '2. CLEAR ARCHITECTURAL LABELS: Give every building group or unit an authentic architectural name and label '
-        '(e.g. "Hotel Tower", "Strip Mall", "Townhouses", or "البرج الفندقي", "الستريب مول", "فلل تاون هاوس"). '
-        'Never return generic names like "Building (1)" or "Building (10)".\n'
-        '3. Place every building inside landParcelBoundary with coordinates [x, y] in the exact coordinate system '
-        'of landParcelBoundary. Calculate the required footprint areas yourself from the source data and notes.\n'
-        '4. Respect setbacks from boundary edges where possible. Do not overlap buildings.\n'
-        '5. Place all required site items (parking, landscape, amenities) in openAreas with distinct polygon coordinates. '
-        'Each amenity (pool, padel, playground) must have its own separate polygon; never give them identical coordinates.\n'
-        '6. Specify access entries that match the recorded streets and frontage.\n'
-        '7. Before returning, calculate the areas yourself, inspect every placement for overlaps, setbacks, boundary fit, '
-        'coverage, and omitted requirements. If any conflict prevents a responsible layout, explain it to the client '
-        'instead of drawing an invalid plan.\n'
-        'Return JSON only: {"ready":true|false,"conflict":true|false,"reply":"Arabic explanation",'
-        '"question":"Arabic follow-up or empty","choices":[],"buildings":[{"id":"","name":"",'
-        '"label":"","category":"","levels":1,"units":1,"footprint":[[x,y],...]}],'
-        '"openAreas":[{"id":"","name":"","label":"","componentId":"",'
-        '"polygon":[[x,y],...],"featureType":""}],'
+        'the complete floor-distribution table, every row note, distributionNotes, clientNotes, geometricFacts, and all area sources.\n'
+        'Use projectMeasurements.landAreaSqm as the declared project area when provided, while keeping the source visible.\n'
+        'ARCHITECTURAL ZONING & PROGRAM:\n'
+        '1. Honor all architectural agreements in sessionMemory, resolvedDecisions, clientNotes, and geometricFacts:\n'
+        '   - Frontage on the primary recorded street (e.g. Madinah Road).\n'
+        '   - Depth 0-15m from frontage: Front setback, drop-off, and surface parking stalls (5.5m setback + 10m parking).\n'
+        '   - Depth 15-45m (depth 30m): Commercial & Hospitality zone (Tower A + Tower B with ground floor strip mall and central pedestrian gateway).\n'
+        '   - Depth 45-250m (depth 205m): Residential & Central Recreation zone:\n'
+        '     * U-shaped townhouses/villas along North, West, and South perimeters.\n'
+        '     * 6.5m dedicated vehicular driveway behind the townhouses with one-way circulation loop and parking stalls.\n'
+        '     * Central courtyard: Olympic swimming pool (20x40m with lane lines and wooden deck), 2 padel courts (with court markings), health club, children playground, and central landscape.\n'
+        '2. VISUAL STYLING & SVG DESIGN STANDARD:\n'
+        '   - Recommended canvas viewBox="0 0 1400 840" (or "0 0 1600 900") with background #f8fafc.\n'
+        '   - Parcel boundary stroke: #07182C (stroke-width 3.2).\n'
+        '   - Soft pastel category fills: Residential Townhouses #E8DFC8/#F5EBE1, Hospitality Towers #2563EB/#3B82F6, '
+        'Commercial Retail #D97706/#F59E0B, Swimming Pool #38BDF8 with lane markings, Padel Courts #10B981 with court lines, '
+        'Playground #FBBF24, Landscape #86EFAC, Parking #94A3B8 with stalls.\n'
+        '   - Include drop shadow filter cardShadow, circulation flow arrow markers, clear English labels, dimension lines, '
+        'north arrow, scale bar, legend, and building schedule table.\n'
+        '   - Structure the SVG with 6 modular layer comments so sections remain interactive:\n'
+        '     <!-- LL_SECTION_START:coordinates -->\n'
+        '     <g id="ll-section-coordinates">...</g>\n'
+        '     <!-- LL_SECTION_END:coordinates -->\n'
+        '     <!-- LL_SECTION_START:colors -->\n'
+        '     <defs id="ll-section-colors">...</defs>\n'
+        '     <!-- LL_SECTION_END:colors -->\n'
+        '     <!-- LL_SECTION_START:components -->\n'
+        '     <g id="ll-section-components">...</g>\n'
+        '     <!-- LL_SECTION_END:components -->\n'
+        '     <!-- LL_SECTION_START:access -->\n'
+        '     <g id="ll-section-access">...</g>\n'
+        '     <!-- LL_SECTION_END:access -->\n'
+        '     <!-- LL_SECTION_START:landscape -->\n'
+        '     <g id="ll-section-landscape">...</g>\n'
+        '     <!-- LL_SECTION_END:landscape -->\n'
+        '     <!-- LL_SECTION_START:legend -->\n'
+        '     <g id="ll-section-legend">...</g>\n'
+        '     <!-- LL_SECTION_END:legend -->\n'
+        '   - NO emojis or emoji icons anywhere.\n'
+        'Return JSON only: {"ready":true,"reply":"Arabic explanation of the master layout and zoning distribution",'
+        '"svgCode":"<svg xmlns=\\"http://www.w3.org/2000/svg\\" viewBox=\\"0 0 1400 840\\" width=\\"100%\\" height=\\"100%\\" style=\\"background-color: #f8fafc; font-family: \'Segoe UI\', Roboto, sans-serif;\\">...</svg>",'
+        '"buildings":[{"id":"","name":"","label":"","category":"","levels":1,"units":1,"footprint":[[x,y],...]}],'
+        '"openAreas":[{"id":"","name":"","label":"","componentId":"","polygon":[[x,y],...],"featureType":""}],'
         '"entries":[{"id":"","point":[x,y],"entryType":"main","label":"Main Entry"}]}'
     )
 
     parsed, _tokens = _visual_plan_site_call(
         system_prompt, json.dumps(design_context, ensure_ascii=False),
         data=data, max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS, reasoning_effort='high')
-    if parsed.get('ready') is False or parsed.get('conflict'):
+    if (parsed.get('ready') is False or parsed.get('conflict')) and not parsed.get('svgCode'):
         return {'assistantDecision': parsed}
 
     ai_buildings_map = {}
@@ -519,9 +531,61 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=No
         'buildings': scene_buildings,
         'openAreas': scene_open_areas,
         'entries': scene_entries,
+        'svgCode': str(parsed.get('svgCode') or ''),
+        'reply': str(parsed.get('reply') or ''),
     }
     signature = _visual_plan_site_context_signature(data)
     return _visual_plan_site_seal_scene(data, scene, signature)
+
+
+def _visual_plan_site_extract_checkpoints(svg):
+    if not svg or not isinstance(svg, str):
+        return {}
+    checkpoints = {}
+    for section, _desc in _VISUAL_PLAN_SITE_SECTIONS:
+        start_marker = '<!-- LL_SECTION_START:' + section + ' -->'
+        end_marker = '<!-- LL_SECTION_END:' + section + ' -->'
+        start_idx = svg.find(start_marker)
+        end_idx = svg.find(end_marker)
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            chunk = svg[start_idx + len(start_marker):end_idx].strip()
+            if chunk:
+                checkpoints[section] = chunk
+                continue
+        elem_tag = 'defs' if section == 'colors' else 'g'
+        pattern = re.compile(rf'(<{elem_tag}[^>]*\bid=["\']ll-section-{section}["\'][\s\S]*?</{elem_tag}>)', re.IGNORECASE)
+        match = pattern.search(svg)
+        if match:
+            checkpoints[section] = match.group(1).strip()
+    return checkpoints
+
+
+def _visual_plan_site_ensure_section_markers(svg):
+    if not svg or not isinstance(svg, str):
+        return svg
+    result = svg
+    for section, _desc in _VISUAL_PLAN_SITE_SECTIONS:
+        start_marker = '<!-- LL_SECTION_START:' + section + ' -->'
+        end_marker = '<!-- LL_SECTION_END:' + section + ' -->'
+        if start_marker in result and end_marker in result:
+            continue
+        elem_tag = 'defs' if section == 'colors' else 'g'
+        pattern = re.compile(rf'(<{elem_tag}[^>]*\bid=["\']ll-section-{section}["\'][\s\S]*?</{elem_tag}>)', re.IGNORECASE)
+        match = pattern.search(result)
+        if match:
+            target = match.group(1)
+            wrapped = f"{start_marker}\n{target}\n{end_marker}"
+            result = result.replace(target, wrapped, 1)
+        else:
+            placeholder = (f"\n{start_marker}\n<defs id=\"ll-section-{section}\"></defs>\n{end_marker}"
+                           if section == 'colors' else
+                           f"\n{start_marker}\n<g id=\"ll-section-{section}\"></g>\n{end_marker}")
+            svg_close = result.rfind('</svg>')
+            if svg_close != -1:
+                result = result[:svg_close] + placeholder + '\n' + result[svg_close:]
+            else:
+                result += placeholder
+    return result
 
 
 def _visual_plan_site_generate(data, interview):
@@ -530,7 +594,14 @@ def _visual_plan_site_generate(data, interview):
     packet, contract, _context, signature = _visual_plan_site_packet(data)
     state = interview['assistantState']
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
-    if not packet.get('drawingLayout') or state.get('redesignRequested'):
+    ai_scene = None
+    direct_svg = ''
+    if isinstance(interview.get('svgCode'), str) and interview.get('svgCode'):
+        direct_svg = str(interview['svgCode']).strip()
+    elif isinstance(workflow.get('scene'), dict) and workflow['scene'].get('svgCode') and not state.get('redesignRequested'):
+        direct_svg = str(workflow['scene']['svgCode']).strip()
+
+    if not direct_svg and (not packet.get('drawingLayout') or state.get('redesignRequested')):
         ai_scene = _visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=state)
         decision = ai_scene.get('assistantDecision') if isinstance(ai_scene, dict) else None
         if isinstance(decision, dict):
@@ -554,6 +625,44 @@ def _visual_plan_site_generate(data, interview):
         data['plansWorkflow'] = workflow
         packet, contract, _context, signature = _visual_plan_site_packet(data)
         workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+        if isinstance(ai_scene, dict) and ai_scene.get('svgCode'):
+            direct_svg = str(ai_scene['svgCode']).strip()
+
+    if direct_svg:
+        fenced = re.search(r'```(?:svg|xml)?\s*\n?([\s\S]*?)```', direct_svg)
+        if fenced:
+            direct_svg = fenced.group(1).strip()
+        direct_svg = _visual_plan_site_ensure_section_markers(direct_svg)
+        sanitized = _visual_plan_sanitize_svg(direct_svg)
+        if sanitized and '<svg' in sanitized:
+            checkpoints = _visual_plan_site_extract_checkpoints(sanitized)
+            encoded = base64.b64encode(sanitized.encode('utf-8')).decode('ascii')
+            image = persist_generated_image('data:image/svg+xml;base64,' + encoded, g.tenant_id)
+            state.update({
+                'status': 'review',
+                'readyForGeneration': True,
+                'generateRequested': False,
+                'redesignRequested': False,
+                'renderRevision': _VISUAL_PLAN_SITE_RENDER_REVISION,
+                'checkpoints': checkpoints,
+                'inputSignature': signature,
+            })
+            _visual_plan_site_report_progress(
+                100, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints, signature)
+            reply = (ai_scene.get('reply') if isinstance(ai_scene, dict) and ai_scene.get('reply')
+                     else interview.get('reply') or (workflow.get('scene') if isinstance(workflow.get('scene'), dict) else {}).get('reply')
+                     or 'تم إنشاء المخطط بنجاح لمراجعته.')
+            state['turns'].append({'role': 'assistant', 'text': reply})
+            return {
+                'success': True,
+                'slotId': 'plan_site',
+                'image': image,
+                'svgCode': sanitized,
+                'model': GEMINI_TEXT_MODEL,
+                'reply': reply,
+                'assistantState': state,
+                'scene': workflow.get('scene'),
+            }
     previous = workflow.get('siteAssistant') if isinstance(workflow.get('siteAssistant'), dict) else {}
     checkpoints = _visual_plan_site_reusable_checkpoints(previous, signature)
     state.update({'status': 'generating', 'inputSignature': signature,
@@ -632,12 +741,14 @@ def _visual_plan_site_edit(data):
         state['pendingQuestion'] = ''
     state['turns'].append({'role': 'user', 'text': instruction})
     system_prompt = (
-        'You are Google Gemini 4 Argon making a surgical edit to an existing modular SVG source file. '
-        'Do not regenerate or return the whole SVG. Return JSON only: {"clear":true|false,"question":"",'
-        '"choices":[],"targetSection":"one section ID","code":"complete replacement fragment",'
-        '"reply":""}. Change exactly one named section, preserving every other byte and all source facts. '
-        'Use English visible labels, preserve the supplied palette and geometry, and keep the drawing uncluttered. '
-        'The replacement must be a single <g id="ll-section-X"> or the <defs id="ll-section-colors"> section.'
+        'You are Google Gemini 4 Argon editing a modular architectural site plan SVG. '
+        'You have two ways to respond:\n'
+        '1. If the edit affects a single modular section, return JSON: '
+        '{"clear":true,"targetSection":"sectionId","code":"complete replacement fragment","reply":""}.\n'
+        '2. If the edit involves a spatial redesign or full regeneration, return JSON: '
+        '{"clear":true,"svgCode":"<svg ...>...</svg>","reply":""}.\n'
+        'Change only what is necessary, preserving every other byte and all source facts. '
+        'Use English visible labels, preserve the supplied palette and geometry, and keep the drawing uncluttered.'
     )
     user_packet = {'projectFacts': packet, 'currentSvg': svg,
                    'resolvedAnswers': state['answers'], 'sessionMemory': state['summary'],
@@ -656,6 +767,25 @@ def _visual_plan_site_edit(data):
         return {'success': True, 'needsClarification': True, 'question': question,
                 'choices': choices,
                 'assistantState': state}
+    if parsed.get('svgCode'):
+        revised_raw = str(parsed['svgCode']).strip()
+        fenced = re.search(r'```(?:svg|xml)?\s*\n?([\s\S]*?)```', revised_raw)
+        if fenced:
+            revised_raw = fenced.group(1).strip()
+        revised_raw = _visual_plan_site_ensure_section_markers(revised_raw)
+        revised = _visual_plan_sanitize_svg(revised_raw)
+        if not revised or '<svg' not in revised:
+            raise visual_plan_geometry.PlanGeometryError('نتج عن التعديل كود SVG غير صالح.', 'PLANS_SVG_INVALID')
+        encoded = base64.b64encode(revised.encode('utf-8')).decode('ascii')
+        image = persist_generated_image('data:image/svg+xml;base64,' + encoded, g.tenant_id)
+        checkpoints = _visual_plan_site_extract_checkpoints(revised)
+        state['checkpoints'].update(checkpoints)
+        state['status'] = 'review'
+        reply = _visual_concept_text(parsed.get('reply'), _VISUAL_PLAN_SITE_REPLY_MAX_CHARS) or 'تم تحديث المخطط.'
+        state['turns'].append({'role': 'assistant', 'text': reply})
+        return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
+                'model': GEMINI_TEXT_MODEL, 'reply': reply,
+                'assistantState': state, 'scene': workflow.get('scene')}
     section = str(parsed.get('targetSection') or '')
     if section not in _VISUAL_PLAN_SITE_SECTION_IDS:
         raise visual_plan_geometry.PlanGeometryError('قسم التعديل غير معروف.', 'PLANS_EDIT_INVALID')

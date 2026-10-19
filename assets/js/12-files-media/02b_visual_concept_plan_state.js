@@ -192,6 +192,41 @@
 
     let visualConceptPlanScenePending = false;
 
+    function isAdvisoryOrCompliantNotice(text) {
+      if (!text || typeof text !== 'string') return false;
+      const lower = text.toLowerCase();
+      if (text.includes('مطابق') || text.includes('يطابق') || text.includes('لا يوجد تعارض') || text.includes('متوافق') || text.includes('ضمن المسموح')) {
+        return true;
+      }
+      if (lower.includes('tia') || text.includes('دراسة مرورية') || text.includes('دراسة المرور')
+          || text.includes('المباني العالية') || text.includes('دليل المباني العالية')
+          || text.includes('كود البناء') || text.includes('اشتراطات أمانة') || text.includes('نظام واشتراطات')
+          || text.includes('إشعار تنظيمي') || text.includes('ملاحظة تنظيمية')
+          || text.includes('متطلب إجرائي') || text.includes('اشتراط إجرائي')
+          || text.includes('تأكيد استيفاء') || text.includes('مراجعة بيانات موثقة')) {
+        return true;
+      }
+      return false;
+    }
+
+    function visualConceptDistributionRowsStamp(rows) {
+      const clean = (Array.isArray(rows) ? rows : []).map(r => ({
+        b: String(r?.building || '').trim(),
+        f: String(r?.floor_range || '').trim(),
+        c: String(r?.component || '').trim(),
+        u: String(r?.units_per_floor ?? '').trim(),
+        a: String(r?.floor_area_sqm ?? '').trim(),
+        s: String(r?.circulation || '').trim()
+      }));
+      const data = JSON.stringify(clean);
+      let first = 2166136261, second = 5381;
+      for (let index = 0; index < data.length; index += 1) {
+        first = Math.imul(first ^ data.charCodeAt(index), 16777619);
+        second = Math.imul(second, 33) ^ data.charCodeAt(index);
+      }
+      return (first >>> 0).toString(16) + ':' + (second >>> 0).toString(16) + ':' + data.length;
+    }
+
     function visualConceptPlanInputStamp(projectData = tenantProjectData) {
       const workflow = tenantVisualConceptState?.plansWorkflow || emptyVisualConceptPlansWorkflow();
       const keys = ['project_name', 'project_idea', 'city', 'district', 'croquis_land_area',
@@ -205,8 +240,7 @@
       const data = JSON.stringify({ fields,
         financialParking: visualConceptPlanFinancialInput(projectData?.financial_study_model),
         boundary: workflow.boundary.points,
-        distribution: workflow.distribution.rows, distributionNotes: workflow.distributionNotes,
-        clientNotes: workflow.clientNotes });
+        distribution: workflow.distribution.rows });
       let first = 2166136261, second = 5381;
       for (let index = 0; index < data.length; index += 1) {
         first = Math.imul(first ^ data.charCodeAt(index), 16777619);
@@ -326,8 +360,13 @@
       const notes = String(value || '').slice(0, 1000000);
       if (workflow.clientNotes === notes) return;
       workflow.clientNotes = notes;
-      invalidateVisualConceptDistributionReview(workflow);
-      invalidateVisualConceptPlanGeneration(workflow);
+      if (workflow.notesReview) {
+        workflow.notesReview.verified = false;
+        workflow.notesReview.canProceed = false;
+        workflow.notesReview.token = '';
+      }
+      workflow.promptReady = false;
+      workflow.scene = null;
       markVisualConceptDirty();
     }
 

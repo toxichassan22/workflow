@@ -9,6 +9,7 @@ const registerJobErrorTests = require('./test_visual_plan_workflow_parts/01_job_
 const registerPlanStatusAndWiringTests = require('./test_visual_plan_workflow_parts/02_plan_status_and_wiring.js');
 const registerSiteChatDisplayTests = require('./test_visual_plan_workflow_parts/03_site_chat_display.js');
 const registerSiteAssistantPayloadTests = require('./test_visual_plan_workflow_parts/04_site_assistant_payload.js');
+const registerNotesDecouplingAndAdvisoryTests = require('./test_visual_plan_workflow_parts/05_notes_decoupling_and_advisory.js');
 
 const dir = path.resolve(__dirname, '../../assets/js/12-files-media');
 const source = fs.readdirSync(dir).filter(file => /^02.*\.js$/.test(file)).sort()
@@ -49,6 +50,7 @@ registerJobErrorTests({ test, fixture });
 registerPlanStatusAndWiringTests({ test, fixture, source, dir, fs, path, vm });
 registerSiteChatDisplayTests({ test, fixture, vm, path });
 registerSiteAssistantPayloadTests({ test, fixture });
+registerNotesDecouplingAndAdvisoryTests({ test, fixture, plain });
 
 function installActiveSectionApproval(context) {
   const start = formSectionsSource.indexOf('    function activeProjectSectionKey()');
@@ -137,10 +139,10 @@ test('changing notes invalidates their review and scene without removing saved i
   assert.equal(workflow.notesReview.verified, false);
   assert.equal(workflow.promptReady, false);
   assert.equal(workflow.scene, null);
-  assert.equal(workflow.distribution.aiReviewed, false);
-  assert.equal(workflow.distribution.reviewSignature, '');
-  assert.equal(workflow.distribution.checks.length, 0);
-  assert.equal(workflow.distribution.issues.length, 0);
+  assert.equal(workflow.distribution.aiReviewed, true);
+  assert.equal(workflow.distribution.reviewSignature, 'old-review-signature');
+  assert.equal(workflow.distribution.checks.length, 1);
+  assert.equal(workflow.distribution.issues.length, 1);
   assert.equal(context.tenantVisualConceptState.slots.plan_site.imageUrl, '/uploads/creative/old.png');
 });
 

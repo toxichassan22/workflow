@@ -185,6 +185,23 @@
       font-weight: 700;
     }
 
+    .plans-workflow-info {
+      padding: 10px 12px;
+      border: 1px solid #c7ddf7;
+      border-radius: 10px;
+      background: #f0f6ff;
+      color: #0c4a6e;
+      font-size: 12px;
+      font-weight: 600;
+      margin-top: 8px;
+    }
+
+    .plans-check-notice {
+      background: #e0f2fe;
+      color: #0369a1;
+      border: 1px solid #bae6fd;
+    }
+
     .plans-workflow-success {
       color: #166534 !important;
       background: #f0fdf4;

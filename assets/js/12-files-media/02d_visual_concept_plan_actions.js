@@ -296,8 +296,12 @@
       const checks = Array.isArray(workflow.verification.checks) ? workflow.verification.checks : [];
       const issues = Array.isArray(workflow.verification.issues) ? workflow.verification.issues : [];
       if (!checks.length && !issues.length && !workflow.verification.canProceed) return;
-      const hasConflicts = checks.some(item => item.result === 'متعارض')
-        || workflow.verification.canProceed === false;
+      const realConflicts = checks.filter(item => {
+        if (item.result !== 'متعارض') return false;
+        const text = (item.detail || '') + ' ' + (item.item || '') + ' ' + (item.suggestion || '') + ' ' + (item.action || '');
+        return typeof isAdvisoryOrCompliantNotice === 'function' ? !isAdvisoryOrCompliantNotice(text) : true;
+      });
+      const hasConflicts = realConflicts.length > 0 || (workflow.verification.canProceed === false && realConflicts.length > 0);
       if (hasConflicts) { showVisualConceptVerificationRisk(); return; }
       applyVisualConceptPlansVerificationApproval(workflow);
     }
@@ -481,8 +485,9 @@
       const workflow = visualConceptPlansWorkflowState();
       const rows = workflow.distribution.rows || [];
       if (!rows.length || !workflow.distribution.aiReviewed) return;
-      const hasConflicts = Boolean(visualConceptDistributionBlocking(workflow.distribution).length)
-        || workflow.distribution.canProceed === false;
+      const blockingList = visualConceptDistributionBlocking(workflow.distribution);
+      const hasConflicts = Boolean(blockingList.length)
+        || (workflow.distribution.canProceed === false && Boolean(blockingList.length));
       const notesPending = Boolean(workflow.clientNotes.trim()) && !visualConceptPlanNotesCleared(workflow);
       if (hasConflicts || notesPending) { showVisualConceptDistributionRisk(hasConflicts, notesPending); return; }
       applyVisualConceptPlansDistributionApproval(workflow);

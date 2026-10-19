@@ -442,7 +442,10 @@ def _visual_concept_plan_adjudicate_checks(checks, reviews):
         if result in ('مطابق', 'سليم', 'صحيح'):
             verdicts[index] = ('مطابق', detail, fixable)
         elif result == 'متعارض':
-            verdicts[index] = ('متعارض', detail, fixable)
+            detail_lower = detail.lower()
+            if any(kw in detail_lower for kw in ('مطابق', 'يطابق', 'متوافق', 'ضمن المسموح', 'tia', 'دراسة مرورية', 'المباني العالية', 'دليل المباني')):
+                result = 'يحتاج تأكيد'
+            verdicts[index] = (result, detail, fixable)
         elif result:
             verdicts[index] = ('يحتاج تأكيد', detail, fixable)
     adjudicated = []

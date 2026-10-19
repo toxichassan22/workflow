@@ -352,7 +352,7 @@ def _read_market_source_page(url, max_bytes=2 * 1024 * 1024):
 
 _ARABIC_DIGITS = str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')
 # Currency-word alternation built from the alias table — the keys are stored
-# folded (همزات swiped, ة→ه) but page text isn't, so each foldable letter
+# folded (همزات swiped, ة to ه) but page text isn't, so each foldable letter
 # widens back to a class. Longest first keeps «دينار اردني» ahead of «دينار».
 _LISTING_CURRENCY_WORD_RE = '|'.join(
     re.escape(key)

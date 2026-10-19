@@ -756,6 +756,9 @@ def _visual_concept_plan_normalize_verification(raw):
         if result not in {'مطابق', 'متعارض', 'يحتاج تأكيد', 'غير متوفر'}:
             result = 'يحتاج تأكيد'
         issues = _visual_concept_plan_bullets(item.get('issues') or item.get('note') or item.get('action'))
+        desc_text = (name + ' ' + str(item.get('suggestion') or '') + ' ' + str(item.get('action') or '') + ' ' + ' '.join(issues)).lower()
+        if result == 'متعارض' and any(kw in desc_text for kw in ('مطابق', 'يطابق', 'متوافق', 'ضمن المسموح', 'tia', 'دراسة مرورية', 'المباني العالية', 'دليل المباني')):
+            result = 'يحتاج تأكيد'
         checks.append({
             'item': name,
             'field': _visual_concept_plan_sanitize_text(item.get('field') or item.get('key'))[:160],
@@ -772,11 +775,15 @@ def _visual_concept_plan_normalize_verification(raw):
     issues = _visual_concept_plan_normalize_issues(
         source.get('issues') or source.get('blocking_issues') or [])
     summary = _visual_concept_plan_sanitize_text(source.get('summary'))
+    has_real_conflicts = any(c.get('result') == 'متعارض' for c in checks) or any(i.get('severity') == 'high' for i in issues)
+    can_proceed = bool(source.get('canProceed', source.get('can_proceed', True)))
+    if not has_real_conflicts:
+        can_proceed = True
     return {
         'checks': checks,
         'issues': issues[:30],
         'summary': summary[:1600],
-        'canProceed': bool(source.get('canProceed', source.get('can_proceed', True))),
+        'canProceed': can_proceed,
         'approved': False,
     }
 
