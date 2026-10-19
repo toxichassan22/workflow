@@ -269,3 +269,24 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         padel_pts = next(oa['points'] for oa in layout['openAreas'] if oa['featureType'] == 'padel')
         self.assertNotEqual(pool_pts, padel_pts)
 
+    def test_site_svg_assistant_prompts_enforce_canvas_safe_zone_and_legend_grid(self):
+        module = self.application_module
+        first_data = {'message': 'صمم المخطط', 'plansWorkflow': {
+            'siteAssistant': {'inputSignature': 'test-sig'}
+        }}
+        with patch.object(module, '_visual_plan_site_packet',
+                          return_value=({}, {}, {}, 'test-sig')), \
+                patch.object(module, '_visual_plan_site_call',
+                             return_value=({'ready': True, 'reply': 'OK'}, 100)) as model_call:
+            module._visual_plan_site_interview(first_data)
+
+        self.assertTrue(model_call.called)
+        system_prompt = model_call.call_args[0][0]
+        self.assertIn('x between 80 and 1520', system_prompt)
+        self.assertIn('x=1480', system_prompt)
+        self.assertIn('text-anchor="end"', system_prompt)
+        self.assertIn('width="690"', system_prompt)
+        self.assertIn('x="830"', system_prompt)
+        self.assertIn('TABLE COLUMN ALIGNMENT', system_prompt)
+        self.assertIn('x=740', system_prompt)
+
