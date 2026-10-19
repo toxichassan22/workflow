@@ -288,5 +288,20 @@ class FinancialMurabahaTermsTests(unittest.TestCase):
         self.assertIn('63,000', html)
 
 
+    def test_murabaha_total_is_fixed_and_plan_distributes_it(self):
+        """Total Murabaha is fixed by loan terms (financeRepaymentYears) and the plan distributes it."""
+        calc_src = self._read('assets/js/09-financial/02_formulas_calc.js')
+        # Total Murabaha is calculated strictly from repayment duration, never murabaha plan years
+        self.assertIn('baseMurabaha = facilityAmount * annualFinanceRate * Math.max(0, financeRepaymentYears);', calc_src)
+        self.assertNotIn('baseMurabaha = facilityAmount * annualFinanceRate * Math.max(1, (financeMurabahaYears', calc_src)
+        # Murabaha plan row amount directly calculates percentage of fixed total Murabaha
+        self.assertIn('const amount = baseMurabaha * (row.murabahaPct / 100);', calc_src)
+        self.assertNotIn('row.murabahaPct / financeMurabahaPctTotal', calc_src)
+        # Fixed interest term strictly respects repayment years
+        self.assertIn('withinFixedInterestTerm = year >= firstDrawYear && year < firstDrawYear + financeRepaymentYears;', calc_src)
+        # Total finance interest metric is fixed to baseMurabaha
+        self.assertIn('totalFinanceInterest = financeOn ? baseMurabaha : 0', calc_src)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -576,7 +576,7 @@
       let baseMurabaha = 0;
       if (financeOn) {
         if (financeInterestMethod === 'fixed') {
-          baseMurabaha = facilityAmount * annualFinanceRate * Math.max(1, (financeMurabahaYears || financeRepaymentYears || 1));
+          baseMurabaha = facilityAmount * annualFinanceRate * Math.max(0, financeRepaymentYears);
         } else {
           let simDebt = 0, totalSimDrawn = 0;
           for (let y = 1; y <= totalYears; y++) {
@@ -596,7 +596,7 @@
       }
       const useMurabahaPlan = financeOn && financeMurabahaYears > 0 && financeMurabahaPlan.length > 0;
       financeMurabahaPlan.forEach(row => {
-        const amount = financeMurabahaPctTotal ? baseMurabaha * (row.murabahaPct / financeMurabahaPctTotal) : 0;
+        const amount = baseMurabaha * (row.murabahaPct / 100);
         row.amount = amount;
         const c = row.tr.querySelector('.financeMurabahaAmount');
         if (c) c.textContent = money(amount);
@@ -623,7 +623,7 @@
       const projected = [];
       const initialProjectLandFlow = landContributionType === 'inKind' ? -landCostIncluded : 0, initialEquityLandFlow = landContributionType === 'inKind' ? -landCostIncluded : 0;
       const projectCashflows = [initialProjectLandFlow], equityCashflows = [initialEquityLandFlow];
-      let cumulative = 0, totalOperatingCF = 0, terminal = 0, saleExitValue = 0, operatingExitValue = 0, saleExitGross = 0, operatingExitGross = 0, totalExitCosts = 0, finalCF = 0, debtBalance = 0, totalDrawn = 0, totalFinanceInterest = 0, totalCashEquity = 0, totalEquityDistributions = 0, cumulativeInvestedCapital = 0, cashReserve = 0, totalFundManagementFees = 0, totalAdditionalFundFees = 0, fundExitFeeTotal = 0, performanceFeeTotal = 0, cumulativeBeforePerformance = 0, revenueY1 = 0, opexY1 = 0, noiY1 = 0, fullOccupancyRevenue = 0, fullOccupancyOpex = 0, fullOccupancyNOI = 0, totalGraceDiscount = 0;
+      let cumulative = 0, totalOperatingCF = 0, terminal = 0, saleExitValue = 0, operatingExitValue = 0, saleExitGross = 0, operatingExitGross = 0, totalExitCosts = 0, finalCF = 0, debtBalance = 0, totalDrawn = 0, totalFinanceInterest = financeOn ? baseMurabaha : 0, totalCashEquity = 0, totalEquityDistributions = 0, cumulativeInvestedCapital = 0, cashReserve = 0, totalFundManagementFees = 0, totalAdditionalFundFees = 0, fundExitFeeTotal = 0, performanceFeeTotal = 0, cumulativeBeforePerformance = 0, revenueY1 = 0, opexY1 = 0, noiY1 = 0, fullOccupancyRevenue = 0, fullOccupancyOpex = 0, fullOccupancyNOI = 0, totalGraceDiscount = 0;
 
       for (let year = 1; year <= totalYears; year++) {
         const inOperation = modeFlags.rental && year >= operationStartYear && (exitMethod === 'none' || year <= operatingExitYear), operationYear = inOperation ? year - operationStartYear + 1 : 0, occupancyReach = inOperation ? occupancyReachForYear(operationYear) : 0, saleRevenue = (modeFlags.sales && year >= salesStartYear && year < Math.min(totalYears + 1, salesStartYear + salesYears)) ? saleRevenueTotal / Math.max(1, Math.min(salesYears, totalYears - salesStartYear + 1)) : 0;
@@ -674,14 +674,14 @@
         const projectOutflow = developmentCost + developerPayment + landPayment, unlevered = saleRevenue + operatingRevenue + tv - projectOutflow - opexAnnual - annualLandRent, openingDebt = debtBalance;
         const planRow = financePlan.find(row => row.year === year), plannedDraw = financeDrawPctTotal && planRow ? facilityAmount * (planRow.drawPct / financeDrawPctTotal) : 0, draw = (financeOn && year <= financeDrawYears) ? Math.min(Math.max(0, facilityAmount - totalDrawn), plannedDraw) : 0;
         totalDrawn += draw;
-        const outstandingBeforeRepayment = openingDebt + draw, firstDrawYear = financePlan.filter(row => row.drawPct > 0).reduce((min, row) => Math.min(min, row.year), 1), withinFixedInterestTerm = year >= firstDrawYear && year < firstDrawYear + (financeMurabahaYears || financeRepaymentYears);
+        const outstandingBeforeRepayment = openingDebt + draw, firstDrawYear = financePlan.filter(row => row.drawPct > 0).reduce((min, row) => Math.min(min, row.year), 1), withinFixedInterestTerm = year >= firstDrawYear && year < firstDrawYear + financeRepaymentYears;
         const murabahaPlanRow = useMurabahaPlan ? financeMurabahaPlan.find(row => row.year === year) : null;
         const interest = financeOn ? (useMurabahaPlan ? (murabahaPlanRow ? murabahaPlanRow.amount : 0) : (financeInterestMethod === 'fixed' ? (withinFixedInterestTerm ? facilityAmount * annualFinanceRate : 0) : (outstandingBeforeRepayment > 0 ? outstandingBeforeRepayment * annualFinanceRate : 0))) : 0, fee = year === firstDrawYear ? arrangementFee : 0;
         const repaymentRow = financeRepaymentPlan.find(row => row.year === year), plannedRepayment = financeRepaymentPctTotal && repaymentRow ? facilityAmount * (repaymentRow.repaymentPct / financeRepaymentPctTotal) : 0;
         let repayment = financeOn ? Math.min(openingDebt + draw, plannedRepayment) : 0;
         if (financeOn && settleDebtAtExit && exitMethod !== 'none' && year === operatingExitYear) repayment = openingDebt + draw;
         if (year === totalYears) repayment = openingDebt + draw;
-        debtBalance = Math.max(0, openingDebt + draw - repayment); totalFinanceInterest += interest;
+        debtBalance = Math.max(0, openingDebt + draw - repayment);
 
         let fundManagementFee = 0; const feeYearFraction = fundFeesOn ? activeYearFraction(year, fundFeeStartYear, fundFeeEndYear) : 0;
         if (feeYearFraction > 0) { let managementBase = 0; if (fundFeeBase === 'fundCapital') managementBase = fundCapitalInput; else if (fundFeeBase === 'investedCapital') managementBase = Math.max(cumulativeInvestedCapital + landInKindContribution, fundCapitalInput); else if (fundFeeBase === 'nav') managementBase = fundNavInput; else if (fundFeeBase === 'projectCost') managementBase = projectCost; const growthYears = Math.max(0, year - Math.ceil(fundFeeStartYear)); fundManagementFee = (fundFeeBase === 'fixed' ? fundFixedAnnualFee : managementBase * fundManagementRate) * Math.pow(1 + fundFeeGrowthRate / 100, growthYears) * feeYearFraction; }
