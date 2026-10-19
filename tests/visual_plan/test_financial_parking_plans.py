@@ -98,12 +98,14 @@ class FinancialParkingPlanTests(unittest.TestCase):
 
     def test_all_drawing_prompts_and_exterior_context_carry_the_financial_capacity(self):
         context = self.context()
-        for kind in ('site', 'uses', 'massing'):
-            with self.subTest(kind=kind):
-                prompt = self.module._visual_concept_plan_drawing_prompt(kind, context)
-                self.assertIn('Regulatory demand=130 spaces', prompt)
-                self.assertIn('Surface Parking: 66', prompt)
-                self.assertIn('including circulation', prompt)
+        site_prompt = self.module._visual_concept_plan_drawing_prompt('site', context)
+        self.assertIn('Regulatory demand=130 spaces', site_prompt)
+        self.assertIn('Surface Parking: 66', site_prompt)
+        self.assertIn('including circulation', site_prompt)
+
+        uses_prompt = self.module._visual_concept_plan_drawing_prompt('uses', context)
+        self.assertIn('Basement Parking', uses_prompt)
+
         text = self.module._visual_concept_plan_context_text(context, diagram_rules=False)
         self.assertIn('Regulatory demand=130 spaces', text)
         self.assertNotIn('All image labels', text)

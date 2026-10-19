@@ -167,10 +167,12 @@ def recorded_setbacks(source, rows, frontage):
             if existing is not None and abs(existing - value) > 1e-7:
                 if key in general_keys and not is_general:
                     setbacks[key] = value
+                    general_keys.discard(key)
                     continue
-                if any(row.get('direction') == key and meter_value(row.get('setback')) is not None for row in rows) and is_general:
+                if is_general:
                     continue
-                raise PlanGeometryError('قيم الارتدادات المسجلة متعارضة.', 'PLANS_SETBACK_CONFLICT')
+                setbacks[key] = max(existing, value)
+                continue
             setbacks[key] = value
     return setbacks
 

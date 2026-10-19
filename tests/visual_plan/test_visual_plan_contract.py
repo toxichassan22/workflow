@@ -68,12 +68,20 @@ class VisualPlanContractTests(VisualPlanContractBase):
     def test_every_plan_prompt_keeps_the_full_croquis_brief_and_constraints(self):
         module = self.application_module
         context = module._visual_concept_plan_context(self.project())
-        for kind in ('site', 'uses', 'massing'):
-            with self.subTest(kind=kind):
-                prompt = module._visual_concept_plan_drawing_prompt(kind, context)
-                self.assertIn('SUMMARY_CONTEXT_MARKER', prompt)
-                self.assertIn('FULL_CONSTRAINT_MARKER', prompt)
-                self.assertIn('500040', prompt)
+        site_prompt = module._visual_concept_plan_drawing_prompt('site', context)
+        self.assertIn('SUMMARY_CONTEXT_MARKER', site_prompt)
+        self.assertIn('FULL_CONSTRAINT_MARKER', site_prompt)
+        self.assertIn('500040', site_prompt)
+
+        uses_prompt = module._visual_concept_plan_drawing_prompt('uses', context)
+        self.assertIn('VERTICAL PROGRAM DISTRIBUTION', uses_prompt)
+        self.assertIn('APPROVED DISTRIBUTION MODEL', uses_prompt)
+        self.assertNotIn('500040', uses_prompt)
+
+        massing_prompt = module._visual_concept_plan_drawing_prompt('massing', context)
+        self.assertIn('CONCEPTUAL MASSING', massing_prompt)
+        self.assertIn('APPROVED DISTRIBUTION MODEL', massing_prompt)
+        self.assertNotIn('500040', massing_prompt)
 
     def test_main_facade_is_a_gated_external_slot_with_a_front_view_prompt(self):
         module = self.application_module

@@ -130,55 +130,57 @@ def _visual_concept_plan_model(context, regulations):
     }
 
 
-def _visual_concept_plan_distribution_spec(context, model, regulations):
-    """The shared APPROVED DISTRIBUTION MODEL block — same shape the bench used."""
+def _visual_concept_plan_distribution_spec(context, model, regulations, kind=None):
+    """The shared APPROVED DISTRIBUTION MODEL block — tailored by plan kind."""
     name = _visual_concept_text(context.get('project_name'), 160) or 'the project'
     place = _visual_concept_plan_place_en(context)
     lines = [f"- Project: '{name}'" + (f' — {place}.' if place else '.')]
 
-    points = context.get('boundary_points') or []
-    parcel = (f'an irregular {len(points)}-vertex plot' if len(points) >= 3 else 'a plot')
-    area = _visual_concept_plan_sanitize_text(context.get('land_area')
-                                              or regulations.get('croquis_land_area'))
-    if area:
-        parcel += f' (~{area} m²)'
-    lines.append(f'- Parcel: {parcel}. Where an outline reference image is attached it is the '
-                 'TRUE surveyed parcel outline — trace it exactly, same vertices and '
-                 'proportions. North is up.')
+    if kind != 'uses':
+        points = context.get('boundary_points') or []
+        parcel = (f'an irregular {len(points)}-vertex plot' if len(points) >= 3 else 'a plot')
+        area = _visual_concept_plan_sanitize_text(context.get('land_area')
+                                                  or regulations.get('croquis_land_area'))
+        if area:
+            parcel += f' (~{area} m²)'
+        lines.append(f'- Parcel: {parcel}. Where an outline reference image is attached it is the '
+                     'TRUE surveyed parcel outline — trace it exactly, same vertices and '
+                     'proportions. North is up.')
 
-    edge_bits, neighbor_dirs = [], []
-    sea_dir = model['sea_dir'] if model else ''
-    for item in context.get('directions') or []:
-        text = _visual_concept_plan_sanitize_text(item.get('regulation_text'))
-        key = _visual_concept_plan_direction_key(item.get('direction'))
-        if not text or not key:
-            continue
-        if re.search(r'neighbor|adjacent|propert|مجاور|جار', text, flags=re.IGNORECASE):
-            neighbor_dirs.append(key)
-            continue
-        bit = f'{key} edge faces {_visual_concept_plan_edge_english(text)}'
-        if key == sea_dir:
-            bit += ' — this is the sea-frontage side'
-        edge_bits.append(bit)
-    if sea_dir:
-        edge_bits.sort(key=lambda bit: 0 if bit.startswith(sea_dir + ' edge') else 1)
-    if neighbor_dirs:
-        edge_bits.append(' and '.join(neighbor_dirs) + ' edges touch neighboring plots')
-    if edge_bits:
-        lines.append('- Edges: ' + '; '.join(edge_bits) + '.')
+        edge_bits, neighbor_dirs = [], []
+        sea_dir = model['sea_dir'] if model else ''
+        for item in context.get('directions') or []:
+            text = _visual_concept_plan_sanitize_text(item.get('regulation_text'))
+            key = _visual_concept_plan_direction_key(item.get('direction'))
+            if not text or not key:
+                continue
+            if re.search(r'neighbor|adjacent|propert|مجاور|جار', text, flags=re.IGNORECASE):
+                neighbor_dirs.append(key)
+                continue
+            bit = f'{key} edge faces {_visual_concept_plan_edge_english(text)}'
+            if key == sea_dir:
+                bit += ' — this is the sea-frontage side'
+            edge_bits.append(bit)
+        if sea_dir:
+            edge_bits.sort(key=lambda bit: 0 if bit.startswith(sea_dir + ' edge') else 1)
+        if neighbor_dirs:
+            edge_bits.append(' and '.join(neighbor_dirs) + ' edges touch neighboring plots')
+        if edge_bits:
+            lines.append('- Edges: ' + '; '.join(edge_bits) + '.')
 
-    if model and model['high_sector'] and model['low_sector']:
+    if kind not in ('uses', 'massing') and model and model.get('high_sector') and model.get('low_sector'):
         lines.append(
             f"- Two zoning zones: the {model['high_sector']['direction'].upper()} part is a "
             f"high-rise axis — the tall tower stands there; the "
             f"{model['low_sector']['direction'].upper()} part is low-rise, "
             f"max {model['low_sector']['cap']} floors.")
 
-    setbacks = _visual_concept_plan_setback_en(_visual_concept_plan_sanitize_text(
-        context.get('setbacks') or regulations.get('setbacks')
-        or regulations.get('building_ratio_setbacks')))
-    if setbacks:
-        lines.append(f'- Setback envelope: {setbacks} — shown as a dashed inner line.')
+    if kind not in ('uses', 'massing'):
+        setbacks = _visual_concept_plan_setback_en(_visual_concept_plan_sanitize_text(
+            context.get('setbacks') or regulations.get('setbacks')
+            or regulations.get('building_ratio_setbacks')))
+        if setbacks:
+            lines.append(f'- Setback envelope: {setbacks} — shown as a dashed inner line.')
 
     if model:
         tower_dir = model['high_sector']['direction'] if model['high_sector'] else ''
@@ -187,7 +189,7 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
         else:
             tower = (f"a {model['floor_count']}-storey mixed-use tower"
                      if model['floor_count'] else 'a mixed-use tower')
-        if tower_dir:
+        if tower_dir and kind != 'uses':
             tower += f' on the {tower_dir} part'
         band_phrases = []
         last = len(model['bands']) - 1
@@ -225,41 +227,44 @@ def _visual_concept_plan_distribution_spec(context, model, regulations):
         masses = [f'(1) {tower}']
         for index, block in enumerate(model.get('blocks') or [], 2):
             cap_text = f"{block['cap']}-storey " if block.get('cap') else 'low-rise '
-            on_part = f" on the {block['direction']} part" if block.get('direction') else ''
+            on_part = f" on the {block['direction']} part" if (block.get('direction') and kind != 'uses') else ''
             masses.append(f"({index}) a {cap_text}{block.get('use') or 'mixed-use'} "
                           f"'{block['label']}'{on_part}")
         if model.get('below'):
             masses.append(f"({len(masses) + 1}) {_financial_parking_basement_levels(model)}-level basement parking across the parcel — "
                           'drawn only in the floor-distribution stack')
         lines.append('- Approved masses: ' + '; '.join(masses) + '.')
-        open_bits = []
-        if model['sea_dir']:
-            open_bits.append(f"along the {model['sea_dir']} edge")
-        block_labels = [block['label'] for block in model.get('blocks') or [] if block.get('label')]
-        if block_labels:
-            open_bits.append('around ' + ', '.join(f"the '{label}'" for label in block_labels))
-        lines.append('- Open areas: landscaping '
-                     + (' and '.join(open_bits) if open_bits
-                        else 'on the remaining open ground inside the setback envelope') + '.')
-        entries = []
-        if model['main_dir']:
-            entries.append(f"main lobby entry on the {model['main_dir']} side")
-        if model['res_dir'] and model['svc_dir'] and model['svc_dir'] != model['res_dir']:
-            entries.append(f"residential entry on the {model['res_dir']} street")
-            entries.append(f"service entry on the {model['svc_dir']} street")
-        elif model['res_dir']:
-            entries.append(f"residential and service entries on the {model['res_dir']} street")
-        elif model['main_dir']:
-            entries.append('residential and service entries beside the main lobby entry')
-        if entries:
-            lines.append('- Entries: ' + '; '.join(entries) + '.')
+        if kind != 'uses':
+            open_bits = []
+            if model['sea_dir']:
+                open_bits.append(f"along the {model['sea_dir']} edge")
+            block_labels = [block['label'] for block in model.get('blocks') or [] if block.get('label')]
+            if block_labels:
+                open_bits.append('around ' + ', '.join(f"the '{label}'" for label in block_labels))
+            lines.append('- Open areas: landscaping '
+                         + (' and '.join(open_bits) if open_bits
+                            else 'on the remaining open ground inside the setback envelope') + '.')
+        if kind not in ('uses', 'massing'):
+            entries = []
+            if model['main_dir']:
+                entries.append(f"main lobby entry on the {model['main_dir']} side")
+            if model['res_dir'] and model['svc_dir'] and model['svc_dir'] != model['res_dir']:
+                entries.append(f"residential entry on the {model['res_dir']} street")
+                entries.append(f"service entry on the {model['svc_dir']} street")
+            elif model['res_dir']:
+                entries.append(f"residential and service entries on the {model['res_dir']} street")
+            elif model['main_dir']:
+                entries.append('residential and service entries beside the main lobby entry')
+            if entries:
+                lines.append('- Entries: ' + '; '.join(entries) + '.')
     else:
         lines.append('- No approved building masses are recorded; keep the parcel a neutral '
                      'regulated-development field.')
 
-    parking_brief = _financial_parking_visual_brief(context)
-    if parking_brief:
-        lines.append(parking_brief)
+    if kind not in ('uses', 'massing'):
+        parking_brief = _financial_parking_visual_brief(context)
+        if parking_brief:
+            lines.append(parking_brief)
     colors = '; '.join(f"{item['use']} = {item['color']}"
                        for item in context.get('colors') or [] if item.get('use'))
     if colors:
@@ -483,14 +488,16 @@ def _visual_concept_plan_drawing_prompt(kind, context, model=None):
     regulations = context.get('regulations') if isinstance(context.get('regulations'), dict) else {}
     if model is None:
         model = _visual_concept_plan_model(context, regulations)
-    spec = _visual_concept_plan_distribution_spec(context, model, regulations)
+    spec = _visual_concept_plan_distribution_spec(context, model, regulations, kind=kind)
     body = {
         'site': _visual_concept_plan_site_body,
         'uses': _visual_concept_plan_uses_body,
         'massing': _visual_concept_plan_massing_body,
     }.get(kind, _visual_concept_plan_massing_body)(context, model, regulations)
-    return (_visual_concept_plan_prompt_header(kind, context)
-            + _visual_concept_plan_context_text(context) + spec + '\n' + body)
+    header = _visual_concept_plan_prompt_header(kind, context)
+    if kind in ('uses', 'massing'):
+        return header + spec + '\n' + body
+    return (header + _visual_concept_plan_context_text(context) + spec + '\n' + body)
 
 
 def _visual_concept_plan_prompt_templates(context, model=None):
