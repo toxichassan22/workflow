@@ -89,7 +89,7 @@ test('site plan chat choices, surgical SVG source, and saved checkpoints are con
   const shell = fs.readFileSync(path.resolve(__dirname,
     '../../../assets/css/base/08_shell_chrome.css'), 'utf8');
   assert.match(shell, /\.visual-plan-site-message\.is-user\s*\{[^}]*align-self:\s*flex-start/s);
-  assert.match(shell, /\.visual-plan-site-preview img\s*\{[^}]*max-height:\s*350px/s);
+  assert.match(shell, /\.visual-plan-site-preview img\s*\{[^}]*max-height:\s*min\(68vh,\s*720px\)/s);
 });
 
 test('a clean verification still approves without opening the dialog', () => {

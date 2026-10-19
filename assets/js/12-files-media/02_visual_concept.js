@@ -722,7 +722,13 @@
           <div class="visual-concept-lightbox-content">
             <div class="visual-concept-lightbox-header">
               <h3 id="visualConceptLightboxTitle">معاينة الصورة</h3>
-              <button type="button" class="btn ghost small" data-visual-lightbox-close>إغلاق</button>
+              <div class="visual-concept-lightbox-controls">
+                <button type="button" class="btn ghost small" data-visual-lightbox-zoom="in">تكبير</button>
+                <button type="button" class="btn ghost small" data-visual-lightbox-zoom="out">تصغير</button>
+                <button type="button" class="btn ghost small" data-visual-lightbox-zoom="reset">الحجم الطبيعي</button>
+                <button type="button" class="btn ghost small" data-visual-lightbox-tab>نافذة جديدة</button>
+                <button type="button" class="btn ghost small" data-visual-lightbox-close>إغلاق</button>
+              </div>
             </div>
             <div class="visual-concept-lightbox-body">
               <img id="visualConceptLightboxImg" src="" alt="معاينة مكبرة">
@@ -733,10 +739,29 @@
         modal.querySelectorAll('[data-visual-lightbox-close]').forEach(btn => {
           btn.addEventListener('click', closeVisualConceptLightbox);
         });
+        let currentScale = 1;
+        const setScale = (scale) => {
+          currentScale = Math.min(Math.max(scale, 0.5), 5);
+          const imgEl = modal.querySelector('#visualConceptLightboxImg');
+          if (imgEl) {
+            imgEl.style.transform = currentScale === 1 ? 'none' : ('scale(' + currentScale + ')');
+            imgEl.style.cursor = currentScale > 1 ? 'grab' : 'default';
+          }
+        };
+        modal.querySelector('[data-visual-lightbox-zoom="in"]')?.addEventListener('click', () => setScale(currentScale + 0.35));
+        modal.querySelector('[data-visual-lightbox-zoom="out"]')?.addEventListener('click', () => setScale(currentScale - 0.35));
+        modal.querySelector('[data-visual-lightbox-zoom="reset"]')?.addEventListener('click', () => setScale(1));
+        modal.querySelector('[data-visual-lightbox-tab]')?.addEventListener('click', () => {
+          const imgEl = modal.querySelector('#visualConceptLightboxImg');
+          if (imgEl && imgEl.src) window.open(imgEl.src, '_blank');
+        });
       }
       const img = modal.querySelector('#visualConceptLightboxImg');
       const titleEl = modal.querySelector('#visualConceptLightboxTitle');
-      if (img) img.src = url;
+      if (img) {
+        img.src = url;
+        img.style.transform = 'none';
+      }
       if (titleEl) titleEl.textContent = title || 'معاينة الصورة';
       modal.hidden = false;
     }
