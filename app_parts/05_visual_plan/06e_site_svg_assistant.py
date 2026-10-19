@@ -143,37 +143,36 @@ def _visual_plan_site_interview(data, action='chat'):
         'You are the lead architect and planner, and the sole authority managing this master plan session. '
         'You are the single entity that commands, designs, responds, identifies conflicts, answers inquiries, '
         'and accepts modifications. There is no code or geometric engine running analysis: you alone perform '
-        'the entire spatial, regulatory, and architectural analysis. '
-        'On EVERY turn, review the complete project packet, approved land survey, coordinates, boundaries, setbacks (north, '
-        'south, east, west), maximum coverage ratio, height limits, building program (names, IDs, uses, floor ranges, '
-        'ground-floor footprint areas, units), site amenities (landscape, surface parking, pools, playgrounds, courts), '
-        'all distribution table rows and row notes, distributionNotes, clientNotes, and financial components. '
-        'The packet is included in full on every turn. Treat approvedFinancialAreaSqm as the declared project land area '
-        'when supplied, and keep it distinct from croquisLandAreaSqm and surveyed coordinates. If these sources disagree, '
-        'explain the discrepancy and ask the client which recorded source should govern; never silently replace one with another. '
-        'Use the supplied notes and distribution rows directly. Component rows carry landShareArea as the whole '
-        'component\'s ground-level land share in sqm (never per unit); legacy rows may instead carry unitFootprintArea, '
-        'the footprint of a single unit — multiply it by units for the component total. '
-        'The current financialComponents list is the authority '
-        'for active program components. If a distribution row refers to a component absent from that list, identify it '
-        'as an unmatched or possibly deleted row and ask the client before treating it as active. Never restore a component '
-        'from old session memory or a stale financial snapshot. No deterministic geometry or engineering engine analyzes, '
-        'calculates, distributes, validates, or rejects the design; all such reasoning is yours. '
-        'Continue the discussion using sessionMemory, resolvedAnswers, and recentTurns while re-reading the full packet. '
+        'On EVERY turn, review the focused project packet: '
+        '1. Land & Croquis: approved land area (approvedFinancialAreaSqm), boundary lengths and coordinates polygon (surveyCoordinates), '
+        'surrounding streets and widths (surroundingStreets), facades count and directions, approved floor count, coverage ratio, floor area ratio (FAR), '
+        'typical floor coverage, total building area (buildingAreaSqm), and directions table (directions, including setbacks). '
+        '2. Project Financial Components: financialComponents (name, category, units, ground landShareArea / unitFootprintArea). '
+        '3. Phase 2 Visual Plan Notes: distributionNotes and clientNotes. '
+        '4. Project Name: projectName. '
+        'Treat approvedFinancialAreaSqm as the sole authoritative project land area. '
+        'Do not audit or dispute minor coordinate precision differences or vertical building heights: this is strictly a 2D top-down site plan. '
+        'Component rows carry landShareArea as the whole component ground-level land share in sqm; legacy rows may carry unitFootprintArea. '
+        'No deterministic geometry or engineering engine calculates or rejects the design; all spatial reasoning is yours. '
+        'Continue the discussion using sessionMemory, resolvedAnswers, and recentTurns while re-reading the focused packet. '
         'RULES OF YOUR ARCHITECTURAL AUTHORITY:\n'
-        '1. IDENTIFYING CONFLICTS: If you find any regulatory or spatial conflict (e.g. required ground-floor footprints '
-        'cannot fit inside the buildable area after setbacks, total footprints exceed the allowable coverage ratio, '
-        'or an entry lacks recorded street access), state the conflict explicitly in Arabic in "reply", explain the exact '
-        'numerical facts and why it occurs, set ready=false, and provide 2-5 actionable choices in "choices" (e.g. reviewing '
-        'setbacks, reducing ground-floor footprint and offsetting with additional floors, or adjusting the program). '
+        '1. IDENTIFYING CONFLICTS: If you find any critical regulatory or spatial conflict (e.g. total footprints exceed allowable coverage ratio, '
+        'or footprints cannot fit inside buildable area), state the conflict explicitly in Arabic in "reply", explain the exact '
+        'numerical facts, set ready=false, and provide 2-5 actionable choices in "choices". '
+        'Once the client answers, selects an option, or confirms proceeding, accept the client direction immediately: '
+        'do NOT re-raise previously noted caveats, and do NOT ask endless follow-up bonus questions. '
         '2. ANSWERING QUESTIONS & CALCULATIONS: When the client asks questions, disputes numbers, asks why there is a '
         'conflict, asks for area calculations (such as net buildable area after setbacks, remaining land area, or coverage), '
         'calculate and explain everything thoroughly and fluently in Arabic. '
         '3. ACCEPTING MODIFICATIONS: When the client requests adjustments, changes, or revisions, accept them, update '
         'your sessionMemory and designSpec, and respond constructively. '
-        '4. DESIGN & GENERATION: When the client asks to generate or draw the master plan ("ارسم", "صمم", "ولد المخطط", '
-        '"وزع المباني على الأرض"), set generateRequested=true. You have full architectural authority to design the master site plan '
-        'layout and provide the complete SVG in "svgCode" when ready, or describe your zoning decisions. '
+        '4. DESIGN & GENERATION (EXECUTIVE MASTER SITE PLAN): This output is strictly a 2D Executive Conceptual Master Site Plan '
+        '(مخطط عام أفقي تصوري 2D) showing ground footprints, parking, roads, setbacks, and landscape from a top-down view. '
+        'Vertical building height, floor counts, and internal room distribution are completely irrelevant to a 2D ground plan. '
+        'NEVER block, interrogate, question, or withhold readiness over floor counts, vertical heights, or municipal permitting. '
+        'Once coverage ratio, setbacks, and ground footprints fit the parcel, conceptual readiness is 100% satisfied. '
+        'When the client asks to generate or draw the master plan or confirms continuation ("ارسم", "صمم", "ولد المخطط", "قم بالتوليد", "تابع", "نعم", "وزع المباني على الأرض"), '
+        'set ready=true, generateRequested=true, question="", design the layout, and provide the complete SVG in "svgCode" directly!\n'
         '5. ARCHITECTURAL PRESENTATION STANDARDS: When planning or drawing the master plan SVG, always adhere to: '
         '(a) Pure white/light background (#FFFFFF, viewBox 0 0 1600 1000) - NEVER dark or black. '
         '(b) 100% visual presentation: draw real striped parking bays with asphalt lanes (#475569) and trees - never solid block grids like stadium seats; realistic swimming pool with lane markers and deck; padel court lines; lush tree clusters with soft shadows. '
@@ -229,6 +228,21 @@ def _visual_plan_site_interview(data, action='chat'):
         state['generateRequested'] = generate_requested
         state['status'] = 'ready' if ready else 'questioning'
     state['summary'] = str(parsed.get('memory') or state['summary'])[:40000]
+    raw_svg = str(parsed.get('svgCode') or '').strip()
+    image = None
+    if raw_svg and '<svg' in raw_svg:
+        fenced = re.search(r'```(?:svg|xml)?\s*\n?([\s\S]*?)```', raw_svg)
+        if fenced:
+            raw_svg = fenced.group(1).strip()
+        raw_svg = _visual_plan_site_ensure_section_markers(raw_svg)
+        sanitized = _visual_plan_sanitize_svg(raw_svg)
+        if sanitized and '<svg' in sanitized:
+            raw_svg = sanitized
+            encoded = base64.b64encode(sanitized.encode('utf-8')).decode('ascii')
+            image = persist_generated_image('data:image/svg+xml;base64,' + encoded, g.tenant_id)
+            state['checkpoints'] = _visual_plan_site_extract_checkpoints(sanitized)
+            state['status'] = 'review'
+            state['readyForGeneration'] = True
     inputs_changed = bool(prior_assistant.get('inputSignature')
                           and prior_assistant.get('inputSignature') != signature)
     state['redesignRequested'] = (bool(parsed.get('redesignRequested'))
@@ -246,7 +260,8 @@ def _visual_plan_site_interview(data, action='chat'):
     return {'success': True, 'readyForGeneration': ready, 'generateRequested': generate_requested,
             'needsClarification': bool(question),
             'question': question, 'choices': choices, 'reply': reply,
-            'svgCode': str(parsed.get('svgCode') or ''),
+            'image': image,
+            'svgCode': raw_svg,
             'assistantState': state, 'scene': workflow.get('scene'),
             'contextChanged': bool(previous_assistant.get('inputSignature')
                                                             and previous_assistant.get('inputSignature') != signature)
@@ -399,12 +414,12 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=No
         'will calculate, validate, rearrange, reject, or repair your design.\n'
         'You are fully empowered to generate the complete, production-ready master plan SVG directly in the "svgCode" '
         'property of your response!\n'
-        'Take into full consideration all provided land and croquis data: boundaries, surrounding streets, street widths, '
-        'facades, setback rules, boundary lengths, orientation with north, regulatory constraints, financial components, '
-        'the complete floor-distribution table, every row note, distributionNotes, clientNotes, geometricFacts, and all area sources.\n'
-        'Use projectMeasurements.landAreaSqm as the declared project area when provided, while keeping the source visible.\n'
+        'Take into full consideration the clean project data: boundaries, surrounding streets and widths, '
+        'facades, setback rules, boundary lengths, orientation with north, financial components, '
+        'distributionNotes, and clientNotes.\n'
+        'Use projectMeasurements.landAreaSqm as the declared project land area.\n'
         'ARCHITECTURAL ZONING & PROGRAM:\n'
-        '1. Honor all architectural agreements in sessionMemory, resolvedDecisions, clientNotes, and geometricFacts:\n'
+        '1. Honor all architectural agreements in sessionMemory, resolvedDecisions, and clientNotes:\n'
         '   - Frontage on the primary recorded street (e.g. Madinah Road).\n'
         '   - Depth 0-15m from frontage: Front setback, drop-off, and surface parking stalls (5.5m setback + 10m parking).\n'
         '   - Depth 15-45m (depth 30m): Commercial & Hospitality zone (Tower A + Tower B with ground floor strip mall and central pedestrian gateway).\n'

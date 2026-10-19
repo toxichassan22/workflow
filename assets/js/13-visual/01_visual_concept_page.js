@@ -416,7 +416,8 @@
       }
       if (response.svgCode) {
         slot.svgCode = String(response.svgCode).slice(0, 300000);
-        slot.imageUrl = visualConceptImageUrl(response.image || slot.imageUrl);
+        const fallbackDataUri = 'data:image/svg+xml;utf8,' + encodeURIComponent(slot.svgCode);
+        slot.imageUrl = visualConceptImageUrl(response.image || slot.imageUrl || fallbackDataUri);
         slot.approvedImageUrl = '';
         slot.status = 'review';
         workflow.siteAssistant.checkpoints = response.assistantState?.checkpoints || workflow.siteAssistant.checkpoints;

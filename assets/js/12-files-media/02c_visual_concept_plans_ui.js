@@ -213,7 +213,8 @@
 
     function renderVisualConceptSitePlanCard() {
       const slot = tenantVisualConceptState.slots.plan_site || emptyVisualConceptSlot('plan_site');
-      const rawImage = slot.approvedImageUrl || slot.imageUrl || '';
+      const fallbackDataUri = slot.svgCode ? ('data:image/svg+xml;utf8,' + encodeURIComponent(slot.svgCode)) : '';
+      const rawImage = slot.approvedImageUrl || slot.imageUrl || fallbackDataUri;
       const image = isSessionOnlyImageUrl(rawImage) ? '' : rawImage;
       const title = visualConceptSlotLabel('plan_site');
       const approved = slot.status === 'approved';

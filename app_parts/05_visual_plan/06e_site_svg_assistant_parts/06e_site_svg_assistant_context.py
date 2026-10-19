@@ -180,55 +180,49 @@ def _visual_plan_site_prompt_contract(project, workflow):
     croquis_source = (project.get('croquis_land_area') or project.get('land_area')
                       or project.get('total_area_sqm'))
     approved_area_number = _visual_concept_number(approved_area)
-    land_area = approved_area_number if approved_area_number is not None else croquis_source
-    area_source = ('approved_financial_area' if approved_area_number is not None else
-                   'croquis_land_area' if croquis_source not in (None, '') else 'not_recorded')
-    distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
-    rows = distribution.get('rows') if isinstance(distribution.get('rows'), list) else []
+    land_area = approved_area_number if approved_area_number is not None else _visual_concept_number(croquis_source)
     boundary = workflow.get('boundary') if isinstance(workflow.get('boundary'), dict) else {}
     financial = _visual_concept_parse_json(project.get('financial_study_model'), {})
     financial = financial if isinstance(financial, dict) else {}
     components = _visual_plan_site_current_components(project, financial)
-    directions = project.get('directions_table') or project.get('directions') or {}
     analysis = _visual_plan_site_model_analysis(project.get('land_documents_analysis'))
     analysis = analysis if isinstance(analysis, dict) else {}
-    parcels = analysis.get('parcels') if isinstance(analysis.get('parcels'), list) else []
-    document_parcel = parcels[0] if parcels and isinstance(parcels[0], dict) else {}
+    directions = project.get('directions_table') or project.get('directions') or {}
     primary_frontage = (project.get('main_facade_direction') or project.get('primary_facade_direction')
                         or project.get('main_frontage_direction') or '')
+    building_area = project.get('building_area') or project.get('total_bua') or project.get('total_built_area')
+    if not building_area and land_area and project.get('approved_floor_area_ratio'):
+        try:
+            building_area = round(float(land_area) * float(project.get('approved_floor_area_ratio')), 2)
+        except Exception:
+            building_area = None
+
+    survey_coords = (project.get('survey_coordinates') or project.get('regulation_coordinates')
+                     or boundary.get('points') or [])
     return {
         'projectName': _visual_concept_read(project, 'project_name', 'projectName'),
         'projectIdea': _visual_concept_read(project, 'project_idea', 'projectIdea'),
-        'city': project.get('city'),
-        'district': project.get('district'),
-        'locationAddress': _visual_concept_read(project, 'location_address', 'locationAddress'),
-        'landAreaSqm': land_area,
-        'landAreaSource': area_source,
-        'approvedFinancialAreaSqm': approved_area,
+        'approvedFinancialAreaSqm': approved_area_number if approved_area_number is not None else land_area,
         'croquisLandAreaSqm': croquis_source,
-        'coverageRatio': _visual_concept_read(project, 'approved_coverage_ratio', 'coverage_ratio'),
-        'floorAreaRatio': _visual_concept_read(project, 'approved_floor_area_ratio', 'floor_area_ratio'),
-        'floorCount': _visual_concept_read(project, 'approved_floor_count', 'table_floors'),
-        'approvedFloorCount': project.get('approved_floor_count'),
-        'typicalFloorCoverage': project.get('approved_typical_floor_coverage'),
-        'openArea': project.get('open_area'),
-        'boundaryLengths': project.get('boundary_lengths'),
-        'surveyCoordinates': (project.get('survey_coordinates') or project.get('regulation_coordinates')
-                             or boundary.get('points') or []),
-        'boundaryPoints': boundary.get('points') or [],
-        'directions': directions or document_parcel.get('directions_table') or {},
-        'setbacks': project.get('setbacks') or document_parcel.get('setbacks'),
+        'landAreaSqm': approved_area_number if approved_area_number is not None else land_area,
+        'landAreaSource': ('approved_financial_area' if approved_area_number is not None else
+                           'croquis_land_area' if croquis_source not in (None, '') else 'not_recorded'),
         'surroundingStreets': project.get('surrounding_streets'),
+        'boundaryLengths': project.get('boundary_lengths'),
         'facadesCount': project.get('facades_count'),
         'facadesDirections': project.get('facades_directions'),
+        'approvedFloorCount': project.get('approved_floor_count') or project.get('table_floors'),
+        'coverageRatio': _visual_concept_read(project, 'approved_coverage_ratio', 'coverage_ratio'),
+        'floorAreaRatio': _visual_concept_read(project, 'approved_floor_area_ratio', 'floor_area_ratio'),
+        'typicalFloorCoverage': project.get('approved_typical_floor_coverage'),
+        'buildingAreaSqm': building_area,
+        'surveyCoordinates': survey_coords,
+        'directions': directions,
+        'setbacks': project.get('setbacks'),
         'primaryFrontage': primary_frontage,
-        'northDirection': project.get('north_direction'),
-        'allowedUses': project.get('allowed_uses'),
-        'regulatoryConstraints': project.get('regulatory_constraints') or document_parcel.get('regulatory_constraints'),
-        'landBrief': project.get('land_and_building_summary') or document_parcel.get('summary'),
         'landDocumentsAnalysis': analysis,
         'financialComponents': components,
-        'distributionRows': rows,
+        'distributionRows': workflow.get('distribution', {}).get('rows') or [],
         'distributionNotes': workflow.get('distributionNotes') or '',
         'clientNotes': workflow.get('clientNotes') or '',
     }
@@ -271,20 +265,33 @@ def _visual_plan_site_packet(data):
                     if key not in ('token', 'inputSignature')} if scene_is_current else None)
     packet = {
         'project': {'name': prompt_contract.get('projectName'), 'idea': prompt_contract.get('projectIdea')},
-        'landAndRegulations': prompt_contract,
-        'geometricFacts': _visual_plan_site_geometric_facts(parcel_polygon, prompt_contract),
-        # `landAndRegulations` is the compact, authoritative prompt contract.
-        # Do not append full project/financial snapshots or duplicate workflow
-        # objects: they can contain removed components and make model calls time out.
-        'existingGeneratedLayout': clean_scene,
-        'program': {},
-        'drawingLayout': drawing_layout,
+        'projectName': prompt_contract.get('projectName'),
+        'approvedFinancialAreaSqm': prompt_contract.get('approvedFinancialAreaSqm'),
+        'surroundingStreets': prompt_contract.get('surroundingStreets'),
+        'boundaryLengths': prompt_contract.get('boundaryLengths'),
+        'facadesCount': prompt_contract.get('facadesCount'),
+        'facadesDirections': prompt_contract.get('facadesDirections'),
+        'approvedFloorCount': prompt_contract.get('approvedFloorCount'),
+        'coverageRatio': prompt_contract.get('coverageRatio'),
+        'floorAreaRatio': prompt_contract.get('floorAreaRatio'),
+        'typicalFloorCoverage': prompt_contract.get('typicalFloorCoverage'),
+        'buildingAreaSqm': prompt_contract.get('buildingAreaSqm'),
+        'surveyCoordinates': prompt_contract.get('surveyCoordinates'),
+        'directions': prompt_contract.get('directions'),
         'financialComponents': prompt_contract.get('financialComponents') or [],
         'distributionRows': prompt_contract.get('distributionRows') or [],
         'distributionNotes': prompt_contract.get('distributionNotes') or '',
         'clientNotes': prompt_contract.get('clientNotes') or '',
-        'projectMeasurements': {key: prompt_contract.get(key) for key in (
-            'landAreaSqm', 'landAreaSource', 'approvedFinancialAreaSqm', 'croquisLandAreaSqm')},
+        'landAndRegulations': prompt_contract,
+        'geometricFacts': _visual_plan_site_geometric_facts(parcel_polygon, prompt_contract),
+        'existingGeneratedLayout': clean_scene,
+        'drawingLayout': drawing_layout,
+        'projectMeasurements': {
+            'approvedFinancialAreaSqm': prompt_contract.get('approvedFinancialAreaSqm'),
+            'landAreaSqm': prompt_contract.get('landAreaSqm'),
+            'croquisLandAreaSqm': prompt_contract.get('croquisLandAreaSqm'),
+            'landAreaSource': prompt_contract.get('landAreaSource'),
+        },
     }
     _visual_plan_report_site_chat_progress(2, 68)
     return packet, render_contract, context, signature
