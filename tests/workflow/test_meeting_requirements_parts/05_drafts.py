@@ -1048,11 +1048,11 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertNotIn('renderClarifications({', index_source)
 
         # 4 and 5. Each schedule stops strictly at the end year entered for that schedule.
-        self.assertIn('function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears)',
+        self.assertIn('function financeMovementRows(projected, financeOn, repaymentStartYear, repaymentYears, murabahaStartYear, murabahaYears)',
                       index_source)
         self.assertIn('function fundFeeScheduleRows(projected, fundFeesOn, feeEndYear)', index_source)
         self.assertIn('return projected.filter(row => row.year <= plannedEnd);', index_source)
-        self.assertIn('financeMovementRows(projected, financeOn, financeRepaymentStartYear, financeRepaymentYears)',
+        self.assertIn('financeMovementRows(projected, financeOn, financeRepaymentStartYear, financeRepaymentYears, financeMurabahaStartYear, financeMurabahaYears)',
                       index_source)
         self.assertIn('fundFeeScheduleRows(projected, fundFeesOn, fundFeeEndYear)', index_source)
         # The tables must no longer render straight from the full projection.
