@@ -295,6 +295,21 @@ class ImageReferenceTests(ScopeTestBase):
         data_uri = 'data:image/png;base64,' + base64.b64encode(b'x').decode()
         self.assertEqual(self.module._prepare_image_reference_for_model(data_uri, self.tenant), data_uri)
 
+    def test_svg_reference_rasterized_to_png(self):
+        folder = Path(self.module.UPLOADS_DIR) / self.tenant
+        folder.mkdir(parents=True, exist_ok=True)
+        svg_content = b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="blue"/></svg>'
+        (folder / 'vector.svg').write_bytes(svg_content)
+        ref = f'/uploads/{self.tenant}/vector.svg'
+        prepared = self.module._prepare_image_reference_for_model(ref, self.tenant)
+        self.assertIsNotNone(prepared)
+        self.assertTrue(prepared.startswith('data:image/png;base64,'))
+
+        data_uri = 'data:image/svg+xml;base64,' + base64.b64encode(svg_content).decode()
+        prepared_uri = self.module._prepare_image_reference_for_model(data_uri, self.tenant)
+        self.assertIsNotNone(prepared_uri)
+        self.assertTrue(prepared_uri.startswith('data:image/png;base64,'))
+
     def test_cross_tenant_and_remote_references_refused(self):
         folder = Path(self.module.UPLOADS_DIR) / self.other
         folder.mkdir(parents=True, exist_ok=True)

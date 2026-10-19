@@ -100,6 +100,22 @@ def _prepare_image_reference_for_model(reference, tenant_id=None):
         return None
     reference = reference.strip()
     if reference.startswith('data:image/'):
+        if reference.startswith('data:image/svg+xml'):
+            try:
+                import fitz
+                header, data_part = reference.split(',', 1) if ',' in reference else ('', reference)
+                if ';base64' in header:
+                    svg_data = base64.b64decode(data_part)
+                else:
+                    import urllib.parse
+                    svg_data = urllib.parse.unquote(data_part).encode('utf-8')
+                doc = fitz.open(stream=svg_data, filetype='svg')
+                pix = doc[0].get_pixmap(dpi=150)
+                encoded = base64.b64encode(pix.tobytes('png')).decode('ascii')
+                return f'data:image/png;base64,{encoded}'
+            except Exception as err:
+                print(f'[IMAGE ERROR] Could not rasterize SVG data URI: {err}')
+                return None
         return reference
     if re.match(r'^https?://', reference, re.IGNORECASE):
         print(f'[IMAGE ERROR] Remote reference images are not allowed: {reference[:120]}')
@@ -141,10 +157,18 @@ def _prepare_image_reference_for_model(reference, tenant_id=None):
         print(f'[IMAGE ERROR] Unsupported local reference format: {reference}')
         return None
     try:
+        if mime_type == 'image/svg+xml':
+            import fitz
+            with open(image_path, 'rb') as svg_file:
+                svg_data = svg_file.read()
+            doc = fitz.open(stream=svg_data, filetype='svg')
+            pix = doc[0].get_pixmap(dpi=150)
+            encoded = base64.b64encode(pix.tobytes('png')).decode('ascii')
+            return f'data:image/png;base64,{encoded}'
         with open(image_path, 'rb') as image_file:
             encoded = base64.b64encode(image_file.read()).decode('ascii')
         return f'data:{mime_type};base64,{encoded}'
-    except OSError as error:
+    except Exception as error:
         print(f'[IMAGE ERROR] Could not read local reference image: {error}')
         return None
 
