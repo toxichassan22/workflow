@@ -1191,6 +1191,28 @@
       background: var(--soft);
     }
 
+    .global-loader-stop {
+      background: none;
+      border: 1px solid var(--border, #d7dee6);
+      color: var(--pd, #123b6d);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      padding: 2px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .global-loader-stop:hover:not(:disabled) {
+      background: var(--soft);
+    }
+
+    .global-loader-stop:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
     .inline-loading-box {
       width: min(320px, 100%);
     }

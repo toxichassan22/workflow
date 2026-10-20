@@ -57,6 +57,7 @@ load_dotenv()
 
 import db
 import auth
+import run_control
 import maps_service
 import market_study
 import executive_content
@@ -447,3 +448,8 @@ try:
 except NameError:
     pass
 del _PARTS_DIR
+
+# The cancel registry lives under the uploads directory the app actually uses.
+# The provider is resolved per lookup so a test that moves UPLOADS_DIR keeps
+# the registry with it instead of writing into the real uploads tree.
+run_control.set_root_provider(lambda: os.path.join(UPLOADS_DIR, '.cancel'))

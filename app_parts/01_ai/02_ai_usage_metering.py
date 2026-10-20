@@ -15,7 +15,12 @@ AI_USAGE_FLOWS = (
 
 
 def _usage_ctx(flow, data=None, draft_id=None, presentation_id=None, tenant_id=None):
-    """Build the metering context for one AI call. Unknown ids stay None."""
+    """Build the metering context for one AI call. Unknown ids stay None.
+
+    The run handle rides along so a stopped run is recognized even when the
+    call leaves the worker thread: the parallel text racer runs its attempts
+    in a pool, and a thread-local handle would not travel with them.
+    """
     if isinstance(data, dict):
         project_data = data.get('projectData')
         if draft_id is None:
@@ -29,11 +34,15 @@ def _usage_ctx(flow, data=None, draft_id=None, presentation_id=None, tenant_id=N
             tenant_id = getattr(g, 'tenant_id', None)
         except Exception:
             tenant_id = None
+    run_id, run_tenant_id = run_control.current_run()
+    if tenant_id is None:
+        tenant_id = run_tenant_id
     return {
         'tenant_id': tenant_id,
         'draft_id': draft_id,
         'presentation_id': presentation_id,
         'flow': flow if flow in AI_USAGE_FLOWS else 'other',
+        'run_id': run_id,
     }
 
 

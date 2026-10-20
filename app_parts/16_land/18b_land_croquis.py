@@ -26,6 +26,9 @@ def _read_land_job(tenant_id, job_id):
 def _land_job_worker(app, tenant_id, data, job_id):
     """Run the long land extraction off the HTTP request so the hosting proxy cannot 404 it."""
     with app.app_context():
+        # The stop button reaches this analysis through the run registry; the
+        # thread dies with the worker, so the handle cannot leak.
+        run_control.bind_run(job_id, tenant_id)
         _write_land_job(tenant_id, job_id, {
             'status': 'running',
             'success': True,

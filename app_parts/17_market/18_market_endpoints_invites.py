@@ -842,6 +842,9 @@ def _run_market_summary(data, tenant_id=None, progress=None,
 
 def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
     with app.app_context():
+        # The stop button reaches this study through the run registry; the
+        # thread dies with the worker, so the handle cannot leak.
+        run_control.bind_run(job_id, tenant_id)
         # ISS-033: helpers that read the caller identity from g (upload dir,
         # logo publish, audit) must see this job's tenant — an app context
         # starts empty, so the worker stamps it the way require_auth would.

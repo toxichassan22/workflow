@@ -65,6 +65,8 @@ def install_job_routes(app, namespace):
         raise RuntimeError("Designer chat job registration lock timed out")
 
     def run_job(flask_app, tenant_id, payload, job_id, authorization):
+        import run_control
+
         payload_with_job = dict(payload)
         payload_with_job["_job_id"] = job_id
         job_record_context = job_context(payload)
@@ -93,6 +95,9 @@ def install_job_routes(app, namespace):
             },
         ):
             try:
+                # The stop button reaches this chat through the run registry;
+                # the thread dies with the worker, so the handle cannot leak.
+                run_control.bind_run(job_id, tenant_id)
                 write_job(".designer_chat_jobs", tenant_id, job_id, {
                     **job_record_context,
                     "status": "running", "success": True, "progress": 10,

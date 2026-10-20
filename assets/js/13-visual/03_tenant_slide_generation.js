@@ -217,6 +217,7 @@
       if (isGeneratingTenantSlides) return;
       if (!tenantSlidePlan || !tenantProjectData) return;
       isGeneratingTenantSlides = true;
+      resetTenantGenerationStop();
       try {
         const sectionKey = String(options.sectionKey || '');
         const totalSlides = (tenantSlidePlan.slides || []).length;
@@ -285,6 +286,9 @@
 
         // Set up live generation banner
         setLiveGenBanner(true, 'بدء توليد الشرائح بالذكاء الاصطناعي...', WFT('gen.total_slides', 'إجمالي {n} شريحة', { n: totalSlides }), 10);
+        // The stop button stays available for the whole run: it is the only
+        // way to stop before the remaining slides are paid for.
+        setTenantGenerationStopVisible(true);
 
         // Pre-render skeleton cards in main preview area
         const wrap = document.getElementById('tenantSlidesMain');
@@ -534,16 +538,26 @@
           generationStopped = true;
           generationFinished = true;
           generationFailure = { index: i, error: lastError || '' };
+          const stoppedByUser = tenantGenerationStopRequested;
           const checkpointSaved = await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError, generationProjectData);
           const slidePct = Math.round(20 + (tenantSlidesData.length / totalSlides) * 75);
-          setLiveGenBanner(true, WFT('gen.paused_at_slide', 'توقف التوليد مؤقتًا عند الشريحة {n}', { n: i + 1 }),
-            (lastError ? lastError + ' — ' : '') + (checkpointSaved
-              ? WFT('gen.checkpoint_saved_detail', 'تم حفظ {n} شريحة ويمكن استكمال العرض لاحقًا.', { n: tenantSlidesData.length })
-              : WFT('gen.checkpoint_missing_detail', 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.')), slidePct);
+          if (stoppedByUser) {
+            setLiveGenBanner(true, WFT('gen.stopped_title', 'تم إيقاف التوليد'),
+              (checkpointSaved
+                ? WFT('gen.stopped_detail', 'تم حفظ {n} شريحة ويمكن استكمال العرض لاحقًا.', { n: tenantSlidesData.length })
+                : WFT('gen.checkpoint_missing_detail', 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.')), slidePct);
+          } else {
+            setLiveGenBanner(true, WFT('gen.paused_at_slide', 'توقف التوليد مؤقتًا عند الشريحة {n}', { n: i + 1 }),
+              (lastError ? lastError + ' — ' : '') + (checkpointSaved
+                ? WFT('gen.checkpoint_saved_detail', 'تم حفظ {n} شريحة ويمكن استكمال العرض لاحقًا.', { n: tenantSlidesData.length })
+                : WFT('gen.checkpoint_missing_detail', 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.')), slidePct);
+          }
           renderTenantSlidesSidebar(true);
-          toast(lastError || (checkpointSaved
-            ? WFT('gen.checkpoint_saved_toast', 'تم حفظ نقطة التوقف عند الشريحة {n}', { n: i + 1 })
-            : WFT('gen.checkpoint_missing_toast', 'تعذر حفظ نقطة التوقف على الخادم')));
+          toast(stoppedByUser
+            ? WFT('gen.stopped_toast', 'تم إيقاف التوليد')
+            : (lastError || (checkpointSaved
+              ? WFT('gen.checkpoint_saved_toast', 'تم حفظ نقطة التوقف عند الشريحة {n}', { n: i + 1 })
+              : WFT('gen.checkpoint_missing_toast', 'تعذر حفظ نقطة التوقف على الخادم'))));
           if (typeof finishResolve === 'function') finishResolve();
         }
 
@@ -585,6 +599,9 @@
 
         function pumpSlideLaunches() {
           if (generationStopped || generationFinished) return;
+          // A stop was asked for: no further slide may start, because every
+          // one of them is a paid call.
+          if (tenantGenerationStopRequested) { generationStopped = true; return; }
           while (!generationStopped && !generationFinished
             && inFlightCount < SLIDE_GENERATION_CONCURRENCY && launchIndex < totalSlides) {
             const i = launchIndex;
@@ -610,6 +627,7 @@
         async function runSlideWorker(i) {
           let generated = null;
           let lastError = '';
+          let slideJobId = '';
 
           // The request is already a background job. Retrying here could enqueue a second paid
           // generation after a browser or proxy timeout, so a failed slide is checkpointed for an
@@ -618,7 +636,12 @@
             try {
               // Snapshot the specific slide so a mutating plan cannot break the request.
               const data = await requestTenantSlideGeneration(buildSlidePayload(i),
-                (partial) => renderTenantSlidePartial(i, partial));
+                (partial) => renderTenantSlidePartial(i, partial),
+                (jobId) => {
+                  // The stop button reaches this slide through its run handle.
+                  slideJobId = String(jobId || '');
+                  registerTenantGenerationRun(slideJobId);
+                });
               if (data.success && data.slide && data.slide.html && containsSlideRoot(data.slide.html)) {
                 generated = data.slide;
               } else {
@@ -632,6 +655,7 @@
               console.error('Slide generation error for index', i, 'attempt', attempt, err);
             }
           }
+          releaseTenantGenerationRun(slideJobId);
 
           if (!generated) generationStopped = true;
           pendingSlides[i] = generated ? { slide: generated } : { error: lastError };
@@ -691,6 +715,7 @@
           }
         }
         isGeneratingTenantSlides = false;
+        setTenantGenerationStopVisible(false);
         checkpointPresentationUndo();
         updatePresentationUndoButtons();
       }

@@ -758,6 +758,15 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None, timeout
             {'message': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.',
              'error_code': 'NO_API_KEY', 'fatal': True, 'http_status': 503},
             log='[IMAGE ERROR] OPENROUTER_KEY is not configured')
+    # A cancelled run must never reach the provider. Image models have no
+    # streaming, so this is the only place the stop can save the tokens of
+    # this call — the part already in flight cannot be un-billed.
+    if run_control.run_is_cancelled(ctx):
+        return _images_api_fail(
+            {'message': run_control.CANCELLED_MESSAGE,
+             'error_code': run_control.CANCELLED_ERROR_CODE,
+             'cancelled': True},
+            log='[IMAGE ERROR] run cancelled before the provider call')
     # ISS-020: reference ownership is checked against the ctx tenant — the
     # worker threads these calls run on have no request context.
     prepared = _normalize_image_references(references, tenant_id=(ctx or {}).get('tenant_id'))

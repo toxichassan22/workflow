@@ -28,6 +28,8 @@
           <p id="globalLoaderText" style="margin:0;color:var(--muted);font-size:12px;line-height:1.4"></p>
         </div>
         <span id="globalLoaderPct" class="global-loader-percent" aria-live="polite">0%</span>
+        <button id="globalLoaderStopButton" type="button" class="global-loader-stop" style="display:none"
+          data-i18n="gen.stop" onclick="stopTenantGeneration()">إيقاف</button>
         <button onclick="hideLoader()" class="global-loader-cancel" title="إخفاء مؤشر التقدم">×</button>
       </div>
       <div id="globalLoaderProgress" class="global-loader-progress">
@@ -646,6 +648,8 @@
           </div>
           <button id="liveGenResumeButton" type="button" class="btn ghost" style="display:none;white-space:nowrap;"
             onclick="resumeTenantSlideGeneration()">استكمال التوليد</button>
+          <button id="liveGenStopButton" type="button" class="btn ghost" style="display:none;white-space:nowrap;"
+            data-i18n="gen.stop_generation" onclick="stopTenantGeneration()">إيقاف التوليد</button>
         </div>
       </div>
 

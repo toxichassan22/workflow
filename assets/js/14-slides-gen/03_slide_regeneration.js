@@ -14,8 +14,10 @@
           30000);
         const status = String(res && res.status || '');
         if (typeof onProgress === 'function') onProgress(res);
-        if (status === 'completed' || status === 'failed' || (res && res.plan)) break;
+        if (status === 'completed' || status === 'failed' || status === 'cancelled' || (res && res.plan)) break;
         if (!res || res.failureReason === 'job_not_found') break;
+        // The user stopped the plan: stop waiting for it.
+        if (tenantGenerationStopRequested) break;
       }
       if (res && !res.plan && !res.error) {
         res = { success: false, error: 'تعذر إعداد خطة الشرائح في الوقت المتاح', error_code: 'PLAN_JOB_TIMEOUT' };
@@ -28,12 +30,16 @@
     // same paid AI generation three more times. While the job runs, the worker publishes the
     // streamed text as `partial`, so the caller can paint the slide live; the completed slide
     // below is still the same finalized response, never the preview.
-    async function requestTenantSlideGeneration(payload, onPartial) {
+    async function requestTenantSlideGeneration(payload, onPartial, onQueued) {
       const queued = await apiWithTimeout(
         'POST', '/api/generate-slide-single-job', payload, 30000,
         'تعذر تسجيل مهمة توليد الشريحة؛ لم يبدأ استهلاك جديد.'
       );
       if (!queued?.jobId) return queued;
+      // The run handle is what the stop button cancels.
+      if (typeof onQueued === 'function') {
+        try { onQueued(queued.jobId); } catch (queueError) { /* stop-only */ }
+      }
 
       const started = Date.now();
       const maxWaitMs = 10 * 60 * 1000;
@@ -51,7 +57,8 @@
           }
         }
         if (result?.status === 'completed' || (result?.success && result?.slide)) return result;
-        if (result?.status === 'failed' || result?.status === 'not_found' || result?.error_code) return result;
+        if (result?.status === 'failed' || result?.status === 'cancelled' ||
+            result?.status === 'not_found' || result?.error_code) return result;
         if (result?.error && !['queued', 'running'].includes(result?.status)) return result;
       }
       return {
@@ -498,7 +505,10 @@
       tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', requestBody)
         .then(async res => {
           if (!(res && res.jobId && !res.plan)) return res;
+          // The plan is a paid call too: its run handle is stoppable.
+          registerTenantGenerationRun(res.jobId);
           const completed = await pollTenantSlidePlanJob(res.jobId, onProgress);
+          releaseTenantGenerationRun(res.jobId);
           if (completed?.plan || !res.fallbackPlan) return completed;
           if (completed && completed.success === false && TENANT_GENERATION_FATAL_CODES.has(completed.error_code)) {
             return completed;

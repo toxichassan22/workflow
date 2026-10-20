@@ -6,6 +6,10 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
         return {"error": gate}
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
+    # A cancelled run must never reach the provider — the whole point of the
+    # stop button is that these tokens are never spent.
+    if run_control.run_is_cancelled(usage_ctx):
+        return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
     headers = _openrouter_headers(usage_ctx)
     user_message_content = user_content
@@ -137,6 +141,10 @@ def call_text_chat_parallel(system_prompt, user_content, temperature=0.7, max_to
                 # A deterministic refusal (wallet/key/trial) cannot be raced
                 # around — every parallel attempt hits it identically.
                 return resp
+            if isinstance(resp, dict) and resp.get('cancelled'):
+                # A stopped run is final as well: racing it would start more
+                # paid attempts for work the user already cancelled.
+                return resp
             if not _has_chat_choices(resp):
                 return None
             content = extract_chat_content(resp, 'TEXT-PARALLEL')
@@ -179,6 +187,9 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
         return {"error": gate}
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
+    # A cancelled run must never reach the provider.
+    if run_control.run_is_cancelled(usage_ctx):
+        return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
     headers = _openrouter_headers(usage_ctx)
     user_message_content = user_content
@@ -279,6 +290,17 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
                 except Exception:
                     pass
                 return _fail(f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)")
+            # A stop clicked mid-generation: closing the response here ends the
+            # provider's stream, so the rest of the output is never produced and
+            # never billed. The tokens already produced stay metered.
+            if run_control.run_is_cancelled(usage_ctx, throttle=True):
+                try:
+                    response.close()
+                except Exception:
+                    pass
+                print(f"[OPENROUTER STREAM CANCELLED] model={model_name}")
+                _settle_ai_attempt_record(attempt_id, 'ok', usage, generation_id)
+                return run_control.cancelled_response(''.join(content_parts))
             if not line:
                 continue
             text = line.strip()

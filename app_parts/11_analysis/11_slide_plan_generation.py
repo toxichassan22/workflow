@@ -161,6 +161,9 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
                 model=LUNA_TEXT_MODEL,
                 usage_ctx=_usage_ctx('slide_plan', project_data, tenant_id=tenant_id)
             )
+            # A stopped plan must not become the generic fallback structure:
+            # the user asked for the work to stop, not for a different deck.
+            run_control.raise_if_cancelled(response)
             content = extract_chat_content(response, "SLIDE-PLAN")
             plan = parse_slide_plan(content, branding, project_data)
             print(f"[SLIDE-PLAN] Parsed on attempt {attempt}")
@@ -305,6 +308,10 @@ def _emergency_slide_plan(project_data, branding, images, tenant_id, target_sect
 
 def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images, job_id, target_section_keys=None):
     with flask_app.app_context():
+        # The stop button reaches this plan through the run registry; the
+        # thread dies with the worker, so the handle cannot leak into another
+        # request.
+        run_control.bind_run(job_id, tenant_id)
         fallback_plan = _emergency_slide_plan(
             project_data, branding, images, tenant_id, target_section_keys=target_section_keys)
         _write_job('.plan_jobs', tenant_id, job_id, {
@@ -319,10 +326,12 @@ def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images,
                 target_section_keys=target_section_keys,
             )
             succeeded = bool(payload.get('success'))
+            cancelled = payload.get('error_code') == run_control.CANCELLED_ERROR_CODE
             _write_job('.plan_jobs', tenant_id, job_id, {
                 **payload,
-                'status': 'completed' if succeeded else 'failed',
-                'message': 'تم إعداد خطة الشرائح' if succeeded else payload.get('error', 'تعذر إعداد خطة الشرائح'),
+                'status': 'completed' if succeeded else ('cancelled' if cancelled else 'failed'),
+                'message': ('تم إيقاف المهمة' if cancelled else
+                            'تم إعداد خطة الشرائح' if succeeded else payload.get('error', 'تعذر إعداد خطة الشرائح')),
             })
         except Exception as exc:
             print(f'[SLIDE-PLAN JOB FAILED] {exc}')
@@ -743,8 +752,12 @@ def api_generate_slide_single():
         # Direct (non-job) calls keep the previous raced behaviour byte for byte.
         stream_job = getattr(g, '_slide_stream_job', None)
         if isinstance(stream_job, dict) and stream_job.get('job_id'):
-            return call_text_chat_stream(sys_prompt, user_msg, max_tokens=max_tokens, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id), on_token=_slide_stream_progress(g.tenant_id, stream_job['job_id']))
-        return call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=1, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
+            response = call_text_chat_stream(sys_prompt, user_msg, max_tokens=max_tokens, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id), on_token=_slide_stream_progress(g.tenant_id, stream_job['job_id']))
+            # A stopped run must not be retried and must not become a
+            # deterministic fallback slide the user never asked for.
+            return run_control.raise_if_cancelled(response)
+        response = call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=1, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
+        return run_control.raise_if_cancelled(response)
 
     # Apply the same ownership repair used by the full-plan normalizer before
     # rendering and before returning slide metadata. A single-slide retry can
@@ -813,6 +826,10 @@ def _run_slide_generation_job(flask_app, tenant_id, payload, job_id, authorizati
     with flask_app.test_request_context(
             '/api/generate-slide-single', method='POST', json=payload,
             headers={'Authorization': authorization}):
+        # The stop button reaches this slide through the run registry; the
+        # thread dies with the worker, so the handle cannot leak into another
+        # request.
+        run_control.bind_run(job_id, tenant_id)
         # g is bound to this worker's request context, so the single-slide
         # route streams this job's completion as live previews through it.
         g._slide_stream_job = {'tenant_id': tenant_id, 'job_id': job_id}
@@ -825,6 +842,15 @@ def _run_slide_generation_job(flask_app, tenant_id, payload, job_id, authorizati
                 _write_job('.slide_jobs', tenant_id, job_id, {
                     **body, 'status': 'completed', 'success': True,
                 })
+            elif body.get('error_code') == run_control.CANCELLED_ERROR_CODE:
+                # The user stopped the run: the slide was never produced and
+                # the tokens for it were never spent.
+                _write_job('.slide_jobs', tenant_id, job_id, {
+                    **body,
+                    'status': 'cancelled',
+                    'success': False,
+                    'error': body.get('error') or run_control.CANCELLED_MESSAGE,
+                })
             else:
                 _write_job('.slide_jobs', tenant_id, job_id, {
                     **body,
@@ -834,6 +860,14 @@ def _run_slide_generation_job(flask_app, tenant_id, payload, job_id, authorizati
                 })
         except Exception as exc:
             print(f'[SLIDE GENERATION JOB FAILED] {exc}')
+            if getattr(exc, 'error_code', None) == run_control.CANCELLED_ERROR_CODE:
+                _write_job('.slide_jobs', tenant_id, job_id, {
+                    'status': 'cancelled',
+                    'success': False,
+                    'error': getattr(exc, 'ai_message', '') or run_control.CANCELLED_MESSAGE,
+                    'error_code': run_control.CANCELLED_ERROR_CODE,
+                })
+                return
             if getattr(exc, 'fatal_ai_error', False):
                 _write_job('.slide_jobs', tenant_id, job_id, {
                     'status': 'failed',

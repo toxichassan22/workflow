@@ -89,6 +89,15 @@
         renderLoaderProgress(nextPct, text || WFT('loader.preparing', 'جاري التحضير...'), { allowDecrease: true });
       }
       loader.style.display = 'flex';
+      // A long paid operation shows the stop button; a short one never does.
+      const stopButton = document.getElementById('globalLoaderStopButton');
+      if (stopButton) {
+        stopButton.style.display = options.stoppable ? 'inline-flex' : 'none';
+        if (options.stoppable) {
+          stopButton.disabled = false;
+          stopButton.textContent = WFT('gen.stop', 'إيقاف');
+        }
+      }
       startLoaderProgressTimer();
     }
 

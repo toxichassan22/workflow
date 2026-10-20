@@ -207,6 +207,9 @@ def _visual_plan_execute(kind, data, slot_id=''):
 def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
     tenant_id = actor['tenant_id']
     with flask_app.test_request_context('/api/visual-concept/plans-jobs/' + job_id, method='POST', json=data):
+        # The stop button reaches this plan through the run registry; the
+        # thread dies with the worker, so the handle cannot leak.
+        run_control.bind_run(job_id, tenant_id)
         for key, value in actor.items():
             setattr(g, key, value)
         initial_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}

@@ -810,6 +810,7 @@
 
     async function directGenerateProposalFile() {
       if (isGeneratingTenantSlides || tenantSlidePlanRequest || tenantPresentationSavePromise) return;
+      resetTenantGenerationStop();
       const formData = await collectTenantFormData();
       tenantProjectData = { ...tenantProjectData, ...formData };
       if (!tenantProjectData.project_name && tenantProjectData.projectName) tenantProjectData.project_name = tenantProjectData.projectName;
@@ -846,10 +847,17 @@
         // a dead provider keeps the user on this page with the error instead
         // of stranding them on an empty design stage.
         showLoader(WFT('gen.planning_structure', 'إعداد خطة وهيكل العرض الاستثماري'),
-        WFT('gen.planning_structure_detail', 'تحليل متطلبات المشروع والهيكل الأنسب'), 5);
+        WFT('gen.planning_structure_detail', 'تحليل متطلبات المشروع والهيكل الأنسب'), 5,
+        { stoppable: true });
         const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
           updateLoaderProgress(8, (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب');
         }).finally(() => hideLoader());
+        if (tenantGenerationStopRequested) {
+          // The user stopped the plan: no slide may start after that.
+          await settleGenerationRun(false, 'أُلغيت مهمة التوليد');
+          toast(WFT('gen.stopped_toast', 'تم إيقاف التوليد'));
+          return;
+        }
         if (planResponse.success && planResponse.plan) {
           tenantSlidePlan = planResponse.plan;
           tenantProjectData.tenantSlidePlan = tenantSlidePlan;

@@ -487,6 +487,14 @@ def _agent_job_mark_cancelled(ctx):
         return True
     except OSError:
         return False
+    finally:
+        # The shared registry is what the generic stop button writes to, and
+        # what the AI layer reads before every provider call. Marking both
+        # keeps the agent's own button and the shared one in agreement.
+        try:
+            run_control.cancel_run(ctx.get('job_id'), ctx.get('tenant_id'))
+        except Exception:
+            pass
 
 
 def _agent_job_clear_cancel(ctx):
@@ -502,6 +510,12 @@ def _agent_job_cancelled(ctx):
     path = _agent_job_cancel_path(ctx)
     if path and os.path.isfile(path):
         return True
+    # The shared registry carries the generic stop button's mark as well.
+    try:
+        if run_control.is_run_cancelled(ctx.get('job_id'), ctx.get('tenant_id')):
+            return True
+    except Exception:
+        pass
     job = _agent_job_get(ctx)
     return bool(isinstance(job, dict) and job.get('cancelRequested'))
 
