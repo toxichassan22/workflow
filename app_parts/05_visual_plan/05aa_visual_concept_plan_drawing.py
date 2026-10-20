@@ -435,11 +435,16 @@ def _visual_concept_plan_massing_body(context, model, regulations):
         'must match its exact shape and proportions. ']
     if model:
         parts.append(
-            'STRICT 3D EXTRUSION OF PLAN 1: Extrude ONLY the building footprints established in the approved '
+            'STRICT 3D EXTRUSION OF PLAN 1 (SITE PLAN): Extrude ONLY the building footprints established in the approved '
             'conceptual site plan (Plan 1) into 3D conceptual volumes with thin white horizontal floor lines '
-            'and dark navy outlines. Keep every building footprint, location, orientation, and landscaped open '
+            'and dark navy outlines. Keep every building footprint, location, orientation, parking layout, and landscaped open '
             'space strictly identical to the site plan illustration — do NOT invent new buildings, do NOT shift '
-            'their positions, and do NOT alter the site arrangement. ')
+            'their positions, and do NOT alter the site arrangement. '
+            'Surface parking lot location: keep surface parking lots strictly in the front street frontage area where Plan 1 '
+            'shows them (adjacent to the hotel on the primary road). Never relocate parking to the rear or any other area. '
+            'Hotel tower: keep the hotel tower on the primary road edge exactly as positioned in Plan 1. '
+            'Amenities & Villas: retain swimming pool, padel courts, open green courtyards, and villa clusters in their exact '
+            'layout and coordinates from Plan 1. ')
         building_bits = []
         if model.get('bands'):
             b_label = model.get('tower_name') or 'Main Building'
@@ -478,8 +483,7 @@ def _visual_concept_plan_massing_body(context, model, regulations):
         'Every word in the drawing is English — the title, the legend chips, the callout labels, '
         'the edge labels, the annotations and the caption. Never write Arabic characters: a '
         'recorded Arabic name is written as its English equivalent, and where there is no English '
-        'equivalent the label is left out. Output ONLY valid standalone raw SVG code starting '
-        'with <svg and ending with </svg> — no markdown fences, no explanation.')
+        'equivalent the label is left out.')
     return ''.join(parts)
 
 

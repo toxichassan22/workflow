@@ -879,11 +879,57 @@ def _visual_plan_render_response(data, slot_id):
         context = _visual_plan_prompt_context(data)
         prompt = _visual_plan_slot_prompt(workflow, kind, context)
         base_image = _visual_concept_edit_base_image(data, g.tenant_id)
+        references = [base_image] if base_image else []
         scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
-        image, reference_count, model_used, svg_code = _visual_plan_render_massing_svg(prompt, data, base_image=base_image)
+
+        boundary_points = ((workflow.get('boundary') or {}).get('points')
+                           or context.get('boundary_points')
+                           or (scene.get('contract') or {}).get('geometry', {}).get('surveyPoints') if isinstance(scene, dict) else None)
+        if boundary_points:
+            try:
+                boundary_url = _visual_concept_render_plan_boundary_reference(boundary_points, g.tenant_id)
+                if boundary_url:
+                    for uri in _visual_concept_reference_uris(urls=[boundary_url], tenant_id=g.tenant_id):
+                        if uri not in references:
+                            references.append(uri)
+            except Exception:
+                pass
+
+        dependency_kinds = list(_VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ()))
+        dependency_images = _visual_plan_dependency_images(data, workflow, kind)
+        for dependency_image in dependency_images:
+            dependency_uris = _visual_concept_reference_uris(
+                urls=[dependency_image], tenant_id=g.tenant_id)
+            for dependency_uri in dependency_uris:
+                if dependency_uri not in references:
+                    references.append(dependency_uri)
+
+        outline_text = ('The attached outline is the true surveyed parcel boundary — trace it exactly and '
+                        'draw only the buildings, entries and open areas the prompt describes, nothing else.')
+
+        image_prompt = (prompt
+            + ('\nThe first attached image is the current approved illustration of this plan — '
+               'keep its look and every unrequested detail identical.\n' if base_image else '\n')
+            + _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=bool(base_image))
+            + outline_text)
+
+        image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
+                                timeout=_visual_plan_job_call_timeout(180),
+                                usage_ctx=_usage_ctx('image', data))
+        if not image:
+            err = last_images_api_error() or {}
+            if err.get('fatal') or err.get('error_code') in _FATAL_AI_ERROR_CODES:
+                raise FatalAICallError(err.get('message'), error_code=err.get('error_code'),
+                                       http_status=err.get('http_status'),
+                                       provider_message=err.get('provider_message'))
+            raise visual_plan_geometry.PlanGeometryError(
+                _client_safe_llm_error(err.get('message') or 'تعذر توليد صورة المخطط.'),
+                'PLANS_PROVIDER_FAILED')
+
         return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
-                'svgCode': svg_code, 'prompt': prompt, 'scene': scene, 'engine': 'svg_massing',
-                'model': model_used, 'referenceCount': reference_count}
+                'prompt': prompt, 'scene': scene, 'engine': 'image_generation',
+                'model': VISUAL_CONCEPT_IMAGE_MODEL,
+                'referenceCount': len(references)}
 
 
 def _visual_plan_edit_scene(data, slot_id):
