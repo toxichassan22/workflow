@@ -228,6 +228,16 @@ def current_run_cancelled():
     return is_run_cancelled(run_id, tenant_id)
 
 
+def run_can_be_cancelled(usage_ctx=None):
+    """True when a run handle is attached to this call.
+
+    A call without a run cannot be stopped, so the caller may take the plain
+    path. A call with one can be cut in the middle, so it must be streamed.
+    """
+    run_id, _tenant_id = _resolve_run(usage_ctx)
+    return bool(run_id)
+
+
 def cancelled_response(partial=None):
     """The shared answer for a call that must not reach the provider."""
     payload = {

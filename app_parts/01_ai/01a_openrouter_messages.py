@@ -24,6 +24,10 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
         return {"error": gate}
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
+    # A cancelled run must never reach the provider — the agent's planner is
+    # one of the most expensive calls in the product.
+    if run_control.run_is_cancelled(usage_ctx):
+        return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
     headers = _openrouter_headers(usage_ctx)
     payload = {

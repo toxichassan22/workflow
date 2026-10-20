@@ -360,9 +360,28 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
 
 
 def call_text_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, timeout=300, reasoning_effort=None, response_format=None, model=None, image_references=None, usage_ctx=None, on_token=None):
-    """Streaming twin of call_text_chat: same defaults, tokens via on_token."""
+    """Streaming twin of call_text_chat: same defaults, tokens via on_token.
+
+    A call that belongs to a run is streamed, because a stream is the only
+    way a stop can cut it in the middle. A call with no run behind it takes
+    the plain twin: the same request, and the credit-recovery retry that the
+    streaming path does not carry.
+    """
     if not _has_any_openrouter_key(usage_ctx):
         return {"error": {"message": "OPENROUTER_KEY is required for the text model"}}
+    if not run_control.run_can_be_cancelled(usage_ctx):
+        return call_text_chat(
+            system_prompt,
+            user_content,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            reasoning_effort=reasoning_effort,
+            response_format=response_format,
+            model=model,
+            image_references=image_references,
+            usage_ctx=usage_ctx,
+        )
     return call_openrouter_chat_stream(
         system_prompt,
         user_content,

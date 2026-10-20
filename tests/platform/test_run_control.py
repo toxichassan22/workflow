@@ -222,6 +222,23 @@ class RunControlAiLayerTests(unittest.TestCase):
         self.assertTrue(response.closed, 'the provider connection must be closed')
         self.assertEqual(result.get('partial'), 'أول')
 
+    def test_a_cancelled_agent_planner_never_reaches_the_provider(self):
+        """The agent planner is one of the most expensive calls in the product."""
+        application_module = self._application()
+        run_control.cancel_run(self.run_id, self.tenant)
+
+        def fake_post(*args, **kwargs):
+            raise AssertionError('the provider must not be called for a cancelled run')
+
+        with patch.object(application_module, '_tenant_key_gate', return_value=None), \
+                patch.object(application_module, '_has_any_openrouter_key', return_value=True), \
+                patch.object(application_module.requests, 'post', side_effect=fake_post):
+            response = application_module.call_openrouter_messages(
+                [{'role': 'user', 'content': 'خطة'}],
+                usage_ctx=self._usage_ctx(application_module))
+        self.assertTrue(response.get('cancelled'), response)
+        self.assertEqual(response.get('error_code'), run_control.CANCELLED_ERROR_CODE)
+
     def test_a_live_stream_returns_its_text(self):
         application_module = self._application()
         response = _FakeStreamResponse([_sse('نص '), _sse('كامل'), 'data: [DONE]'])
