@@ -52,5 +52,14 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "plans.distribution_chat_typing": "Typing…",
   "plans.distribution_chat_loading": "Working on the layout request",
   "plans.distribution_chat_loading_detail": "The layout table is being updated and reviewed...",
-  "plans.distribution_chat_failed": "Could not apply the request to the layout."
+  "plans.distribution_chat_failed": "Could not apply the request to the layout.",
+  "plans.distribution_chat_distribute": "Distribute the floors",
+  "plans.distribution_chat_restart": "Start over",
+  "plans.distribution_chat_restart_confirm": "The current floor distribution will be cleared and the conversation starts over. Continue?",
+  "plans.distribution_chat_elapsed": "Working… {time}",
+  "plans.distribution_chat_applied": "The layout table was updated.",
+  "plans.distribution_chat_table_unchanged": "The answer carried no layout — the floors did not change.",
+  "plans.distribution_chat_failed_unreadable": "The model sent an answer that could not be read — the layout did not change.",
+  "plans.distribution_chat_failed_empty": "The model sent no answer — the layout did not change.",
+  "plans.distribution_chat_failed_timeout": "The layout request ran out of time."
 }/*I18N_EN_END*/);

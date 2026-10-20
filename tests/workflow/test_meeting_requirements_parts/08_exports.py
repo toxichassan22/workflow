@@ -753,12 +753,23 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
             check_body.index('const workflow = visualConceptPlansWorkflowState()'))
         # The distribution conversation writes its table and its findings onto
         # the live workflow — they reach the draft, and approval sees them.
+        # The turn itself leaves the page at once: the model thinks for
+        # minutes, and a held request was cut by the hosting edge, so the
+        # request is a job the browser polls.
         chat_start = index_source.index('async function sendVisualConceptDistributionChat(')
         chat_body = index_source[chat_start:index_source.index(
             'function startVisualConceptDistributionChat()', chat_start)]
+        self.assertIn('await visualConceptDistributionChatJob(payload)', chat_body)
+        job_start = index_source.index('async function visualConceptDistributionChatJob(')
+        job_body = index_source[job_start:index_source.index(
+            'async function sendVisualConceptDistributionChat(', job_start)]
         self.assertLess(
-            chat_body.index("api('POST', '/api/visual-concept/plans-distribution-chat'"),
-            chat_body.index('const state = visualConceptPlansWorkflowState()'))
+            job_body.index("api('POST', '/api/visual-concept/plans-distribution-chat'"),
+            job_body.index("api('GET', '/api/visual-concept/plans-jobs/'"))
+        # The answer lands on the live workflow before the state is read back.
+        self.assertLess(
+            chat_body.index('const state = visualConceptPlansWorkflowState()'),
+            chat_body.index('state.distribution = normalizeVisualConceptPlansWorkflow('))
         # The conversation is a pure audit: it reviews the table and the client
         # edits it by hand — no auto-repair pass exists anywhere.
         self.assertNotIn("action === 'check-distribution')", index_source)
@@ -796,7 +807,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('promptsError', render_body)
         # Exterior prompts ship the workflow too, so the server can ground them on
         # the same deterministic measurements the plan diagrams draw from.
-        payload_start = index_source.index('async function collectVisualConceptPayload(slotId)')
+        payload_start = index_source.index('async function collectVisualConceptPayload(')
         payload_body = index_source[payload_start:index_source.index('function visualConceptSlotLocked', payload_start)]
         self.assertIn(
             'plansWorkflow: normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow),',
@@ -1092,7 +1103,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('مبنى منخفض بطراز إسلامي', refs_text)
 
         # Angle slots re-render the approved hero: style refs stay out of their
-        # reference set entirely — plans and the cover image lead it instead.
+        # reference set entirely — the massing diagram and the cover image lead
+        # it instead. The two 2D diagrams are inputs to the plans themselves,
+        # never to the render.
         with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,DDDD') as angle_call, \
                 patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/right.png'), \
                 patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
@@ -1107,7 +1120,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(angle.status_code, 200, angle.get_json())
         angle_refs = [str(item) for item in angle_call.call_args.args[1]]
         self.assertTrue(any('cover.png' in item for item in angle_refs))
-        self.assertTrue(any('plan_site.png' in item for item in angle_refs))
+        self.assertTrue(any('plan_massing.png' in item for item in angle_refs))
+        self.assertFalse(any('plan_site.png' in item for item in angle_refs))
+        self.assertFalse(any('plan_uses.png' in item for item in angle_refs))
         self.assertFalse(any(
             'ref-club-w' in item or 'ref-tower-h' in item or 'ref-club-m' in item
             for item in angle_refs))
@@ -1158,6 +1173,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         sent_prompt = named_call.call_args.args[0]
         self.assertIn('last 3 attached images', sent_prompt)
         self.assertIn('نادي النساء', sent_prompt)
+        # The exterior render is bound to the approved massing diagram: the
+        # rule travels with the prompt, so a client prompt cannot talk the
+        # model out of resizing or adding a mass.
+        self.assertIn('approved massing diagram (Plan 3)', sent_prompt)
         # The response echoes the stored prompt — the suffix must not bake
         # into it or every regenerate would stack another copy.
         self.assertEqual(named_cover.get_json()['prompt'], 'Hero image from the project facts')

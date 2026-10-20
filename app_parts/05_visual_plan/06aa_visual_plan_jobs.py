@@ -1,5 +1,20 @@
 _VISUAL_PLAN_JOB_NAMESPACE = '.visual_plan_jobs'
 _VISUAL_PLAN_JOB_TIMEOUT_SECONDS = 600
+# The floor distribution thinks at maximum reasoning effort on the full project
+# brief, so its turn gets a quarter hour of provider time plus the margin the
+# job deadline needs to outlive it.
+_VISUAL_PLAN_DISTRIBUTION_JOB_TIMEOUT_SECONDS = 1200
+
+
+def _visual_plan_job_timeout_seconds(kind=''):
+    """The absolute deadline of one job, per kind.
+
+    The distribution turn answers on the slowest model the product owns, so it
+    gets its own ceiling instead of inheriting the shorter one.
+    """
+    if kind == 'distribution':
+        return _VISUAL_PLAN_DISTRIBUTION_JOB_TIMEOUT_SECONDS
+    return _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
 
 
 def _visual_plan_job_subject(kind):
@@ -15,6 +30,8 @@ def _visual_plan_job_subject(kind):
         return 'وصف التصور البصري'
     if kind == 'edit_image':
         return 'تعديل التصور البصري'
+    if kind == 'distribution':
+        return 'توزيع الأدوار'
     return 'المخطط الهندسي'
 
 
@@ -45,6 +62,7 @@ def _visual_plan_job_todos(kind, state='running', active_index=None):
                       'مراجعة الإجابات السابقة', 'تحليل المتطلبات وتحديد السؤال'],
         'site_generate': ['تأكيد اكتمال المتطلبات', 'كتابة أقسام كود SVG', 'فحص المخطط وتجهيز المعاينة'],
         'site_edit': ['قراءة كود SVG والطلب', 'تعديل القسم المستهدف', 'فحص المخطط وتجهيز المعاينة'],
+        'distribution': ['قراءة بيانات المشروع والتوزيع', 'اقتراح توزيع الأدوار', 'مراجعة النتيجة'],
         'image': ['قراءة وصف التصور البصري', 'توليد الصورة'],
         'chat': ['قراءة طلب التعديل', 'تحديث وصف الصورة'],
         'edit_image': ['قراءة طلب التعديل والصورة الحالية', 'توليد الصورة المعدّلة'],
@@ -217,6 +235,9 @@ def _visual_plan_execute(kind, data, slot_id=''):
         elif kind == 'edit_image':
             result, status = _visual_concept_edit_result(data, slot_id)
             return result, status
+        elif kind == 'distribution':
+            result, status = _plans_distribution_chat_execute(data)
+            return result, status
         else:
             return {'success': False, 'error_code': 'PLANS_OPERATION_INVALID'}, 400
         return result, 200
@@ -250,7 +271,7 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
         try:
             g.visual_plan_job_deadline = float(initial_job.get('deadlineAt'))
         except (TypeError, ValueError):
-            g.visual_plan_job_deadline = time.time() + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
+            g.visual_plan_job_deadline = time.time() + _visual_plan_job_timeout_seconds(kind)
         g.visual_plan_job_kind = kind
         def report_progress(progress=None, todos=None, checkpoint=None, timing=None):
             try:
@@ -348,20 +369,21 @@ def _visual_plan_dispatch(kind, data, slot_id=''):
         return jsonify(result), status
     job_id = _uuid.uuid4().hex
     created_at = time.time()
-    deadline_at = created_at + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
+    timeout_seconds = _visual_plan_job_timeout_seconds(kind)
+    deadline_at = created_at + timeout_seconds
     actor = {key: getattr(g, key, None) for key in
              ('tenant_id', 'user_id', 'user_name', 'user_role', 'is_admin', 'token_payload')}
     _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id,
                {'status': 'queued', 'success': True, 'progress': 5, 'actor': actor,
                 'createdAt': created_at, 'deadlineAt': deadline_at,
-                'timeoutSeconds': _VISUAL_PLAN_JOB_TIMEOUT_SECONDS,
+                'timeoutSeconds': timeout_seconds,
                 'todos': _visual_plan_job_todos(kind, 'queued'),
                 'payload': {'data': data, 'kind': kind, 'slotId': slot_id}})
     threading.Thread(target=_visual_plan_job_worker,
                      args=(current_app._get_current_object(), actor, data, kind, slot_id, job_id),
                      daemon=True).start()
     return jsonify({'success': True, 'jobId': job_id, 'status': 'queued', 'progress': 5,
-                    'timeoutSeconds': _VISUAL_PLAN_JOB_TIMEOUT_SECONDS}), 202
+                    'timeoutSeconds': timeout_seconds}), 202
 
 
 @app.route('/api/visual-concept/plans-notes-check', methods=['POST'])
@@ -410,7 +432,9 @@ def api_visual_concept_plan_job(job_id):
     try:
         deadline_at = float(job.get('deadlineAt'))
     except (TypeError, ValueError):
-        deadline_at = float(job.get('createdAt') or job.get('updatedAt') or time.time()) + _VISUAL_PLAN_JOB_TIMEOUT_SECONDS
+        deadline_at = (float(job.get('createdAt') or job.get('updatedAt') or time.time())
+                       + _visual_plan_job_timeout_seconds(
+                           ((job.get('payload') or {}).get('kind') or '')))
     if job.get('status') in ('queued', 'running') and time.time() >= deadline_at:
         kind = ((job.get('payload') or {}).get('kind') or 'render')
         todos = job.get('todos') if isinstance(job.get('todos'), list) else []

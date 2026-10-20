@@ -179,4 +179,173 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
     assert.equal(payload.plansWorkflow.conflictChats.verify.turns.length, 0);
     assert.equal(payload.plansWorkflow.conflictChats.distribution.turns.length, 0);
   });
+
+  test('the turn is queued, polled, and the applied table lands in the workflow', async () => {
+    const context = fixture();
+    const calls = [];
+    const toasts = [];
+    context.setTimeout = fn => setTimeout(fn, 0);
+    context.hasPermission = () => true;
+    context.showLoader = () => {};
+    context.hideLoader = () => {};
+    context.toast = message => toasts.push(message);
+    context.markVisualConceptDirty = () => {};
+    context.renderVisualConceptPage = () => {};
+    context.collectVisualConceptPlansWorkflowPayload = async () => ({
+      plansWorkflow: { distribution: { rows: [] } }, projectData: {} });
+    context.api = async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (method === 'POST') {
+        return { success: true, jobId: 'job-123', status: 'queued', timeoutSeconds: 600 };
+      }
+      return { status: 'completed', success: true, result: {
+        success: true, action: 'update', reply: 'تم توزيع الأدوار.',
+        rows: [{ id: 'r1', building: 'المبنى أ', floor_range: '1', component: 'سكني',
+          units_per_floor: 4, floor_area_sqm: 120 }],
+        checks: [], issues: [], canProceed: true } };
+    };
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: {},
+      plansWorkflow: { viewStage: 'boundary', verification: { approved: true },
+        distribution: { approved: false, aiReviewed: false, rows: [], checks: [], issues: [] } } });
+
+    await context.sendVisualConceptDistributionChat('اقترح توزيعًا', { expectsTable: true });
+
+    // The request leaves the page at once and the answer comes from the job.
+    assert.equal(calls[0].method, 'POST');
+    assert.equal(calls[0].path, '/api/visual-concept/plans-distribution-chat');
+    assert.ok(calls.some(call => call.method === 'GET'
+      && call.path === '/api/visual-concept/plans-jobs/job-123'));
+    const workflow = context.tenantVisualConceptState.plansWorkflow;
+    assert.equal(workflow.distribution.rows.length, 1);
+    assert.equal(workflow.distribution.rows[0].floor_range, '1');
+    assert.equal(workflow.distribution.aiReviewed, true);
+    // The answer is in the chat, not only on the screen.
+    assert.equal(workflow.distributionChat.turns[1].role, 'assistant');
+    assert.equal(workflow.distributionChat.turns[1].text, 'تم توزيع الأدوار.');
+    // A turn that applied the table does not warn about an unchanged one.
+    assert.equal(toasts.length, 0);
+  });
+
+  test('a failed turn shows the reason the server gave instead of one made-up message', async () => {
+    const context = fixture();
+    const toasts = [];
+    context.hasPermission = () => true;
+    context.showLoader = () => {};
+    context.hideLoader = () => {};
+    context.toast = message => toasts.push(message);
+    context.markVisualConceptDirty = () => {};
+    context.renderVisualConceptPage = () => {};
+    context.collectVisualConceptPlansWorkflowPayload = async () => ({
+      plansWorkflow: { distribution: { rows: [] } }, projectData: {} });
+    context.api = async () => ({ success: false,
+      error: 'انتهت مهلة الاتصال بالمزوّد (900 ثانية)', error_code: 'PLANS_PROVIDER_TIMEOUT' });
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: {},
+      plansWorkflow: { viewStage: 'boundary', verification: { approved: true },
+        distribution: { approved: false, aiReviewed: false, rows: [], checks: [], issues: [] } } });
+
+    await context.sendVisualConceptDistributionChat('اقترح توزيعًا');
+
+    assert.equal(toasts.length, 1);
+    assert.match(toasts[0], /انتهت مهلة/);
+    // The table stays exactly as the client left it.
+    const workflow = context.tenantVisualConceptState.plansWorkflow;
+    assert.equal(workflow.distribution.rows.length, 0);
+    assert.equal(workflow.distribution.aiReviewed, false);
+  });
+
+  test('a turn that asked for a layout and got none says the floors did not change', async () => {
+    const context = fixture();
+    const toasts = [];
+    context.hasPermission = () => true;
+    context.showLoader = () => {};
+    context.hideLoader = () => {};
+    context.toast = message => toasts.push(message);
+    context.markVisualConceptDirty = () => {};
+    context.renderVisualConceptPage = () => {};
+    context.collectVisualConceptPlansWorkflowPayload = async () => ({
+      plansWorkflow: { distribution: { rows: [] } }, projectData: {} });
+    context.api = async () => ({ success: true, action: 'explain',
+      reply: 'السكن في الطابق الأول.', rows: [] });
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: {},
+      plansWorkflow: { viewStage: 'boundary', verification: { approved: true },
+        distribution: { approved: false, aiReviewed: false, rows: [], checks: [], issues: [] } } });
+
+    await context.sendVisualConceptDistributionChat('اقترح توزيعًا', { expectsTable: true });
+
+    assert.equal(toasts.length, 1);
+    assert.match(toasts[0], /لم يتغير توزيع الأدوار/);
+  });
+
+  test('the chat offers the floors and a clean start, and the clean start drops the old ones', async () => {
+    const context = fixture();
+    const calls = [];
+    const root = { innerHTML: '', dataset: {}, querySelector: () => null,
+      querySelectorAll: () => [], addEventListener: () => {} };
+    context.document.getElementById = id => id === 'visualConceptPlansWorkflow' ? root : null;
+    context.hasPermission = () => true;
+    context.showLoader = () => {};
+    context.hideLoader = () => {};
+    context.toast = () => {};
+    context.markVisualConceptDirty = () => {};
+    context.renderVisualConceptPage = () => {};
+    context.confirm = () => true;
+    context.collectVisualConceptPlansWorkflowPayload = async () => ({
+      plansWorkflow: { distribution: { rows: [] } }, projectData: {} });
+    context.api = async (method, path, body) => {
+      calls.push({ method, path, body });
+      return { success: true, action: 'update', reply: 'تم.', rows: [],
+        checks: [], issues: [], canProceed: true };
+    };
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: {},
+      plansWorkflow: { viewStage: 'boundary', verification: { approved: true },
+        distribution: { approved: false, aiReviewed: false, approved: false,
+          rows: [{ id: 'r1', building: 'المبنى أ', floor_range: 'أرضي', component: 'سكني' }],
+          checks: [], issues: [] },
+        distributionChat: { turns: [{ role: 'user', text: 'سؤال قديم' }],
+          memory: 'ذاكرة قديمة', decisions: ['قرار قديم'] } } });
+
+    context.renderVisualConceptPlansWorkflow();
+    const html = root.innerHTML;
+    // The two one-click actions the client asked for.
+    assert.ok(html.includes('data-plans-workflow-action="distribution-chat-start"'));
+    assert.ok(html.includes('data-plans-workflow-action="distribution-chat-restart"'));
+    assert.ok(html.includes('توزيع الأدوار'));
+    assert.ok(html.includes('ابدأ من جديد'));
+
+    await context.restartVisualConceptDistributionChat();
+
+    // The old floors and the old thread are gone, and the model is told to
+    // start from scratch. The new turn and its answer are the only ones left.
+    const workflow = context.tenantVisualConceptState.plansWorkflow;
+    assert.equal(workflow.distribution.rows.length, 0);
+    assert.equal(workflow.distributionChat.turns.length, 2);
+    assert.equal(workflow.distributionChat.turns[0].role, 'user');
+    assert.equal(workflow.distributionChat.turns[1].role, 'assistant');
+    assert.equal(workflow.distributionChat.memory, '');
+    assert.equal(calls[0].body.reset, true);
+    assert.equal(calls[0].body.distribution.rows.length, 0);
+    assert.equal(calls[0].body.history.length, 0);
+  });
+
+  test('a cancelled clean start leaves the floors and the thread as they were', async () => {
+    const context = fixture();
+    context.hasPermission = () => true;
+    context.confirm = () => false;
+    context.toast = () => {};
+    context.markVisualConceptDirty = () => assert.fail('a cancelled reset must not write');
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: {},
+      plansWorkflow: { verification: { approved: true },
+        distribution: { rows: [{ id: 'r1', building: 'المبنى أ', component: 'سكني' }] },
+        distributionChat: { turns: [{ role: 'user', text: 'سؤال قديم' }], memory: 'ذاكرة' } } });
+
+    assert.equal(await context.restartVisualConceptDistributionChat(), false);
+    const workflow = context.tenantVisualConceptState.plansWorkflow;
+    assert.equal(workflow.distribution.rows.length, 1);
+    assert.equal(workflow.distributionChat.turns.length, 1);
+  });
 };

@@ -53,5 +53,14 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "plans.distribution_chat_typing": "يكتب…",
   "plans.distribution_chat_loading": "جاري تنفيذ الطلب على التوزيع",
   "plans.distribution_chat_loading_detail": "يتم تحديث جدول التوزيع ومراجعته...",
-  "plans.distribution_chat_failed": "تعذر تنفيذ الطلب على التوزيع."
+  "plans.distribution_chat_failed": "تعذر تنفيذ الطلب على التوزيع.",
+  "plans.distribution_chat_distribute": "توزيع الأدوار",
+  "plans.distribution_chat_restart": "ابدأ من جديد",
+  "plans.distribution_chat_restart_confirm": "سيُمسح توزيع الأدوار الحالي وتبدأ المحادثة من جديد. هل تريد المتابعة؟",
+  "plans.distribution_chat_elapsed": "يعمل الآن… {time}",
+  "plans.distribution_chat_applied": "تم تحديث جدول التوزيع.",
+  "plans.distribution_chat_table_unchanged": "وصل الرد بدون جدول توزيع — لم يتغير توزيع الأدوار.",
+  "plans.distribution_chat_failed_unreadable": "ما جا رد مفهوم من النموذج — لم يتغير التوزيع.",
+  "plans.distribution_chat_failed_empty": "لم يرد النموذج بجواب — لم يتغير التوزيع.",
+  "plans.distribution_chat_failed_timeout": "انتهت مهلة تنفيذ الطلب على التوزيع."
 }/*I18N_AR_END*/);
