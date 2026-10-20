@@ -181,6 +181,7 @@ FINANCIAL_RESULT_LABELS = (
     ('fullOccupancyRevenue', 'الإيرادات عند الإشغال المستهدف'),
     ('fullOccupancyNOI', 'NOI عند الإشغال المستهدف'),
     ('totalGraceDiscount', 'إجمالي خصم فترة السماح'),
+    ('financeBaseAmount', 'قيمة أساس التمويل'),
     ('facilityAmount', 'قيمة التسهيل التمويلي'),
     ('arrangementFee', 'رسوم ترتيب التمويل'),
     ('totalFinanceInterest', 'إجمالي المرابحة'),
@@ -222,7 +223,7 @@ def _filter_financial_results(inputs, projection):
     allowed_keys = {'projectCost', 'developerCost', 'totalEquityRequired', 'roi', 'projectIrr', 'payback'}
 
     if finance_on:
-        allowed_keys.update({'projectCostWithFinance', 'facilityAmount', 'arrangementFee', 'totalFinanceInterest', 'totalFinanceCost', 'totalCashEquity', 'equityIrr', 'equityPayback'})
+        allowed_keys.update({'projectCostWithFinance', 'financeBaseAmount', 'facilityAmount', 'arrangementFee', 'totalFinanceInterest', 'totalFinanceCost', 'totalCashEquity', 'equityIrr', 'equityPayback'})
     if finance_on or fund_on:
         allowed_keys.add('adjustedProjectCost')
     if has_land_rent:
@@ -377,6 +378,27 @@ def _financial_report_table(rows):
     return f'<table><thead><tr>{headers}</tr></thead><tbody>{body}</tbody></table>'
 
 
+def _is_financial_parking_report_part(part):
+    if not isinstance(part, dict):
+        return False
+    kind = part.get('type')
+    if kind == 'heading':
+        text = str(part.get('text') or '').strip()
+        lower_text = text.lower()
+        if any(term in text for term in ('المواقف المقترحة', 'اقتراح المواقف')) or any(term in lower_text for term in ('proposed parking', 'parking proposal')):
+            return True
+    elif kind == 'table':
+        headers = {str(h or '').strip() for h in (part.get('headers') or [])}
+        if 'عدد المواقف المطلوبة' in headers or 'الاشتراط الموثق' in headers or 'required spaces' in {h.lower() for h in headers}:
+            return True
+    elif kind == 'fields':
+        rows = part.get('rows') or []
+        labels = {str(r[0] or '').strip() for r in rows if isinstance(r, (list, tuple)) and len(r) >= 1}
+        if any('المواقف المطلوبة' in label or 'اقتراح المواقف' in label or 'parking' in label.lower() for label in labels):
+            return True
+    return False
+
+
 def _financial_screen_parts(model):
     """The study as the screen sent it, or None for a draft saved before that was captured."""
     report = model.get('report') if isinstance(model, dict) else None
@@ -385,7 +407,7 @@ def _financial_screen_parts(model):
         return None
     cleaned = []
     for part in parts:
-        if not isinstance(part, dict):
+        if not isinstance(part, dict) or _is_financial_parking_report_part(part):
             continue
         if part.get('type') == 'fields':
             rows = [
@@ -494,7 +516,7 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
     rental_on = mode in {'rental', 'mixed'}
     font_css, font_family = build_font_css(branding or {}, tenant_id, embed=True)
     font_css = (font_css or '').replace('.slide', '.financial-report')
-    rows = lambda keys: _financial_report_rows([(label, inputs.get(key), key) for key, label in keys])
+    rows = lambda keys: _financial_report_rows([(label, inputs.get(key) if inputs.get(key) not in (None, '') else projection.get(key), key) for key, label in keys])
     sections = []
     sections.append(f'<section class="cover"><div class="eyebrow">دراسة مالية</div><h1>{_financial_report_escape(project_name)}</h1><h2>التقرير المالي المنظم</h2><p>تم إنشاء التقرير من النسخة المعتمدة للمدخلات والافتراضات.</p></section>')
     screen_parts = _financial_screen_parts(model)
@@ -531,7 +553,7 @@ def build_financial_report_html(project_name, model, branding, tenant_id):
         sections.append('<section><h2>8. الصندوق وأتعابه</h2>' + rows([('fundFeeBase', 'أساس الأتعاب'), ('fundCapitalInput', 'رأس مال الصندوق'), ('fundManagementRate', 'نسبة الإدارة'), ('fundFeeStartYear', 'بداية الاحتساب'), ('fundFeeEndYear', 'نهاية الاحتساب')]) + _financial_report_table(tables.get('fundAdditionalFeesTable')) + '</section>')
     if inputs.get('financeEnabled') == 'yes':
         murabaha_table_html = _financial_report_table(tables.get('financeMurabahaTable')) if tables.get('financeMurabahaTable') else ''
-        sections.append('<section><h2>9. التمويل</h2>' + rows([('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'), ('annualFinanceRate', 'معدل المرابحة'), ('financeInterestMethod', 'طريقة المرابحة'), ('financeDrawYears', 'سنوات السحب'), ('financeRepaymentYears', 'سنوات السداد')]) + _financial_report_table(tables.get('financeDrawTable')) + _financial_report_table(tables.get('financeRepaymentTable')) + murabaha_table_html + '</section>')
+        sections.append('<section><h2>9. التمويل</h2>' + rows([('financeBase', 'أساس التمويل'), ('financingRate', 'نسبة التمويل'), ('annualFinanceRate', 'معدل المرابحة'), ('financeBaseAmount', 'قيمة أساس التمويل'), ('facilityAmount', 'قيمة التسهيل التمويلي'), ('financeInterestMethod', 'طريقة المرابحة'), ('financeDrawYears', 'سنوات السحب'), ('financeRepaymentYears', 'سنوات السداد')]) + _financial_report_table(tables.get('financeDrawTable')) + _financial_report_table(tables.get('financeRepaymentTable')) + murabaha_table_html + '</section>')
     if inputs.get('externalEnabled') == 'yes' and tables.get('externalTable'):
         sections.append('<section><h2>10. البنود الخارجية</h2>' + _financial_report_table(tables.get('externalTable')) + '</section>')
     if inputs.get('exitEnabled') == 'yes':

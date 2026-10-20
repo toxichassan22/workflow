@@ -380,6 +380,54 @@ class FinancialMurabahaTermsTests(unittest.TestCase):
         self.assertIn('"هل تكلفة الصندوق ضمن المشروع": "Fund cost included in project"', i18n_src)
         self.assertIn('"إجمالي تكلفة المشروع شامل تكاليف الصندوق": "Total project cost including fund costs"', i18n_src)
 
+    def test_financial_study_export_and_presentation_pull_finance_base_and_rounding(self):
+        """Verify that financial study PDF export and presentation slide extraction include financeBaseAmount and format to hundredths."""
+        # 1. Export PDF model includes financeBaseAmount in labels and rows
+        export_src = self._read('app_parts/13_financial/13_financial_study_export.py')
+        self.assertIn("('financeBaseAmount', 'قيمة أساس التمويل')", export_src)
+        self.assertIn("('facilityAmount', 'قيمة التسهيل التمويلي')", export_src)
+        self.assertIn("allowed_keys.update({'projectCostWithFinance', 'financeBaseAmount', 'facilityAmount'", export_src)
+        self.assertIn("def _round_financial_hundredth(value):", export_src)
+
+        # 2. PyMuPDF fallback in 13c_financial_study_pdf_model.py includes financeBaseAmount
+        pdf_model_src = self._read('app_parts/13_financial/13c_financial_study_pdf_model.py')
+        self.assertIn("('قيمة أساس التمويل', inputs.get('financeBaseAmount') or projection.get('financeBaseAmount'), 'financeBaseAmount')", pdf_model_src)
+
+        # 3. Presentation slide plan normalization and chart extractors include financeBaseAmount
+        norm_src = self._read('modules/slides/slide_engine_parts/02_plan/02_plan_normalization.py')
+        self.assertIn("('financeBaseAmount', 'قيمة أساس التمويل')", norm_src)
+        chart_src = self._read('modules/slides/slide_engine_parts/02_plan/04_chart_extractors.py')
+        self.assertIn("('financeBaseAmount', 'قيمة أساس التمويل')", chart_src)
+
+        # 4. Functional test of build_financial_report_html with financeBaseAmount
+        round_fn = getattr(self.application_module, '_round_financial_hundredth')
+        build_html_fn = getattr(self.application_module, 'build_financial_report_html')
+        self.assertEqual(round_fn(1234.567), 1234.57)
+        self.assertEqual(round_fn(1234.5), 1234.5)
+        self.assertEqual(round_fn(100.005), 100.01)
+
+        model = {
+            'inputs': {
+                'unitRevenueMode': 'rental',
+                'financeEnabled': 'yes',
+                'financeBase': 'withFund',
+                'financingRate': 70.0,
+                'annualFinanceRate': 6.25,
+                'financeBaseAmount': 85400120.456,
+                'facilityAmount': 59780084.319,
+            },
+            'projection': {
+                'financeBaseAmount': 85400120.456,
+                'facilityAmount': 59780084.319,
+            },
+            'tables': {}
+        }
+        with self.app.app_context():
+            html = build_html_fn('مشروع تجريبي', model, {}, self.tenant)
+        self.assertIn('قيمة أساس التمويل', html)
+        self.assertIn('85,400,120.46', html)
+        self.assertIn('59,780,084.32', html)
+
 
 if __name__ == '__main__':
     unittest.main()

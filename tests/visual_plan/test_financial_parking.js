@@ -435,3 +435,40 @@ test('the discard action only shows while a proposal exists and removes it upon 
   assert.equal(f.context.financialParkingError(), '');
   assert.equal(discard.hidden, true);
 });
+
+test('financial parking panel is excluded from collected report for PDF and deck', () => {
+  const f = fixture();
+  class MockElement {
+    constructor() {
+      this.classList = classes();
+      this.style = {};
+      this.children = [];
+      this.hidden = false;
+      this.querySelectorAll = () => [];
+    }
+  }
+  f.context.HTMLElement = MockElement;
+  const parkingPanel = Object.assign(new MockElement(), {
+    id: 'financialParkingPanel',
+    tagName: 'SECTION',
+    children: [
+      Object.assign(new MockElement(), { id: 'financialParkingTitle', tagName: 'H4', textContent: 'المواقف المقترحة' })
+    ]
+  });
+  const h2 = Object.assign(new MockElement(), { id: 'financialSummaryHeading', tagName: 'H2', textContent: '1. ملخص المشروع' });
+  const label = Object.assign(new MockElement(), { tagName: 'LABEL', textContent: 'طبيعة الإيرادات' });
+  const input = Object.assign(new MockElement(), { tagName: 'INPUT', type: 'text', value: 'بيع' });
+  const fieldDiv = Object.assign(new MockElement(), { tagName: 'DIV', children: [label, input], querySelector: sel => sel.includes('input') ? input : null });
+  const root = Object.assign(new MockElement(), {
+    id: 'section-financial-calc',
+    tagName: 'DIV',
+    children: [h2, fieldDiv, parkingPanel]
+  });
+  const oldGetById = f.context.document.getElementById;
+  f.context.document.getElementById = id => id === 'section-financial-calc' ? root : oldGetById(id);
+  const report = f.context.collectFinancialStudyReport();
+  assert(report && Array.isArray(report.parts));
+  const headings = report.parts.filter(p => p.type === 'heading').map(p => p.text);
+  assert.equal(headings.includes('المواقف المقترحة'), false);
+  assert.equal(headings.includes('1. ملخص المشروع'), true);
+});

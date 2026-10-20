@@ -111,7 +111,7 @@
     const FINANCIAL_REPORT_SKIP_COLUMNS = new Set(['ترتيب / حذف', 'ترتيب', 'حذف', 'مرتبط بمكون']);
     const FINANCIAL_REPORT_SKIP_IDS = new Set([
       'componentAreaValidation', 'timelineStagesWarning', 'analysisWarnings',
-      'componentsAllowedUsesNote', 'sensitivityVariableSelect',
+      'componentsAllowedUsesNote', 'sensitivityVariableSelect', 'financialParkingPanel',
     ]);
     const FINANCIAL_REPORT_SKIP_CLASSES = [
       'help', 'hint', 'formula-tag', 'calculation-note', 'validation-panel', 'analysis-warning',
@@ -127,7 +127,7 @@
         || el.classList.contains('conditional-off')
         || el.classList.contains('dynamic-off')
         || el.classList.contains('hidden')
-        || el.style.display === 'none';
+        || el.style?.display === 'none';
     }
 
     function financialReportControlValue(control) {

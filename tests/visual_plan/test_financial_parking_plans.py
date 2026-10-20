@@ -128,5 +128,67 @@ class FinancialParkingPlanTests(unittest.TestCase):
         self.assertIsNotNone(self.module._visual_concept_plan_model(context, {}))
 
 
+
+    def test_financial_screen_parts_excludes_parking_proposal_section(self):
+        model = {
+            'report': {
+                'parts': [
+                    {'type': 'heading', 'level': 2, 'text': '1. ملخص المشروع'},
+                    {'type': 'fields', 'rows': [['طبيعة الإيرادات', 'بيع']]},
+                    {'type': 'heading', 'level': 3, 'text': 'المواقف المقترحة'},
+                    {'type': 'fields', 'rows': [['إجمالي المواقف المطلوبة', '130']]},
+                    {'type': 'table', 'headers': ['المكون', 'عدد المواقف المطلوبة', 'الاشتراط الموثق'],
+                     'rows': [['شقق', '100', 'موقف لكل وحدة']]},
+                    {'type': 'heading', 'level': 2, 'text': '2. الإيرادات'},
+                    {'type': 'fields', 'rows': [['إجمالي الإيرادات', '1,000,000']]},
+                ]
+            }
+        }
+        parts = self.module._financial_screen_parts(model)
+        self.assertIsNotNone(parts)
+        headings = [p.get('text') for p in parts if p.get('type') == 'heading']
+        self.assertIn('1. ملخص المشروع', headings)
+        self.assertIn('2. الإيرادات', headings)
+        self.assertNotIn('المواقف المقترحة', headings)
+        self.assertFalse(any('عدد المواقف المطلوبة' in p.get('headers', []) for p in parts if p.get('type') == 'table'))
+        self.assertFalse(any(any('المواقف المطلوبة' in row[0] for row in p.get('rows', []))
+                             for p in parts if p.get('type') == 'fields'))
+
+    def test_financial_data_note_excludes_parking_proposal_from_slide_facts(self):
+        import slide_engine
+        project = {
+            'financial_study_model': {
+                'inputs': {'landArea': 5000},
+                'report': {
+                    'parts': [
+                        {'type': 'heading', 'level': 2, 'text': '1. ملخص المشروع'},
+                        {'type': 'fields', 'rows': [['طبيعة الإيرادات', 'بيع']]},
+                        {'type': 'heading', 'level': 3, 'text': 'المواقف المقترحة'},
+                        {'type': 'fields', 'rows': [['إجمالي المواقف المطلوبة', '130']]},
+                        {'type': 'table', 'headers': ['المكون', 'عدد المواقف المطلوبة', 'الاشتراط الموثق'],
+                         'rows': [['شقق', '100', 'موقف لكل وحدة']]},
+                    ]
+                }
+            }
+        }
+        note = slide_engine._financial_data_note(project)
+        self.assertIn('1. ملخص المشروع', note)
+        self.assertNotIn('المواقف المقترحة', note)
+        self.assertNotIn('عدد المواقف المطلوبة', note)
+
+    def test_presentation_plan_normalizer_drops_financial_parking_proposal_slides(self):
+        import slide_engine
+        plan = {
+            'slides': [
+                {'title': 'الغلاف', 'type': 'cover'},
+                {'title': 'المواقف المقترحة', 'type': 'content', 'section_key': 'financial'},
+                {'title': 'الخاتمة', 'type': 'closing'},
+            ]
+        }
+        normalized = slide_engine.normalize_presentation_plan(plan, {'project_name': 'تجربة'}, {})
+        titles = [s.get('title') for s in normalized.get('slides', [])]
+        self.assertNotIn('المواقف المقترحة', titles)
+
+
 if __name__ == '__main__':
     unittest.main()

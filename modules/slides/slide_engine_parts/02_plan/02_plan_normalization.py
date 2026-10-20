@@ -945,6 +945,11 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
                 continue
             item['type'] = 'content'
             item['design_style'] = 'image'
+        if section_key == 'financial':
+            slide_title = str(item.get('title') or '').strip()
+            lower_title = slide_title.lower()
+            if any(term in slide_title for term in ('المواقف المقترحة', 'اقتراح المواقف')) or any(term in lower_title for term in ('proposed parking', 'parking proposal')):
+                continue
         signature = (section_key,) + _plan_slide_signature(item)
         if signature in signatures:
             continue
@@ -1247,6 +1252,7 @@ _FINANCIAL_INDICATOR_LABELS = (
     ('fullOccupancyRevenue', 'الإيرادات عند الإشغال المستهدف'),
     ('fullOccupancyNOI', 'NOI عند الإشغال المستهدف'),
     ('totalGraceDiscount', 'إجمالي خصم فترة السماح'),
+    ('financeBaseAmount', 'قيمة أساس التمويل'),
     ('facilityAmount', 'قيمة التسهيل التمويلي'),
     ('arrangementFee', 'رسوم ترتيب التمويل'),
     ('totalFinanceInterest', 'إجمالي المرابحة'),
@@ -1274,6 +1280,27 @@ _FINANCIAL_TABLE_TITLES = {
 }
 
 
+def _is_financial_parking_report_part(part):
+    if not isinstance(part, dict):
+        return False
+    kind = part.get('type')
+    if kind == 'heading':
+        text = str(part.get('text') or '').strip()
+        lower_text = text.lower()
+        if any(term in text for term in ('المواقف المقترحة', 'اقتراح المواقف')) or any(term in lower_text for term in ('proposed parking', 'parking proposal')):
+            return True
+    elif kind == 'table':
+        headers = {str(h or '').strip() for h in (part.get('headers') or [])}
+        if 'عدد المواقف المطلوبة' in headers or 'الاشتراط الموثق' in headers or 'required spaces' in {h.lower() for h in headers}:
+            return True
+    elif kind == 'fields':
+        rows = part.get('rows') or []
+        labels = {str(r[0] or '').strip() for r in rows if isinstance(r, (list, tuple)) and len(r) >= 1}
+        if any('المواقف المطلوبة' in label or 'اقتراح المواقف' in label or 'parking' in label.lower() for label in labels):
+            return True
+    return False
+
+
 def _financial_data_note(project_data):
     """Extract and format financial study tables and metrics so they are never lost or distorted."""
     if not project_data or not isinstance(project_data, dict):
@@ -1299,9 +1326,11 @@ def _financial_data_note(project_data):
     ]
 
     if report_parts:
-        lines.append("\n### نسخة الشاشة المعتمدة بالترتيب والمسميات الظاهرة للمستخدم:")
-        lines.append(json.dumps(report_parts, ensure_ascii=False, indent=2))
-        return '\n'.join(lines)
+        filtered_parts = [p for p in report_parts if not _is_financial_parking_report_part(p)]
+        if filtered_parts:
+            lines.append("\n### نسخة الشاشة المعتمدة بالترتيب والمسميات الظاهرة للمستخدم:")
+            lines.append(json.dumps(filtered_parts, ensure_ascii=False, indent=2))
+            return '\n'.join(lines)
 
     indicators = {}
     for key, label in _FINANCIAL_INDICATOR_LABELS:

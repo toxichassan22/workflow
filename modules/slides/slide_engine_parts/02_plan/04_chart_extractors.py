@@ -349,6 +349,7 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
             ('landValue', 'قيمة الأرض'),
             ('landRent', 'إيجار الأرض السنوي'),
             ('totalCashEquity', 'حقوق الملكية النقدية المطلوبة'),
+            ('financeBaseAmount', 'قيمة أساس التمويل'),
             ('facilityAmount', 'قيمة التسهيل التمويلي'),
             ('totalFinanceCost', 'إجمالي كلفة التمويل'),
             ('totalFundFees', 'إجمالي أتعاب الصندوق'),
