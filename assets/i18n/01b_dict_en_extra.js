@@ -23,5 +23,21 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "draft_branch.merge_failed": "Could not merge the branch",
   "draft_branch.discarded": "Branch discarded",
   "draft_branch.discard_confirm": "Discard the branch and everything in it?",
-  "draft_branch.needs_decision": "Choose the surviving version for every conflict before merging"
+  "draft_branch.needs_decision": "Choose the surviving version for every conflict before merging",
+  "draft_merge.title": "Save conflict",
+  "draft_merge.intro": "Someone else changed the same fields. Choose the version that stays for every conflict.",
+  "draft_merge.apply": "Merge and save",
+  "draft_merge.cancel": "Cancel",
+  "draft_merge.keep_ours": "Project version",
+  "draft_merge.keep_mine": "My version",
+  "draft_versions.title": "Project versions",
+  "draft_versions.button": "Versions",
+  "draft_versions.empty": "No saved versions",
+  "draft_versions.restore": "Restore",
+  "draft_versions.kind_save": "Save",
+  "draft_versions.kind_restore": "Restore",
+  "draft_versions.changed": "{n} fields",
+  "draft_versions.restore_confirm": "Restore this version? Your current work stays in the history as a new version.",
+  "draft_versions.restored": "Version restored",
+  "draft_versions.restore_failed": "Could not restore the version"
 }/*I18N_EN_END*/);

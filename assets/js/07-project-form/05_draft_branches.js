@@ -151,7 +151,7 @@
         blocks.push('<div class="change-log-day">' +
           WFT('draft_branch.changes', 'تغييرات الدمج') + '</div>');
         blocks.push('<div class="change-log-entry"><div class="change-log-summary">' +
-          changes.map(item => '<div>' + escapeHtml(item.key) + ' → ' +
+          changes.map(item => '<div>' + escapeHtml(item.key) + ': ' +
             escapeHtml(draftBranchValueText(item.value, item.action === 'delete')) +
             '</div>').join('') + '</div></div>');
       }

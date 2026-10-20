@@ -24,5 +24,21 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "draft_branch.merge_failed": "تعذر دمج الفرع",
   "draft_branch.discarded": "تم حذف الفرع",
   "draft_branch.discard_confirm": "حذف الفرع وكل ما فيه؟",
-  "draft_branch.needs_decision": "اختر النسخة التيتبقى لكل تعارض قبل الدمج"
+  "draft_branch.needs_decision": "اختر النسخة التيتبقى لكل تعارض قبل الدمج",
+  "draft_merge.title": "تعارض في الحفظ",
+  "draft_merge.intro": "شخص آخر عدّل نفس الحقول. اختار النسخة اللي تتبقى لكل تعارض.",
+  "draft_merge.apply": "دمج وحفظ",
+  "draft_merge.cancel": "إلغاء",
+  "draft_merge.keep_ours": "نسخة المشروع",
+  "draft_merge.keep_mine": "نسختي",
+  "draft_versions.title": "إصدارات المشروع",
+  "draft_versions.button": "الإصدارات",
+  "draft_versions.empty": "لا توجد إصدارات محفوظة",
+  "draft_versions.restore": "استرجاع",
+  "draft_versions.kind_save": "حفظ",
+  "draft_versions.kind_restore": "استرجاع",
+  "draft_versions.changed": "{n} حقل",
+  "draft_versions.restore_confirm": "استرجاع هذه النسخة؟ شغلك الحالي سيبقى في السجل كنسخة جديدة.",
+  "draft_versions.restored": "تم استرجاع النسخة",
+  "draft_versions.restore_failed": "تعذر استرجاع النسخة"
 }/*I18N_AR_END*/);

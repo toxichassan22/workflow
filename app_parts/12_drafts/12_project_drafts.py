@@ -148,6 +148,13 @@ def api_save_project_draft():
             commit_author_name=_landloom_actor_name(),
         )
     except db.DraftRevisionConflict as conflict:
+        # Another session saved while this one was editing. The client asks
+        # for a merge instead of overwriting the newer work, and the server
+        # rebuilds the base from the commit chain — nobody has to send it.
+        if data.get('mergeOnConflict'):
+            return _merge_conflicting_draft_save(
+                g.tenant_id, save_draft_id, expected_revision, draft_data,
+                data.get('mergeResolutions') or [])
         return jsonify({
             'error': 'المسودة تغيّرت في نسخة أخرى منذ آخر قراءة — أعد تحميلها قبل الحفظ',
             'error_code': 'DRAFT_REVISION_CONFLICT',

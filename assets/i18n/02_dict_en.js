@@ -988,15 +988,5 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "summary_chat.end_confirm_title": "End this conversation?",
   "summary_chat.end_confirm_body": "The chat will start a new conversation next time it opens.",
   "summary_chat.end_confirm": "End conversation",
-  "summary_chat.end_return": "Back to the conversation",
-  "draft_versions.title": "Project versions",
-  "draft_versions.button": "Versions",
-  "draft_versions.empty": "No saved versions",
-  "draft_versions.restore": "Restore",
-  "draft_versions.kind_save": "Save",
-  "draft_versions.kind_restore": "Restore",
-  "draft_versions.changed": "{n} fields",
-  "draft_versions.restore_confirm": "Restore this version? Your current work stays in the history as a new version.",
-  "draft_versions.restored": "Version restored",
-  "draft_versions.restore_failed": "Could not restore the version"
+  "summary_chat.end_return": "Back to the conversation"
 }/*I18N_EN_END*/;

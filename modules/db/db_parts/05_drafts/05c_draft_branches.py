@@ -35,12 +35,16 @@ def _branch_value(value):
     return None if value is _ABSENT else value
 
 
-def draft_three_way_merge(base, ours, theirs):
+def draft_three_way_merge(base, ours, theirs, prefer_theirs=()):
     """Merge two payloads against their common ancestor.
 
     Returns ``(merged, changes, conflicts)``: the merged payload, the keys
     the branch changed that the merge took, and the keys both sides changed
     differently — those need a human decision.
+
+    ``prefer_theirs`` names the keys the incoming side always wins on (the
+    slides and the chat of a session are its own), so a merge never turns
+    them into a conflict nobody can read.
     """
     base = base if isinstance(base, dict) else {}
     ours = ours if isinstance(ours, dict) else {}
@@ -51,6 +55,7 @@ def draft_three_way_merge(base, ours, theirs):
     # Bookkeeping keys (the draft id, the derived mirrors) are not project
     # content: the two sides always differ on them and they never conflict.
     skip = set(DRAFT_BOOKKEEPING_KEYS or ())
+    preferred = set(prefer_theirs or ())
     for key in sorted(set(base) | set(ours) | set(theirs)):
         if key in skip:
             continue
@@ -58,6 +63,18 @@ def draft_three_way_merge(base, ours, theirs):
         our_value = ours.get(key, _ABSENT)
         their_value = theirs.get(key, _ABSENT)
         if our_value == their_value:
+            continue
+        if key in preferred and their_value != base_value:
+            # The incoming side owns this key outright.
+            if their_value is _ABSENT:
+                merged.pop(key, None)
+            else:
+                merged[key] = their_value
+            changes.append({
+                'key': key,
+                'action': 'delete' if their_value is _ABSENT else 'set',
+                'value': _branch_value(their_value),
+            })
             continue
         if our_value == base_value:
             # Only the branch moved this key — the merge takes it.
@@ -123,6 +140,40 @@ def apply_merge_resolutions(merged, conflicts, resolutions):
             continue
         unresolved.append(item)
     return payload, unresolved
+
+
+def draft_commit_at_or_before_revision(tenant_id, draft_id, revision):
+    """The commit of that revision, or the last one before it.
+
+    The base of a merge is the state the other side started from, and the
+    client only knows its revision number — the chain holds the states.
+    """
+    row = get_db().execute(
+        'SELECT id FROM draft_commits WHERE draft_id = ? AND revision <= ? '
+        'ORDER BY revision DESC LIMIT 1',
+        (draft_id, int(revision or 0))
+    ).fetchone()
+    return row['id'] if row else None
+
+
+def draft_merge_preview_for_save(tenant_id, draft_id, base_revision, incoming,
+                                 prefer_theirs=()):
+    """The three-way merge of a save that lost the race.
+
+    The base is rebuilt from the commit chain, so the client does not have
+    to send what it loaded: the revision it saved against is enough.
+    """
+    base_commit_id = draft_commit_at_or_before_revision(tenant_id, draft_id, base_revision)
+    base = {}
+    if base_commit_id:
+        state, _meta = draft_state_at_commit(tenant_id, draft_id, base_commit_id)
+        base = state if isinstance(state, dict) else {}
+    current = get_project_draft_by_id(tenant_id, draft_id) or {}
+    ours = dict(current.get('draft_data') or {})
+    theirs = dict(incoming or {})
+    merged, changes, conflicts = draft_three_way_merge(
+        base, ours, theirs, prefer_theirs=prefer_theirs)
+    return merged, changes, conflicts
 
 
 def create_draft_branch(tenant_id, base_draft_id, author_id=None, author_name=None,

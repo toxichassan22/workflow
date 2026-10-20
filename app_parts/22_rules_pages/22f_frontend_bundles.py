@@ -33,6 +33,7 @@ FRONTEND_JS_ORDER = (
     '07-project-form/03a_best_use_calculator.js', '07-project-form/03b_best_use_explore.js',
     '07-project-form/04_draft_versions.js',
     '07-project-form/05_draft_branches.js',
+    '07-project-form/06_draft_merge_decisions.js',
     '08-location-maps/01_tables_approvals.js',
     '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
     '09-financial/02_formulas_calc.js', '09-financial/03_parking_planning.js',

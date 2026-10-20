@@ -279,26 +279,62 @@
         // Every save declares the revision its snapshot was built on. A conflict
         // means another copy wrote since our last read — background writes
         // (checkpoints, generation pre-saves) must not bury that newer copy, so
-        // only an interactive save may land on top of it, after the user
-        // confirms. The same answer commitTenantPresentation gives.
+        // only an interactive save may land on top of it. An interactive save
+        // asks the server to merge instead: the newer work comes in, and only
+        // the fields both sides changed need a decision.
         let resp = null;
         let expectedRev = tenantDraftRevision;
+        let mergeRequested = false;
+        let mergeResolutions = null;
         if (typeof bestUseOptionalStatuses === 'function') {
           tenantProjectSectionStatuses = bestUseOptionalStatuses(tenantProjectSectionStatuses);
         }
-        for (let attempt = 0; attempt < 2; attempt++) {
+        for (let attempt = 0; attempt < 4; attempt++) {
           resp = await api('POST', '/api/project-draft',
             { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
-              slideCheckpoint, expectedRevision: expectedRev },
+              slideCheckpoint, expectedRevision: expectedRev,
+              mergeOnConflict: mergeRequested, mergeResolutions: mergeResolutions },
             false, { onProgress });
-          if (!resp || resp.success || resp.error_code !== 'DRAFT_REVISION_CONFLICT') break;
-          const serverRevision = Number(resp.currentRevision);
-          if (attempt > 0 || silent || slideCheckpoint
-              || !Number.isInteger(serverRevision) || typeof confirm !== 'function'
-              || !confirm(WFT('draft.conflict_confirm',
-                'توجد نسخة أحدث من المسودة محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟',
-                { rev: serverRevision }))) break;
-          expectedRev = serverRevision;
+          if (!resp || resp.success) break;
+          if (resp.error_code === 'DRAFT_REVISION_CONFLICT') {
+            if (mergeRequested || slideCheckpoint) break;
+            // A save that lost the race asks for a merge: the newer work comes
+            // in and nothing is written over. A background save merges the
+            // same way — it only stops when the merge itself needs a decision.
+            mergeRequested = true;
+            continue;
+          }
+          if (resp.error_code === 'DRAFT_MERGE_CONFLICTS') {
+            if (silent || slideCheckpoint) break;
+            const decisions = typeof askDraftMergeDecisions === 'function'
+              ? await askDraftMergeDecisions(resp.conflicts || [])
+              : null;
+            if (!decisions) {
+              // The user chose not to decide: writing over the newer copy
+              // stays possible, but it is an explicit answer, not a default.
+              const serverRevision = Number(resp.currentRevision);
+              if (!Number.isInteger(serverRevision) || typeof confirm !== 'function'
+                  || !confirm(WFT('draft.conflict_confirm',
+                    'توجد نسخة أحدث من المسودة محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟',
+                    { rev: serverRevision }))) break;
+              expectedRev = serverRevision;
+              mergeRequested = false;
+              mergeResolutions = null;
+              continue;
+            }
+            mergeResolutions = decisions;
+            continue;
+          }
+          break;
+        }
+        // A merge means the file on the server now holds both sides' work, so
+        // the workspace is loaded again instead of keeping a stale copy.
+        if (resp && resp.success && resp.merged) {
+          const mergedDraftId = resp.draftId || (tenantProjectData && tenantProjectData.draftId);
+          if (mergedDraftId && typeof openProjectDraftById === 'function') {
+            await openProjectDraftById(mergedDraftId);
+            return true;
+          }
         }
         // The response describes the workspace captured above. A draft-id ack
         // belongs to the draft row, so it lands whenever the same draft is

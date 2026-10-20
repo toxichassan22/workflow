@@ -13,6 +13,11 @@ demoted instead of silently kept.
 """
 
 DRAFT_RESTORE_COMMIT_MESSAGE = 'استرجاع نسخة سابقة'
+DRAFT_SAVE_MERGE_COMMIT_MESSAGE = 'دمج تعديلات متزامنة'
+# The slides and the chat belong to the session that made them: a merge takes
+# them from the incoming side instead of asking the user to read a conflict
+# nobody can judge.
+DRAFT_SAVE_PREFER_THEIRS = ('tenantSlidesData', 'designerChat', 'slide_generation_checkpoint')
 
 
 def _draft_commit_error(code, message, status=400, **extra):
@@ -67,6 +72,70 @@ def _restore_section_statuses(tenant_id, draft, restored_data, stored_statuses):
         if key not in bookkeeping and current.get(key) != restored_data.get(key)
     ]
     return _demote_sections_for_keys(tenant_id, changed, stored_statuses)
+
+
+def _merge_conflicting_draft_save(tenant_id, draft_id, base_revision, incoming, resolutions):
+    """Merge a save that lost the race instead of overwriting the newer work.
+
+    The base is the state the other side started from, rebuilt from the
+    commit chain — the client only sends the revision it saved against. A
+    field only the incoming side changed comes over, a field both sides
+    changed differently is a conflict the caller has to decide on, and the
+    merge lands on the main line as a new commit.
+    """
+    merged, changes, conflicts = db.draft_merge_preview_for_save(
+        tenant_id, draft_id, base_revision, incoming,
+        prefer_theirs=DRAFT_SAVE_PREFER_THEIRS)
+    payload, unresolved = db.apply_merge_resolutions(merged, conflicts, resolutions)
+    current = db.get_project_draft_by_id(tenant_id, draft_id) or {}
+    if unresolved:
+        return jsonify({
+            'error': 'في تعارضات محتاجة قرار قبل الحفظ',
+            'error_code': 'DRAFT_MERGE_CONFLICTS',
+            'conflicts': unresolved,
+            'currentRevision': int(current.get('revision') or 0),
+        }), 409
+    payload.pop('draftId', None)
+    payload.pop('draft_id', None)
+    stored = current.get('draft_data') or {}
+    payload = _sanitize_save_workflow_claims(tenant_id, draft_id, payload, stored)
+    changed_keys = [item.get('key') for item in (changes or [])]
+    changed_keys += [item.get('key') for item in (conflicts or [])]
+    statuses, demoted = _demote_sections_for_keys(
+        tenant_id, [key for key in changed_keys if key], current.get('section_statuses') or {})
+    try:
+        db.save_project_draft(
+            tenant_id, _project_draft_actor_id(), payload, statuses, 'draft',
+            draft_id=draft_id,
+            expected_revision=int(current.get('revision') or 0),
+            commit_author_id=g.user_id,
+            commit_author_name=_landloom_actor_name(),
+            commit_message=DRAFT_SAVE_MERGE_COMMIT_MESSAGE,
+            commit_kind='merge',
+        )
+    except db.DraftRevisionConflict as conflict:
+        return jsonify({
+            'error': 'المسودة تغيّرت في نسخة أخرى — أعد المحاولة',
+            'error_code': 'DRAFT_REVISION_CONFLICT',
+            'expectedRevision': conflict.expected_revision,
+            'currentRevision': conflict.current_revision,
+        }), 409
+    except db.DraftLocked as locked:
+        return _draft_locked_response(locked.status)
+    except db.DraftOverwriteRefused:
+        return jsonify({
+            'error': 'لم يتم الحفظ: البيانات المرسلة فارغة والمسودة المحفوظة تحتوي بيانات المشروع',
+            'error_code': 'DRAFT_EMPTY_OVERWRITE',
+        }), 409
+    stored_draft = db.get_project_draft_by_id(tenant_id, draft_id) or {}
+    return jsonify({
+        'success': True,
+        'merged': True,
+        'draftId': draft_id,
+        'revision': int(stored_draft.get('revision') or 0),
+        'demotedSections': demoted,
+        'sectionStatuses': stored_draft.get('section_statuses') or {},
+    })
 
 
 @app.route('/api/project-draft/<draft_id>/commits', methods=['GET'])
