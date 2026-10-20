@@ -595,7 +595,8 @@ class JobBudgetConstantTests(unittest.TestCase):
         module = self.application_module
         for name, floor in (('_SUMMARY_JOB_TIME_BUDGET', 60),
                             ('_SUMMARY_CHAT_JOB_TIME_BUDGET', 30),
-                            ('_BEST_USE_SCAN_TIME_BUDGET', 60)):
+                            ('_BEST_USE_SCAN_TIME_BUDGET', 60),
+                            ('_SUMMARY_AGGREGATOR_TIMEOUT', 60)):
             value = getattr(module, name, None)
             self.assertIsInstance(value, int, name)
             self.assertGreaterEqual(value, floor, name)

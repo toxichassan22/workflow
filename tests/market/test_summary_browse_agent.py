@@ -430,6 +430,23 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                          'https://rega.gov.sa/city-data')
         self.assertTrue(result['browse_trace'])
 
+    def test_aggregator_timeout_defaults_to_ten_minutes(self):
+        module = self.module
+        self.assertEqual(module._SUMMARY_AGGREGATOR_TIMEOUT, 600)
+        captured = {}
+
+        def fake_chat(system, prompt, **kwargs):
+            captured.update(kwargs)
+            return {'choices': [{'message': {'content': '{}', 'annotations': []}}]}
+
+        with patch.object(module, 'call_text_chat', side_effect=fake_chat):
+            result = module._run_market_summary_aggregator(
+                'system', 'evidence prompt', {'tenant_id': 't1'}, {'citation_urls': []},
+                deadline=None)
+
+        self.assertIn('choices', result)
+        self.assertEqual(captured.get('timeout'), 600)
+
     def test_aggregator_retries_using_the_provider_affordable_token_cap(self):
         module = self.module
         responses = [

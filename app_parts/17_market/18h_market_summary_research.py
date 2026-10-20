@@ -61,6 +61,10 @@ _SUMMARY_RESEARCH_SEARCH_BUDGET = 1000
 _SUMMARY_RESEARCHER_MODEL = 'anthropic/claude-haiku-5.5'
 _SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS = 66000
 _SUMMARY_AGGREGATOR_MAX_OUTPUT_TOKENS = 66000
+try:
+    _SUMMARY_AGGREGATOR_TIMEOUT = max(60, int(os.environ.get('SUMMARY_AGGREGATOR_TIMEOUT') or 600))
+except (TypeError, ValueError):
+    _SUMMARY_AGGREGATOR_TIMEOUT = 600
 _SUMMARY_RESEARCH_REQUIRED_URLS = {
     'rei.rega.gov.sa': [
         'https://rei.rega.gov.sa',
@@ -953,7 +957,7 @@ def _run_market_summary_aggregator(system_prompt, prompt, usage_ctx,
         result = run_control.raise_if_cancelled(call_text_chat_stream(
             system_prompt, prompt, model=GEMINI_TEXT_MODEL,
             max_tokens=cap, reasoning_effort='medium',
-            timeout=min(300, remaining or 300), usage_ctx=usage_ctx))
+            timeout=min(_SUMMARY_AGGREGATOR_TIMEOUT, remaining or _SUMMARY_AGGREGATOR_TIMEOUT), usage_ctx=usage_ctx))
         if _ai_fatal_error_dict(result) is not None:
             return result
         error = result.get('error') if isinstance(result, dict) else None
