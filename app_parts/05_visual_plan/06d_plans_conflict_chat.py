@@ -13,15 +13,20 @@ PLANS_CONFLICT_CHAT_SYSTEM_PROMPT = (
     '- لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية؛ استخدم «البيانات التنظيمية الموثقة» '
     'أو «نتائج الفحص».\n'
     '- هذا النقاش مخصص لنتائج الفحص والتوزيع المرفقين فقط؛ إن سُئلت عن شيء خارجها فوضّح ذلك باختصار.\n'
-    '- ذاكرة المحادثة إلزامية: لا تخالف ما اتُّفق عليه سابقًا ولا تعِد اقتراحًا رُفض، '
-    'وإذا غيّر العميل قرارًا سابقًا فاذكر التغيير صراحة.\n'
     '- ممنوع تنسيق Markdown تمامًا (لا ** ولا ### ولا جداول) — نص عادي ونقاط قصيرة فقط.\n'
 )
 
 
 def _plans_conflict_chat_history(raw):
-    """The conversation as it travelled — the whole thing, not the last eight turns."""
-    return chat_memory.normalize_turns(raw)
+    history = []
+    for item in (raw if isinstance(raw, list) else [])[-8:]:
+        if not isinstance(item, dict):
+            continue
+        content = _visual_concept_text(item.get('content'), 2000)
+        if content:
+            history.append({'role': 'user' if item.get('role') == 'user' else 'assistant',
+                            'content': content})
+    return history
 
 
 @app.route('/api/visual-concept/plans-conflict-chat', methods=['POST'])
@@ -76,11 +81,10 @@ def api_visual_concept_plans_conflict_chat():
             findings['summary'] = summary
     prior = ''
     history = _plans_conflict_chat_history(data.get('history'))
-    memory = data.get('memory') if isinstance(data.get('memory'), str) else ''
-    conversation = chat_memory.build_context(history, memory=memory)
-    prior = chat_memory.prompt_block(conversation)
-    if prior:
-        prior = prior + '\n\n'
+    if history:
+        prior = 'سياق النقاش السابق:\n' + '\n'.join(
+            ('المستخدم: ' if turn['role'] == 'user' else 'المساعد: ') + turn['content']
+            for turn in history) + '\n\n'
     scope_label = ('نتائج فحص توزيع المكونات على الأدوار' if scope == 'distribution'
                    else 'نتائج التحقق من التضارب')
     user_content = (
@@ -118,6 +122,4 @@ def api_visual_concept_plans_conflict_chat():
             return fatal
         return jsonify({'success': False, 'error': 'تعذر الحصول على إجابة',
                         'error_code': 'TEXT_PROVIDER_FAILED'}), 503
-    return jsonify({'success': True, 'reply': reply,
-                    'memory': conversation['memory'],
-                    'decisions': conversation['decisions']})
+    return jsonify({'success': True, 'reply': reply})

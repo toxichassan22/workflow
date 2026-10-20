@@ -86,8 +86,7 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         polygon = [[0, 0], [40, 0], [40, 30], [0, 30]]
         geometry = {'parcels': [{'id': 'parcel_1', 'polygon': polygon}]}
         contract = {
-            'geometry': geometry, 'projectName': 'مشروع النخيل',
-            'projectNameEn': 'Al Nakhil Project', 'landArea': 1200,
+            'geometry': geometry, 'projectName': 'مشروع النخيل', 'landArea': 1200,
             'primaryFrontage': {'direction': 'west'},
             'directions': [{'direction': 'west', 'street': True, 'streetName': 'West Road',
                             'streetWidth': 18}],
@@ -137,17 +136,10 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         }
         with patch.object(module.visual_plan_scene, 'buildable_envelopes', return_value=[]):
             layout = module._visual_plan_site_projected_layout(
-                scene, contract, program, {'developerName': 'Nakhil Development Co.'})
-            arabic_identity = module._visual_plan_site_projected_layout(
-                scene, {**contract, 'projectNameEn': ''}, program,
-                {'developerName': 'شركة النخيل للتطوير'})
+                scene, contract, program, {'developerName': 'شركة النخيل للتطوير'})
 
-        # The general site plan is drawn in English: the English project name
-        # is used, and an Arabic-only identity is left out of the drawing.
-        self.assertEqual(layout['identity']['projectName'], 'Al Nakhil Project')
-        self.assertEqual(layout['identity']['developerName'], 'Nakhil Development Co.')
-        self.assertEqual(arabic_identity['identity']['projectName'], '')
-        self.assertEqual(arabic_identity['identity']['developerName'], '')
+        self.assertEqual(layout['identity']['projectName'], 'مشروع النخيل')
+        self.assertEqual(layout['identity']['developerName'], 'شركة النخيل للتطوير')
         self.assertEqual(layout['streets'][0]['label'], 'West Road, 18 m')
         self.assertEqual(layout['buildings'][1]['displayLabel'], 'V 1')
         self.assertEqual(layout['siteCirculation'], [])
@@ -170,8 +162,8 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         self.assertIn('data-site-feature="pool"', landscape)
         self.assertIn('data-site-feature="padel"', landscape)
         self.assertEqual(landscape.count('Parking'), 1)
-        self.assertIn('Al Nakhil Project', legend)
-        self.assertIn('Nakhil Development Co.', legend)
+        self.assertIn('مشروع النخيل', legend)
+        self.assertIn('شركة النخيل للتطوير', legend)
         self.assertIn('BUILDING SCHEDULE', legend)
 
     def test_legend_edits_keep_the_saved_project_identity(self):

@@ -188,14 +188,8 @@ def _visual_plan_site_prompt_contract(project, workflow):
     analysis = _visual_plan_site_model_analysis(project.get('land_documents_analysis'))
     analysis = analysis if isinstance(analysis, dict) else {}
     directions = project.get('directions_table') or project.get('directions') or {}
-    # The recorded direction in the project data wins. When the croquis text
-    # names no main facade, the server resolved one and the plan context
-    # carries it — the site plan is drawn against the same facade the
-    # geometry used, not against an empty one.
-    facade_hint = _visual_plan_frontage_hint(workflow) or {}
     primary_frontage = (project.get('main_facade_direction') or project.get('primary_facade_direction')
-                        or project.get('main_frontage_direction')
-                        or facade_hint.get('direction') or '')
+                        or project.get('main_frontage_direction') or '')
     building_area = project.get('building_area') or project.get('total_bua') or project.get('total_built_area')
     if not building_area and land_area and project.get('approved_floor_area_ratio'):
         try:
@@ -207,10 +201,6 @@ def _visual_plan_site_prompt_contract(project, workflow):
                      or boundary.get('points') or [])
     return {
         'projectName': _visual_concept_read(project, 'project_name', 'projectName'),
-        # The site plan is drawn in English: an English project name is used
-        # when the client recorded one, and an Arabic-only name is left out of
-        # the drawing rather than printed in Arabic.
-        'projectNameEn': _visual_concept_read(project, 'project_name_en', 'projectNameEn'),
         'projectIdea': _visual_concept_read(project, 'project_idea', 'projectIdea'),
         'approvedFinancialAreaSqm': approved_area_number if approved_area_number is not None else land_area,
         'croquisLandAreaSqm': croquis_source,
@@ -257,7 +247,6 @@ def _visual_plan_site_packet(data):
         'primaryFrontage': (scene.get('primaryFrontage') if scene_is_current
                             else prompt_contract.get('primaryFrontage')),
         'projectName': prompt_contract.get('projectName'),
-        'projectNameEn': prompt_contract.get('projectNameEn'),
         'landArea': prompt_contract.get('landAreaSqm'),
     }
     context = {'components': prompt_contract.get('financialComponents') or []}

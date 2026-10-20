@@ -6,8 +6,6 @@ import re
 import time
 from lxml import etree
 
-import chat_memory
-
 
 _VISUAL_PLAN_SITE_SECTIONS = (
     ('coordinates', 'White drawing sheet, parcel and recorded setback outlines with adjoining street bands.'),
@@ -36,11 +34,8 @@ def _visual_plan_site_record_tokens(state, value):
     state['promptTokens'] += _visual_plan_site_number(value)
     compacted_at = _visual_plan_site_number(state.get('compactedAtTokens'))
     if state['promptTokens'] - compacted_at >= _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT:
-        # The oldest turns are not dropped: the interview folds them into the
-        # session memory the model maintains, so a long session keeps what it
-        # agreed instead of forgetting it.
-        state['turns'] = state['turns'][-24:]
-        state['answers'] = state['answers'][-40:]
+        state['turns'] = state['turns'][-4:]
+        state['answers'] = state['answers'][-12:]
         state['compactionCount'] += 1
         state['compactedAtTokens'] = state['promptTokens']
 
@@ -53,7 +48,7 @@ def _visual_plan_site_state(data, signature):
             or (old_revision and old_revision != _VISUAL_PLAN_SITE_RENDER_REVISION)):
         source = {}
     turns = []
-    for item in (source.get('turns') if isinstance(source.get('turns'), list) else [])[-60:]:
+    for item in (source.get('turns') if isinstance(source.get('turns'), list) else [])[-12:]:
         if isinstance(item, dict) and str(item.get('text') or '').strip():
             turns.append({'role': 'assistant' if item.get('role') == 'assistant' else 'user',
                           'text': str(item['text']).strip()[:4000],
@@ -203,21 +198,13 @@ def _visual_plan_site_interview(data, action='chat'):
         task = 'review all available approved site-plan inputs and begin the client interview; ask only a blocking design question if needed'
     else:
         task = 'continue the site-plan interview'
-    # The whole session travels: the newest turns stay verbatim inside the input
-    # budget and the older ones are folded into the memory the model maintains.
-    # A turn is never lost, so the assistant answers from what was agreed
-    # instead of contradicting it.
-    conversation = chat_memory.build_context(
-        [{'role': turn.get('role'), 'content': turn.get('text')} for turn in state['turns']],
-        memory=state['summary'])
-    recent_turns = state['turns'][-len(conversation['verbatim']):] if conversation['verbatim'] else []
     user_packet = {
         'task': task,
         'continuation': continuing,
         'validatedProjectData': packet,
         'resolvedAnswers': state['answers'][-8:] if continuing else state['answers'],
-        'sessionMemory': conversation['memory'],
-        'recentTurns': recent_turns,
+        'sessionMemory': state['summary'],
+        'recentTurns': state['turns'][-4:] if continuing else state['turns'][-8:],
         'latestClientMessage': message,
         'compactContext': compact_mode,
     }

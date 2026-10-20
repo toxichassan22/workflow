@@ -203,16 +203,13 @@ class VisualPlanContractTests(VisualPlanContractBase):
     def test_site_plan_context_compaction_keeps_recent_answers_and_repeats_at_each_threshold(self):
         module = self.application_module
         state = {'promptTokens': 899990, 'compactedAtTokens': 0, 'compactionCount': 0,
-                 'turns': [{'text': str(index)} for index in range(40)],
+                 'turns': [{'text': str(index)} for index in range(10)],
                  'answers': [{'question': str(index), 'answer': str(index)} for index in range(20)]}
         module._visual_plan_site_record_tokens(state, 10)
         self.assertEqual(state['compactionCount'], 1)
-        # The compaction trims the transcript, it does not erase it: the turns
-        # that no longer fit travel on in the session memory the assistant
-        # maintains, so a long session keeps what it agreed.
-        self.assertEqual(len(state['turns']), 24)
+        self.assertEqual(len(state['turns']), 4)
         self.assertEqual([item['question'] for item in state['answers']],
-                         [str(index) for index in range(0, 20)])
+                         [str(index) for index in range(8, 20)])
         module._visual_plan_site_record_tokens(state, 900000)
         self.assertEqual(state['compactionCount'], 2)
         self.assertEqual(state['compactedAtTokens'], 1800000)
@@ -602,13 +599,11 @@ class VisualPlanContractTests(VisualPlanContractBase):
             'choices': [{'message': {'content': layout}}]
         }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
-            prepared = client.post('/api/visual-concept/plans-prompts',
-                headers=self._headers(self.token_a),
-                json={'projectData': project, 'plansWorkflow': self.workflow(project)})
-        self.assertEqual(prepared.status_code, 200, prepared.get_json())
-        scene = prepared.get_json()['scene']
-        workflow = {**self.workflow(project), 'scene': scene,
-                    'prompts': prepared.get_json()['prompts']}
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                scene, _context, _ref = module._visual_plan_create_scene({
+                    'projectData': project, 'plansWorkflow': self.workflow(project)})
+        workflow = {**self.workflow(project), 'scene': scene}
 
         section_ids = ('coordinates', 'colors', 'components', 'access', 'landscape', 'legend')
         model_replies = [{'choices': [{'message': {'content': json.dumps(

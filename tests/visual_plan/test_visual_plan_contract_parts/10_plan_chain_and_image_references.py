@@ -159,22 +159,6 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
         self.assertNotIn('isometric', prompt.lower())
         self.assertNotIn('Plan 2', prompt)
 
-    def test_the_general_site_plan_never_carries_arabic_into_the_drawing(self):
-        module = self.application_module
-        arabic = re.compile(r'[\u0600-\u06FF]')
-
-        self.assertFalse(arabic.search(module._visual_plan_site_short_label('مبنى غير معروف')))
-        self.assertFalse(arabic.search(module._visual_plan_site_short_label(
-            'مشروع سكني جديد', 'Open space')))
-        self.assertFalse(arabic.search(module._visual_plan_site_street_label(
-            {'streetName': 'طريق الأميرة نورة', 'streetWidth': 20}, 'north')))
-        self.assertFalse(arabic.search(module._visual_plan_site_english_identity('مشروع النخيل')))
-        # The English text is kept as it is.
-        self.assertEqual(module._visual_plan_site_short_label('Retail & Strip Mall'),
-                         'Retail & Strip Mall')
-        self.assertEqual(module._visual_plan_site_english_identity('Al Waha Compound'),
-                         'Al Waha Compound')
-
     def test_the_massing_prompt_is_english_whatever_the_project_language(self):
         module = self.application_module
         context = {
