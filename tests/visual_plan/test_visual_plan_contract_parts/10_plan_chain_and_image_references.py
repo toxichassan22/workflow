@@ -225,3 +225,32 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
         self.assertIn('Write every label of the drawing in English', prompt)
         self.assertIn('Every word in the drawing is English', prompt)
         self.assertIn('VERTICAL PROGRAM DISTRIBUTION', prompt)
+
+    def test_visual_concept_image_model_defaults_to_gemini_nano_banana(self):
+        """The default model for generating visual concepts and images is
+        pinned to google/gemini-nano-banana-2.1."""
+        module = self.application_module
+        self.assertEqual(module.IMAGE_MODEL, 'google/gemini-nano-banana-2.1')
+        self.assertEqual(module.VISUAL_CONCEPT_IMAGE_MODEL, 'google/gemini-nano-banana-2.1')
+
+    def test_call_images_api_uses_gemini_nano_banana_by_default(self):
+        """When no model override is passed, call_images_api routes to
+        google/gemini-nano-banana-2.1."""
+        module = self.application_module
+        captured_payload = {}
+
+        def _fake_post(url, headers=None, json=None, timeout=None):
+            captured_payload.update(json or {})
+            class _Resp:
+                status_code = 200
+                def json(self):
+                    return {'data': [{'url': 'data:image/png;base64,TEST'}]}
+            return _Resp()
+
+        with patch.object(module, '_tenant_key_gate', return_value=None), \
+                patch.object(module, '_has_any_openrouter_key', return_value=True), \
+                patch.object(module, '_openrouter_headers', return_value={}), \
+                patch.object(module.requests, 'post', side_effect=_fake_post):
+            module.call_images_api('render hero facade', usage_ctx={'tenant_id': self.tenant_a})
+
+        self.assertEqual(captured_payload.get('model'), 'google/gemini-nano-banana-2.1')
