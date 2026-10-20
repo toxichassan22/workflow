@@ -318,6 +318,7 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         # is still open instead of overwriting a sealed one.
         existing = conn.execute(
             '''SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ?
+               AND COALESCE(parent_draft_id, '') = ''
                AND COALESCE(status, 'draft') NOT IN (
                    'generation_approval_pending', 'generating',
                    'final_approval_pending', 'approved', 'archived')
@@ -603,10 +604,15 @@ def restore_draft_from_snapshot(tenant_id, draft_id, snapshot_data):
 
 
 def get_project_draft(tenant_id, user_id):
-    """Get the latest unified draft for one tenant actor."""
+    """Get the latest unified draft for one tenant actor.
+
+    A branch is a forked copy, never the file the person works on, so it
+    never answers here.
+    """
     conn = get_db()
     row = conn.execute(
-        'SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ? ORDER BY updated_at DESC LIMIT 1',
+        'SELECT * FROM project_drafts WHERE tenant_id = ? AND user_id = ? '
+        "AND COALESCE(parent_draft_id, '') = '' ORDER BY updated_at DESC LIMIT 1",
         (tenant_id, user_id)
     ).fetchone()
     return _hydrate_project_draft(row)
@@ -620,7 +626,7 @@ def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', st
     conn = get_db()
     limit = max(1, min(int(limit or 50), 200))
     offset = max(0, int(offset or 0))
-    clauses = ['tenant_id = ?']
+    clauses = ['tenant_id = ?', "COALESCE(parent_draft_id, '') = ''"]
     params = [tenant_id]
     if accessible_ids is not None:
         ids = [str(i) for i in accessible_ids]
@@ -673,10 +679,14 @@ def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', st
 
 
 def get_all_project_drafts(tenant_id):
-    """Get all saved project drafts for a tenant, including full payloads."""
+    """Get all saved project drafts for a tenant, including full payloads.
+
+    A forked branch is not a project of its own, so it stays out of the list.
+    """
     conn = get_db()
     rows = conn.execute(
-        'SELECT * FROM project_drafts WHERE tenant_id = ? ORDER BY updated_at DESC',
+        "SELECT * FROM project_drafts WHERE tenant_id = ? AND COALESCE(parent_draft_id, '') = '' "
+        'ORDER BY updated_at DESC',
         (tenant_id,)
     ).fetchall()
     return [_hydrate_project_draft(row) for row in rows]

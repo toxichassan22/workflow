@@ -65,6 +65,7 @@ FRONTEND_JS_ORDER = (
     '06-team.js', '07-project-form/01_form_sections.js',
     '07-project-form/02_section_versions.js', '07-project-form/03_best_use.js', '07-project-form/03a_best_use_calculator.js', '07-project-form/03b_best_use_explore.js',
     '07-project-form/04_draft_versions.js',
+    '07-project-form/05_draft_branches.js',
     '08-location-maps/01_tables_approvals.js',
     '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
     '09-financial/02_formulas_calc.js', '09-financial/03_parking_planning.js',
@@ -208,17 +209,23 @@ def read_dict_source():
 
 
 def read_dicts():
-    """Parse the JSON-compatible dict blocks out of assets/i18n/*.js."""
+    """Parse the JSON-compatible dict blocks out of assets/i18n/*.js.
+
+    The dictionary is split across parts because one file cannot hold every
+    string; each part merges itself into the same global, so every block is
+    parsed here and combined."""
     src = read_dict_source()
     dicts = {}
     for lang in ('AR', 'EN'):
-        match = re.search(
-            r'/\*I18N_%s_BEGIN\*/(.*?)/\*I18N_%s_END\*/' % (lang, lang),
-            src, re.S)
-        if not match:
+        blocks = re.findall(
+            r'/\*I18N_%s_BEGIN\*/(.*?)/\*I18N_%s_END\*/' % (lang, lang), src, re.S)
+        if not blocks:
             raise AssertionError(
                 'assets/i18n.js lost its I18N_%s markers' % lang)
-        dicts[lang.lower()] = json.loads(match.group(1))
+        merged = {}
+        for block in blocks:
+            merged.update(json.loads(block))
+        dicts[lang.lower()] = merged
     return dicts
 
 

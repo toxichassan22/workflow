@@ -32,6 +32,7 @@ FRONTEND_JS_ORDER = (
     '07-project-form/02_section_versions.js', '07-project-form/03_best_use.js',
     '07-project-form/03a_best_use_calculator.js', '07-project-form/03b_best_use_explore.js',
     '07-project-form/04_draft_versions.js',
+    '07-project-form/05_draft_branches.js',
     '08-location-maps/01_tables_approvals.js',
     '08-location-maps/02_catchment_edits.js', '09-financial/01_financial_format.js',
     '09-financial/02_formulas_calc.js', '09-financial/03_parking_planning.js',
@@ -112,7 +113,7 @@ def _frontend_bundle_asset_version(kind):
 # bundle for the same reason the app bundle does: eighteen blocking part
 # requests on every page view is exactly what the bundle removed once.
 FRONTEND_I18N_ORDER = (
-    '01_dict_ar.js', '02_dict_en.js',
+    '01_dict_ar.js', '01a_dict_ar_extra.js', '01b_dict_en_extra.js', '02_dict_en.js',
     '03_dict_en_auto_core.js', '04_dict_en_auto_project.js',
     '05_dict_en_auto_financial.js', '06_dict_en_auto_location.js',
     '07_dict_en_auto_market.js', '08_dict_en_auto_team.js',

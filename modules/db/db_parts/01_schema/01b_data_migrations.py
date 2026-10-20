@@ -289,6 +289,10 @@ def _migrate_project_draft_columns(conn):
             'data_bytes': "ALTER TABLE project_drafts ADD COLUMN data_bytes INTEGER DEFAULT 0",
             'has_slides': "ALTER TABLE project_drafts ADD COLUMN has_slides INTEGER DEFAULT 0",
             'has_maps': "ALTER TABLE project_drafts ADD COLUMN has_maps INTEGER DEFAULT 0",
+            # A branch is a forked copy of a project file: it keeps its own row
+            # so parallel work never touches the main line.
+            'parent_draft_id': "ALTER TABLE project_drafts ADD COLUMN parent_draft_id TEXT",
+            'branch_label': "ALTER TABLE project_drafts ADD COLUMN branch_label TEXT",
         }
         for column, sql in migrations.items():
             if column not in existing_cols:

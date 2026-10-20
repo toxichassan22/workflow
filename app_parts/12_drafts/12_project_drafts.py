@@ -74,7 +74,8 @@ def api_save_project_draft():
         status = 'draft'
     # Read the stored version before writing over it, so the history can name every field that
     # changed instead of only counting a revision.
-    previous_id = draft_data.get('draftId') or draft_data.get('draft_id')
+    previous_id = (draft_data.get('draftId') or draft_data.get('draft_id')
+                   or data.get('draftId') or data.get('draft_id'))
     previous = db.get_project_draft_by_id(g.tenant_id, previous_id) if previous_id else None
     # ISS-014: a project-scoped actor must not write a draft outside its scope
     # by naming its id — the same not-found answer the GET path gives.
@@ -112,7 +113,7 @@ def api_save_project_draft():
     # While the draft runs its generation job only the job's own checkpoint saves
     # may write; every other locked state refuses the save outright.
     prev_norm = db.normalize_proposal_status((previous or {}).get('status')) if previous else 'draft'
-    save_draft_id = draft_data.get('draftId') or draft_data.get('draft_id') \
+    save_draft_id = previous_id \
         or (previous or {}).get('id')
     # ISS-025: the client flag only claims the run exists — a live approved
     # approval is what proves it, so the flag alone cannot unlock the state.
@@ -139,7 +140,7 @@ def api_save_project_draft():
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
-            draft_id=draft_data.get('draftId') or draft_data.get('draft_id'),
+            draft_id=save_draft_id,
             allow_generating=allow_generating,
             expected_revision=expected_revision,
             existing_row=previous,

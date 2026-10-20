@@ -49,7 +49,7 @@
           WFT('draft_versions.empty', 'لا توجد إصدارات محفوظة') + '</p>';
         return;
       }
-      body.innerHTML = draftVersionCommits.map(commit => {
+      body.innerHTML = '<div id="draftVersionsBranches"></div>' + draftVersionCommits.map(commit => {
         const kind = commit.kind === 'restore'
           ? WFT('draft_versions.kind_restore', 'استرجاع')
           : WFT('draft_versions.kind_save', 'حفظ');
@@ -62,13 +62,17 @@
             '<span class="change-log-stamp">' + escapeHtml(draftVersionStamp(commit.created_at)) + '</span>' +
           '</div>' +
           '<div class="change-log-summary">' + escapeHtml(changed) + '</div>' +
-          '<div style="margin-top:8px">' +
+          '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">' +
             '<button type="button" class="btn small ghost" onclick="restoreDraftVersion(\'' + commit.id + '\')">' +
               WFT('draft_versions.restore', 'استرجاع') +
+            '</button>' +
+            '<button type="button" class="btn small ghost" onclick="createDraftBranch(\'' + commit.id + '\')">' +
+              WFT('draft_branch.create', 'فرع من هذه النسخة') +
             '</button>' +
           '</div>' +
         '</div>';
       }).join('');
+      if (typeof loadDraftBranches === 'function') loadDraftBranches(draftVersionDraftId);
     }
 
     async function showDraftVersions(draftId) {

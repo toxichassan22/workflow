@@ -21,21 +21,15 @@ def _draft_commit_error(code, message, status=400, **extra):
     return jsonify(payload), status
 
 
-def _restore_section_statuses(tenant_id, draft, restored_data, stored_statuses):
-    """Approvals the restored data contradicts go back to 'draft'.
+def _demote_sections_for_keys(tenant_id, changed_keys, stored_statuses):
+    """Approvals of the sections a change touched go back to 'draft'.
 
     A section approved against the current values cannot stay approved once
-    the file carries the old ones — the approval described data that is no
+    the file carries other ones — the approval described data that is no
     longer there.
     """
-    current = draft.get('draft_data') or {}
-    bookkeeping = set(getattr(db, 'DRAFT_BOOKKEEPING_KEYS', ()) or ())
-    changed = [
-        key for key in set(current) | set(restored_data)
-        if key not in bookkeeping and current.get(key) != restored_data.get(key)
-    ]
     statuses = dict(stored_statuses or {})
-    if not changed:
+    if not changed_keys:
         return statuses, []
     try:
         section_map = _draft_field_section_map(tenant_id)
@@ -43,7 +37,7 @@ def _restore_section_statuses(tenant_id, draft, restored_data, stored_statuses):
         section_map = {}
     sections = set()
     unmapped = False
-    for key in changed:
+    for key in changed_keys:
         section = _draft_section_of_key(section_map, key)
         if section:
             sections.add(section)
@@ -62,6 +56,17 @@ def _restore_section_statuses(tenant_id, draft, restored_data, stored_statuses):
                 statuses[section] = 'draft'
                 demoted.append(section)
     return statuses, sorted(set(demoted))
+
+
+def _restore_section_statuses(tenant_id, draft, restored_data, stored_statuses):
+    """Approvals the restored data contradicts go back to 'draft'."""
+    current = draft.get('draft_data') or {}
+    bookkeeping = set(getattr(db, 'DRAFT_BOOKKEEPING_KEYS', ()) or ())
+    changed = [
+        key for key in set(current) | set(restored_data)
+        if key not in bookkeeping and current.get(key) != restored_data.get(key)
+    ]
+    return _demote_sections_for_keys(tenant_id, changed, stored_statuses)
 
 
 @app.route('/api/project-draft/<draft_id>/commits', methods=['GET'])

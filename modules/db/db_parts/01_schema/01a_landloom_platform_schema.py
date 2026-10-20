@@ -306,6 +306,26 @@ def _create_landloom_tables(conn):
     conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_commits_draft ON draft_commits(draft_id, revision DESC, created_at DESC)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_commits_tenant ON draft_commits(tenant_id, created_at DESC)')
 
+    # A branch is a parallel line of work on one project file. The forked copy
+    # is its own draft row (parent_draft_id points at the main line) and this
+    # table records where the fork started and how it ended.
+    conn.execute('''CREATE TABLE IF NOT EXISTS draft_branches (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        base_draft_id TEXT NOT NULL,
+        branch_draft_id TEXT NOT NULL,
+        base_commit_id TEXT,
+        name TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_by TEXT,
+        created_by_name TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        merged_at TEXT,
+        merged_commit_id TEXT
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_branches_base ON draft_branches(base_draft_id, created_at DESC)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_branches_tenant ON draft_branches(tenant_id, created_at DESC)')
+
 
 def _ensure_landloom_columns(conn):
     """Additive migrations on existing installs: last_login on users/tenants."""
