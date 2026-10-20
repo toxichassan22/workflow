@@ -5,6 +5,35 @@
 
 let tenantGenerationStopRequested = false;
 const tenantActiveGenerationRuns = new Set();
+const tenantStopListeners = new Set();
+
+function onTenantGenerationStop(callback) {
+  if (typeof callback !== 'function') return () => {};
+  tenantStopListeners.add(callback);
+  return () => tenantStopListeners.delete(callback);
+}
+
+function triggerTenantGenerationStopEvent() {
+  for (const callback of tenantStopListeners) {
+    try { callback(); } catch (err) { /* stop notification */ }
+  }
+}
+
+function interruptiblePollSleep(ms) {
+  return new Promise(resolve => {
+    if (tenantGenerationStopRequested) return resolve(false);
+    let timer = null;
+    const unsub = onTenantGenerationStop(() => {
+      if (timer) clearTimeout(timer);
+      unsub();
+      resolve(false);
+    });
+    timer = setTimeout(() => {
+      unsub();
+      resolve(true);
+    }, ms);
+  });
+}
 
 function registerTenantGenerationRun(runId) {
   if (!runId) return;
@@ -14,6 +43,9 @@ function registerTenantGenerationRun(runId) {
 function releaseTenantGenerationRun(runId) {
   if (!runId) return;
   tenantActiveGenerationRuns.delete(String(runId));
+  if (tenantActiveGenerationRuns.size === 0) {
+    tenantGenerationStopRequested = false;
+  }
 }
 
 function tenantGenerationRunsInFlight() {
@@ -29,6 +61,7 @@ async function cancelTenantGenerationRun(runId) {
 
 function resetTenantGenerationStop() {
   tenantGenerationStopRequested = false;
+  tenantActiveGenerationRuns.clear();
   const stopButton = document.getElementById('liveGenStopButton');
   if (stopButton) {
     stopButton.disabled = false;
@@ -51,6 +84,7 @@ function setTenantGenerationStopVisible(visible) {
 async function stopTenantGeneration() {
   if (tenantGenerationStopRequested) return;
   tenantGenerationStopRequested = true;
+  triggerTenantGenerationStopEvent();
   const runs = tenantGenerationRunsInFlight();
   const stopButton = document.getElementById('liveGenStopButton');
   if (stopButton) {
@@ -63,8 +97,8 @@ async function stopTenantGeneration() {
     loaderStopButton.textContent = WFT('gen.stopping', 'جاري الإيقاف...');
   }
   // The server has to learn about the stop before it starts the next paid
-  // call, so the requests go out first and the UI settles afterwards.
-  await Promise.all(runs.map(runId => cancelTenantGenerationRun(runId).catch(() => false)));
+  // call, so the requests go out in parallel immediately.
+  Promise.all(runs.map(runId => cancelTenantGenerationRun(runId).catch(() => false)));
   toast(WFT('gen.stop_requested', 'تم إرسال طلب الإيقاف'));
 }
 
@@ -79,7 +113,9 @@ async function pollTenantGenerationJob(jobId, statusPath, options = {}) {
   const timeoutMessage = options.timeoutMessage || WFT('gen.job_timeout', 'انتهت مهلة المهمة.');
   let job = null;
   while (Date.now() < deadline) {
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    if (tenantGenerationStopRequested) break;
+    const slept = await interruptiblePollSleep(1500);
+    if (tenantGenerationStopRequested || !slept) break;
     const requestTimeout = Math.min(15000, deadline - Date.now());
     if (requestTimeout <= 0) break;
     job = await apiWithTimeout(
@@ -91,6 +127,14 @@ async function pollTenantGenerationJob(jobId, statusPath, options = {}) {
     if (!job || !['queued', 'running'].includes(job.status)) break;
     if (tenantGenerationStopRequested) break;
   }
+  if (tenantGenerationStopRequested || job?.status === 'cancelled') {
+    return {
+      success: false,
+      error: WFT('gen.job_cancelled', 'تم إيقاف المهمة'),
+      error_code: 'RUN_CANCELLED',
+      cancelled: true
+    };
+  }
   if (job?.result && typeof job.result === 'object') return job.result;
   if (job?.error) return { success: false, error: job.error, error_code: job.error_code };
   return { success: false, error: timeoutMessage, error_code: 'JOB_TIMEOUT' };
@@ -99,6 +143,9 @@ async function pollTenantGenerationJob(jobId, statusPath, options = {}) {
 // Post an operation that may be queued, then wait for its job. The run
 // handle is registered so the stop button can reach it while it runs.
 async function runTenantGenerationJob(method, path, body, statusPath, options = {}) {
+  if (tenantActiveGenerationRuns.size === 0) {
+    resetTenantGenerationStop();
+  }
   const initial = await api(method, path, body);
   if (!initial || !initial.jobId) return initial;
   registerTenantGenerationRun(initial.jobId);

@@ -52,13 +52,15 @@ _RUN_ID_RE = re.compile(r'[A-Za-z0-9_-]{6,80}\Z')
 # that could escape its own directory.
 _TENANT_RE = re.compile(r'[A-Za-z0-9_-]{1,64}\Z')
 
-# How often a streaming call re-checks the registry. The marker is a stat()
-# call, so checking on every chunk would be wasteful; a cancelled run still
-# stops within this window.
-CANCEL_CHECK_INTERVAL = 0.4
+# How often a streaming call re-checks the registry via stat(). The in-memory
+# cache is checked on every single chunk (< 1 µs); the stat() check covers
+# out-of-process cancels within this window.
+CANCEL_CHECK_INTERVAL = 0.05
 
 _ROOT_PROVIDER = None
 _THREAD = threading.local()
+_CANCELLED_RUNS_MEM = set()
+_CANCELLED_LOCK = threading.Lock()
 
 
 def set_root_provider(provider):
@@ -66,6 +68,8 @@ def set_root_provider(provider):
     a test that moves the uploads directory keeps the registry with it."""
     global _ROOT_PROVIDER
     _ROOT_PROVIDER = provider
+    with _CANCELLED_LOCK:
+        _CANCELLED_RUNS_MEM.clear()
 
 
 def _default_root():
@@ -119,6 +123,10 @@ def cancel_run(run_id, tenant_id=None):
     path = cancel_path(run_id, tenant_id)
     if not path:
         return False
+    tenant = _tenant_key(tenant_id)
+    if tenant:
+        with _CANCELLED_LOCK:
+            _CANCELLED_RUNS_MEM.add((tenant, str(run_id)))
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, 'w', encoding='utf-8') as handle:
@@ -134,6 +142,14 @@ def cancel_run(run_id, tenant_id=None):
 
 
 def is_run_cancelled(run_id, tenant_id=None):
+    if not _valid_run_id(run_id):
+        return False
+    tenant = _tenant_key(tenant_id)
+    if tenant is None:
+        return False
+    with _CANCELLED_LOCK:
+        if (tenant, str(run_id)) in _CANCELLED_RUNS_MEM:
+            return True
     path = cancel_path(run_id, tenant_id)
     if not path:
         return False
@@ -145,6 +161,10 @@ def is_run_cancelled(run_id, tenant_id=None):
 
 def clear_run_cancel(run_id, tenant_id=None):
     """Drop a stale marker so a reused handle starts clean."""
+    tenant = _tenant_key(tenant_id)
+    if tenant and _valid_run_id(run_id):
+        with _CANCELLED_LOCK:
+            _CANCELLED_RUNS_MEM.discard((tenant, str(run_id)))
     path = cancel_path(run_id, tenant_id)
     if not path:
         return False
@@ -154,6 +174,34 @@ def clear_run_cancel(run_id, tenant_id=None):
         return True
     except OSError:
         return False
+
+
+def sweep_stale_cancel_markers(max_age_seconds=86400):
+    """Remove .cancel marker files older than max_age_seconds."""
+    root = _root()
+    if not os.path.isdir(root):
+        return 0
+    now = time.time()
+    removed = 0
+    try:
+        for tenant_dir in os.listdir(root):
+            tenant_path = os.path.join(root, tenant_dir)
+            if not os.path.isdir(tenant_path):
+                continue
+            for fname in os.listdir(tenant_path):
+                if not fname.endswith('.cancel'):
+                    continue
+                fpath = os.path.join(tenant_path, fname)
+                try:
+                    mtime = os.path.getmtime(fpath)
+                    if now - mtime > max_age_seconds:
+                        os.unlink(fpath)
+                        removed += 1
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return removed
 
 
 def bind_run(run_id, tenant_id=None):
@@ -215,6 +263,13 @@ def run_is_cancelled(usage_ctx=None, throttle=False):
     run_id, tenant_id = _resolve_run(usage_ctx)
     if not run_id:
         return False
+    tenant = _tenant_key(tenant_id)
+    # The in-memory check is sub-microsecond (< 1 µs), so it is checked on
+    # every call without waiting for throttle windows.
+    if tenant:
+        with _CANCELLED_LOCK:
+            if (tenant, str(run_id)) in _CANCELLED_RUNS_MEM:
+                return True
     if throttle and not _check_due(run_id):
         return False
     return is_run_cancelled(run_id, tenant_id)

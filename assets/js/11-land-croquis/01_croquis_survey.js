@@ -79,11 +79,18 @@
         if (res && res.jobId && !res.extractedData) {
           const jobId = res.jobId;
           // The stop button reaches this analysis through its run handle.
+          if (typeof resetTenantGenerationStop === 'function' && typeof tenantActiveGenerationRuns !== 'undefined' && tenantActiveGenerationRuns.size === 0) {
+            resetTenantGenerationStop();
+          }
           registerTenantGenerationRun(jobId);
           updateLoaderProgress(35, res.message || 'بدأ التحليل في الخلفية...');
           const started = Date.now();
           while (Date.now() - started < 12 * 60 * 1000) {
-            await new Promise(resolve => setTimeout(resolve, 2500));
+            if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) break;
+            const slept = typeof interruptiblePollSleep === 'function'
+              ? await interruptiblePollSleep(2500)
+              : await new Promise(resolve => setTimeout(resolve, 2500));
+            if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) break;
             res = await api('GET', '/api/extract-croquis/' + encodeURIComponent(jobId));
             const jobStatus = String(res && res.status || '');
             updateLoaderProgress(
@@ -97,6 +104,11 @@
             if (tenantGenerationStopRequested) break;
           }
           releaseTenantGenerationRun(jobId);
+          if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) {
+            hideLoader();
+            toast(WFT('gen.job_cancelled', 'تم إيقاف المهمة'));
+            return;
+          }
         }
         updateLoaderProgress(55, 'تم تجهيز الموقع والخرائط؛ جاري قراءة المستندات والاشتراطات...');
         if (res.success && res.extractedData) {
@@ -516,10 +528,17 @@
           // The sweep runs in a job: the stop button reaches it through the
           // run handle, and the browser only polls for the answer.
           const jobId = String(data.jobId);
+          if (typeof resetTenantGenerationStop === 'function' && typeof tenantActiveGenerationRuns !== 'undefined' && tenantActiveGenerationRuns.size === 0) {
+            resetTenantGenerationStop();
+          }
           registerTenantGenerationRun(jobId);
           const started = Date.now();
           while (Date.now() - started < 15 * 60 * 1000) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) break;
+            const slept = typeof interruptiblePollSleep === 'function'
+              ? await interruptiblePollSleep(2000)
+              : await new Promise(resolve => setTimeout(resolve, 2000));
+            if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) break;
             const job = await api('GET', '/api/site-analysis-jobs/' + encodeURIComponent(jobId));
             updateLoaderProgress(60, (job && job.message) || 'جاري تحليل بيانات الموقع...');
             if (job && (job.result || job.error)) { data = job.result || job; break; }
@@ -527,6 +546,11 @@
             if (tenantGenerationStopRequested) break;
           }
           releaseTenantGenerationRun(jobId);
+          if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) {
+            hideLoader();
+            toast(WFT('gen.job_cancelled', 'تم إيقاف المهمة'));
+            return;
+          }
         }
         if (!data || !data.success) {
           toast((data && data.error) || 'تعذر تحليل الموقع');

@@ -86,6 +86,27 @@ class RunControlRegistryTests(unittest.TestCase):
         self.assertTrue(run_control.clear_run_cancel(self.run_id, self.tenant))
         self.assertFalse(run_control.is_run_cancelled(self.run_id, self.tenant))
 
+    def test_in_memory_instant_cancel(self):
+        self.assertFalse(run_control.is_run_cancelled('instant-001', self.tenant))
+        run_control.cancel_run('instant-001', self.tenant)
+        self.assertTrue(run_control.is_run_cancelled('instant-001', self.tenant))
+        run_control.clear_run_cancel('instant-001', self.tenant)
+        self.assertFalse(run_control.is_run_cancelled('instant-001', self.tenant))
+
+    def test_sweep_stale_cancel_markers(self):
+        old_run = 'old-run-001'
+        new_run = 'new-run-001'
+        run_control.cancel_run(old_run, self.tenant)
+        run_control.cancel_run(new_run, self.tenant)
+        old_path = run_control.cancel_path(old_run, self.tenant)
+        new_path = run_control.cancel_path(new_run, self.tenant)
+        two_days_ago = time.time() - 172800
+        os.utime(old_path, (two_days_ago, two_days_ago))
+        removed = run_control.sweep_stale_cancel_markers(max_age_seconds=86400)
+        self.assertGreaterEqual(removed, 1)
+        self.assertFalse(os.path.isfile(old_path))
+        self.assertTrue(os.path.isfile(new_path))
+
     def test_a_bound_run_is_what_the_thread_checks(self):
         run_control.bind_run(self.run_id, self.tenant)
         try:
@@ -125,8 +146,10 @@ class RunControlAiLayerTests(unittest.TestCase):
         run_control.set_root_provider(lambda: os.path.join(self.temp_dir.name, 'cancel'))
         self.tenant = 'tenant-ai-layer'
         self.run_id = 'ai-layer-run-0001'
+        run_control.clear_run_cancel(self.run_id, self.tenant)
 
     def tearDown(self):
+        run_control.clear_run_cancel(self.run_id, self.tenant)
         run_control.set_root_provider(self.previous_provider)
         self.temp_dir.cleanup()
 
@@ -378,7 +401,7 @@ class RunControlJobTests(unittest.TestCase):
 
         with cls.app.app_context():
             db.init_db()
-            cls.tenant_id = db.create_tenant('Run Jobs Co', 'jobs@example.test', 'hash', 'run-jobs-co')
+            cls.tenant_id = db.create_tenant('Run Jobs Co', 'jobs@example.test', 'hash', 'run-jobs-co', credit_balance=100.0)
 
         cls.token = auth.create_token(
             cls.tenant_id, 'jobs@example.test', user_id=None, user_name='Jobs Admin',

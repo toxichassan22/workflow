@@ -45,7 +45,25 @@
       const maxWaitMs = 10 * 60 * 1000;
       let lastPartial = '';
       while (Date.now() - started < maxWaitMs) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) {
+          return {
+            success: false,
+            error: WFT('gen.stopped_title', 'تم إيقاف التوليد'),
+            error_code: 'RUN_CANCELLED',
+            cancelled: true
+          };
+        }
+        const slept = typeof interruptiblePollSleep === 'function'
+          ? await interruptiblePollSleep(1000)
+          : await new Promise(resolve => setTimeout(resolve, 1000));
+        if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) {
+          return {
+            success: false,
+            error: WFT('gen.stopped_title', 'تم إيقاف التوليد'),
+            error_code: 'RUN_CANCELLED',
+            cancelled: true
+          };
+        }
         const result = await apiWithTimeout(
           'GET', '/api/generate-slide-single/jobs/' + encodeURIComponent(queued.jobId), null,
           30000, 'انتهت مهلة متابعة مهمة توليد الشريحة.'

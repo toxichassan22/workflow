@@ -94,6 +94,9 @@
       if (stopButton) {
         stopButton.style.display = options.stoppable ? 'inline-flex' : 'none';
         if (options.stoppable) {
+          if (typeof resetTenantGenerationStop === 'function') {
+            resetTenantGenerationStop();
+          }
           stopButton.disabled = false;
           stopButton.textContent = WFT('gen.stop', 'إيقاف');
         }

@@ -54,11 +54,16 @@ def _land_job_worker(app, tenant_id, data, job_id):
                 'message': payload.get('error') or 'اكتمل التحليل',
             })
         except Exception as exc:
+            cancelled = (run_control.current_run_cancelled() or
+                         getattr(exc, 'error_code', None) == run_control.CANCELLED_ERROR_CODE or
+                         getattr(exc, 'cancelled', False))
             _write_land_job(tenant_id, job_id, {
-                'status': 'failed',
+                'status': 'cancelled' if cancelled else 'failed',
                 'success': False,
-                'error': f'حدث خطأ في قراءة ملف الكروكي: {exc}',
-                'failureReason': 'job_failed',
+                'error': run_control.CANCELLED_MESSAGE if cancelled else f'حدث خطأ في قراءة ملف الكروكي: {exc}',
+                'error_code': run_control.CANCELLED_ERROR_CODE if cancelled else 'LAND_CROQUIS_FAILED',
+                'failureReason': 'cancelled' if cancelled else 'job_failed',
+                'cancelled': cancelled,
             })
 
 

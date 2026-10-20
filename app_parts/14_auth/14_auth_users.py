@@ -248,6 +248,7 @@ def _run_housekeeping_tick():
         ('usage_billing', _bill_all_unbilled_usage),
         ('cap_resync', _resync_pending_tenant_caps),
         ('trial_watch', _trial_watch_sweep),
+        ('stale_cancel_markers', run_control.sweep_stale_cancel_markers),
     )
     for name, fn in steps:
         try:

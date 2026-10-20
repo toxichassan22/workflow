@@ -143,7 +143,11 @@
       try {
         while (job && (job.status === 'queued' || job.status === 'running')) {
           if (Date.now() >= deadline) break;
-          await new Promise(resolve => setTimeout(resolve, VISUAL_CONCEPT_DISTRIBUTION_CHAT_POLL_MS));
+          if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) break;
+          const slept = typeof interruptiblePollSleep === 'function'
+            ? await interruptiblePollSleep(VISUAL_CONCEPT_DISTRIBUTION_CHAT_POLL_MS)
+            : await new Promise(resolve => setTimeout(resolve, VISUAL_CONCEPT_DISTRIBUTION_CHAT_POLL_MS));
+          if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) break;
           job = await api('GET', '/api/visual-concept/plans-jobs/' + encodeURIComponent(jobId), null);
           if (typeof updateVisualConceptPlanJobUi === 'function') updateVisualConceptPlanJobUi(job);
           if (typeof onStep === 'function') onStep(job.todos, job.partial);
@@ -153,6 +157,14 @@
         }
       } finally {
         if (typeof releaseTenantGenerationRun === 'function') releaseTenantGenerationRun(jobId);
+      }
+      if ((typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) || job?.status === 'cancelled') {
+        return {
+          success: false,
+          error_code: 'RUN_CANCELLED',
+          cancelled: true,
+          error: WFT('gen.job_cancelled', 'تم إيقاف المهمة'),
+        };
       }
       if (job && job.result && typeof job.result === 'object') return job.result;
       if (job && job.error) return { success: false, error: job.error, error_code: job.error_code };

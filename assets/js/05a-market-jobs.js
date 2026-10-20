@@ -15,11 +15,18 @@
         ? Number(pollOpts.intervalMs) : MARKET_JOB_POLL_INTERVAL_MS;
       const started = Date.now();
       let res = null;
+      if (typeof resetTenantGenerationStop === 'function' && typeof tenantActiveGenerationRuns !== 'undefined' && tenantActiveGenerationRuns.size === 0) {
+        resetTenantGenerationStop();
+      }
       // The stop button reaches this study through its run handle.
       registerTenantGenerationRun(jobId);
       try {
         while (Date.now() - started < budgetMs) {
-          await new Promise(resolve => setTimeout(resolve, intervalMs));
+          if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) break;
+          const slept = typeof interruptiblePollSleep === 'function'
+            ? await interruptiblePollSleep(intervalMs)
+            : await new Promise(resolve => setTimeout(resolve, intervalMs));
+          if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) break;
           res = await api('GET', '/api/market-study/jobs/' + encodeURIComponent(jobId));
           const status = String(res && res.status || '');
           if (typeof onProgress === 'function') onProgress(res);
@@ -31,6 +38,15 @@
         }
       } finally {
         releaseTenantGenerationRun(jobId);
+      }
+      if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) {
+        return {
+          success: false,
+          status: 'cancelled',
+          cancelled: true,
+          error: WFT('gen.job_cancelled', 'تم إيقاف المهمة'),
+          error_code: 'RUN_CANCELLED',
+        };
       }
       return res;
     }
