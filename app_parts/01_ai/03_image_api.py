@@ -829,13 +829,15 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None, timeout
             'model': images_model,
             'prompt': prompt,
             'aspect_ratio': '16:9',
-            'quality': 'high',
             'n': 1,
         }
+        if 'openai' in images_model.lower():
+            payload['quality'] = 'high'
         if prepared:
+            max_refs = 14 if ('google' in images_model.lower() or 'gemini' in images_model.lower()) else 16
             payload['input_references'] = [
                 {'type': 'image_url', 'image_url': {'url': ref}}
-                for ref in prepared[:16]
+                for ref in prepared[:max_refs]
             ]
         response = requests.post(f'{OPENROUTER_BASE}/images', headers=headers, json=payload, timeout=timeout)
         data = response.json()

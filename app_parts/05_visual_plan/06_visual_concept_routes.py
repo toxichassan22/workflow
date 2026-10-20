@@ -560,8 +560,8 @@ def _visual_concept_generate_image_result(data, slot_id):
             return {'success': False,
                     'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.',
                     'error_code': 'NO_API_KEY'}, 400
-        return {'success': False, 'error': 'تعذر توليد صورة التصور البصري',
-                'error_code': 'IMAGE_FAILED'}, 503
+        return {'success': False, 'error': _client_safe_llm_error(error.get('message') or '') or 'تعذر توليد صورة التصور البصري',
+                'error_code': error.get('error_code') or 'IMAGE_FAILED'}, 503
     return {
         'success': True,
         'slotId': slot_id,
