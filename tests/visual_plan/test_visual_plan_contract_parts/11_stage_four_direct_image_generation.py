@@ -48,47 +48,52 @@ class VisualPlanContractTestsPart11(VisualPlanContractBase):
         self.assertEqual(captured['references'], [])
         self.assertIn('VERTICAL PROGRAM DISTRIBUTION', captured['prompt'])
 
-    def test_plan_massing_attaches_plan_one_as_2d_reference_and_prompts_heights_extrusion(self):
+    def test_plan_massing_generates_svg_from_plan1_and_plan2_svg(self):
         module = self.application_module
         project = self.project()
+        fake_plan1_svg = '<svg viewBox="0 0 1600 1000"><rect id="hotel_tower" x="100" y="100" width="200" height="300" fill="#FEF08A"/><rect id="surface_parking" x="100" y="450" width="200" height="150" fill="#CBD5E1"/></svg>'
+        fake_plan2_svg = '<svg viewBox="0 0 1600 1000"><text>Tower: 15 floors (G-14)</text></svg>'
         workflow = {
             'distribution': {
                 'approved': True,
                 'rows': [
-                    {'building': 'Building A', 'floor_range': 'G-5', 'component': 'Commercial',
-                     'units_per_floor': 2, 'floor_area_sqm': 400, 'circulation': ''},
+                    {'building': 'Main Tower', 'floor_range': 'G-14', 'component': 'Hotel'},
                 ]
+            },
+            'slots': {
+                'plan_site': {'svgCode': fake_plan1_svg},
+                'plan_uses': {'svgCode': fake_plan2_svg},
             }
         }
         data = {
             'projectData': project,
             'plansWorkflow': workflow,
-            'planImages': {
-                'site': '/uploads/creative/tenant/plan_site.svg',
-            },
         }
         captured = {}
 
-        def _fake_images_call(prompt, references, **_kwargs):
-            captured['prompt'] = prompt
-            captured['references'] = list(references or [])
-            return 'data:image/png;base64,MASSING_IMAGE_DATA'
+        def _fake_chat_call(system, user, **_kwargs):
+            captured['system'] = system
+            captured['user'] = user
+            fake_svg = '<svg viewBox="0 0 1600 1000"><polygon points="100,100 200,100 200,200" fill="#FEF08A"/></svg>'
+            return {'choices': [{'message': {'content': fake_svg}}]}
 
-        with patch.object(module, 'call_images_api', side_effect=_fake_images_call), \
-                patch.object(module, '_visual_concept_reference_uris',
-                             side_effect=lambda urls=None, **_kwargs: list(urls or [])), \
-                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/massing.png'), \
+        with patch.object(module, 'call_openrouter_chat', side_effect=_fake_chat_call), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/massing.svg'), \
                 patch.object(module, '_visual_concept_edit_base_image', return_value=''):
             with self.app.test_request_context():
                 module.g.tenant_id = self.tenant_a
                 result = module._visual_plan_render_response(data, 'plan_massing')
 
         self.assertTrue(result['success'])
-        self.assertEqual(result['image'], '/uploads/creative/massing.png')
-        self.assertEqual(result['engine'], 'image_generation')
-        self.assertIn('/uploads/creative/tenant/plan_site.svg', captured['references'])
-        self.assertIn('STRICT 3D EXTRUSION OF PLAN 1', captured['prompt'])
-        self.assertIn('Plan 1', captured['prompt'])
+        self.assertEqual(result['image'], '/uploads/creative/massing.svg')
+        self.assertEqual(result['engine'], 'svg_massing')
+        self.assertEqual(result['model'], module.VISUAL_PLAN_MASSING_MODEL)
+        self.assertIn('<polygon', result['svgCode'])
+        # Assert Plan 1 SVG and Plan 2 SVG are fed directly into the prompt
+        self.assertIn('PLAN 1 (MASTER SITE PLAN - EXACT VECTOR SVG LAYOUT)', captured['user'])
+        self.assertIn('surface_parking', captured['user'])
+        self.assertIn('PLAN 2 (VERTICAL PROGRAM DISTRIBUTION - EXACT FLOOR STACK SVG)', captured['user'])
+        self.assertIn('Tower: 15 floors', captured['user'])
 
     def test_stage_four_workflow_error_bypasses_notes_and_scene_gates(self):
         module = self.application_module
@@ -184,38 +189,38 @@ class VisualPlanContractTestsPart11(VisualPlanContractBase):
 
         self.assertTrue(result2['success'])
 
-    def test_plan_massing_edit_diagram_calls_images_api(self):
+    def test_plan_massing_edit_diagram_updates_svg_with_sol_model(self):
         module = self.application_module
         project = self.project()
         data = {
             'projectData': project,
             'plansWorkflow': {},
             'message': 'Make the tower facade light stone',
-            'baseImage': '/uploads/creative/tenant/massing_v1.png',
+            'currentSvg': '<svg viewBox="0 0 1600 1000"><rect id="tower" width="100" height="100"/></svg>',
             'planImages': {
                 'site': '/uploads/creative/tenant/plan_site.svg',
                 'uses': '/uploads/creative/tenant/plan_uses.svg',
             }
         }
         captured = {}
-        def fake_call_images_api(prompt, references=None, **kwargs):
-            captured['prompt'] = prompt
-            captured['references'] = list(references or [])
-            return 'data:image/png;base64,UPDATED_MASSING'
+        def fake_call_chat(system, user, **kwargs):
+            captured['system'] = system
+            captured['user'] = user
+            return {'choices': [{'message': {'content': '<svg viewBox="0 0 1600 1000"><rect id="tower" width="100" height="150" fill="#F8FAFC"/></svg>'}}]}
 
-        with patch.object(module, 'call_images_api', side_effect=fake_call_images_api), \
-                patch.object(module, '_visual_concept_reference_uris', side_effect=lambda urls, **kwargs: list(urls or [])), \
-                patch.object(module, '_visual_concept_edit_base_image', return_value='/uploads/creative/tenant/massing_v1.png'), \
-                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/tenant/massing_v2.png'):
+        with patch.object(module, 'call_openrouter_chat', side_effect=fake_call_chat), \
+                patch.object(module, '_visual_plan_extract_current_slot_svg', side_effect=lambda d, slot: '<svg id="' + slot + '"></svg>'), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/tenant/massing_v2.svg'):
             with self.app.test_request_context():
                 module.g.tenant_id = self.tenant_a
                 result = module._visual_plan_edit_diagram(data, 'plan_massing', 'massing')
 
         self.assertTrue(result['success'])
-        self.assertEqual(result['image'], '/uploads/creative/tenant/massing_v2.png')
-        self.assertIn('/uploads/creative/tenant/massing_v1.png', captured['references'])
-        self.assertIn('/uploads/creative/tenant/plan_site.svg', captured['references'])
-        self.assertIn('/uploads/creative/tenant/plan_uses.svg', captured['references'])
-        self.assertIn('Make the tower facade light stone', captured['prompt'])
+        self.assertEqual(result['image'], '/uploads/creative/tenant/massing_v2.svg')
+        self.assertEqual(result['engine'], 'svg_massing')
+        self.assertIn('<rect id="tower"', result['svgCode'])
+        self.assertIn('Make the tower facade light stone', captured['user'])
+        self.assertIn('PLAN 1 (SITE PLAN SVG', captured['user'])
+        self.assertIn('PLAN 2 (FLOOR DISTRIBUTION SVG', captured['user'])
 
 

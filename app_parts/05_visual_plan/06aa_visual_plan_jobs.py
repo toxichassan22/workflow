@@ -131,6 +131,8 @@ def _visual_plan_report_site_chat_timing(name, started_at):
 def _visual_plan_edit_diagram(data, slot_id, kind_type):
     if kind_type == 'uses':
         return _visual_plan_edit_uses_svg(data, slot_id)
+    if kind_type == 'massing':
+        return _visual_plan_edit_massing_svg(data, slot_id)
     instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
     if not instruction:
         raise visual_plan_geometry.PlanGeometryError('طلب تعديل المخطط غير متوفر.', 'MESSAGE_REQUIRED')

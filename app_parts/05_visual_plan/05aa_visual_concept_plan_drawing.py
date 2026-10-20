@@ -483,7 +483,8 @@ def _visual_concept_plan_massing_body(context, model, regulations):
         'Every word in the drawing is English — the title, the legend chips, the callout labels, '
         'the edge labels, the annotations and the caption. Never write Arabic characters: a '
         'recorded Arabic name is written as its English equivalent, and where there is no English '
-        'equivalent the label is left out.')
+        'equivalent the label is left out. Output ONLY valid standalone raw SVG code starting '
+        'with <svg and ending with </svg> — no markdown fences, no explanation.')
     return ''.join(parts)
 
 
