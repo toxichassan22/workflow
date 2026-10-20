@@ -668,35 +668,30 @@ def api_analyze_site():
     if lat is None or lng is None:
         return jsonify({'success': False, 'error': 'أدخل رابط Google Maps أو عنوان الموقع أولاً'}), 400
 
-    site_maps_ctx = maps_service.maps_usage_ctx('site', g.tenant_id, data=data)
-    with maps_service.maps_usage_scope(site_maps_ctx):
-        fields, nearby_items, nearby_matrix, city_items, city_matrix, roads, polygon, diagnostics = _collect_site_fields(
-            project_data, g.tenant_id, lat, lng
-        )
-    fields.setdefault('location_polygon_source', 'none')
+    if current_app.config.get('TESTING') and data.get('background') is not True:
+        return jsonify(_site_analysis_result(data, project_data, lat, lng, source))
 
+    # The Maps sweep runs in a job: the stop button has to reach it, and the
+    # request must not stay open for the whole sweep.
+    job_id = str(_uuid.uuid4())
+    actor = {key: getattr(g, key, None) for key in ('user_id', 'user_name', 'user_role')}
+    _write_job(_SITE_ANALYSIS_JOB_NAMESPACE, g.tenant_id, job_id, {
+        'status': 'queued',
+        'success': True,
+        'message': 'بدأ تحليل الموقع في الخلفية',
+        'payload': {'data': data, 'actor': actor},
+    })
+    threading.Thread(
+        target=_site_analysis_job_worker,
+        args=(current_app._get_current_object(), g.tenant_id, data, job_id),
+        daemon=True,
+    ).start()
     return jsonify({
         'success': True,
-        'fields': fields,
-        'mapPlaceholders': {},
-        'mapsDeferred': True,
-        'landmarks': nearby_items,
-        'landmarksMatrix': nearby_matrix,
-        'cityLandmarks': city_items,
-        'roads': roads,
-        'zooms': {},
-        'lat': lat,
-        'lng': lng,
-        'source': source,
-        'boundary': {
-            'status': 'verified_building' if polygon else 'needs_review',
-            'estimated': False,
-            'manual_edit_available': True,
-        },
-        'warning': None,
-        'landmarksWarning': diagnostics.get('nearby_landmarks_error') or diagnostics.get('nearby_landmarks_warning'),
-        'cityLandmarksWarning': diagnostics.get('city_landmarks_error') or diagnostics.get('city_landmarks_warning'),
-    })
+        'jobId': job_id,
+        'status': 'queued',
+        'message': 'بدأ تحليل الموقع في الخلفية',
+    }), 202
 
 
 @app.route('/api/site-analysis', methods=['POST'])

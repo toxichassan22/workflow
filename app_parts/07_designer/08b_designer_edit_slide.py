@@ -245,7 +245,13 @@ HTML الحالي:
             except Exception as progress_error:
                 app.logger.warning('[DESIGNER-EDIT] progress callback failed: %s', progress_error)
         try:
-            raw = extract_chat_content(call_text_chat(prompt, instruction, max_tokens=DESIGNER_EDIT_MAX_TOKENS, model=GEMINI_TEXT_MODEL, image_references=image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', project_data, presentation_id=presentation_id)), 'DESIGNER-EDIT')
+            # The streamed call can be cut mid-answer, so a stop saves the rest
+            # of the output instead of paying for all of it.
+            edit_response = run_control.raise_if_cancelled(call_text_chat_stream(
+                prompt, instruction, max_tokens=DESIGNER_EDIT_MAX_TOKENS, model=GEMINI_TEXT_MODEL,
+                image_references=image_refs, timeout=300,
+                usage_ctx=_usage_ctx('designer_chat', project_data, presentation_id=presentation_id)))
+            raw = extract_chat_content(edit_response, 'DESIGNER-EDIT')
             parsed = _designer_json_response(raw)
             output = parsed.get('html') or parsed.get('content') or parsed.get('slide_html')
             if not output and raw and '<div' in raw and 'slide' in raw:

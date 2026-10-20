@@ -765,7 +765,8 @@ def call_images_api(prompt, references=None, usage_ctx=None, model=None, timeout
         return _images_api_fail(
             {'message': run_control.CANCELLED_MESSAGE,
              'error_code': run_control.CANCELLED_ERROR_CODE,
-             'cancelled': True},
+             'cancelled': True,
+             'http_status': 409},
             log='[IMAGE ERROR] run cancelled before the provider call')
     # ISS-020: reference ownership is checked against the ctx tenant — the
     # worker threads these calls run on have no request context.

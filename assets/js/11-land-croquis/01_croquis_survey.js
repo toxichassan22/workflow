@@ -56,7 +56,8 @@
       showLoader(
         WFT('land.docs.analyzing', 'تحليل الكروكي والمستندات معًا'),
         WFT('land.docs.analyzing_wait', 'جاري تحليل الملفات واستخراج التنظيم والاتجاهات والإحداثيات...'),
-        10);
+        10,
+        { stoppable: true });
       try {
         updateLoaderProgress(25, 'جاري تجهيز بيانات الموقع والخرائط وملفات الاشتراطات كاملة...');
         let res = await api('POST', '/api/extract-croquis', {
@@ -77,6 +78,8 @@
         });
         if (res && res.jobId && !res.extractedData) {
           const jobId = res.jobId;
+          // The stop button reaches this analysis through its run handle.
+          registerTenantGenerationRun(jobId);
           updateLoaderProgress(35, res.message || 'بدأ التحليل في الخلفية...');
           const started = Date.now();
           while (Date.now() - started < 12 * 60 * 1000) {
@@ -87,9 +90,13 @@
               jobStatus === 'running' ? 55 : 40,
               (res && res.message) || 'جاري تحليل المستندات والاشتراطات...'
             );
-            if (jobStatus === 'completed' || jobStatus === 'failed' || (res && res.extractedData) || (res && res.failureReason)) break;
+            if (jobStatus === 'completed' || jobStatus === 'failed' || jobStatus === 'cancelled'
+              || (res && res.extractedData) || (res && res.failureReason)) break;
             if (!res || res.failureReason === 'job_not_found') break;
+            // The user stopped the analysis: stop waiting for it.
+            if (tenantGenerationStopRequested) break;
           }
+          releaseTenantGenerationRun(jobId);
         }
         updateLoaderProgress(55, 'تم تجهيز الموقع والخرائط؛ جاري قراءة المستندات والاشتراطات...');
         if (res.success && res.extractedData) {
@@ -496,14 +503,31 @@
         toast('أدخل رابط Google Maps صحيحًا فقط لموقع المشروع');
         return;
       }
-      showLoader('جاري تحليل الموقع', 'يتم جلب بيانات الموقع والطرق والمعالم فقط...');
+      showLoader('جاري تحليل الموقع', 'يتم جلب بيانات الموقع والطرق والمعالم فقط...', 10,
+        { stoppable: true });
       try {
-        const data = await apiWithTimeout('POST', '/api/analyze-site', {
+        let data = await apiWithTimeout('POST', '/api/analyze-site', {
           projectData: tenantProjectData,
           presentationId: tenantPresentationId,
           force: true,
           generateMaps: false
         }, 90000, 'انتهت مهلة تحليل بيانات الموقع؛ لم يتم توليد الخرائط بعد.');
+        if (data && data.jobId && !data.fields) {
+          // The sweep runs in a job: the stop button reaches it through the
+          // run handle, and the browser only polls for the answer.
+          const jobId = String(data.jobId);
+          registerTenantGenerationRun(jobId);
+          const started = Date.now();
+          while (Date.now() - started < 15 * 60 * 1000) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const job = await api('GET', '/api/site-analysis-jobs/' + encodeURIComponent(jobId));
+            updateLoaderProgress(60, (job && job.message) || 'جاري تحليل بيانات الموقع...');
+            if (job && (job.result || job.error)) { data = job.result || job; break; }
+            if (!job) break;
+            if (tenantGenerationStopRequested) break;
+          }
+          releaseTenantGenerationRun(jobId);
+        }
         if (!data || !data.success) {
           toast((data && data.error) || 'تعذر تحليل الموقع');
           return;

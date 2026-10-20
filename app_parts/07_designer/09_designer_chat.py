@@ -483,9 +483,13 @@ def api_designer_chat():
             pass
         else:
             try:
-                planner_raw = extract_chat_content(
-                    call_text_chat(planner_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=GEMINI_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
-                    'DESIGNER-PLANNER')
+                # The streamed planner can be cut mid-answer, so a stop saves
+                # the rest of the plan instead of paying for all of it.
+                planner_response = run_control.raise_if_cancelled(call_text_chat_stream(
+                    planner_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=GEMINI_TEXT_MODEL,
+                    image_references=user_image_refs, timeout=300,
+                    usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)))
+                planner_raw = extract_chat_content(planner_response, 'DESIGNER-PLANNER')
             except Exception as _planner_exc:
                 if _is_company_credit_error(_planner_exc):
                     return jsonify({'success': False,
@@ -562,7 +566,10 @@ def api_designer_chat():
                             history_note, focus_note, explicit_scope_note)
                         print(f"[DESIGNER-CHAT] retrying planner slim ({len(slim_prompt)} chars, was {len(planner_prompt)} chars)")
                         planner_raw = extract_chat_content(
-                            call_text_chat(slim_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=GEMINI_TEXT_MODEL, image_references=user_image_refs, timeout=300, usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)),
+                            run_control.raise_if_cancelled(call_text_chat_stream(
+                                slim_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS, model=GEMINI_TEXT_MODEL,
+                                image_references=user_image_refs, timeout=300,
+                                usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id))),
                             'DESIGNER-PLANNER')
                     except Exception as _slim_exc:
                         if _is_company_credit_error(_slim_exc):

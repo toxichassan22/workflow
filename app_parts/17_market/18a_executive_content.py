@@ -54,13 +54,13 @@ def api_generate_executive_content():
     try:
         for attempt in range(3):
             try:
-                response = call_text_chat(
+                response = run_control.raise_if_cancelled(call_text_chat_stream(
                     system_prompt, prompt, temperature=0.2,
                     max_tokens=cap,
                     reasoning_effort='low',
                     response_format={'type': 'json_object'},
                     usage_ctx=_usage_ctx('executive', data),
-                )
+                ))
                 if isinstance(response, dict) and 'error' in response:
                     msg = _chat_error_message(response)
                     affordable = _chat_affordable_tokens(response)

@@ -215,7 +215,7 @@ def _visual_concept_edit_result(data, slot_id):
                             usage_ctx=usage_ctx)
     if not image:
         error = last_images_api_error() or {}
-        if error.get('fatal') or error.get('error_code') in _FATAL_AI_ERROR_CODES:
+        if error.get('cancelled') or error.get('fatal') or error.get('error_code') in _FATAL_AI_ERROR_CODES:
             status = error.get('http_status') if isinstance(error.get('http_status'), int) else 503
             return {'success': False, 'error': _client_safe_llm_error(error.get('message') or ''),
                     'error_code': error.get('error_code') or 'IMAGE_FAILED'}, status

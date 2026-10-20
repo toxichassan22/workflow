@@ -947,10 +947,13 @@ def _run_market_summary_aggregator(system_prompt, prompt, usage_ctx,
             remaining = max(1, int(float(deadline) - time.time()))
             if remaining <= 1:
                 return {'error': {'message': 'deadline_exceeded'}}
-        result = call_text_chat(
+        # The streamed aggregator can be cut mid-answer, so a stop saves the
+        # rest of the summary instead of paying for all of it — and it is not
+        # retried, because a stopped run is final.
+        result = run_control.raise_if_cancelled(call_text_chat_stream(
             system_prompt, prompt, model=GEMINI_TEXT_MODEL,
             max_tokens=cap, reasoning_effort='medium',
-            timeout=min(300, remaining or 300), usage_ctx=usage_ctx)
+            timeout=min(300, remaining or 300), usage_ctx=usage_ctx))
         if _ai_fatal_error_dict(result) is not None:
             return result
         error = result.get('error') if isinstance(result, dict) else None

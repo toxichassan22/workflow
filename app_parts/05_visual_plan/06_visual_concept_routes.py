@@ -232,7 +232,7 @@ def api_visual_concept_plans_distribution():
     try:
         response = call_openrouter_chat(
             system_prompt, user_prompt, temperature=None, max_tokens=8000,
-            model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium',
+            model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='max',
             response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
         result = parse_json_object(_get_chat_response_text(response))
     except Exception:
@@ -337,7 +337,7 @@ def api_visual_concept_plans_distribution_check():
         try:
             response = call_openrouter_chat(
                 system_prompt, user_prompt, temperature=None, max_tokens=5000,
-                model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium',
+                model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='max',
                 response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
             parsed = parse_json_object(_get_chat_response_text(response))
         except Exception:
@@ -549,7 +549,7 @@ def _visual_concept_generate_image_result(data, slot_id):
                             usage_ctx=_usage_ctx('image', data))
     if not image:
         error = last_images_api_error() or {}
-        if error.get('fatal') or error.get('error_code') in _FATAL_AI_ERROR_CODES:
+        if error.get('cancelled') or error.get('fatal') or error.get('error_code') in _FATAL_AI_ERROR_CODES:
             status = error.get('http_status') if isinstance(error.get('http_status'), int) else 503
             return {'success': False, 'error': _client_safe_llm_error(error.get('message') or ''),
                     'error_code': error.get('error_code') or 'IMAGE_FAILED'}, status

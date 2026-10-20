@@ -15,13 +15,22 @@
         ? Number(pollOpts.intervalMs) : MARKET_JOB_POLL_INTERVAL_MS;
       const started = Date.now();
       let res = null;
-      while (Date.now() - started < budgetMs) {
-        await new Promise(resolve => setTimeout(resolve, intervalMs));
-        res = await api('GET', '/api/market-study/jobs/' + encodeURIComponent(jobId));
-        const status = String(res && res.status || '');
-        if (typeof onProgress === 'function') onProgress(res);
-        if (status === 'completed' || status === 'failed' || (res && res.failureReason)) break;
-        if (!res || res.failureReason === 'job_not_found') break;
+      // The stop button reaches this study through its run handle.
+      registerTenantGenerationRun(jobId);
+      try {
+        while (Date.now() - started < budgetMs) {
+          await new Promise(resolve => setTimeout(resolve, intervalMs));
+          res = await api('GET', '/api/market-study/jobs/' + encodeURIComponent(jobId));
+          const status = String(res && res.status || '');
+          if (typeof onProgress === 'function') onProgress(res);
+          if (status === 'completed' || status === 'failed' || status === 'cancelled'
+            || (res && res.failureReason)) break;
+          if (!res || res.failureReason === 'job_not_found') break;
+          // The user stopped the study: stop waiting for it.
+          if (tenantGenerationStopRequested) break;
+        }
+      } finally {
+        releaseTenantGenerationRun(jobId);
       }
       return res;
     }
@@ -150,7 +159,8 @@
       showLoader(
         mode === 'fill' ? 'إكمال بيانات المنافسين' : 'توليد المنافسين',
         'جاري البحث عن المنافسين من المصادر المعتمدة...',
-        12
+        12,
+        { stoppable: true }
       );
       try {
         let lastJobPct = 10;
@@ -302,7 +312,8 @@
         if (btn) btn.disabled = false;
         return;
       }
-      showLoader('توليد ملخص السوق', 'جاري البحث في المصادر الرسمية وكتابة الملخص التنفيذي...', 12);
+      showLoader('توليد ملخص السوق', 'جاري البحث في المصادر الرسمية وكتابة الملخص التنفيذي...', 12,
+        { stoppable: true });
       try {
         let lastJobPct = 10;
         const onProgress = job => {
@@ -368,7 +379,8 @@
       const currentSummary = marketSummaryState(priorState.summary);
       const currentSwot = { ...(priorState.swot || {}) };
       const currentOneBlock = String(priorState.one_block_summary || '').trim();
-      showLoader('استكمال ملخص السوق', 'جاري استكمال مراحل الدراسة المحفوظة...', 12);
+      showLoader('استكمال ملخص السوق', 'جاري استكمال مراحل الدراسة المحفوظة...', 12,
+        { stoppable: true });
       try {
         const onProgress = job => {
           const pct = Number(job && job.progress);

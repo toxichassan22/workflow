@@ -11,6 +11,7 @@ one company can never stop another company's run.
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -339,6 +340,128 @@ class RunControlRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409, body)
         self.assertEqual(body.get('error_code'), run_control.CANCELLED_ERROR_CODE)
         self.assertNotIn('slide', body)
+
+
+class RunControlJobTests(unittest.TestCase):
+    """The queued flows: the site analysis and the visual-concept image."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        cls.uploads_temp = tempfile.TemporaryDirectory(dir=ROOT)
+        db.DB_PATH = os.path.join(cls.temp_dir.name, 'run-control-jobs.db')
+
+        import app as application_module
+
+        cls.application_module = application_module
+        cls.app = application_module.app
+        cls.app.config.update(TESTING=True)
+        cls.previous_uploads = application_module.UPLOADS_DIR
+        cls.application_module.UPLOADS_DIR = os.path.join(cls.uploads_temp.name, 'uploads')
+
+        with cls.app.app_context():
+            db.init_db()
+            cls.tenant_id = db.create_tenant('Run Jobs Co', 'jobs@example.test', 'hash', 'run-jobs-co')
+
+        cls.token = auth.create_token(
+            cls.tenant_id, 'jobs@example.test', user_id=None, user_name='Jobs Admin',
+            user_role='company_admin',
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.application_module.UPLOADS_DIR = cls.previous_uploads
+        cls.temp_dir.cleanup()
+        cls.uploads_temp.cleanup()
+
+    def _headers(self):
+        return {'Authorization': f'Bearer {self.token}'}
+
+    def test_the_site_analysis_queues_a_job_the_stop_button_can_reach(self):
+        application_module = self.application_module
+        client = self.app.test_client()
+        with patch.object(application_module.maps_service, 'extract_coords_from_maps_link',
+                          return_value={'lat': 25.1, 'lng': 47.6}), \
+                patch.object(application_module, '_collect_site_fields',
+                             return_value=({'location_lat': 25.1}, [], [], [], [], [], None, {})):
+            response = client.post('/api/analyze-site', headers=self._headers(), json={
+                'projectData': {'location_address': 'https://www.google.com/maps/@25.1,47.6,17z'},
+                'generateMaps': False,
+                'background': True,
+            })
+            self.assertEqual(response.status_code, 202, response.get_json())
+            job_id = str(response.get_json().get('jobId') or '')
+            self.assertTrue(job_id, response.get_json())
+            # The job settles inside the patch, so the sweep never reaches the
+            # real Maps provider.
+            deadline = time.time() + 15
+            job = None
+            while time.time() < deadline:
+                job = application_module._read_job('.site_analysis_jobs', self.tenant_id, job_id)
+                if job and job.get('status') in ('completed', 'failed', 'cancelled'):
+                    break
+                time.sleep(0.1)
+        self.assertIsNotNone(job, 'the site analysis job never settled')
+        self.assertEqual(job.get('status'), 'completed', job)
+        # The handle is a run: the stop button can cancel it.
+        self.assertTrue(run_control.cancel_run(job_id, self.tenant_id))
+        self.assertTrue(run_control.is_run_cancelled(job_id, self.tenant_id))
+
+    def test_a_cancelled_visual_concept_image_never_reaches_the_provider(self):
+        application_module = self.application_module
+        run_id = 'vc-image-run-0001'
+        run_control.cancel_run(run_id, self.tenant_id)
+        run_control.bind_run(run_id, self.tenant_id)
+
+        def fake_post(*args, **kwargs):
+            raise AssertionError('the provider must not be called for a cancelled run')
+
+        try:
+            with patch.object(application_module, '_tenant_key_gate', return_value=None), \
+                    patch.object(application_module, '_has_any_openrouter_key', return_value=True), \
+                    patch.object(application_module, '_visual_concept_request_bundle',
+                                 return_value=({}, {'idea': 'فكرة'}, [])), \
+                    patch.object(application_module, '_visual_concept_cover_image', return_value=''), \
+                    patch.object(application_module, '_visual_concept_collect_generation_references',
+                                 return_value=[]), \
+                    patch.object(application_module, '_visual_concept_attach_style_reference_suffix',
+                                 return_value='وصف الصورة'), \
+                    patch.object(application_module.requests, 'post', side_effect=fake_post):
+                with self.app.app_context():
+                    result, status = application_module._visual_concept_generate_image_result(
+                        {'slotId': 'cover', 'prompt': 'وصف الصورة'}, 'cover')
+        finally:
+            run_control.unbind_run()
+        self.assertFalse(result.get('success'), result)
+        self.assertEqual(result.get('error_code'), run_control.CANCELLED_ERROR_CODE)
+
+    def test_a_cancelled_visual_concept_chat_never_reaches_the_provider(self):
+        application_module = self.application_module
+        run_id = 'vc-chat-run-0001'
+        run_control.cancel_run(run_id, self.tenant_id)
+        run_control.bind_run(run_id, self.tenant_id)
+
+        def fake_post(*args, **kwargs):
+            raise AssertionError('the provider must not be called for a cancelled run')
+
+        try:
+            with patch.object(application_module, '_tenant_key_gate', return_value=None), \
+                    patch.object(application_module, '_has_any_openrouter_key', return_value=True), \
+                    patch.object(application_module, '_visual_concept_request_bundle',
+                                 return_value=({}, {'idea': 'فكرة'}, [])), \
+                    patch.object(application_module, '_visual_concept_cover_image', return_value=''), \
+                    patch.object(application_module, '_visual_concept_collect_generation_references',
+                                 return_value=[]), \
+                    patch.object(application_module, '_visual_concept_edit_reference_uris',
+                                 return_value=[]), \
+                    patch.object(application_module, '_visual_concept_generate_prompt_text',
+                                 side_effect=AssertionError('the provider must not be called')), \
+                    patch.object(application_module.requests, 'post', side_effect=fake_post):
+                result, status = application_module._visual_concept_chat_result(
+                    {'slotId': 'cover', 'message': 'اجعلها ليلية'}, 'cover')
+        finally:
+            run_control.unbind_run()
+        self.assertFalse(result.get('success'), result)
 
 
 def _frontend_text(application_module):
