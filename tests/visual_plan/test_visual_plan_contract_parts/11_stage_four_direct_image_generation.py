@@ -44,7 +44,7 @@ class VisualPlanContractTestsPart11(VisualPlanContractBase):
 
         self.assertTrue(result['success'])
         self.assertEqual(result['image'], '/uploads/creative/uses.png')
-        self.assertEqual(result['engine'], 'image_generation')
+        self.assertEqual(result['engine'], 'svg_stacking')
         self.assertEqual(captured['references'], [])
         self.assertIn('VERTICAL PROGRAM DISTRIBUTION', captured['prompt'])
 
@@ -85,7 +85,7 @@ class VisualPlanContractTestsPart11(VisualPlanContractBase):
 
         self.assertTrue(result['success'])
         self.assertEqual(result['image'], '/uploads/creative/massing.png')
-        self.assertEqual(result['engine'], 'image_generation')
+        self.assertEqual(result['engine'], 'svg_massing')
         self.assertIn('/uploads/creative/tenant/plan_site.svg', captured['references'])
         self.assertIn('STRICT COMPOSITION', captured['prompt'])
         self.assertIn('Plan 1', captured['prompt'])
@@ -132,3 +132,103 @@ class VisualPlanContractTestsPart11(VisualPlanContractBase):
         self.assertIn('VERTICAL PROGRAM DISTRIBUTION', uses_res.get('prompt', ''))
         self.assertTrue(massing_res.get('success'))
         self.assertIn('CONCEPTUAL MASSING', massing_res.get('prompt', ''))
+
+    def test_stage_four_render_handles_string_visual_concept_in_project_data(self):
+        module = self.application_module
+        # Case 1: visual_concept as a serialized JSON string
+        data_json_str = {
+            'projectData': {
+                'visual_concept': json.dumps({
+                    'slots': {
+                        'plan_site': {'imageUrl': '/uploads/creative/tenant/plan_site.svg'},
+                    }
+                })
+            },
+            'plansWorkflow': {
+                'prompts': {'massing': 'Prompt for massing'},
+            }
+        }
+        captured = {}
+        def fake_call_images_api(prompt, references=None, **kwargs):
+            captured['prompt'] = prompt
+            captured['references'] = list(references or [])
+            return 'data:image/png;base64,fakeimage'
+
+        with patch.object(module, 'call_images_api', side_effect=fake_call_images_api), \
+                patch.object(module, '_visual_concept_reference_uris', side_effect=lambda urls, **kwargs: urls), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/massing.png'), \
+                patch.object(module, '_visual_concept_edit_base_image', return_value=''):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                result = module._visual_plan_render_response(data_json_str, 'plan_massing')
+
+        self.assertTrue(result['success'])
+        self.assertIn('/uploads/creative/tenant/plan_site.svg', captured['references'])
+
+        # Case 2: visual_concept as a non-JSON string (must not crash with AttributeError)
+        data_plain_str = {
+            'projectData': {
+                'visual_concept': 'some plain string status'
+            },
+            'plansWorkflow': {
+                'prompts': {'massing': 'Prompt for massing'},
+            }
+        }
+        with patch.object(module, 'call_images_api', side_effect=fake_call_images_api), \
+                patch.object(module, '_visual_concept_reference_uris', side_effect=lambda urls, **kwargs: urls), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/massing.png'), \
+                patch.object(module, '_visual_concept_edit_base_image', return_value=''):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                result2 = module._visual_plan_render_response(data_plain_str, 'plan_massing')
+
+        self.assertTrue(result2['success'])
+
+    def test_plan_massing_generates_svg_with_sol_model(self):
+        module = self.application_module
+        project = self.project()
+        workflow = {
+            'distribution': {
+                'approved': True,
+                'rows': [
+                    {'building': 'Tower A', 'floor_range': '1-10', 'component': 'Offices'},
+                ]
+            }
+        }
+        data = {'projectData': project, 'plansWorkflow': workflow}
+        fake_svg = '<svg viewBox="0 0 1600 1000"><polygon points="100,100 200,100 200,200" fill="#93C5FD"/></svg>'
+        with patch.object(module, 'call_openrouter_chat', return_value={'choices': [{'message': {'content': fake_svg}}]}), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/massing.svg'), \
+                patch.object(module, '_visual_concept_edit_base_image', return_value=''):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                result = module._visual_plan_render_response(data, 'plan_massing')
+
+        self.assertTrue(result['success'])
+        self.assertEqual(result['image'], '/uploads/creative/massing.svg')
+        self.assertEqual(result['model'], module.VISUAL_PLAN_MASSING_MODEL)
+        self.assertEqual(result['engine'], 'svg_massing')
+        self.assertIn('<polygon', result['svgCode'])
+
+    def test_plan_massing_edit_svg_updates_with_instruction(self):
+        module = self.application_module
+        project = self.project()
+        data = {
+            'projectData': project,
+            'plansWorkflow': {},
+            'message': 'Make the tower 20 floors instead of 10',
+            'currentSvg': '<svg viewBox="0 0 1600 1000"><rect width="100" height="100"/></svg>',
+        }
+        updated_svg = '<svg viewBox="0 0 1600 1000"><rect width="100" height="200" fill="#93C5FD"/></svg>'
+        with patch.object(module, 'call_openrouter_chat', return_value={'choices': [{'message': {'content': updated_svg}}]}), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/massing_v2.svg'):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                result = module._visual_plan_edit_diagram(data, 'plan_massing', 'massing')
+
+        self.assertTrue(result['success'])
+        self.assertEqual(result['image'], '/uploads/creative/massing_v2.svg')
+        self.assertEqual(result['engine'], 'svg_massing')
+        self.assertIn('<rect width="100" height="200"', result['svgCode'])
+
+

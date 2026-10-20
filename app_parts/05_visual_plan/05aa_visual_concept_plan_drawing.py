@@ -352,9 +352,10 @@ def _visual_concept_plan_site_body(context, model, regulations):
 
 def _visual_concept_plan_uses_body(context, model, regulations):
     parts = [
-        "DRAWING REQUESTED — 'VERTICAL PROGRAM DISTRIBUTION': a clean vertical stacked-floor "
-        'diagram of the approved distribution on a white background, same pastel style and fixed '
-        'color code. ']
+        "DRAWING REQUESTED — 'VERTICAL PROGRAM DISTRIBUTION': generate clean standalone SVG markup "
+        '(<svg viewBox="0 0 1600 1000" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">) '
+        'for a clean vertical stacked-floor diagram of the approved distribution on a white background, '
+        'same pastel style and fixed color code. ']
     if model:
         stacks = []
         tower_bits = []
@@ -418,7 +419,8 @@ def _visual_concept_plan_uses_body(context, model, regulations):
         'Every word in the drawing is English — the title, the legend chips, the band labels, the '
         'callout labels, the annotations and the caption. Never write Arabic characters: a '
         'recorded Arabic name is written as its English equivalent, and where there is no English '
-        'equivalent the label is left out.')
+        'equivalent the label is left out. Output ONLY valid standalone raw SVG code starting '
+        'with <svg and ending with </svg> — no markdown fences, no explanation.')
     return ''.join(parts)
 
 
@@ -476,7 +478,8 @@ def _visual_concept_plan_massing_body(context, model, regulations):
         'Every word in the drawing is English — the title, the legend chips, the callout labels, '
         'the edge labels, the annotations and the caption. Never write Arabic characters: a '
         'recorded Arabic name is written as its English equivalent, and where there is no English '
-        'equivalent the label is left out.')
+        'equivalent the label is left out. Output ONLY valid standalone raw SVG code starting '
+        'with <svg and ending with </svg> — no markdown fences, no explanation.')
     return ''.join(parts)
 
 

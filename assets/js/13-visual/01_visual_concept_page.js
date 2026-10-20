@@ -597,6 +597,7 @@
           if (response.scene?.token) liveSlot().sceneToken = response.scene.token;
         }
         if (sitePlan) applyVisualConceptSiteAssistantResponse(response);
+        if (response.svgCode) liveSlot().svgCode = response.svgCode;
         liveSlot().prompt = response.prompt || liveSlot().prompt;
         liveSlot().imageUrl = visualConceptImageUrl(response.image);
         liveSlot().approvedImageUrl = '';
@@ -819,6 +820,9 @@
           payload.planAssistantAction = editImage ? 'edit' : 'chat';
           payload.siteSvgCode = liveSlot().svgCode || '';
         }
+        if ((slotId === 'plan_uses' || slotId === 'plan_massing') && liveSlot().svgCode) {
+          payload.svgCode = liveSlot().svgCode;
+        }
         if (planWorkflowSlot && !sitePlan) visualConceptPlanScenePending = true;
         const response = sitePlan
           ? await visualConceptPlanJobApi('POST', '/api/visual-concept/site-plan-assistant', payload)
@@ -862,6 +866,7 @@
             receiveVisualConceptPlanScene(response.scene, slotId);
             if (response.scene?.token) liveSlot().sceneToken = response.scene.token;
           }
+          if (response.svgCode) liveSlot().svgCode = response.svgCode;
           liveSlot().imageUrl = visualConceptImageUrl(response.image);
           liveSlot().approvedImageUrl = '';
           liveSlot().status = 'review';

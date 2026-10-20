@@ -560,18 +560,17 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertEqual(render.status_code, 200, render.get_json())
         body = render.get_json()
         self.assertEqual(body['image'], '/uploads/creative/plan.png')
-        self.assertEqual(body['model'], module.VISUAL_CONCEPT_IMAGE_MODEL)
+        self.assertEqual(body['model'], module.VISUAL_PLAN_USES_MODEL)
         image_call.assert_called_once()
         pil_render.assert_not_called()
         sent_prompt = image_call.call_args.args[0]
         self.assertIn('DRAWING REQUESTED', sent_prompt)
-        self.assertIn('true surveyed parcel boundary', sent_prompt)
+        self.assertIn('VERTICAL PROGRAM DISTRIBUTION', sent_prompt)
         self.assertNotIn('layout render', sent_prompt)
-        self.assertEqual(image_call.call_args.kwargs.get('model'), module.VISUAL_CONCEPT_IMAGE_MODEL)
+        self.assertEqual(image_call.call_args.kwargs.get('model'), module.VISUAL_PLAN_USES_MODEL)
         references = image_call.call_args.args[1]
-        # No scene render is attached — the surveyed parcel outline is the
-        # only geometry reference the illustration may trace.
-        self.assertEqual(references, ['ref:parcel'])
+        # Uses is a vertical floor stacking diagram, so it attaches no parcel boundary
+        self.assertEqual(references, [])
 
         with patch.object(module, 'call_images_api', return_value=None), \
                 patch.object(module, 'last_images_api_error', return_value=None), \

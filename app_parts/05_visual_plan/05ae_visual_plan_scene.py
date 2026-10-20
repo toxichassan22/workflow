@@ -799,7 +799,14 @@ def _visual_plan_dependency_images(data, workflow, kind):
     receive Plan 1 only and had to invent the floor stacking itself.
     """
     posted = data.get('planImages') if isinstance(data.get('planImages'), dict) else {}
-    project_slots = ((data.get('projectData') or {}).get('visual_concept') or {}).get('slots') or {}
+    project_data = data.get('projectData') if isinstance(data.get('projectData'), dict) else {}
+    vc = project_data.get('visual_concept')
+    if isinstance(vc, str):
+        try:
+            vc = json.loads(vc)
+        except Exception:
+            vc = {}
+    project_slots = vc.get('slots') if isinstance(vc, dict) and isinstance(vc.get('slots'), dict) else {}
     workflow_slots = workflow.get('slots') if isinstance(workflow.get('slots'), dict) else {}
     found = []
     for dependency in _VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ()):
@@ -808,8 +815,12 @@ def _visual_plan_dependency_images(data, workflow, kind):
             raw = raw.get('approvedImageUrl') or raw.get('imageUrl')
         url = str(raw or '').strip()
         if not url:
-            slot = workflow_slots.get(f'plan_{dependency}') or {}
-            draft_slot = project_slots.get(f'plan_{dependency}') or {}
+            slot = workflow_slots.get(f'plan_{dependency}') if isinstance(workflow_slots, dict) else {}
+            if not isinstance(slot, dict):
+                slot = {}
+            draft_slot = project_slots.get(f'plan_{dependency}') if isinstance(project_slots, dict) else {}
+            if not isinstance(draft_slot, dict):
+                draft_slot = {}
             url = str(slot.get('approvedImageUrl') or slot.get('imageUrl')
                       or draft_slot.get('approvedImageUrl') or draft_slot.get('imageUrl')
                       or '').strip()
@@ -855,67 +866,24 @@ def _visual_plan_render_response(data, slot_id):
                 'model': model_used, 'geometryMode': 'surveyed_xy_schematic_z',
                 'referenceCount': reference_count}
 
-    # Stage 4 diagrams (uses and massing): direct image generation from stage 2 distribution
-    context = _visual_plan_prompt_context(data)
-    prompt = _visual_plan_slot_prompt(workflow, kind, context)
-    base_image = _visual_concept_edit_base_image(data, g.tenant_id)
-    references = [base_image] if base_image else []
-    scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
-
-    boundary_points = ((workflow.get('boundary') or {}).get('points')
-                       or context.get('boundary_points')
-                       or (scene.get('contract') or {}).get('geometry', {}).get('surveyPoints') if isinstance(scene, dict) else None)
-    if boundary_points:
-        try:
-            boundary_url = _visual_concept_render_plan_boundary_reference(boundary_points, g.tenant_id)
-            if boundary_url:
-                for uri in _visual_concept_reference_uris(urls=[boundary_url], tenant_id=g.tenant_id):
-                    if uri not in references:
-                        references.append(uri)
-        except Exception:
-            pass
-
-    outline_text = ('The attached outline is the true surveyed parcel boundary — trace it exactly and '
-                    'draw only the buildings, entries and open areas the prompt describes, nothing else.')
-
     if kind == 'uses':
-        image_prompt = (prompt
-            + ('\nThe first attached image is the current approved illustration of this diagram — '
-               'keep its look and every unrequested detail identical.\n' if base_image else '\n')
-            + outline_text)
-    else:
-        dependency_kinds = list(_VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ()))
-        dependency_images = _visual_plan_dependency_images(data, workflow, kind)
-        for dependency_image in dependency_images:
-            dependency_uris = _visual_concept_reference_uris(
-                urls=[dependency_image], tenant_id=g.tenant_id)
-            for dependency_uri in dependency_uris:
-                if dependency_uri not in references:
-                    references.append(dependency_uri)
+        context = _visual_plan_prompt_context(data)
+        prompt = _visual_plan_slot_prompt(workflow, kind, context)
+        base_image = _visual_concept_edit_base_image(data, g.tenant_id)
+        image, reference_count, model_used, svg_code = _visual_plan_render_uses_svg(prompt, data, base_image=base_image)
+        return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
+                'svgCode': svg_code, 'prompt': prompt, 'scene': None, 'engine': 'svg_stacking',
+                'model': model_used, 'referenceCount': reference_count}
 
-        image_prompt = (prompt
-            + ('\nThe first attached image is the current approved illustration of this plan — '
-               'keep its look and every unrequested detail identical.\n' if base_image else '\n')
-            + _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=bool(base_image))
-            + outline_text)
-
-    image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
-                            timeout=_visual_plan_job_call_timeout(180),
-                            usage_ctx=_usage_ctx('image', data))
-    if not image:
-        err = last_images_api_error() or {}
-        if err.get('fatal') or err.get('error_code') in _FATAL_AI_ERROR_CODES:
-            raise FatalAICallError(err.get('message'), error_code=err.get('error_code'),
-                                   http_status=err.get('http_status'),
-                                   provider_message=err.get('provider_message'))
-        raise visual_plan_geometry.PlanGeometryError(
-            _client_safe_llm_error(err.get('message') or 'تعذر توليد صورة المخطط.'),
-            'PLANS_PROVIDER_FAILED')
-
-    return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
-            'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry' if scene else 'image_generation',
-            'model': VISUAL_CONCEPT_IMAGE_MODEL,
-            'referenceCount': len(references)}
+    if kind == 'massing':
+        context = _visual_plan_prompt_context(data)
+        prompt = _visual_plan_slot_prompt(workflow, kind, context)
+        base_image = _visual_concept_edit_base_image(data, g.tenant_id)
+        scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
+        image, reference_count, model_used, svg_code = _visual_plan_render_massing_svg(prompt, data, base_image=base_image)
+        return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
+                'svgCode': svg_code, 'prompt': prompt, 'scene': scene, 'engine': 'svg_massing',
+                'model': model_used, 'referenceCount': reference_count}
 
 
 def _visual_plan_edit_scene(data, slot_id):

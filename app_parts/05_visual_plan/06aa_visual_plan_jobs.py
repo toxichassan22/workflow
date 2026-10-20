@@ -129,6 +129,10 @@ def _visual_plan_report_site_chat_timing(name, started_at):
 
 
 def _visual_plan_edit_diagram(data, slot_id, kind_type):
+    if kind_type == 'uses':
+        return _visual_plan_edit_uses_svg(data, slot_id)
+    if kind_type == 'massing':
+        return _visual_plan_edit_massing_svg(data, slot_id)
     instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
     if not instruction:
         raise visual_plan_geometry.PlanGeometryError('طلب تعديل المخطط غير متوفر.', 'MESSAGE_REQUIRED')
@@ -225,7 +229,9 @@ def _visual_plan_execute(kind, data, slot_id=''):
             result = {'success': True, 'notesReview': review, 'primaryFrontage': frontage}
         elif kind == 'edit':
             kind_type = _visual_concept_plan_kind(slot_id)
-            if kind_type in ('uses', 'massing'):
+            if kind_type == 'uses':
+                result = _visual_plan_edit_uses_svg(data, slot_id)
+            elif kind_type == 'massing':
                 result = _visual_plan_edit_diagram(data, slot_id, kind_type)
             else:
                 result = _visual_plan_edit_scene(data, slot_id)
@@ -261,7 +267,7 @@ def _visual_plan_execute(kind, data, slot_id=''):
         if fatal is not None:
             response = app.make_response(fatal)
             return response.get_json(), response.status_code
-        app.logger.warning('Visual plan operation failed: %s', type(error).__name__)
+        app.logger.warning('Visual plan operation failed: %s: %s', type(error).__name__, error, exc_info=True)
         return {'success': False,
                 'error': 'تعذرت معالجة ' + _visual_plan_job_subject(kind) + '.',
                 'error_code': 'PLANS_PROVIDER_FAILED'}, 503
