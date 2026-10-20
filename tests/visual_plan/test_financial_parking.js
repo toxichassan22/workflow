@@ -384,3 +384,54 @@ test('land shares are capped by the building footprint area', () => {
   assert.equal(ok.landShareExceeded, false);
   assert.equal(ok.valid, true);
 });
+
+test('the discard action only shows while a proposal exists and removes it upon confirmation', async () => {
+  const f = fixture();
+  const discard = { hidden: true, textContent: 'حذف اقتراح المواقف', disabled: false };
+  const approve = { hidden: true, textContent: '', disabled: false };
+  const byId = f.context.document.getElementById;
+  f.context.document.getElementById = id => id === 'financialParkingPanel' ? {}
+    : id === 'financialParkingDiscard' ? discard
+    : id === 'financialParkingApprove' ? approve
+    : id === 'financialParkingStatus' ? { textContent: '' }
+    : byId(id);
+  f.context.renderFinancialParking();
+  assert.equal(discard.hidden, true);
+
+  const plan = f.proposal(true);
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  f.add(plan.components[0]);
+  f.inputs.basementArea.value = '3900';
+  f.context.renderFinancialParking();
+  assert.equal(discard.hidden, false);
+  assert.equal(f.rows.length, 3);
+
+  let confirmed = false;
+  f.context.confirm = () => confirmed;
+  f.context.api = async () => { throw new Error('should not call api'); };
+  assert.equal(await f.context.discardFinancialParking(), false);
+
+  confirmed = true;
+  const calls = [];
+  f.context.api = async (method, url, body) => {
+    calls.push({ method, url, body: plain(body) });
+    return {
+      success: true, draftId: 'draft-1', revision: 2,
+      financialModel: {
+        inputs: { basementArea: 600 },
+        dynamicRows: { components: [] }
+      }
+    };
+  };
+
+  const result = await f.context.discardFinancialParking();
+  assert.equal(result, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /parking\/discard/);
+  assert.equal(calls[0].body.planId, 'plan-1');
+  assert.equal(f.rows.length, 2);
+  assert.equal(f.inputs.basementArea.value, '600');
+  assert.equal(f.context.tenantProjectData.financial_study_model.parkingPlan, undefined);
+  assert.equal(f.context.financialParkingError(), '');
+  assert.equal(discard.hidden, true);
+});

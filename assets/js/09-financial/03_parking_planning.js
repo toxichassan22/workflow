@@ -110,6 +110,7 @@
         <div class="financial-parking-header"><h4 id="financialParkingTitle">المواقف المقترحة</h4>
           <div class="financial-parking-actions">
             <button type="button" id="financialParkingSuggest" class="btn ghost" onclick="suggestFinancialParking()">اقتراح المواقف بالذكاء الاصطناعي</button>
+            <button type="button" id="financialParkingDiscard" class="btn ghost" data-section-lock-ignore="1" onclick="discardFinancialParking()" hidden>حذف اقتراح المواقف</button>
             <button type="button" id="financialParkingApprove" class="btn primary" data-section-lock-ignore="1" onclick="approveFinancialParking()" hidden>اعتماد اقتراح المواقف</button>
           </div></div>
         <div id="financialParkingStatus" class="tenant-hint financial-parking-status" role="status" aria-live="polite"></div>
@@ -186,6 +187,11 @@
       if (notes) notes.value = noteLines.map(financialParkingText).join('\n');
       const notesWrap = document.getElementById('financialParkingNotesWrap');
       if (notesWrap) notesWrap.hidden = !noteLines.length;
+      const discard = document.getElementById('financialParkingDiscard');
+      if (discard) {
+        discard.hidden = !plan.id;
+        discard.disabled = financialParkingBusy || presentationMode || sectionLocked;
+      }
       const approve = document.getElementById('financialParkingApprove');
       if (approve) {
         approve.hidden = !plan.id;
@@ -268,6 +274,7 @@
           const plan = financialParkingPlan();
           const body = { draftId, expectedRevision: tenantDraftRevision };
           if (action === 'approval') Object.assign(body, { planId: plan.id, approved: !plan.approved });
+          else if (action === 'discard') Object.assign(body, { planId: plan.id });
           const response = await parkingApi('POST', '/api/financial-study/parking/' + action, body,
             action === 'suggest' ? 180000 : 60000);
           if (!response?.success) {
@@ -297,6 +304,10 @@
 
     function suggestFinancialParking() { return runFinancialParkingAction('suggest'); }
     function approveFinancialParking() { return runFinancialParkingAction('approval'); }
+    function discardFinancialParking() {
+      if (typeof confirm === 'function' && !confirm(financialParkingText('حذف اقتراح المواقف ومكوناته المولدة؟'))) return Promise.resolve(false);
+      return runFinancialParkingAction('discard');
+    }
 
     document.addEventListener('wf:lang', () => renderFinancialParking());
     document.addEventListener('input', event => {
