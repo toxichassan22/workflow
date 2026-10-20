@@ -534,11 +534,7 @@
       sections.forEach(sec => {
         if (sec.dataset.underConstruction === '1') return;
         const key = sec.dataset.section;
-        if (key === 'section-best-use' && typeof bestUseSectionRequired === 'function') {
-          if (!bestUseSectionRequired()) return;
-          const error = bestUseSectionError();
-          if (error) { bestUseBlocked = true; toast(error); return; }
-        }
+        if (key === 'section-best-use') return;
         if (key === 'location') {
           if (!tenantProjectData.site_analysis_approved
               || !String(tenantProjectData.site_analysis || '').trim()

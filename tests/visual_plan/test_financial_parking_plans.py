@@ -189,6 +189,43 @@ class FinancialParkingPlanTests(unittest.TestCase):
         titles = [s.get('title') for s in normalized.get('slides', [])]
         self.assertNotIn('المواقف المقترحة', titles)
 
+    def test_presentation_plan_normalizer_drops_best_use_slides(self):
+        import slide_engine
+        plan = {
+            'slides': [
+                {'title': 'الغلاف', 'type': 'cover'},
+                {'title': 'أفضل استخدامات للأرض', 'type': 'content', 'section_key': 'section-best-use'},
+                {'title': 'الاستخدام الأمثل للمشروع', 'type': 'content', 'section_key': 'overview'},
+                {'title': 'Best Use Analysis', 'type': 'content', 'section_key': 'best_use'},
+                {'title': 'الخاتمة', 'type': 'closing'},
+            ]
+        }
+        normalized = slide_engine.normalize_presentation_plan(plan, {'project_name': 'تجربة'}, {})
+        titles = [s.get('title') for s in normalized.get('slides', [])]
+        self.assertNotIn('أفضل استخدامات للأرض', titles)
+        self.assertNotIn('الاستخدام الأمثل للمشروع', titles)
+        self.assertNotIn('Best Use Analysis', titles)
+
+    def test_build_project_facts_excludes_best_use_keys(self):
+        import slide_engine
+        project = {
+            'project_name': 'مشروع اختباري',
+            'city': 'الرياض',
+            'best_use_data': {'proposal': 'توزيع تجاري'},
+            'best_use_chat': {'messages': [{'role': 'user', 'content': 'سؤال'}]},
+            'best_use_mode': 'explore',
+            'best_use_explore_data': {'concepts': [{'id': 'c1'}]},
+            'best_use_explore_chat': {'land': []},
+        }
+        facts = slide_engine.build_project_facts(project)
+        self.assertIn('مشروع اختباري', facts)
+        self.assertNotIn('best_use_data', facts)
+        self.assertNotIn('best_use_chat', facts)
+        self.assertNotIn('best_use_mode', facts)
+        self.assertNotIn('best_use_explore_data', facts)
+        self.assertNotIn('best_use_explore_chat', facts)
+        self.assertNotIn('توزيع تجاري', facts)
+
 
 if __name__ == '__main__':
     unittest.main()

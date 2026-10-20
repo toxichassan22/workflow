@@ -945,9 +945,13 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
                 continue
             item['type'] = 'content'
             item['design_style'] = 'image'
+        slide_title = str(item.get('title') or '').strip()
+        lower_title = slide_title.lower()
+        if (section_key in ('best_use', 'best-use', 'section-best-use')
+                or any(term in slide_title for term in ('أفضل استخدام', 'الاستخدام الأمثل'))
+                or any(term in lower_title for term in ('best use', 'best-use'))):
+            continue
         if section_key == 'financial':
-            slide_title = str(item.get('title') or '').strip()
-            lower_title = slide_title.lower()
             if any(term in slide_title for term in ('المواقف المقترحة', 'اقتراح المواقف')) or any(term in lower_title for term in ('proposed parking', 'parking proposal')):
                 continue
         signature = (section_key,) + _plan_slide_signature(item)
@@ -1415,6 +1419,7 @@ PROMPT_INTERNAL_KEYS = {
     'draftId', 'draft_id', 'sectionStatuses', 'site_analysis_approved',
     'conceptual_plans', 'land_documents_files', 'land_photos', 'project_logo',
     'land_use_status',
+    'best_use_data', 'best_use_chat', 'best_use_mode', 'best_use_explore_data', 'best_use_explore_chat',
     # Working and run state stored on the draft — bookkeeping, never facts.
     'draftHistory', 'tenantArchiveCache', 'slide_generation_checkpoint',
     'schema_version',

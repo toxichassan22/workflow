@@ -123,7 +123,8 @@ def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requ
                     'section_statuses': statuses}
         prior_status = norm
     else:
-        expired = expired_approved_sections(tenant_id, draft_id)
+        expired = [key for key in expired_approved_sections(tenant_id, draft_id)
+                   if key != 'section-best-use']
         if expired:
             return {'error': 'section_version_expired', 'sections': expired}
         if norm == 'generated_draft':
@@ -131,7 +132,8 @@ def create_generation_approval(tenant_id, draft_id, estimate, requested_by, requ
             prior_status = 'generated_draft'
         elif norm in {'draft', 'sections_in_progress', 'section_approval_pending',
                       'rejected_for_revision', 'sections_approved'}:
-            if statuses and any(value != 'approved' for value in statuses.values()):
+            required_statuses = {k: v for k, v in statuses.items() if k != 'section-best-use'}
+            if required_statuses and any(value != 'approved' for value in required_statuses.values()):
                 return {'error': 'sections_not_approved', 'section_statuses': statuses}
             prior_status = 'sections_approved'
             if norm != 'sections_approved':
@@ -200,15 +202,17 @@ def decide_generation_approval(tenant_id, approval_id, decision, decided_by, dec
         # tracked section of the draft.
         draft = get_project_draft_by_id(tenant_id, row['draft_id'])
         statuses = (draft or {}).get('section_statuses') or {}
+        required_statuses = {k: v for k, v in statuses.items() if k != 'section-best-use'}
         if section_scope:
             if statuses.get(section_scope) != 'approved':
                 return {'error': 'section_not_approved', 'section': section_scope,
                         'section_statuses': statuses}
-        elif statuses and any(value != 'approved' for value in statuses.values()):
+        elif required_statuses and any(value != 'approved' for value in required_statuses.values()):
             return {'error': 'sections_not_approved', 'section_statuses': statuses}
         # d05: an approval that expired while the request waited is no
         # longer a gate the run can rely on.
-        expired = expired_approved_sections(tenant_id, row['draft_id'])
+        expired = [key for key in expired_approved_sections(tenant_id, row['draft_id'])
+                   if key != 'section-best-use']
         if section_scope:
             expired = [key for key in expired if key == section_scope]
         if expired:

@@ -484,6 +484,25 @@ class BestUseApiTests(unittest.TestCase):
         self.assertEqual(saved.status_code, 200, saved.get_json())
         self.assertNotIn('section-best-use', self.draft()['section_statuses'])
 
+    def test_unapproved_best_use_proposal_does_not_block_presentation_generation_approval(self):
+        result, _ = self.generate()
+        self.assertFalse(result['bestUse'].get('approved'))
+        with self.app.app_context():
+            estimate = db.estimate_generation_cost(self.tenant, draft_id=self.draft_id, slides_count=10)
+            approval = db.create_generation_approval(
+                self.tenant, self.draft_id, estimate, 'user-1', 'المستخدم',
+                input_snapshot={'draft_hash': 'h1', 'captured_at': '2026-10-20', 'slides_count': 10,
+                                'units': 1, 'unit_prices': {}, 'estimated_cost_usd': 1, 'estimated_points': 1})
+            self.assertNotIn('error', approval)
+            self.assertEqual(approval.get('status'), 'pending')
+
+    def test_unapproved_best_use_proposal_does_not_block_request_project_draft_approval(self):
+        result, _ = self.generate()
+        self.assertFalse(result['bestUse'].get('approved'))
+        response = self.client.post('/api/project-draft/request-approval', headers=self.headers,
+                                    json={'draftId': self.draft_id})
+        self.assertEqual(response.status_code, 200, response.get_json())
+
 
 if __name__ == '__main__':
     unittest.main()

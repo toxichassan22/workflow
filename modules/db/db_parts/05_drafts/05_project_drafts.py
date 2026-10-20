@@ -1515,9 +1515,11 @@ def request_project_draft_approval(tenant_id, user_id, requested_by, requested_b
         # A draft already past the section gate cannot be re-submitted through it.
         return {'error': 'invalid_transition', 'current_status': norm}
     statuses = draft.get('section_statuses', {})
-    if not statuses or any(value != 'approved' for value in statuses.values()):
+    required_statuses = {k: v for k, v in statuses.items() if k != 'section-best-use'}
+    if not required_statuses or any(value != 'approved' for value in required_statuses.values()):
         return {'error': 'sections_not_approved', 'section_statuses': statuses}
-    expired = expired_approved_sections(tenant_id, draft['id'])
+    expired = [key for key in expired_approved_sections(tenant_id, draft['id'])
+               if key != 'section-best-use']
     if expired:
         return {'error': 'section_version_expired', 'sections': expired}
     conn = get_db()
@@ -1563,9 +1565,11 @@ def review_project_draft(tenant_id, draft_id, review_status, reviewed_by, review
         # The project-level approve cannot stand in for missing section
         # approvals — every tracked section must hold a valid approval first.
         statuses = draft.get('section_statuses') or {}
-        if statuses and any(value != 'approved' for value in statuses.values()):
+        required_statuses = {k: v for k, v in statuses.items() if k != 'section-best-use'}
+        if required_statuses and any(value != 'approved' for value in required_statuses.values()):
             return {'error': 'sections_not_approved', 'section_statuses': statuses}
-        expired = expired_approved_sections(tenant_id, draft_id)
+        expired = [key for key in expired_approved_sections(tenant_id, draft_id)
+                   if key != 'section-best-use']
         if expired:
             return {'error': 'section_version_expired', 'sections': expired}
         target = 'sections_approved'
