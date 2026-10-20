@@ -702,6 +702,27 @@ def get_project_draft_by_id(tenant_id, draft_id):
     return _hydrate_project_draft(row)
 
 
+def get_project_draft_state(tenant_id, draft_id):
+    """The light state of a project file: no payload is read or parsed.
+
+    The live poll runs every few seconds per open workspace, so it must not
+    pay for a multi-megabyte ``draft_data`` parse to learn one revision
+    number. The access check the caller needs (owner and tenant) is on the
+    row itself, so the caller can still decide who may follow the file.
+    """
+    conn = get_db()
+    row = conn.execute(
+        'SELECT id, tenant_id, user_id, revision, updated_at, section_statuses '
+        'FROM project_drafts WHERE id = ? AND tenant_id = ?',
+        (draft_id, tenant_id)
+    ).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    result['section_statuses'] = _json_object(result.get('section_statuses'))
+    return result
+
+
 def delete_project_draft_by_id(tenant_id, draft_id):
     """Delete a specific project draft by ID."""
     conn = get_db()

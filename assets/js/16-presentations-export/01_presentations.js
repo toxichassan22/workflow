@@ -7,7 +7,7 @@
       setDraftDirty(false);
       tenantPresentationId = p.id;
       tenantPresentationRevision = Number(p.revision) || 0;
-      tenantDraftRevision = Number(p.draftRevision) || 0;
+      setTenantDraftRevision(p.draftRevision);
       tenantPresentationProvenance = null;
       tenantPresentationTitle = p.title || '';
       tenantProjectMode = 'presentation';
@@ -225,7 +225,12 @@
 
         const draft = resp.draft;
         setDraftDirty(false);
-        tenantDraftRevision = Number(draft.revision) || 0;
+        setTenantDraftRevision(draft.revision);
+        // The file is followed while it stays open: a merge by somebody else
+        // shows up without a manual refresh.
+        if (typeof startDraftLiveSync === 'function') {
+          startDraftLiveSync(draft.id, tenantDraftRevision);
+        }
         const draftData = draft.draft_data || draft.draftData || {};
         const pageDrafts = draftData.pageDrafts || {};
         const sectionStatuses = draft.section_statuses || {};

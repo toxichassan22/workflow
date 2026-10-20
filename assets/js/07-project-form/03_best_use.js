@@ -450,7 +450,7 @@
       }
       const fresh = (typeof draftEditCounter === 'undefined' || draftEditCounter === requestContext.editCounter)
         && bestUseStable(bestUseSourceSnapshot()) === bestUseStable(requestContext.sourceSnapshot);
-      if (response.revision !== undefined) tenantDraftRevision = Number(response.revision);
+      if (response.revision !== undefined) setTenantDraftRevision(response.revision);
       if (response.bestUse) tenantProjectData.best_use_data = bestUseObject(response.bestUse);
       if (response.chat) tenantProjectData.best_use_chat = bestUseObject(response.chat);
       if (response.sectionStatuses && typeof applySectionStatuses === 'function') applySectionStatuses(response.sectionStatuses);

@@ -311,6 +311,23 @@
     let tenantPresentationId = null;
     let tenantPresentationRevision = 0;
     let tenantDraftRevision = 0;
+    // The newest revision of the followed file this client already knows
+    // about. The live poll compares the server's revision against it, so it
+    // moves with our own saves too — otherwise a save of our own reads as
+    // somebody else's change and reloads the workspace under the person who
+    // just saved. See 07-project-form/07_draft_live_sync.js.
+    let draftLiveSyncRevision = 0;
+
+    // Move the workspace revision and the poll baseline together. Every write
+    // path goes through this setter, so the two can never drift apart.
+    function setTenantDraftRevision(revision) {
+      if (revision === null || revision === undefined || revision === '') return tenantDraftRevision;
+      const value = Number(revision);
+      if (!Number.isFinite(value) || value < 0) return tenantDraftRevision;
+      tenantDraftRevision = value;
+      if (value > draftLiveSyncRevision) draftLiveSyncRevision = value;
+      return value;
+    }
     let tenantPresentationProvenance = null;
     let tenantPresentationSavePromise = null;
     let tenantPresentationHistory = null;

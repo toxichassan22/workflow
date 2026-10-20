@@ -240,6 +240,16 @@ def create_draft_branch(tenant_id, base_draft_id, author_id=None, author_name=No
     }
 
 
+def count_open_draft_branches(tenant_id, draft_id):
+    """How many branches of a project file are still open."""
+    row = get_db().execute(
+        "SELECT COUNT(*) AS n FROM draft_branches WHERE tenant_id = ? AND base_draft_id = ? "
+        "AND status = 'open'",
+        (tenant_id, draft_id)
+    ).fetchone()
+    return int(row['n'] or 0) if row else 0
+
+
 def get_draft_branch(tenant_id, draft_id, branch_id):
     """One branch of a project file, with the state of its forked copy."""
     row = get_db().execute(

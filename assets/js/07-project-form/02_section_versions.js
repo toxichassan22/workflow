@@ -115,7 +115,7 @@
         const result = await api('POST', '/api/project-draft/section-version/restore', { versionId: versionId });
         hideLoader();
         if (!result || !result.success) { toast((result && result.error) || WFT('sectionver.restore_failed', 'تعذر الاستعادة')); return; }
-        if (result.revision !== undefined) tenantDraftRevision = Number(result.revision) || tenantDraftRevision;
+        if (result.revision !== undefined) setTenantDraftRevision(result.revision);
         toast(WFT('sectionver.restore_done', 'تمت الاستعادة كإصدار جديد'));
         applySectionStatuses({ [sectionKey]: 'pending' });
         openSectionVersionsPage(sectionKey);

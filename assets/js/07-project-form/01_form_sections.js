@@ -176,7 +176,10 @@
       setDraftDirty(false);
       tenantPresentationId = null;
       tenantPresentationRevision = 0;
-      tenantDraftRevision = 0;
+      // A new project is not the file the live poll was following: stop it, or
+      // a save of the previous project would pull this one back under it.
+      if (typeof stopDraftLiveSync === 'function') stopDraftLiveSync();
+      setTenantDraftRevision(0);
       tenantPresentationProvenance = null;
       tenantPresentationTitle = '';
       tenantProjectMode = 'new';

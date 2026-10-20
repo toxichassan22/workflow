@@ -162,6 +162,10 @@
       }
 
       if (pageId === 'tenantDashboardPage') loadDashboard();
+      if (pageId !== 'tenantProjectPage' && typeof stopDraftLiveSync === 'function') {
+        // Leaving the project file: the workspace stops following it.
+        stopDraftLiveSync();
+      }
       renderWorkflowStageSidebars(pageId);
       refreshGlobalRail();
       updatePresentationUndoButtons();

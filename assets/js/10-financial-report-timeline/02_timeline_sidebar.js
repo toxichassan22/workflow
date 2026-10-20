@@ -289,43 +289,50 @@
         if (typeof bestUseOptionalStatuses === 'function') {
           tenantProjectSectionStatuses = bestUseOptionalStatuses(tenantProjectSectionStatuses);
         }
-        for (let attempt = 0; attempt < 4; attempt++) {
-          resp = await api('POST', '/api/project-draft',
-            { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
-              slideCheckpoint, expectedRevision: expectedRev,
-              mergeOnConflict: mergeRequested, mergeResolutions: mergeResolutions },
-            false, { onProgress });
-          if (!resp || resp.success) break;
-          if (resp.error_code === 'DRAFT_REVISION_CONFLICT') {
-            if (mergeRequested || slideCheckpoint) break;
-            // A save that lost the race asks for a merge: the newer work comes
-            // in and nothing is written over. A background save merges the
-            // same way — it only stops when the merge itself needs a decision.
-            mergeRequested = true;
-            continue;
-          }
-          if (resp.error_code === 'DRAFT_MERGE_CONFLICTS') {
-            if (silent || slideCheckpoint) break;
-            const decisions = typeof askDraftMergeDecisions === 'function'
-              ? await askDraftMergeDecisions(resp.conflicts || [])
-              : null;
-            if (!decisions) {
-              // The user chose not to decide: writing over the newer copy
-              // stays possible, but it is an explicit answer, not a default.
-              const serverRevision = Number(resp.currentRevision);
-              if (!Number.isInteger(serverRevision) || typeof confirm !== 'function'
-                  || !confirm(WFT('draft.conflict_confirm',
-                    'توجد نسخة أحدث من المسودة محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟',
-                    { rev: serverRevision }))) break;
-              expectedRev = serverRevision;
-              mergeRequested = false;
-              mergeResolutions = null;
+        // Our own write is on the wire: the live poll waits for it instead of
+        // reading the revision it is about to produce as somebody else's change.
+        if (typeof beginDraftLocalSave === 'function') beginDraftLocalSave();
+        try {
+          for (let attempt = 0; attempt < 4; attempt++) {
+            resp = await api('POST', '/api/project-draft',
+              { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
+                slideCheckpoint, expectedRevision: expectedRev,
+                mergeOnConflict: mergeRequested, mergeResolutions: mergeResolutions },
+              false, { onProgress });
+            if (!resp || resp.success) break;
+            if (resp.error_code === 'DRAFT_REVISION_CONFLICT') {
+              if (mergeRequested || slideCheckpoint) break;
+              // A save that lost the race asks for a merge: the newer work comes
+              // in and nothing is written over. A background save merges the
+              // same way — it only stops when the merge itself needs a decision.
+              mergeRequested = true;
               continue;
             }
-            mergeResolutions = decisions;
-            continue;
+            if (resp.error_code === 'DRAFT_MERGE_CONFLICTS') {
+              if (silent || slideCheckpoint) break;
+              const decisions = typeof askDraftMergeDecisions === 'function'
+                ? await askDraftMergeDecisions(resp.conflicts || [])
+                : null;
+              if (!decisions) {
+                // The user chose not to decide: writing over the newer copy
+                // stays possible, but it is an explicit answer, not a default.
+                const serverRevision = Number(resp.currentRevision);
+                if (!Number.isInteger(serverRevision) || typeof confirm !== 'function'
+                    || !confirm(WFT('draft.conflict_confirm',
+                      'توجد نسخة أحدث من المسودة محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟',
+                      { rev: serverRevision }))) break;
+                expectedRev = serverRevision;
+                mergeRequested = false;
+                mergeResolutions = null;
+                continue;
+              }
+              mergeResolutions = decisions;
+              continue;
+            }
+            break;
           }
-          break;
+        } finally {
+          if (typeof endDraftLocalSave === 'function') endDraftLocalSave();
         }
         // A merge means the file on the server now holds both sides' work, so
         // the workspace is loaded again instead of keeping a stale copy.
@@ -347,7 +354,15 @@
           && draftEditCounter === savedEditCounter;
         if (sameDraftOpen) {
           if (resp.draftId) tenantProjectData.draftId = resp.draftId;
-          if (resp.revision) tenantDraftRevision = Number(resp.revision) || tenantDraftRevision;
+          // The workspace revision and the live poll's baseline move together,
+          // so a save of our own is never read as somebody else's change.
+          setTenantDraftRevision(resp.revision);
+          // The file is followed from the revision it was saved at — a project
+          // saved for the first time is followed too, not only one opened from
+          // the list.
+          if (resp.draftId && typeof startDraftLiveSync === 'function') {
+            startDraftLiveSync(resp.draftId, Number(resp.revision) || 0);
+          }
           // A save may have voided approvals whose snapshots went stale — the
           // stored statuses come back with the response so the badges heal
           // instead of staying approved until the next reload.

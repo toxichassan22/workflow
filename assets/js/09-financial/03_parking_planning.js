@@ -226,7 +226,7 @@
 
     function financialParkingReceive(response, expectedSnapshot, draftId) {
       if (tenantProjectData.draftId !== draftId || response.draftId !== draftId) return false;
-      if (response.revision) tenantDraftRevision = Number(response.revision);
+      if (response.revision) setTenantDraftRevision(response.revision);
       const fresh = financialParkingStable(financialParkingSnapshot()) === expectedSnapshot;
       const model = financialParkingObject(response.financialModel);
       hydrateFinancialParkingPlan(model);

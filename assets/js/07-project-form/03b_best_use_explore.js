@@ -333,7 +333,7 @@
       }
       const fresh = (typeof draftEditCounter === 'undefined' || draftEditCounter === requestContext.editCounter)
         && bestUseStable(bestUseExploreSourceSnapshot()) === bestUseStable(requestContext.sourceSnapshot);
-      if (response.revision !== undefined) tenantDraftRevision = Number(response.revision);
+      if (response.revision !== undefined) setTenantDraftRevision(response.revision);
       if (!fresh) {
         const current = bestUseExploreSourceSnapshot();
         console.warn('[BEST-USE-EXPLORE] inputs changed while processing',
