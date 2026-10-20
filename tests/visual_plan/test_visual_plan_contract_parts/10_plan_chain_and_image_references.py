@@ -226,16 +226,16 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
         self.assertIn('Every word in the drawing is English', prompt)
         self.assertIn('VERTICAL PROGRAM DISTRIBUTION', prompt)
 
-    def test_visual_concept_image_model_defaults_to_gemini_nano_banana(self):
+    def test_visual_concept_image_model_defaults_to_gemini_flash_image(self):
         """The default model for generating visual concepts and images is
-        pinned to google/gemini-nano-banana-2.1."""
+        pinned to google/gemini-3.1-flash-image."""
         module = self.application_module
-        self.assertEqual(module.IMAGE_MODEL, 'google/gemini-nano-banana-2.1')
-        self.assertEqual(module.VISUAL_CONCEPT_IMAGE_MODEL, 'google/gemini-nano-banana-2.1')
+        self.assertEqual(module.IMAGE_MODEL, 'google/gemini-3.1-flash-image')
+        self.assertEqual(module.VISUAL_CONCEPT_IMAGE_MODEL, 'google/gemini-3.1-flash-image')
 
-    def test_call_images_api_uses_gemini_nano_banana_by_default(self):
+    def test_call_images_api_uses_gemini_flash_image_by_default(self):
         """When no model override is passed, call_images_api routes to
-        google/gemini-nano-banana-2.1."""
+        google/gemini-3.1-flash-image."""
         module = self.application_module
         captured_payload = {}
 
@@ -253,4 +253,4 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
                 patch.object(module.requests, 'post', side_effect=_fake_post):
             module.call_images_api('render hero facade', usage_ctx={'tenant_id': self.tenant_a})
 
-        self.assertEqual(captured_payload.get('model'), 'google/gemini-nano-banana-2.1')
+        self.assertEqual(captured_payload.get('model'), 'google/gemini-3.1-flash-image')

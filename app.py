@@ -411,7 +411,7 @@ print(f"[CONFIG] Visual plan text model: {VISUAL_PLAN_TEXT_MODEL}")
 print(f"[CONFIG] Visual plan distribution model: {VISUAL_PLAN_DISTRIBUTION_MODEL}")
 # All image generation runs on OpenRouter's dedicated /images endpoint — the
 # adopted model is image-only and rejects /chat/completions.
-IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'google/gemini-nano-banana-2.1')
+IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'google/gemini-3.1-flash-image')
 VISUAL_CONCEPT_IMAGE_MODEL = os.environ.get('VISUAL_CONCEPT_IMAGE_MODEL', IMAGE_MODEL)
 PLAN_SITE_MODEL = os.environ.get('PLAN_SITE_MODEL', 'google/gemini-4-argon')
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
