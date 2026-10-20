@@ -338,8 +338,12 @@
         // the workspace is loaded again instead of keeping a stale copy.
         if (resp && resp.success && resp.merged) {
           const mergedDraftId = resp.draftId || (tenantProjectData && tenantProjectData.draftId);
-          if (mergedDraftId && typeof openProjectDraftById === 'function') {
-            await openProjectDraftById(mergedDraftId);
+          if (mergedDraftId) {
+            if (typeof applyLiveDraftSync === 'function') {
+              await applyLiveDraftSync(mergedDraftId, resp.revision);
+            } else if (typeof openProjectDraftById === 'function') {
+              await openProjectDraftById(mergedDraftId);
+            }
             return true;
           }
         }

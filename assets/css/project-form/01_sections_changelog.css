@@ -795,3 +795,9 @@
       background: var(--pd);
     }
 
+
+    .field-live-updated {
+      transition: background-color 0.4s ease, border-color 0.4s ease;
+      background-color: #DFF6FB !important;
+      border-color: #17C8E3 !important;
+    }

@@ -31,7 +31,7 @@ def _demote_sections_for_keys(tenant_id, changed_keys, stored_statuses):
 
     A section approved against the current values cannot stay approved once
     the file carries other ones — the approval described data that is no
-    longer there.
+    longer there. Only mapped keys belonging to an identified section demote that section.
     """
     statuses = dict(stored_statuses or {})
     if not changed_keys:
@@ -41,25 +41,15 @@ def _demote_sections_for_keys(tenant_id, changed_keys, stored_statuses):
     except Exception:
         section_map = {}
     sections = set()
-    unmapped = False
     for key in changed_keys:
         section = _draft_section_of_key(section_map, key)
         if section:
             sections.add(section)
-        else:
-            unmapped = True
     demoted = []
     for section in sorted(sections):
         if statuses.get(section) == 'approved':
             statuses[section] = 'draft'
             demoted.append(section)
-    if unmapped:
-        # A changed key nobody can place in a section may belong to any of
-        # them, so no approval survives it.
-        for section, value in list(statuses.items()):
-            if value == 'approved':
-                statuses[section] = 'draft'
-                demoted.append(section)
     return statuses, sorted(set(demoted))
 
 

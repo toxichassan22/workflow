@@ -125,6 +125,27 @@ class SectionVersionDbTests(unittest.TestCase):
             db.section_snapshot_hash({'a': 3}),
         )
 
+    def test_snapshot_hash_is_canonicalized(self):
+        # Empty values / None / omitted
+        self.assertEqual(
+            db.section_snapshot_hash({'a': 1}),
+            db.section_snapshot_hash({'a': 1, 'empty_str': '', 'none_val': None}),
+        )
+        # Numbers (int, float, numeric string)
+        self.assertEqual(
+            db.section_snapshot_hash({'area': 5000}),
+            db.section_snapshot_hash({'area': '5000'}),
+        )
+        self.assertEqual(
+            db.section_snapshot_hash({'area': 5000}),
+            db.section_snapshot_hash({'area': 5000.0}),
+        )
+        # Whitespace stripping
+        self.assertEqual(
+            db.section_snapshot_hash({'title': '  برج  '}),
+            db.section_snapshot_hash({'title': 'برج'}),
+        )
+
     def test_diff_against_predecessor_names_changed_fields(self):
         """The approver's comparison names every changed field between snapshots."""
         first = db.create_section_version(
@@ -400,6 +421,52 @@ class SectionVersionApiTests(unittest.TestCase):
             f'/api/project-draft/section-versions?draftId={owner_draft_id}&sectionKey=basic',
             headers=approver_headers)
         self.assertEqual(listed.status_code, 200, listed.get_json())
+
+    def test_saving_unrelated_or_empty_fields_does_not_void_approved_sections(self):
+        client = self.app.test_client()
+        # 1. Setup draft with basic fields
+        client.post('/api/project-draft', headers=self.headers(), json={
+            'draftData': {'project_name': 'برج الاختبار', 'project_type': 'سكني', 'city': 'الرياض'},
+            'sectionStatuses': {'basic': 'draft'}, 'status': 'draft',
+        })
+        # 2. Send and approve basic section
+        sent = client.post('/api/project-draft/section-version', headers=self.headers(),
+                           json={'sectionKey': 'basic'})
+        self.assertEqual(sent.status_code, 200)
+        version_id = sent.get_json()['version']['id']
+        decided = client.post('/api/project-draft/section-version/decision', headers=self.headers(), json={
+            'versionId': version_id, 'decision': 'approved'})
+        self.assertEqual(decided.status_code, 200)
+
+        # 3. Save draft with unmapped keys (e.g. slides, chat) and empty field variations
+        draft = client.get('/api/project-draft', headers=self.headers()).get_json()['draft']
+        self.assertEqual(draft['section_statuses'].get('basic'), 'approved')
+
+        save_data = dict(draft['draft_data'])
+        save_data['tenantSlidesData'] = [{'title': 'Slide 1'}]
+        save_data['project_idea'] = ''  # empty string from form DOM
+        save_data['croquis_land_area'] = '5000'  # unapproved section input
+
+        saved = client.post('/api/project-draft', headers=self.headers(), json={
+            'draftId': draft['id'],
+            'draftData': save_data,
+            'sectionStatuses': draft['section_statuses'],
+            'status': 'draft',
+        })
+        self.assertEqual(saved.status_code, 200)
+        # Approval must NOT be voided!
+        self.assertEqual(saved.get_json()['sectionStatuses'].get('basic'), 'approved')
+
+        # 4. Now modify an ACTUAL field of basic section: approval SHOULD void to 'draft'
+        save_data['project_name'] = 'اسم معدل بالكامل'
+        saved_after_edit = client.post('/api/project-draft', headers=self.headers(), json={
+            'draftId': draft['id'],
+            'draftData': save_data,
+            'sectionStatuses': {'basic': 'approved'},
+            'status': 'draft',
+        })
+        self.assertEqual(saved_after_edit.status_code, 200)
+        self.assertEqual(saved_after_edit.get_json()['sectionStatuses'].get('basic'), 'draft')
 
 
 class SectionVersionDiffApiTests(unittest.TestCase):

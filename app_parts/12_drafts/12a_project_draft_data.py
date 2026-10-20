@@ -399,8 +399,23 @@ def _void_stale_section_approvals(tenant_id, draft_id, draft_data, statuses=None
             continue
         if slices is None:
             slices = _section_snapshot_slices(draft_data, section_map)
-        live_hash = db.section_snapshot_hash(slices.get(key, {}))
-        if live_hash != meta.get('snapshot_hash') or meta.get('is_expired'):
+        live_slice = slices.get(key, {})
+        live_hash = db.section_snapshot_hash(live_slice)
+        if live_hash != meta.get('snapshot_hash'):
+            version_row = db.get_section_version(tenant_id, meta.get('id'), include_snapshot=True)
+            stored_snap = (version_row or {}).get('snapshot')
+            if stored_snap and db.section_snapshot_hash(stored_snap) == live_hash:
+                try:
+                    db.get_db().execute(
+                        'UPDATE section_versions SET snapshot_hash = ? WHERE id = ?',
+                        (live_hash, meta.get('id'))
+                    )
+                    db.get_db().commit()
+                except Exception:
+                    pass
+                continue
+            stale[key] = 'draft'
+        elif meta.get('is_expired'):
             stale[key] = 'draft'
     if stale:
         db.update_draft_section_status_by_id(tenant_id, draft_id, stale)

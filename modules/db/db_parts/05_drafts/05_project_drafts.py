@@ -908,10 +908,65 @@ BASE_SECTION_KEYS = {
 }
 
 
+def _normalize_snapshot_value(val):
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, (int, float)):
+        if isinstance(val, float) and val.is_integer():
+            return int(val)
+        return val
+    if isinstance(val, str):
+        val = val.strip()
+        if not val:
+            return None
+        try:
+            num = float(val)
+            if num.is_integer():
+                return int(num)
+            return num
+        except (ValueError, TypeError):
+            pass
+        if (val.startswith('{') and val.endswith('}')) or (val.startswith('[') and val.endswith(']')):
+            try:
+                parsed = json.loads(val)
+                return _normalize_snapshot_value(parsed)
+            except (ValueError, TypeError):
+                pass
+        return val
+    if isinstance(val, dict):
+        normalized = {}
+        for k, v in val.items():
+            norm_v = _normalize_snapshot_value(v)
+            if norm_v is not None:
+                normalized[str(k)] = norm_v
+        return normalized if normalized else None
+    if isinstance(val, (list, tuple)):
+        normalized = [_normalize_snapshot_value(item) for item in val]
+        normalized = [item for item in normalized if item is not None]
+        return normalized if normalized else None
+    return val
+
+
+def canonicalize_snapshot(snapshot):
+    """Normalize snapshot data so formatting differences (None vs '', int vs str,
+    extra whitespace) produce deterministic canonical snapshots and hashes."""
+    if not isinstance(snapshot, dict):
+        return {}
+    normalized = {}
+    for k, v in snapshot.items():
+        norm_v = _normalize_snapshot_value(v)
+        if norm_v is not None:
+            normalized[str(k)] = norm_v
+    return normalized
+
+
 def section_snapshot_hash(snapshot):
     """Stable sha256 over the canonical JSON of a section snapshot."""
     try:
-        canonical = json.dumps(snapshot if isinstance(snapshot, dict) else {}, ensure_ascii=False, sort_keys=True)
+        canonical_snap = canonicalize_snapshot(snapshot)
+        canonical = json.dumps(canonical_snap, ensure_ascii=False, sort_keys=True)
     except (TypeError, ValueError):
         canonical = '{}'
     return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
