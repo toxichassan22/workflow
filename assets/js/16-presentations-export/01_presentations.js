@@ -121,10 +121,14 @@
         const actionsHtml = isArchived
           ? '<button class="btn small primary" onclick="restoreProposalById(\'' + d.id + '\')">استعادة</button>' +
             '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
+            '<button class="btn small ghost" onclick="showDraftVersions(\'' + d.id + '\')">' +
+              WFT('draft_versions.button', 'الإصدارات') + '</button>' +
             deleteBtn
           : '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
             copyBtn +
             '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
+            '<button class="btn small ghost" onclick="showDraftVersions(\'' + d.id + '\')">' +
+              WFT('draft_versions.button', 'الإصدارات') + '</button>' +
             deleteBtn;
         const rowCls = isArchived ? 'll-row-archived' : '';
         return '<tr data-draft-id="' + d.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +

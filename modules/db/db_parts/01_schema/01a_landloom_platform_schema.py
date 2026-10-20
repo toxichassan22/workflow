@@ -283,6 +283,29 @@ def _create_landloom_tables(conn):
     conn.execute('CREATE INDEX IF NOT EXISTS idx_trusted_devices_lookup ON trusted_devices(tenant_id, device_id, is_revoked)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_trusted_devices_token ON trusted_devices(token_hash)')
 
+    # The draft version history: every save of a project file leaves a commit
+    # behind, the way a git repository keeps one commit per change. The live
+    # row keeps the current payload; a commit keeps the DIFFERENCE against the
+    # state the save started from, so an earlier version can be rebuilt or
+    # restored without storing a full copy of every multi-megabyte payload.
+    conn.execute('''CREATE TABLE IF NOT EXISTS draft_commits (
+        id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        draft_id TEXT NOT NULL,
+        parent_id TEXT,
+        revision INTEGER NOT NULL DEFAULT 0,
+        kind TEXT NOT NULL DEFAULT 'save',
+        message TEXT,
+        author_id TEXT,
+        author_name TEXT,
+        changed_keys TEXT NOT NULL DEFAULT '[]',
+        skipped_keys TEXT NOT NULL DEFAULT '[]',
+        patch TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_commits_draft ON draft_commits(draft_id, revision DESC, created_at DESC)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_commits_tenant ON draft_commits(tenant_id, created_at DESC)')
+
 
 def _ensure_landloom_columns(conn):
     """Additive migrations on existing installs: last_login on users/tenants."""

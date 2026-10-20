@@ -143,6 +143,8 @@ def api_save_project_draft():
             allow_generating=allow_generating,
             expected_revision=expected_revision,
             existing_row=previous,
+            commit_author_id=g.user_id,
+            commit_author_name=_landloom_actor_name(),
         )
     except db.DraftRevisionConflict as conflict:
         return jsonify({

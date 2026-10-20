@@ -979,5 +979,15 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "summary_chat.end_confirm_title": "هل تريد إنهاء هذه المحادثة؟",
   "summary_chat.end_confirm_body": "سيبدأ الشات محادثة جديدة عند فتحه مرة أخرى.",
   "summary_chat.end_confirm": "إنهاء المحادثة",
-  "summary_chat.end_return": "العودة إلى المحادثة"
+  "summary_chat.end_return": "العودة إلى المحادثة",
+  "draft_versions.title": "إصدارات المشروع",
+  "draft_versions.button": "الإصدارات",
+  "draft_versions.empty": "لا توجد إصدارات محفوظة",
+  "draft_versions.restore": "استرجاع",
+  "draft_versions.kind_save": "حفظ",
+  "draft_versions.kind_restore": "استرجاع",
+  "draft_versions.changed": "{n} حقل",
+  "draft_versions.restore_confirm": "استرجاع هذه النسخة؟ شغلك الحالي سيبقى في السجل كنسخة جديدة.",
+  "draft_versions.restored": "تم استرجاع النسخة",
+  "draft_versions.restore_failed": "تعذر استرجاع النسخة"
 }/*I18N_AR_END*/;
