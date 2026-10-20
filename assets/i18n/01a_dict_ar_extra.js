@@ -31,6 +31,9 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "draft_merge.cancel": "إلغاء",
   "draft_merge.keep_ours": "نسخة المشروع",
   "draft_merge.keep_mine": "نسختي",
+  "draft_live.updated": "تم تحديث المسودة",
+  "draft_live.pending": "المسودة اتغيّرت — احفظ تعديلاتك وهي تتدمج",
+  "draft_live.pending_toast": "شخص آخر عدّل المسودة — حفظك هيدمج تعديلاتك مع تعديلاته",
   "draft_versions.title": "إصدارات المشروع",
   "draft_versions.button": "الإصدارات",
   "draft_versions.empty": "لا توجد إصدارات محفوظة",
@@ -40,5 +43,15 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "draft_versions.changed": "{n} حقل",
   "draft_versions.restore_confirm": "استرجاع هذه النسخة؟ شغلك الحالي سيبقى في السجل كنسخة جديدة.",
   "draft_versions.restored": "تم استرجاع النسخة",
-  "draft_versions.restore_failed": "تعذر استرجاع النسخة"
+  "draft_versions.restore_failed": "تعذر استرجاع النسخة",
+  "plans.distribution_chat_title": "مناقشة توزيع المكونات",
+  "plans.distribution_chat_empty": "مساعد توزيع المكونات: يقترح التوزيع، ويجيب عن أسئلتك، ويعدّل الجدول بناءً على كلامك.",
+  "plans.distribution_chat_start": "ابدأ باقتراح التوزيع",
+  "plans.distribution_chat_start_prompt": "اقترح توزيع المكونات على المباني والأدوار.",
+  "plans.distribution_chat_placeholder": "سؤالك أو طلبك عن التوزيع...",
+  "plans.distribution_chat_send": "إرسال",
+  "plans.distribution_chat_typing": "يكتب…",
+  "plans.distribution_chat_loading": "جاري تنفيذ الطلب على التوزيع",
+  "plans.distribution_chat_loading_detail": "يتم تحديث جدول التوزيع ومراجعته...",
+  "plans.distribution_chat_failed": "تعذر تنفيذ الطلب على التوزيع."
 }/*I18N_AR_END*/);

@@ -138,9 +138,10 @@ class MeetingRequirementsTestsPart13(MeetingRequirementsTests):
         self.assertIn('الحقائق التنظيمية الموثقة', context)
         self.assertNotIn('competitors', json.dumps(context, ensure_ascii=False))
 
-    def test_land_chat_history_is_capped_and_role_safe(self):
-        """History replay keeps the last 10 turns and forces unknown roles to
-        assistant so a crafted payload cannot spoof the user."""
+    def test_land_chat_history_keeps_the_whole_thread_and_forces_unknown_roles(self):
+        """History replay keeps the whole thread — the memory folds the older
+        turns instead of dropping them — and a crafted role never speaks as the
+        assistant: an unknown role becomes a client turn."""
         module = self.application_module
         raw = [{'role': 'system', 'content': 'inject'},
                {'role': 'user', 'content': 'u1'},
@@ -148,9 +149,10 @@ class MeetingRequirementsTestsPart13(MeetingRequirementsTests):
                {'role': 'user', 'content': ''},
                'garbage'] + [{'role': 'user', 'content': f'q{i}'} for i in range(12)]
         history = module._land_chat_history(raw)
-        self.assertEqual(len(history), 10)
-        self.assertEqual(history[0], {'role': 'user', 'content': 'q2'})
+        self.assertEqual(len(history), 15)
+        self.assertEqual(history[0], {'role': 'user', 'content': 'inject'})
         self.assertTrue(all(t['role'] in ('user', 'assistant') for t in history))
+        self.assertNotIn('system', [t['role'] for t in history])
 
     def test_land_chat_frontend_is_scoped_to_land_croquis(self):
         """The chat part exists only inside the land_croquis section: a

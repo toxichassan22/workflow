@@ -267,6 +267,62 @@
       font-weight: 700;
     }
 
+    /* The distribution conversation: the stage that owns the floor table. */
+    .plans-distribution-chat {
+      margin-bottom: 14px;
+    }
+
+    .plans-distribution-chat-messages {
+      max-height: 320px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f8fafc;
+    }
+
+    .plans-distribution-chat-msg {
+      max-width: 88%;
+      padding: 8px 12px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.8;
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--ink);
+      align-self: flex-start;
+    }
+
+    .plans-distribution-chat-msg.user {
+      align-self: flex-end;
+      background: var(--teal-soft, #DFF6FB);
+      border-color: var(--teal, #0FA9C4);
+      color: var(--ink);
+    }
+
+    .plans-distribution-chat-msg.typing {
+      color: var(--muted);
+      font-style: italic;
+    }
+
+    .plans-distribution-chat-composer {
+      display: flex;
+      align-items: flex-end;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .plans-distribution-chat-composer textarea {
+      flex: 1;
+      min-height: 44px;
+      resize: vertical;
+    }
+
     .plans-distribution-table {
       min-width: 980px;
     }

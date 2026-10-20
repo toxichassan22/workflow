@@ -15,10 +15,15 @@
       return (workflow && workflow.viewStage) === 'verify' ? 'verify' : 'distribution';
     }
 
-    function plansConflictChatMessages(scope) {
+    function plansConflictChatState(scope) {
       const workflow = visualConceptPlansWorkflowState();
-      scope = scope === 'verify' ? 'verify' : 'distribution';
-      return workflow.conflictChats[scope] || [];
+      const chats = workflow.conflictChats || {};
+      const state = chats[scope === 'verify' ? 'verify' : 'distribution'];
+      return normalizePlansChatState(state);
+    }
+
+    function plansConflictChatMessages(scope) {
+      return plansConflictChatState(scope).turns;
     }
 
     function plansChatClampFabPosition(left, top) {
@@ -280,7 +285,7 @@
 
     function confirmEndPlansChat() {
       const workflow = visualConceptPlansWorkflowState();
-      workflow.conflictChats[plansConflictChatScope()] = [];
+      workflow.conflictChats[plansConflictChatScope()] = normalizePlansChatState(null);
       markVisualConceptDirty();
       renderPlansConflictChatMessages();
       hidePlansChatEndConfirm();
@@ -338,26 +343,35 @@
       const question = String(input && input.value || '').trim();
       if (!question || plansChatBusy) return;
       const scope = plansConflictChatScope();
-      const messages = plansConflictChatMessages(scope);
+      const state = plansConflictChatState(scope);
+      const messages = state.turns.slice();
       messages.push({ role: 'user', text: question });
       if (input) input.value = '';
       plansChatBusy = true;
       renderPlansConflictChatMessages();
       let reply = WFT('plans.conflict_chat_failed', 'تعذر الحصول على إجابة الآن.');
+      let memory = state.memory || '';
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         payload.scope = scope;
         payload.question = question;
-        // Everything before the just-pushed turn is prior context for the model.
-        payload.history = messages.slice(0, -1).slice(-8).map(item => ({
-          role: item.role, content: String(item.text || '').slice(0, 2000)
+        // The whole thread travels with the request: the server keeps the
+        // newest turns verbatim and folds the older ones into the memory, so
+        // the answer builds on what was already agreed.
+        payload.history = messages.slice(0, -1).map(item => ({
+          role: item.role, content: String(item.text || '').slice(0, 4000)
         }));
+        payload.memory = memory;
         const data = await api('POST', '/api/visual-concept/plans-conflict-chat', payload);
         if (data && data.reply) reply = data.reply;
         else if (data && data.error) reply = data.error;
+        memory = String(data?.memory || memory || '').slice(0, PLANS_CHAT_MEMORY_MAX_CHARS);
       } catch (error) {}
-      const live = plansConflictChatMessages(scope);
-      live.push({ role: 'assistant', text: String(reply || '').slice(0, 4000) });
+      messages.push({ role: 'assistant', text: String(reply || '').slice(0, 4000) });
+      const workflow = visualConceptPlansWorkflowState();
+      workflow.conflictChats[scope] = {
+        turns: messages, memory, decisions: state.decisions || []
+      };
       plansChatBusy = false;
       markVisualConceptDirty();
       renderPlansConflictChatMessages();

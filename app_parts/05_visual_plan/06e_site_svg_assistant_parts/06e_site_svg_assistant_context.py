@@ -188,8 +188,14 @@ def _visual_plan_site_prompt_contract(project, workflow):
     analysis = _visual_plan_site_model_analysis(project.get('land_documents_analysis'))
     analysis = analysis if isinstance(analysis, dict) else {}
     directions = project.get('directions_table') or project.get('directions') or {}
+    # The recorded direction in the project data wins. When the croquis text
+    # names no main facade, the server resolved one and the plan context
+    # carries it — the site plan is drawn against the same facade the
+    # geometry used, not against an empty one.
+    facade_hint = _visual_plan_frontage_hint(workflow) or {}
     primary_frontage = (project.get('main_facade_direction') or project.get('primary_facade_direction')
-                        or project.get('main_frontage_direction') or '')
+                        or project.get('main_frontage_direction')
+                        or facade_hint.get('direction') or '')
     building_area = project.get('building_area') or project.get('total_bua') or project.get('total_built_area')
     if not building_area and land_area and project.get('approved_floor_area_ratio'):
         try:

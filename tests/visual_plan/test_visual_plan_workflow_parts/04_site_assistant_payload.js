@@ -33,6 +33,8 @@ module.exports = function registerSiteAssistantPayloadTests({ test, fixture }) {
         notesReview: { verified: true, canProceed: true, inputSignature: 'signature',
           token: 'review-token', checks: [{ index: 0 }], issues: [] },
         scene: { version: 1, token: 'scene-token', inputSignature: 'same-input' },
+        planContext: { primary_frontage: { direction: 'south', status: 'ai_resolved',
+          evidence: ['الواجهة الرئيسية على الجنوب.'] } },
         jobTodos: [{ id: '1', label: 'مهمة قديمة', status: 'done' }],
         prompts: { site: 'وصف سابق كبير' },
         siteAssistant: { inputSignature: 'same-input', checkpoints: { components: 'X'.repeat(50000) } },
@@ -60,8 +62,13 @@ module.exports = function registerSiteAssistantPayloadTests({ test, fixture }) {
     assert.equal(JSON.stringify(payload).includes('data:image'), false);
     assert.deepEqual(Object.keys(payload.plansWorkflow).sort(), [
       'boundary', 'clientNotes', 'distribution', 'distributionNotes',
-      'notesReview', 'scene', 'siteAssistant', 'verification',
+      'notesReview', 'planContext', 'scene', 'siteAssistant', 'verification',
     ]);
+    // The resolved main facade is a plan input: the server hashes it into the
+    // contract, so a request that drops it rebuilds a different contract and
+    // the notes review minted against the real one reads as stale.
+    assert.equal(payload.plansWorkflow.planContext.primary_frontage.direction, 'south');
+    assert.equal(payload.plansWorkflow.planContext.primary_frontage.status, 'ai_resolved');
     assert.equal(payload.plansWorkflow.distribution.rows[0].notes, 'إبقاء مدخل الخدمة خاليًا.');
     assert.equal(payload.plansWorkflow.notesReview.token, 'review-token');
     assert.equal(payload.plansWorkflow.boundary.points[0].eastings, 400000);

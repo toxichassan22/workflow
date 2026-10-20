@@ -751,26 +751,32 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertLess(
             check_body.index("api('POST', '/api/visual-concept/plans-distribution-check'"),
             check_body.index('const workflow = visualConceptPlansWorkflowState()'))
-        # The check action is a pure audit: sol adjudicates the deterministic
-        # findings and the client edits the table or the study data manually —
-        # no auto-repair pass exists anywhere.
-        self.assertIn(
-            "action === 'check-distribution') checkVisualConceptPlansDistribution('ai')",
-            index_source)
+        # The distribution conversation writes its table and its findings onto
+        # the live workflow — they reach the draft, and approval sees them.
+        chat_start = index_source.index('async function sendVisualConceptDistributionChat(')
+        chat_body = index_source[chat_start:index_source.index(
+            'function startVisualConceptDistributionChat()', chat_start)]
+        self.assertLess(
+            chat_body.index("api('POST', '/api/visual-concept/plans-distribution-chat'"),
+            chat_body.index('const state = visualConceptPlansWorkflowState()'))
+        # The conversation is a pure audit: it reviews the table and the client
+        # edits it by hand — no auto-repair pass exists anywhere.
+        self.assertNotIn("action === 'check-distribution')", index_source)
         self.assertNotIn('checkAndRepairVisualConceptPlansDistribution', index_source)
         self.assertNotIn('repairVisualConceptPlansDistribution', index_source)
         self.assertNotIn('plans-distribution-repair', index_source)
-        # Findings belong to sol's review: the proposal lands verdict-free, the
-        # silent pass refreshes totals only, and approval needs aiReviewed with
-        # no confirmed blockers.
+        # The proposal, the notes, the revision and the conflict check are one
+        # conversation now — the separate controls are gone.
+        self.assertNotIn('async function proposeVisualConceptPlansDistribution()', index_source)
+        self.assertNotIn('async function reviseVisualConceptPlansDistribution()', index_source)
+        self.assertIn('startVisualConceptDistributionChat', index_source)
+        # Findings belong to sol's review: the table lands with the review that
+        # came with it, and approval needs aiReviewed with no confirmed blockers.
         results_start = index_source.index('function visualConceptDistributionResultsHtml')
         results_body = index_source[results_start:index_source.index('function visualConceptDistributionBlocking', results_start)]
         self.assertIn('aiReviewed', results_body)
         self.assertIn('لم يُفحص بعد', results_body)
         self.assertNotIn('repair-distribution', results_body)
-        propose_start = index_source.index('async function proposeVisualConceptPlansDistribution()')
-        propose_body = index_source[propose_start:index_source.index('async function checkVisualConceptPlansDistribution(', propose_start)]
-        self.assertIn('checks: [], issues: []', propose_body)
         approve_start = index_source.index('function approveVisualConceptPlansDistribution()')
         approve_body = index_source[approve_start:approve_start + 1200]
         self.assertIn('aiReviewed', approve_body)
@@ -1479,7 +1485,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'plansWorkflow': {**workflow, 'distributionNotes': 'المواقف السطحية في خلف الأرض'}})
         self.assertEqual(proposal.status_code, 200, proposal.get_json())
         self.assertIn('المواقف السطحية في خلف الأرض', propose_call.call_args[0][1])
-        self.assertEqual(propose_call.call_args.kwargs['model'], module.VISUAL_PLAN_TEXT_MODEL)
+        # The distribution runs on the slide model at maximum effort: placing
+        # components over buildings and floors is a spatial decision.
+        self.assertEqual(propose_call.call_args.kwargs['model'], module.VISUAL_PLAN_DISTRIBUTION_MODEL)
+        self.assertEqual(propose_call.call_args.kwargs['reasoning_effort'], 'max')
         distribution = proposal.get_json()['distribution']
         self.assertEqual(len(distribution['rows']), 3)
         totals = {row['component']: row for row in distribution['totals']}
@@ -1509,7 +1518,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('انقل المكاتب من الأدوار 1-10 إلى 1-5', revise_prompt)
         self.assertIn('مواقف سيارات', revise_prompt)
         self.assertIn('أبقِ باقي الصفوف', revise_prompt)
-        self.assertEqual(revise_call.call_args.kwargs['model'], module.VISUAL_PLAN_TEXT_MODEL)
+        self.assertEqual(revise_call.call_args.kwargs['model'], module.VISUAL_PLAN_DISTRIBUTION_MODEL)
         self.assertEqual(len(revision.get_json()['distribution']['rows']), 2)
 
         # A failed revision never falls back to a fresh distribution — that
@@ -1557,7 +1566,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'projectData': project_data, 'plansWorkflow': workflow, 'distribution': overlapping, 'mode': 'ai'})
         self.assertEqual(ai_checked.status_code, 200, ai_checked.get_json())
         self.assertTrue(review_call.called)
-        self.assertEqual(review_call.call_args.kwargs['model'], module.VISUAL_PLAN_TEXT_MODEL)
+        # The review rides the same distribution brain — the model that placed
+        # the components is the model that judges them.
+        self.assertEqual(review_call.call_args.kwargs['model'], module.VISUAL_PLAN_DISTRIBUTION_MODEL)
+        self.assertEqual(review_call.call_args.kwargs['reasoning_effort'], 'max')
         self.assertEqual(ai_checked.get_json()['issues'][0]['title'], 'المواقف')
 
         # sol may also dismiss a finding as a false alarm: the deterministic

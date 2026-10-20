@@ -943,8 +943,10 @@ def _visual_concept_plan_workflow_error(data, slot_id, require_distribution=Fals
     # approved images are references only, never additional approval gates.
     if require_distribution:
         try:
-            if not _visual_plan_notes_cleared(data):
-                return {'success': False, 'error': 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
+            gate = _visual_plan_notes_gate(data)
+            if not gate.get('cleared'):
+                return {'success': False, 'error': gate.get('message')
+                        or 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
                         'error_code': 'PLANS_NOTES_CHECK_REQUIRED'}
         except visual_plan_geometry.PlanGeometryError as error:
             return {'success': False, 'error': str(error), 'error_code': error.code}

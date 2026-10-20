@@ -30,6 +30,9 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "draft_merge.cancel": "Cancel",
   "draft_merge.keep_ours": "Project version",
   "draft_merge.keep_mine": "My version",
+  "draft_live.updated": "Project file updated",
+  "draft_live.pending": "The file changed — save to merge your edits",
+  "draft_live.pending_toast": "Someone else changed the file — your save will merge with theirs",
   "draft_versions.title": "Project versions",
   "draft_versions.button": "Versions",
   "draft_versions.empty": "No saved versions",
@@ -39,5 +42,15 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "draft_versions.changed": "{n} fields",
   "draft_versions.restore_confirm": "Restore this version? Your current work stays in the history as a new version.",
   "draft_versions.restored": "Version restored",
-  "draft_versions.restore_failed": "Could not restore the version"
+  "draft_versions.restore_failed": "Could not restore the version",
+  "plans.distribution_chat_title": "Discussing the component layout",
+  "plans.distribution_chat_empty": "The layout assistant: proposes the distribution, answers your questions, and edits the table from what you say.",
+  "plans.distribution_chat_start": "Start with a layout proposal",
+  "plans.distribution_chat_start_prompt": "Propose the distribution of the components over the buildings and floors.",
+  "plans.distribution_chat_placeholder": "Your question or request about the layout...",
+  "plans.distribution_chat_send": "Send",
+  "plans.distribution_chat_typing": "Typing…",
+  "plans.distribution_chat_loading": "Working on the layout request",
+  "plans.distribution_chat_loading_detail": "The layout table is being updated and reviewed...",
+  "plans.distribution_chat_failed": "Could not apply the request to the layout."
 }/*I18N_EN_END*/);

@@ -226,7 +226,21 @@
 
     async function collectVisualConceptPlansWorkflowPayload(options = {}) {
       const payload = await collectVisualConceptPayload('plan_site');
-      payload.plansWorkflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
+      const workflow = normalizeVisualConceptPlansWorkflow(tenantVisualConceptState.plansWorkflow);
+      // The chat threads travel in their own fields (history + memory): keeping
+      // the turns inside the workflow would send every message twice and grow
+      // the body past what the hosting edge accepts.
+      payload.plansWorkflow = {
+        ...workflow,
+        conflictChats: {
+          verify: { turns: [], memory: workflow.conflictChats?.verify?.memory || '', decisions: [] },
+          distribution: { turns: [], memory: workflow.conflictChats?.distribution?.memory || '', decisions: [] }
+        },
+        distributionChat: {
+          turns: [], memory: workflow.distributionChat?.memory || '',
+          decisions: workflow.distributionChat?.decisions || []
+        }
+      };
       // The plans endpoints read plansWorkflow and the project facts only, so the
       // visual_concept state mirror is dead weight here — and oversized bodies are
       // what the hosting edge corrupts, so the request drops it (clone: projectData
@@ -237,6 +251,16 @@
         const workflow = payload.plansWorkflow;
         const assistant = { ...workflow.siteAssistant };
         if (options.assistantAction !== 'generate') assistant.checkpoints = {};
+        // The resolved main facade is a plan input, not a cache: the server
+        // hashes it into the contract (and the setbacks it derives), so a
+        // request that drops it rebuilds a different contract and the notes
+        // review minted against the real one reads as stale. Only the facade
+        // travels — the rest of the plan context is not part of the contract.
+        const planContext = workflow.planContext && typeof workflow.planContext === 'object'
+          ? workflow.planContext : null;
+        const frontage = planContext
+          ? (planContext.primary_frontage || planContext.primaryFrontage || null)
+          : null;
         payload.plansWorkflow = {
           verification: { approved: workflow.verification.approved },
           boundary: { points: workflow.boundary.points, approved: workflow.boundary.approved },
@@ -245,7 +269,8 @@
           clientNotes: workflow.clientNotes,
           notesReview: workflow.notesReview,
           scene: workflow.scene,
-          siteAssistant: assistant
+          siteAssistant: assistant,
+          planContext: frontage ? { primary_frontage: frontage } : null
         };
         return {
           slotId: payload.slotId,
@@ -271,7 +296,10 @@
         workflow.verification = normalizeVisualConceptPlansWorkflow({ verification: response.verification }).verification;
         // Fresh findings replace the set every earlier chat turn discussed —
         // keeping them would let the assistant answer about a stale conflict.
-        workflow.conflictChats = { verify: [], distribution: [] };
+        workflow.conflictChats = {
+          verify: normalizePlansChatState(null),
+          distribution: normalizePlansChatState(null)
+        };
         workflow.planContext = response.planContext || workflow.planContext || null;
         workflow.status = 'verified';
         workflow.viewStage = 'verify';
@@ -359,78 +387,6 @@
       invalidateVisualConceptPlanGeneration(workflow);
       markVisualConceptDirty();
       renderVisualConceptPage();
-    }
-
-    async function proposeVisualConceptPlansDistribution() {
-      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
-      if (!visualConceptPlanActionBusy('propose-distribution', true)) return;
-      showLoader(WFT('plans.distribution_loading', 'جاري اقتراح التوزيع'),
-        WFT('plans.distribution_loading_detail', 'يتم توزيع المكونات على المباني والأدوار...'), 30);
-      try {
-        const payload = await collectVisualConceptPlansWorkflowPayload();
-        const stamp = visualConceptPlanInputStamp();
-        const response = await api('POST', '/api/visual-concept/plans-distribution', payload);
-        hideLoader();
-        if (stamp !== visualConceptPlanInputStamp()) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
-        if (!response?.success) { toast(response?.error || WFT('plans.distribution_failed', 'تعذر اقتراح التوزيع')); return; }
-        const workflow = visualConceptPlansWorkflowState();
-        // Verdicts belong to sol's review only — the proposed table lands with
-        // totals but no pre-baked deterministic conflict list.
-        workflow.distribution = normalizeVisualConceptPlansWorkflow({
-          distribution: { ...response.distribution, checks: [], issues: [] }
-        }).distribution;
-        workflow.planContext = response.planContext || workflow.planContext || null;
-        invalidateVisualConceptPlanGeneration(workflow);
-        markVisualConceptDirty();
-        renderVisualConceptPage();
-      } catch (error) {
-        hideLoader();
-        toast(error.message || WFT('plans.distribution_failed', 'تعذر اقتراح التوزيع'));
-      } finally {
-        visualConceptPlanActionBusy('propose-distribution', false);
-      }
-    }
-
-    // A revision sends the current table plus the client's one-shot instruction;
-    // the model edits those rows instead of redistributing from scratch. The
-    // response lands in the same editable table and still needs a fresh check.
-    async function reviseVisualConceptPlansDistribution() {
-      if (!hasPermission('generate_images')) { toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات')); return; }
-      const seedWorkflow = visualConceptPlansWorkflowState();
-      const revision = String(seedWorkflow.distributionRevision || '').trim();
-      if (!revision) { toast(WFT('plans.dist_revise_required', 'اكتب التعديل المطلوب أولاً')); return; }
-      if (!(seedWorkflow.distribution.rows || []).length) return;
-      if (!visualConceptPlanActionBusy('revise-distribution', true)) return;
-      showLoader(WFT('plans.dist_revise_loading', 'جاري تعديل التوزيع'),
-        WFT('plans.dist_revise_loading_detail', 'يتم تطبيق التعديل على الجدول...'), 30);
-      try {
-        const payload = await collectVisualConceptPlansWorkflowPayload();
-        payload.revision = revision;
-        payload.distribution = { rows: seedWorkflow.distribution.rows };
-        const stamp = visualConceptPlanInputStamp();
-        const response = await api('POST', '/api/visual-concept/plans-distribution', payload);
-        hideLoader();
-        if (stamp !== visualConceptPlanInputStamp()
-            || String(visualConceptPlansWorkflowState().distributionRevision || '').trim() !== revision) {
-          toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.'));
-          return;
-        }
-        if (!response?.success) { toast(response?.error || WFT('plans.dist_revise_failed', 'تعذر تطبيق التعديل على التوزيع')); return; }
-        const workflow = visualConceptPlansWorkflowState();
-        workflow.distribution = normalizeVisualConceptPlansWorkflow({
-          distribution: { ...response.distribution, checks: [], issues: [] }
-        }).distribution;
-        workflow.distributionRevision = '';
-        workflow.planContext = response.planContext || workflow.planContext || null;
-        invalidateVisualConceptPlanGeneration(workflow);
-        markVisualConceptDirty();
-        renderVisualConceptPage();
-      } catch (error) {
-        hideLoader();
-        toast(error.message || WFT('plans.dist_revise_failed', 'تعذر تطبيق التعديل على التوزيع'));
-      } finally {
-        visualConceptPlanActionBusy('revise-distribution', false);
-      }
     }
 
     async function checkVisualConceptPlansDistribution(mode, options) {

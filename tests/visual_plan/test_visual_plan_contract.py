@@ -203,13 +203,16 @@ class VisualPlanContractTests(VisualPlanContractBase):
     def test_site_plan_context_compaction_keeps_recent_answers_and_repeats_at_each_threshold(self):
         module = self.application_module
         state = {'promptTokens': 899990, 'compactedAtTokens': 0, 'compactionCount': 0,
-                 'turns': [{'text': str(index)} for index in range(10)],
+                 'turns': [{'text': str(index)} for index in range(40)],
                  'answers': [{'question': str(index), 'answer': str(index)} for index in range(20)]}
         module._visual_plan_site_record_tokens(state, 10)
         self.assertEqual(state['compactionCount'], 1)
-        self.assertEqual(len(state['turns']), 4)
+        # The compaction trims the transcript, it does not erase it: the turns
+        # that no longer fit travel on in the session memory the assistant
+        # maintains, so a long session keeps what it agreed.
+        self.assertEqual(len(state['turns']), 24)
         self.assertEqual([item['question'] for item in state['answers']],
-                         [str(index) for index in range(8, 20)])
+                         [str(index) for index in range(0, 20)])
         module._visual_plan_site_record_tokens(state, 900000)
         self.assertEqual(state['compactionCount'], 2)
         self.assertEqual(state['compactedAtTokens'], 1800000)

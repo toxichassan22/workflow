@@ -7,6 +7,8 @@
 # as grounded guidance, but it never applies them — the client owns every change.
 from numeric_precision import format_precise_number
 
+import chat_memory
+
 
 LAND_CHAT_FIELD_LABELS = (
     ('project_name', 'اسم المشروع'),
@@ -75,6 +77,8 @@ LAND_CHAT_SYSTEM_PROMPT = (
     '- اكتب المعادلات كنص عادي يقرؤه الإنسان (مثال: مسطح البناء = 7.0 × المساحة = 56000 م²)، وممنوع صيغ LaTeX أو رموزها مثل $ و \\times و \\text، وممنوع تنسيق Markdown تمامًا (لا ** ولا ### ولا جداول).\n'
     '- إن كان للسؤال علاقة بتعارض أو نقطة مراجعة مسجلة فاذكرها.\n'
     '- إن كان السؤال خارج بيانات الأرض والكروكي فوضّح أن هذا الشات مخصص لقسم الأرض والكروكي فقط.\n'
+    '- ذاكرة المحادثة إلزامية: لا تخالف ما اتُّفق عليه سابقًا ولا تعِد رقمًا عدّلته أو رفضته، '
+    'وإذا غيّر العميل قرارًا سابقًا فاذكر التغيير صراحة.\n'
     '- يجوز اقتراح تعديل على قيم القسم كنص إرشادي مبني على البيانات المرفقة حصرًا: '
     'انسب كل قيمة مقترحة إلى مصدرها الموثق (جدول التنظيم، الحقائق التنظيمية، ملفات الأمانة) '
     'بلا اجتهاد ولا افتراض قيمة غير مسجلة، وإن لم تدعم البيانات اقتراحًا فصرّح بذلك. '
@@ -434,15 +438,13 @@ def _land_chat_clean_reply(text):
 
 
 def _land_chat_history(raw):
-    history = []
-    for item in (raw if isinstance(raw, list) else [])[-10:]:
-        if not isinstance(item, dict):
-            continue
-        content = _visual_concept_text(item.get('content'), 2000)
-        if content:
-            history.append({'role': 'user' if item.get('role') == 'user' else 'assistant',
-                            'content': content})
-    return history
+    """The whole conversation, not the last ten turns.
+
+    The land chat used to carry a fixed slice of the conversation, so it
+    answered a fresh question and contradicted what the client had just
+    agreed. The digest keeps the client's own words when the session grows.
+    """
+    return chat_memory.normalize_turns(raw)
 
 
 @app.route('/api/land-chat', methods=['POST'])
@@ -462,12 +464,12 @@ def api_land_chat():
     # context block: both change per turn, so the request prefix stays
     # identical and can hit provider-side prompt caching.
     evidence = _land_chat_regulation_evidence(message, project_data)
-    prior = ''
     history = _land_chat_history(data.get('history'))
-    if history:
-        prior = 'سياق المحادثة السابقة:\n' + '\n'.join(
-            f"{'المستخدم' if turn['role'] == 'user' else 'المساعد'}: {turn['content']}"
-            for turn in history) + '\n\n'
+    memory = data.get('memory') if isinstance(data.get('memory'), str) else ''
+    conversation = chat_memory.build_context(history, memory=memory)
+    prior = chat_memory.prompt_block(conversation)
+    if prior:
+        prior = prior + '\n\n'
     user_content = f"بيانات الأرض والكروكي المتاحة:\n{context_json}\n\n"
     if evidence:
         user_content += f"نصوص الاشتراطات الموثقة من ملفات الأمانة:\n{evidence}\n\n"
@@ -485,4 +487,6 @@ def api_land_chat():
             return fatal
         return jsonify({'success': False, 'error': 'تعذر الحصول على إجابة',
                         'error_code': 'TEXT_PROVIDER_FAILED'}), 503
-    return jsonify({'success': True, 'reply': reply})
+    return jsonify({'success': True, 'reply': reply,
+                    'memory': conversation['memory'],
+                    'decisions': conversation['decisions']})

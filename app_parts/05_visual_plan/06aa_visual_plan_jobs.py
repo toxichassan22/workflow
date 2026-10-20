@@ -182,8 +182,11 @@ def _visual_plan_execute(kind, data, slot_id=''):
                 scene, _contract, context, _program = _visual_plan_scene_from_request(data)
             else:
                 context = _visual_plan_prompt_context(data)
-                if not _visual_plan_notes_cleared(data, context):
-                    raise visual_plan_geometry.PlanGeometryError('فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.', 'PLANS_NOTES_CHECK_REQUIRED')
+                notes_gate = _visual_plan_notes_gate(data, context)
+                if not notes_gate.get('cleared'):
+                    raise visual_plan_geometry.PlanGeometryError(
+                        notes_gate.get('message') or 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
+                        'PLANS_NOTES_CHECK_REQUIRED')
             context['client_notes'] = _visual_plan_notes(data)
             distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
             model = (_visual_concept_plan_model_from_distribution(distribution, context, context.get('regulations') or {})

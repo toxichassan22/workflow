@@ -26,6 +26,27 @@
       }).filter(item => Number.isFinite(item.eastings) && Number.isFinite(item.northings)).slice(0, 60);
     }
 
+    const PLANS_CHAT_MEMORY_MAX_TURNS = 120;
+    const PLANS_CHAT_MEMORY_MAX_CHARS = 40000;
+
+    // One shape for every conversation in the plans workflow: the turns, the
+    // memory digest the server folds the older turns into, and the points the
+    // client and the assistant agreed on. The memory is what keeps a chat from
+    // contradicting what was already settled.
+    function normalizePlansChatState(raw) {
+      const source = raw && typeof raw === 'object' ? raw : {};
+      const turns = Array.isArray(raw) ? raw : (Array.isArray(source.turns) ? source.turns : []);
+      return {
+        turns: turns.slice(-PLANS_CHAT_MEMORY_MAX_TURNS).map(item => ({
+          role: item?.role === 'assistant' ? 'assistant' : 'user',
+          text: String(item?.text ?? item?.content ?? '').slice(0, 4000)
+        })).filter(item => item.text),
+        memory: String(source.memory || '').slice(0, PLANS_CHAT_MEMORY_MAX_CHARS),
+        decisions: (Array.isArray(source.decisions) ? source.decisions : [])
+          .map(item => String(item || '').slice(0, 400)).filter(Boolean).slice(0, 40)
+      };
+    }
+
     function emptyVisualConceptPlansWorkflow() {
       return {
         status: 'idle',
@@ -35,7 +56,8 @@
           aiReviewed: false, reviewSignature: '', canProceed: null },
         distributionNotes: '',
         distributionRevision: '',
-        conflictChats: { verify: [], distribution: [] },
+        conflictChats: { verify: normalizePlansChatState(null), distribution: normalizePlansChatState(null) },
+        distributionChat: normalizePlansChatState(null),
         clientNotes: '',
         notesReview: { verified: false, canProceed: false, checks: [], issues: [], inputSignature: '', token: '',
           acknowledged: false, ackSignature: '', ackToken: '' },
@@ -68,16 +90,10 @@
       const distribution = source.distribution && typeof source.distribution === 'object' ? source.distribution : {};
       const review = source.notesReview && typeof source.notesReview === 'object' ? source.notesReview : {};
       const chats = source.conflictChats && typeof source.conflictChats === 'object' ? source.conflictChats : {};
-      const chatTurns = list => (Array.isArray(list) ? list.slice(-12) : [])
-        .map(item => ({
-          role: item && item.role === 'assistant' ? 'assistant' : 'user',
-          text: String((item && item.text) || '').slice(0, 2000)
-        }))
-        .filter(item => item.text);
       const prompts = source.prompts && typeof source.prompts === 'object' ? source.prompts : {};
       const scene = source.scene && typeof source.scene === 'object' && source.scene.version === 1 ? source.scene : null;
       const assistant = source.siteAssistant && typeof source.siteAssistant === 'object' ? source.siteAssistant : {};
-      const assistantTurns = (Array.isArray(assistant.turns) ? assistant.turns : []).slice(-12).map(item => ({
+      const assistantTurns = (Array.isArray(assistant.turns) ? assistant.turns : []).slice(-60).map(item => ({
         role: item?.role === 'assistant' ? 'assistant' : 'user',
         text: String(item?.text || '').slice(0, 4000),
         choices: Array.isArray(item?.choices) ? item.choices.slice(0, 6).map(choice => String(choice).slice(0, 240)) : []
@@ -124,7 +140,11 @@
         },
         distributionNotes: String(source.distributionNotes || '').slice(0, 1000000),
         distributionRevision: String(source.distributionRevision || '').slice(0, 4000),
-        conflictChats: { verify: chatTurns(chats.verify), distribution: chatTurns(chats.distribution) },
+        conflictChats: {
+          verify: normalizePlansChatState(chats.verify),
+          distribution: normalizePlansChatState(chats.distribution)
+        },
+        distributionChat: normalizePlansChatState(source.distributionChat),
         clientNotes: String(source.clientNotes || '').slice(0, 1000000),
         notesReview: {
           verified: Boolean(review.verified), canProceed: Boolean(review.canProceed),

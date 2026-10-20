@@ -1,5 +1,8 @@
 
 
+import chat_memory
+
+
 def _build_designer_attached_slide_html(image_url, title='', caption='', branding=None):
     """Build a standalone slide that shows one attached image full-width, no model needed."""
     safe_url = html_lib.escape(str(image_url or ''), quote=True)
@@ -850,10 +853,10 @@ def _designer_edit_failure_detail(reasons):
 
 
 
-DESIGNER_CHAT_VERBATIM_TURNS = 10
-DESIGNER_CHAT_MEMORY_CHARS = 6000
-DESIGNER_CHAT_MEMORY_MAX = 1800
-DESIGNER_CHAT_STORED_TURNS = 40
+DESIGNER_CHAT_VERBATIM_TURNS = chat_memory.CHAT_MEMORY_VERBATIM_TURNS
+DESIGNER_CHAT_MEMORY_CHARS = chat_memory.CHAT_MEMORY_DIGEST_CHARS
+DESIGNER_CHAT_MEMORY_MAX = chat_memory.CHAT_MEMORY_DIGEST_CHARS
+DESIGNER_CHAT_STORED_TURNS = 120
 
 
 def _normalize_designer_chat_messages(messages):
@@ -910,60 +913,22 @@ def _designer_chat_history_lines(history):
 
 
 def _designer_chat_memory(history, memory, usage_ctx=None):
-    """Keep the conversation whole: recent turns verbatim, older ones kept as tail text.
+    """Keep the conversation whole: recent turns verbatim, older ones folded away.
 
     The chat used to receive nothing but the current message, so it asked «أي شريحة؟», the user
     answered «8», and the next turn had no idea what «8» referred to. History is now carried, and
-    once it grows past DESIGNER_CHAT_MEMORY_CHARS the older half is folded into the memory string.
+    once it grows past the input budget the older turns are folded into the memory digest.
 
     Billing rule: this helper never calls the model. A previous version summarized the older
     turns with an extra AI call on every long-history turn, so a simple message was billed for
-    work the user never asked for. The tail of the raw conversation is kept instead, which
+    work the user never asked for. The digest is built from the conversation text instead, which
     preserves slide numbers and decisions without any hidden spend. ``usage_ctx`` is kept only
     for caller compatibility.
     """
     _ = usage_ctx
-    memory = str(memory or '').strip()
-    entries = [e for e in (history if isinstance(history, list) else []) if isinstance(e, dict)]
-    recent = entries[-DESIGNER_CHAT_VERBATIM_TURNS:]
-    older = entries[:-DESIGNER_CHAT_VERBATIM_TURNS] if len(entries) > DESIGNER_CHAT_VERBATIM_TURNS else []
-    older_lines = _designer_chat_history_lines(older)
-    if not older_lines:
-        return memory, recent
-
-    older_text = '\n'.join(older_lines)
-    merged = (memory + '\n' + older_text).strip() if memory else older_text
-    if len(memory) + len(older_text) <= DESIGNER_CHAT_MEMORY_CHARS:
-        return _text_tail(merged, DESIGNER_CHAT_MEMORY_CHARS), recent
-
-    # No model summarization here: keep the newest COMPLETE lines within the
-    # cap — a mid-sentence cut drops the slide reference the line carried.
-    return _text_tail(merged, DESIGNER_CHAT_MEMORY_MAX), recent
-
-
-def _text_tail(text, cap):
-    """The newest whole lines of ``text`` that fit ``cap``, marked when cut."""
-    text = str(text or '')
-    if len(text) <= cap:
-        return text
-    lines = text.split('\n')
-    kept, total = [], 0
-    for line in reversed(lines):
-        cost = len(line) + 1
-        if kept and total + cost > cap:
-            break
-        if not kept and cost > cap:
-            # One line longer than the cap — keep its tail at a word edge.
-            cut = line[-cap:]
-            space = cut.find(' ')
-            kept.append(cut[space + 1:] if 0 < space < len(cut) - 40 else cut)
-            total += cap
-            break
-        kept.append(line)
-        total += cost
-    if len(kept) == len(lines):
-        return '\n'.join(reversed(kept))
-    return '…\n' + '\n'.join(reversed(kept))
+    conversation = chat_memory.build_context(
+        chat_memory.normalize_turns(history), memory=str(memory or ''))
+    return conversation['memory'], conversation['verbatim']
 
 
 def _report_designer_job_progress(job_id, tenant_id, progress_val, message_text, extra_data=None):

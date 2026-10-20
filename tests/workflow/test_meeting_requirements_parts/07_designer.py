@@ -780,15 +780,19 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         lines = module._designer_chat_history_lines(recent)
         self.assertIn('المستخدم [شرائح: 8]: الشريحة 8 فيها مشكلة', lines[0])
 
-        # A long conversation is truncated locally, never summarized by the model:
-        # a hidden summarization call billed the tenant for work nobody requested.
-        long_history = [{'role': 'user', 'content': 'ك' * 900, 'slides': [3]} for _ in range(20)]
+        # A long conversation keeps the newest turns verbatim and folds the older
+        # ones into the digest: no model call, so a plain message is never
+        # billed for work the client did not ask for.
+        long_history = [{'role': 'user', 'content': 'ك' * 900, 'slides': [3]} for _ in range(200)]
         with patch.object(module, 'call_text_chat',
                           return_value={'choices': [{'message': {'content': 'ملخص: الحديث عن الشريحة 3.'}}]}) as chat:
             compressed, kept = module._designer_chat_memory(long_history, '')
         self.assertFalse(chat.called)
         self.assertIn('[شرائح: 3]', compressed)
         self.assertEqual(len(kept), module.DESIGNER_CHAT_VERBATIM_TURNS)
+        # The client's own words survive the folding — an instruction is a
+        # contract, an assistant reply is disposable.
+        self.assertIn('العميل', compressed)
 
         app_source = read_module_source('app.py')
         self.assertIn('## ذاكرة المحادثة (ملخص ما سبق — قد تحمل قيمًا سبق تعديلها', app_source)

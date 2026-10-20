@@ -209,8 +209,11 @@ def _visual_plan_scene_from_request(data):
     if scene.get('version') != VISUAL_PLAN_SCENE_VERSION or not isinstance(scene.get('token'), str):
         raise visual_plan_geometry.PlanGeometryError('المشهد الهندسي غير جاهز.', 'PLANS_SCENE_REQUIRED')
     contract, context = _visual_plan_contract(data)
-    if not _visual_plan_notes_cleared(data, context):
-        raise visual_plan_geometry.PlanGeometryError('فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.', 'PLANS_NOTES_CHECK_REQUIRED')
+    notes_gate = _visual_plan_notes_gate(data, context)
+    if not notes_gate.get('cleared'):
+        raise visual_plan_geometry.PlanGeometryError(
+            notes_gate.get('message') or 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
+            'PLANS_NOTES_CHECK_REQUIRED')
     signature = _visual_plan_input_signature(data, context)
     if scene.get('inputSignature') != signature:
         raise visual_plan_geometry.PlanGeometryError('المشهد الهندسي لا يطابق بيانات المشروع الحالية.', 'PLANS_CONTEXT_CHANGED')
@@ -416,8 +419,11 @@ def _visual_plan_create_scene(data, context=None):
             context['primary_frontage'] = dict(resolved)
     if not contract['primaryFrontage']['direction']:
         raise visual_plan_geometry.PlanGeometryError('الواجهة الرئيسية غير محددة بوضوح في الكروكي والملخص.', 'PLANS_MAIN_FRONTAGE_REQUIRED')
-    if not _visual_plan_notes_cleared(data, context):
-        raise visual_plan_geometry.PlanGeometryError('فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.', 'PLANS_NOTES_CHECK_REQUIRED')
+    notes_gate = _visual_plan_notes_gate(data, context)
+    if not notes_gate.get('cleared'):
+        raise visual_plan_geometry.PlanGeometryError(
+            notes_gate.get('message') or 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
+            'PLANS_NOTES_CHECK_REQUIRED')
     program = _visual_plan_program(contract, context)
     visual_plan_scene.check_program_feasibility(contract, program)
     reference_url = _visual_concept_render_plan_boundary_reference(contract['geometry']['surveyPoints'], g.tenant_id)
@@ -784,6 +790,64 @@ def _visual_plan_render_site_svg(prompt, contract, data, base_image='', extra_re
     return data_uri, len(references), model
 
 
+def _visual_plan_dependency_images(data, workflow, kind):
+    """The approved diagrams this diagram must be drawn on, in order.
+
+    Plan 2 is drawn on Plan 1; Plan 3 is drawn on Plan 1 AND Plan 2. The
+    dependency list is fixed per kind, so a diagram can never be produced
+    without the approved drawings it is supposed to build on — Plan 3 used to
+    receive Plan 1 only and had to invent the floor stacking itself.
+    """
+    posted = data.get('planImages') if isinstance(data.get('planImages'), dict) else {}
+    project_slots = ((data.get('projectData') or {}).get('visual_concept') or {}).get('slots') or {}
+    workflow_slots = workflow.get('slots') if isinstance(workflow.get('slots'), dict) else {}
+    found = []
+    for dependency in _VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ()):
+        raw = posted.get(dependency)
+        if isinstance(raw, dict):
+            raw = raw.get('approvedImageUrl') or raw.get('imageUrl')
+        url = str(raw or '').strip()
+        if not url:
+            slot = workflow_slots.get(f'plan_{dependency}') or {}
+            draft_slot = project_slots.get(f'plan_{dependency}') or {}
+            url = str(slot.get('approvedImageUrl') or slot.get('imageUrl')
+                      or draft_slot.get('approvedImageUrl') or draft_slot.get('imageUrl')
+                      or '').strip()
+        if url and url not in found:
+            found.append(url)
+    return found
+
+
+def _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=False):
+    """The rule that holds for the diagrams this one is drawn on.
+
+    It states what the attached diagrams are and what may not change, so the
+    drawing is derived from them instead of invented around them.
+    """
+    if not dependency_kinds:
+        return ''
+    labels = {'site': 'Plan 1 — the approved site plan',
+              'uses': 'Plan 2 — the approved floor allocation'}
+    listed = '; '.join(labels.get(item, item) for item in dependency_kinds)
+    lead = 'The attached images that follow are' if base_image else 'The attached images are'
+    if kind == 'uses':
+        return (
+            f'\nSTRICT DERIVATION: {lead} {listed}. This diagram is the floor-by-floor use '
+            'allocation of that plan: keep its building footprints, its entries and its site '
+            'arrangement exactly as they are drawn, and place only the approved components on the '
+            'approved number of floors. Never add a floor, a component, a unit, a building, an area '
+            'or a dimension that the approved data does not contain, and never resize a footprint.\n'
+        )
+    if kind == 'massing':
+        return (
+            f'\nSTRICT COMPOSITION: {lead} {listed}. This isometric is their composition: extrude '
+            'the exact footprints of Plan 1 and stack them exactly as Plan 2 allocates them. Do not '
+            'invent, merge, split, move, rotate or resize any building, floor, volume or open area, '
+            'and do not add anything the approved diagrams do not contain.\n'
+        )
+    return ''
+
+
 def _visual_plan_render_response(data, slot_id):
     kind = _visual_concept_plan_kind(slot_id)
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
@@ -796,20 +860,21 @@ def _visual_plan_render_response(data, slot_id):
                 'model': model_used, 'geometryMode': 'surveyed_xy_schematic_z',
                 'referenceCount': reference_count}
 
-    # Stage 4 diagrams (uses and massing) built directly on Plan 1 and distribution
+    # Stage 4 diagrams (uses and massing) are drawn on the approved diagrams
+    # they depend on: Plan 2 on Plan 1, Plan 3 on Plan 1 AND Plan 2.
     context = _visual_plan_prompt_context(data)
     prompt = _visual_plan_slot_prompt(workflow, kind, context)
     base_image = _visual_concept_edit_base_image(data, g.tenant_id)
     references = [base_image] if base_image else []
 
-    plan_images = data.get('planImages') if isinstance(data.get('planImages'), dict) else {}
-    site_image = (plan_images.get('site')
-                  or (workflow.get('slots', {}).get('plan_site', {}).get('imageUrl'))
-                  or (data.get('projectData', {}).get('visual_concept', {}).get('slots', {}).get('plan_site', {}).get('imageUrl'))
-                  or '')
-    if site_image and site_image not in references:
-        site_uris = _visual_concept_reference_uris(urls=[site_image], tenant_id=g.tenant_id)
-        references.extend(site_uris)
+    dependency_kinds = list(_VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ()))
+    dependency_images = _visual_plan_dependency_images(data, workflow, kind)
+    for dependency_image in dependency_images:
+        dependency_uris = _visual_concept_reference_uris(
+            urls=[dependency_image], tenant_id=g.tenant_id)
+        for dependency_uri in dependency_uris:
+            if dependency_uri not in references:
+                references.append(dependency_uri)
 
     boundary_points = (workflow.get('boundary') or {}).get('points') or context.get('survey_points')
     if boundary_points:
@@ -823,10 +888,7 @@ def _visual_plan_render_response(data, slot_id):
     image_prompt = (prompt
         + ('\nThe first attached image is the current approved illustration of this plan — '
            'keep its look and every unrequested detail identical. ' if base_image else '\n')
-        + (('\nCRITICAL ARCHITECTURAL CONFORMITY: The attached site plan illustration is the approved 2D layout (Plan 1) — '
-            'you MUST strictly extrude the exact 2D building footprints and masses established in it into 3D isometric volumes! '
-            'Do NOT invent new buildings, do NOT change their locations, and do NOT alter the site arrangement.\n')
-           if site_image else '')
+        + _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=bool(base_image))
         + 'The attached outline is the true surveyed parcel boundary — trace it exactly and '
         'draw only the buildings, entries and open areas the prompt describes, nothing else.')
 

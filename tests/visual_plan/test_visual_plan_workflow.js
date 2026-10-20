@@ -10,6 +10,7 @@ const registerPlanStatusAndWiringTests = require('./test_visual_plan_workflow_pa
 const registerSiteChatDisplayTests = require('./test_visual_plan_workflow_parts/03_site_chat_display.js');
 const registerSiteAssistantPayloadTests = require('./test_visual_plan_workflow_parts/04_site_assistant_payload.js');
 const registerNotesDecouplingAndAdvisoryTests = require('./test_visual_plan_workflow_parts/05_notes_decoupling_and_advisory.js');
+const registerDistributionChatTests = require('./test_visual_plan_workflow_parts/06_distribution_chat.js');
 
 const dir = path.resolve(__dirname, '../../assets/js/12-files-media');
 const source = fs.readdirSync(dir).filter(file => /^02.*\.js$/.test(file)).sort()
@@ -38,6 +39,7 @@ function fixture(includeVisualPage = false) {
     WFT: (key, fallback, params = {}) => fallback.replace(/\{([^}]+)\}/g,
       (match, name) => params[name] ?? match),
     setDraftDirty() {}, renderVisualConceptPage() {},
+    resetTenantGenerationStop() {},
     normalizeVisualConceptSketch: value => value || {}, emptyVisualConceptSketch: () => ({}),
     visualConceptReferenceNameSeed: value => value,
   });
@@ -51,6 +53,7 @@ registerPlanStatusAndWiringTests({ test, fixture, source, dir, fs, path, vm });
 registerSiteChatDisplayTests({ test, fixture, vm, path });
 registerSiteAssistantPayloadTests({ test, fixture });
 registerNotesDecouplingAndAdvisoryTests({ test, fixture, plain });
+registerDistributionChatTests({ test, fixture, plain });
 
 function installActiveSectionApproval(context) {
   const start = formSectionsSource.indexOf('    function activeProjectSectionKey()');

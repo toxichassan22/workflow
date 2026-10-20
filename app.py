@@ -393,6 +393,11 @@ SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
 # The plans workflow (verify, boundary, distribution, notes, scene) runs its own
 # text model — default argon, overridable without touching the slide model.
 VISUAL_PLAN_TEXT_MODEL = os.environ.get('VISUAL_PLAN_TEXT_MODEL') or GEMINI_TEXT_MODEL
+# The floor-distribution model sits apart from the rest of the plans workflow:
+# distributing components over buildings and floors is a spatial decision, not a
+# listing, so it runs on the slide model at maximum reasoning effort.
+VISUAL_PLAN_DISTRIBUTION_MODEL = (
+    os.environ.get('VISUAL_PLAN_DISTRIBUTION_MODEL') or SLIDE_TEXT_MODEL).strip()
 DESIGNER_PLANNER_MAX_TOKENS = int(os.environ.get('DESIGNER_PLANNER_MAX_TOKENS', '3000'))
 DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000'))
 # Designer agent (chatplan): per-task planner/runner path behind a flag. When 0,
@@ -403,6 +408,7 @@ DESIGNER_AGENT_WORKER_MODEL = os.environ.get('DESIGNER_AGENT_WORKER_MODEL') or G
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
 print(f"[CONFIG] Visual plan text model: {VISUAL_PLAN_TEXT_MODEL}")
+print(f"[CONFIG] Visual plan distribution model: {VISUAL_PLAN_DISTRIBUTION_MODEL}")
 # All image generation runs on OpenRouter's dedicated /images endpoint — the
 # adopted model is image-only and rejects /chat/completions.
 IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'openai/gpt-image-2.5-sunburst')

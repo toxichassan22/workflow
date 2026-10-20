@@ -254,13 +254,23 @@ def _visual_plan_token_matches(kind, data, signature, payload, token):
     return False
 
 
-def _visual_plan_notes_cleared(data, context=None):
-    """Written notes gate generation until either a clean review passes or the
+def _visual_plan_notes_gate(data, context=None):
+    """The written-notes gate with the reason it is closed.
+
+    Written notes gate generation until either a clean review passes or the
     client signs the responsibility acknowledgement — both are server-minted
     tokens bound to the exact input signature, so neither can be forged or
-    carried onto edited inputs."""
+    carried onto edited inputs.
+
+    The gate used to answer one message for three different states: never
+    checked, checked against older inputs, and checked with a real conflict.
+    A review whose signature no longer matches the current inputs is stale, not
+    conflicting — reporting it as a conflict sends the client after the wrong
+    problem, so each state carries its own wording now. The refusal itself is
+    unchanged: the same inputs are accepted and the same ones are refused.
+    """
     if not _visual_plan_notes(data):
-        return True
+        return {'cleared': True, 'reason': '', 'message': ''}
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     review = workflow.get('notesReview') if isinstance(workflow.get('notesReview'), dict) else {}
     signature = _visual_plan_input_signature(data, context)
@@ -268,13 +278,26 @@ def _visual_plan_notes_cleared(data, context=None):
             and isinstance(review.get('ackToken'), str)):
         if _visual_plan_token_matches('notes-ack', data, signature, {'acknowledged': True},
                                       review['ackToken']):
-            return True
-    if not review.get('verified') or not review.get('canProceed'):
-        return False
+            return {'cleared': True, 'reason': 'acknowledged', 'message': ''}
+    if not review.get('verified'):
+        return {'cleared': False, 'reason': 'not_checked',
+                'message': 'لم يتم فحص الملاحظات الحالية بعد.'}
+    if not review.get('canProceed'):
+        return {'cleared': False, 'reason': 'conflict',
+                'message': 'الملاحظات الحالية تحتوي تعارضًا — عدّلها ثم أعد فحص الملاحظات.'}
     if review.get('inputSignature') != signature or not isinstance(review.get('token'), str):
-        return False
+        return {'cleared': False, 'reason': 'stale',
+                'message': 'فحص الملاحظات لم يعد صالحًا لبيانات المخطط الحالية — أعد فحص الملاحظات.'}
     payload = {key: review.get(key) for key in ('verified', 'canProceed', 'checks', 'issues')}
-    return _visual_plan_token_matches('notes', data, signature, payload, review['token'])
+    if not _visual_plan_token_matches('notes', data, signature, payload, review['token']):
+        return {'cleared': False, 'reason': 'stale',
+                'message': 'فحص الملاحظات لم يعد صالحًا لبيانات المخطط الحالية — أعد فحص الملاحظات.'}
+    return {'cleared': True, 'reason': 'verified', 'message': ''}
+
+
+def _visual_plan_notes_cleared(data, context=None):
+    """The gate as a plain answer — see _visual_plan_notes_gate for the reason."""
+    return bool(_visual_plan_notes_gate(data, context).get('cleared'))
 
 
 def _visual_plan_notes_ack(data, context=None):
