@@ -248,6 +248,12 @@ class DraftSaveMergeApiTests(unittest.TestCase):
         self.assertEqual(commits[0]['kind'], 'merge')
         self.assertEqual(commits[0]['changed_keys'], ['city'])
 
+        # The merge is a save: it shows up in the project change log.
+        log = client.get(f"/api/project-draft/{draft['id']}/edit-log",
+                         headers=self.headers()).get_json()
+        actions = [str(entry.get('action') or '') for entry in (log.get('log') or [])]
+        self.assertTrue(actions, 'the merge wrote no change log entry')
+
 
 if __name__ == '__main__':
     unittest.main()

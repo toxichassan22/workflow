@@ -157,6 +157,9 @@ def api_merge_draft_branch(draft_id, branch_id):
     merged_commit_id = commits[0]['id'] if commits else None
     db.finish_draft_branch_merge(g.tenant_id, draft_id, branch_id, merged_commit_id)
     current = db.get_project_draft_by_id(g.tenant_id, draft_id) or {}
+    _record_draft_save_change(
+        draft_id, stored, merged, draft.get('section_statuses') or {},
+        statuses, draft)
     return jsonify({
         'success': True,
         'merged': True,

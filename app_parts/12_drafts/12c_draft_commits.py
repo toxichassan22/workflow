@@ -74,6 +74,39 @@ def _restore_section_statuses(tenant_id, draft, restored_data, stored_statuses):
     return _demote_sections_for_keys(tenant_id, changed, stored_statuses)
 
 
+def _record_draft_save_change(draft_id, previous_data, draft_data,
+                              previous_statuses, section_statuses, previous=None):
+    """Write the change-log entries of a save.
+
+    One entry per touched section, so the log reads as a feed of named actions
+    instead of one row dumping every accumulated difference. A merge and a
+    restore write the same entries: they are saves like any other, and the
+    owner has to see them next to the rest.
+    """
+    details = change_tracking.describe_draft_changes(
+        previous_data, draft_data, id_names=_draft_change_id_names())
+    if isinstance(section_statuses, dict) and section_statuses:
+        for status_line in change_tracking.describe_section_status_changes(
+                previous_statuses, section_statuses):
+            details.append({'group': 'حالة الأقسام', 'text': status_line, 'kind': 'info'})
+    if not previous:
+        _record_change('draft', draft_id, 'إنشاء ملف مشروع',
+                       details, source='manual', summary='تم إنشاء ملف المشروع')
+        return
+    grouped_details = {}
+    for item in details:
+        group_name = item.get('group') if isinstance(item, dict) else ''
+        grouped_details.setdefault(str(group_name or ''), []).append(item)
+    for group_name, group_items in grouped_details.items():
+        if group_name == 'حالة الأقسام':
+            entry_action = 'تحديث حالة الأقسام'
+        elif group_name:
+            entry_action = 'تعديل «%s»' % group_name
+        else:
+            entry_action = 'حفظ بيانات المشروع'
+        _record_change('draft', draft_id, entry_action, group_items, source='manual')
+
+
 def _merge_conflicting_draft_save(tenant_id, draft_id, base_revision, incoming, resolutions):
     """Merge a save that lost the race instead of overwriting the newer work.
 
@@ -128,6 +161,9 @@ def _merge_conflicting_draft_save(tenant_id, draft_id, base_revision, incoming, 
             'error_code': 'DRAFT_EMPTY_OVERWRITE',
         }), 409
     stored_draft = db.get_project_draft_by_id(tenant_id, draft_id) or {}
+    _record_draft_save_change(
+        draft_id, stored, payload, current.get('section_statuses') or {},
+        statuses, current)
     return jsonify({
         'success': True,
         'merged': True,
@@ -217,6 +253,9 @@ def api_restore_draft_commit(draft_id, commit_id):
             409,
         )
     current = db.get_project_draft_by_id(g.tenant_id, draft_id) or {}
+    _record_draft_save_change(
+        draft_id, stored, restored, draft.get('section_statuses') or {},
+        statuses, draft)
     return jsonify({
         'success': True,
         'restored': True,

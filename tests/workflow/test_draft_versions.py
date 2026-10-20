@@ -220,6 +220,13 @@ class DraftVersionApiTests(unittest.TestCase):
         self.assertEqual(commits[0]['kind'], 'restore')
         self.assertEqual(commits[0]['changed_keys'], ['project_name'])
 
+        # The restore is a save: it shows up in the project change log.
+        log = client.get(f"/api/project-draft/{draft['id']}/edit-log",
+                         headers=self.headers()).get_json()
+        actions = [str(entry.get('action') or '') for entry in (log.get('log') or [])]
+        self.assertTrue(actions, 'the restore wrote no change log entry')
+        self.assertTrue(any('تعديل' in action or 'حفظ' in action for action in actions), actions)
+
     def test_restoring_a_version_of_another_company_is_refused(self):
         client = self.app.test_client()
         draft = self.draft(client)
