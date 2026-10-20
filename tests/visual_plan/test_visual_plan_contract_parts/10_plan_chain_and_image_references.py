@@ -254,3 +254,26 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
             module.call_images_api('render hero facade', usage_ctx={'tenant_id': self.tenant_a})
 
         self.assertEqual(captured_payload.get('model'), 'google/gemini-3.1-flash-image')
+
+    def test_plans2d_section_approval_and_external_gate_without_massing(self):
+        """Plan 3 is optional: the client can approve the plans section
+        and proceed to exterior visuals with Plan 1 and Plan 2 alone."""
+        module = self.application_module
+        data_without_massing = {
+            'planImages': {
+                'site': '/uploads/creative/tenant/plan_site.svg',
+                'uses': '/uploads/creative/tenant/plan_uses.svg',
+            }
+        }
+        self.assertTrue(module._visual_concept_section_items_approved(data_without_massing, 'plans2d'))
+        self.assertIsNone(module._visual_concept_external_gate(data_without_massing, 'cover'))
+
+        data_missing_uses = {
+            'planImages': {
+                'site': '/uploads/creative/tenant/plan_site.svg',
+            }
+        }
+        self.assertFalse(module._visual_concept_section_items_approved(data_missing_uses, 'plans2d'))
+        err = module._visual_concept_external_gate(data_missing_uses, 'cover')
+        self.assertIsNotNone(err)
+        self.assertEqual(err['error_code'], 'PLANS_IMAGES_REQUIRED')

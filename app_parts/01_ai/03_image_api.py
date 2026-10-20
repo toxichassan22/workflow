@@ -1003,10 +1003,11 @@ def _visual_concept_external_gate(data, slot_id):
     they are blocked until the client ships all three approved plan images."""
     if slot_id not in VISUAL_CONCEPT_EXTERNAL_SLOTS:
         return None
-    if len(_visual_concept_plan_image_urls(data)) >= 3:
+    plan_map = _visual_concept_plan_image_map(data)
+    if plan_map.get('site') and plan_map.get('uses'):
         return None
     return {'success': False,
-            'error': 'اعتمد المخططات الثلاثة قبل توليد التصور الخارجي',
+            'error': 'اعتمد مخططي الموقع العام وتوزيع الاستخدامات قبل توليد التصور الخارجي',
             'error_code': 'PLANS_IMAGES_REQUIRED'}
 
 

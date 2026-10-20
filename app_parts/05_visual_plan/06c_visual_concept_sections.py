@@ -53,7 +53,8 @@ def _visual_concept_section_items_approved(data, section_id):
     there, the same trust level as the approvedImageUrl values the rest of
     the flow accepts."""
     if section_id == 'plans2d':
-        return len(_visual_concept_plan_image_urls(data)) >= 3
+        plan_map = _visual_concept_plan_image_map(data)
+        return bool(plan_map.get('site') and plan_map.get('uses'))
     slots = _visual_concept_posted_state(data).get('slots')
     slots = slots if isinstance(slots, dict) else {}
     if not slots:

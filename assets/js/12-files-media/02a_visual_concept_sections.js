@@ -96,7 +96,7 @@
       const slots = tenantVisualConceptState?.slots || {};
       if (id === 'plans2d') {
         return VISUAL_CONCEPT_PLAN_KINDS
-          .filter(item => !durableImageUrl(slots[item.id]?.approvedImageUrl))
+          .filter(item => item.id !== 'plan_massing' && !durableImageUrl(slots[item.id]?.approvedImageUrl))
           .map(item => visualConceptSlotLabel(item.id));
       }
       if (!VISUAL_CONCEPT_SECTION_IDS.includes(id)) return [id];

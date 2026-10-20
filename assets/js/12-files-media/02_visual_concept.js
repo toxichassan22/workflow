@@ -467,7 +467,7 @@
 
     function visualConceptPlansApproved() {
       const slots = tenantVisualConceptState?.slots || {};
-      return VISUAL_CONCEPT_PLAN_KINDS.every(item => Boolean(slots[item.id]?.approvedImageUrl));
+      return VISUAL_CONCEPT_PLAN_KINDS.filter(item => item.id !== 'plan_massing').every(item => Boolean(slots[item.id]?.approvedImageUrl));
     }
 
     function visualConceptPlanImageMap() {
