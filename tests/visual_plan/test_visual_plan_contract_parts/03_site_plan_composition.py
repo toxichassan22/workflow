@@ -288,3 +288,61 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         self.assertIn('TABLE COLUMN ALIGNMENT', system_prompt)
         self.assertIn('x=740', system_prompt)
 
+    def test_site_svg_assistant_interview_receives_initial_notes_from_turn_one(self):
+        module = self.application_module
+        first_data = {'message': 'المدخل من الشارع الشرقي والمسابح في الخلف', 'plansWorkflow': {
+            'siteAssistant': {'inputSignature': 'test-sig-notes'}
+        }}
+        with patch.object(module, '_visual_plan_site_packet',
+                          return_value=({}, {}, {}, 'test-sig-notes')), \
+                patch.object(module, '_visual_plan_site_call',
+                             return_value=({'ready': False, 'reply': 'تم استلام ملاحظاتك وجاري التحليل'}, 120)) as model_call:
+            res = module._visual_plan_site_interview(first_data)
+
+        self.assertTrue(model_call.called)
+        user_packet = json.loads(model_call.call_args[0][1])
+        self.assertIn('client initial instructions', user_packet['task'])
+        self.assertEqual(user_packet['latestClientMessage'], 'المدخل من الشارع الشرقي والمسابح في الخلف')
+        self.assertEqual(res['assistantState']['turns'][0]['text'], 'المدخل من الشارع الشرقي والمسابح في الخلف')
+
+    def test_site_svg_edit_system_prompt_prioritizes_modular_section_and_progress(self):
+        module = self.application_module
+        svg_content = (
+            '<svg viewBox="0 0 1600 1000">\n'
+            '<!-- LL_SECTION_START:coordinates --><g id="coords"></g><!-- LL_SECTION_END:coordinates -->\n'
+            '<!-- LL_SECTION_START:colors --><defs></defs><!-- LL_SECTION_END:colors -->\n'
+            '<!-- LL_SECTION_START:components --><g id="comp"></g><!-- LL_SECTION_END:components -->\n'
+            '<!-- LL_SECTION_START:access --><g id="acc"></g><!-- LL_SECTION_END:access -->\n'
+            '<!-- LL_SECTION_START:landscape --><g id="land"></g><!-- LL_SECTION_END:landscape -->\n'
+            '<!-- LL_SECTION_START:legend --><g id="leg"></g><!-- LL_SECTION_END:legend -->\n'
+            '</svg>'
+        )
+        edit_data = {
+            'siteSvgCode': svg_content,
+            'message': 'نقل المسبح لليمين',
+            'plansWorkflow': {
+                'siteAssistant': {
+                    'inputSignature': 'sig-123',
+                    'renderRevision': module._VISUAL_PLAN_SITE_RENDER_REVISION,
+                }
+            }
+        }
+        with patch.object(module, '_visual_plan_site_packet',
+                          return_value=({'drawingLayout': {'approvedLabels': []}}, {}, {}, 'sig-123')), \
+                patch.object(module, '_visual_plan_site_call',
+                             return_value=({'clear': True, 'targetSection': 'landscape',
+                                            'code': '<g id="ll-section-landscape"><circle r="10"/></g>', 'reply': 'تم'}, 80)) as model_call, \
+                patch.object(module, '_visual_plan_report_site_chat_progress') as progress_call, \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/edit.png'):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                res = module._visual_plan_site_edit(edit_data)
+
+        self.assertTrue(res['success'])
+        self.assertEqual(res['targetSection'], 'landscape')
+        system_prompt = model_call.call_args[0][0]
+        self.assertIn('ALWAYS prioritize Option 1', system_prompt)
+        user_packet = json.loads(model_call.call_args[0][1])
+        self.assertEqual(user_packet['request'], 'نقل المسبح لليمين')
+        self.assertTrue(progress_call.called)
+

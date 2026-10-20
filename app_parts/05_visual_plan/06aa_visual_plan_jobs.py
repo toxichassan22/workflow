@@ -111,17 +111,17 @@ def _visual_plan_job_terminal_todos(kind, state, current_todos=None, active_inde
 
 
 def _visual_plan_report_site_chat_progress(active_index, progress):
-    if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') != 'site_chat':
+    if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') not in ('site_chat', 'site_edit', 'site_generate'):
         return
     callback = getattr(g, 'visual_plan_job_progress', None)
     if callable(callback):
         callback(progress=progress,
-                 todos=_visual_plan_job_todos('site_chat', active_index=active_index))
+                 todos=_visual_plan_job_todos(getattr(g, 'visual_plan_job_kind', 'site_chat'), active_index=active_index))
 
 
 def _visual_plan_report_site_chat_timing(name, started_at):
     if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') not in (
-            'site_chat', 'site_generate'):
+            'site_chat', 'site_edit', 'site_generate'):
         return
     callback = getattr(g, 'visual_plan_job_progress', None)
     if callable(callback):

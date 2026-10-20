@@ -194,6 +194,8 @@ def _visual_plan_site_interview(data, action='chat'):
     compact_mode = state['promptTokens'] >= _VISUAL_PLAN_SITE_CONTEXT_COMPACT_AT
     if action == 'generate':
         task = 'confirm readiness for generation; ask a blocking question if needed'
+    elif message and len(state.get('turns') or []) <= 1:
+        task = 'review all available approved site-plan inputs together with the client initial instructions, acknowledge the client notes, address any design conflicts, and confirm readiness to draw the master plan'
     elif not state['turns'] and not message:
         task = 'review all available approved site-plan inputs and begin the client interview; ask only a blocking design question if needed'
     else:
@@ -700,6 +702,7 @@ def _visual_plan_site_generate(data, interview):
                      else interview.get('reply') or (workflow.get('scene') if isinstance(workflow.get('scene'), dict) else {}).get('reply')
                      or 'تم إنشاء المخطط بنجاح لمراجعته.')
             state['turns'].append({'role': 'assistant', 'text': reply})
+
             return {
                 'success': True,
                 'slotId': 'plan_site',
@@ -787,6 +790,7 @@ def _visual_plan_site_edit(data):
         state['answers'] = state['answers'][-100:]
         state['pendingQuestion'] = ''
     state['turns'].append({'role': 'user', 'text': instruction})
+    _visual_plan_report_site_chat_progress(0, 25)
     system_prompt = (
         'You are Google Gemini 4 Argon editing a modular architectural site plan SVG. '
         'You have two ways to respond:\n'
@@ -795,6 +799,7 @@ def _visual_plan_site_edit(data):
         '2. If the edit involves a spatial redesign or full regeneration, return JSON: '
         '{"clear":true,"svgCode":"<svg ...>...</svg>","reply":""}.\n'
         'Change only what is necessary, preserving every other byte and all source facts. '
+        'ALWAYS prioritize Option 1 (targetSection + code fragment) whenever the edit targets a specific section (e.g. landscape, components, access, legend) to minimize output size and latency. Only use Option 2 if the user explicitly requested a total redesign. '
         'Follow architectural presentation standards: crisp white/light canvas (#FFFFFF/#f8fafc, viewBox 0 0 1600 1000). '
         'STRICT SAFE ZONE: All elements and text must fit within x=80..1520 and y=40..960 (80px side margins, 40px top/bottom). '
         'Top header title anchored at x=1480 text-anchor="end" (y=50..75). '
@@ -805,12 +810,13 @@ def _visual_plan_site_edit(data):
         'never shifted against card borders or canvas edge.'
     )
     user_packet = {'projectFacts': packet, 'currentSvg': svg,
-                   'resolvedAnswers': state['answers'], 'sessionMemory': state['summary'],
-                   'recentTurns': state['turns'][-8:], 'request': instruction}
+                   'resolvedAnswers': state['answers'][-8:], 'sessionMemory': state['summary'],
+                   'recentTurns': state['turns'][-6:], 'request': instruction}
     parsed, prompt_tokens = _visual_plan_site_call(
         system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
         max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS)
     _visual_plan_site_record_tokens(state, prompt_tokens)
+    _visual_plan_report_site_chat_progress(1, 70)
     if parsed.get('clear') is False:
         question = _visual_concept_text(parsed.get('question'), 800) or 'حدد العنصر المطلوب تعديله.'
         raw_choices = parsed.get('choices') if isinstance(parsed.get('choices'), list) else []
@@ -837,6 +843,8 @@ def _visual_plan_site_edit(data):
         state['status'] = 'review'
         reply = _visual_concept_text(parsed.get('reply'), _VISUAL_PLAN_SITE_REPLY_MAX_CHARS) or 'تم تحديث المخطط.'
         state['turns'].append({'role': 'assistant', 'text': reply})
+
+        _visual_plan_report_site_chat_progress(2, 95)
         return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
                 'model': VISUAL_PLAN_SITE_MODEL, 'reply': reply,
                 'assistantState': state, 'scene': workflow.get('scene')}
@@ -870,6 +878,7 @@ def _visual_plan_site_edit(data):
     if sanitized_sections:
         reply += ' حُذفت تسميات غير إنجليزية من القسم المعدل.'
     state['turns'].append({'role': 'assistant', 'text': reply})
+    _visual_plan_report_site_chat_progress(2, 95)
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
             'targetSection': section, 'model': VISUAL_PLAN_SITE_MODEL,
             'reply': reply,

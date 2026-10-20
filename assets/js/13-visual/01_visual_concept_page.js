@@ -62,7 +62,12 @@
         else if (action === 'delete-interior-field') deleteVisualConceptInteriorField(slotId);
         else if (action === 'delete-plan') deleteVisualConceptPlan(slotId);
         else if (action === 'chat') sendVisualConceptChat(slotId);
-        else if (action === 'start-site-chat') startVisualConceptSiteChat();
+        else if (action === 'start-site-chat') {
+          const input = document.querySelector('[data-visual-chat="plan_site"]');
+          const message = (input?.value || '').trim();
+          if (input) input.value = '';
+          startVisualConceptSiteChat(message);
+        }
         else if (action === 'restart-site-plan') restartVisualConceptSitePlan();
         else if (action === 'chat-choice') {
           const input = document.querySelector('[data-visual-chat="' + slotId + '"]');
@@ -465,7 +470,7 @@
       return true;
     }
 
-    async function startVisualConceptSiteChat() {
+    async function startVisualConceptSiteChat(initialMessage = '') {
       if (visualConceptSiteAssistantBusy) return;
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked('plan_site')) {
@@ -474,7 +479,8 @@
       }
       const slot = tenantVisualConceptState?.slots?.plan_site;
       const assistant = visualConceptPlansWorkflowState().siteAssistant || {};
-      if (!slot || (assistant.turns || []).length || (slot.chat || []).length) return;
+      const trimmedMessage = String(initialMessage || '').trim();
+      if (!slot || (!trimmedMessage && ((assistant.turns || []).length || (slot.chat || []).length))) return;
 
       visualConceptSiteAssistantBusy = true;
       const workflow = visualConceptPlansWorkflowState();
@@ -484,6 +490,13 @@
         { id: '3', label: 'مراجعة الإجابات السابقة', status: 'pending' },
         { id: '4', label: 'تحليل المتطلبات وتحديد السؤال', status: 'pending' },
       ];
+      if (trimmedMessage) {
+        slot.chat = slot.chat || [];
+        slot.chat.push({ role: 'user', text: trimmedMessage });
+        if (!workflow.clientNotes?.trim()) {
+          workflow.clientNotes = trimmedMessage;
+        }
+      }
       markVisualConceptDirty();
       renderVisualConceptPage();
       try {
@@ -499,6 +512,9 @@
           siteAssistantContext: true, assistantAction: 'chat'
         });
         payload.planAssistantAction = 'chat';
+        if (trimmedMessage) {
+          payload.message = trimmedMessage;
+        }
         const response = await visualConceptPlanJobApi(
           'POST', '/api/visual-concept/site-plan-assistant', payload);
         if (!response?.success) {
@@ -742,7 +758,10 @@
       const sitePlan = slotId === 'plan_site' && planWorkflowSlot;
       if (sitePlan) {
         const assistant = visualConceptPlansWorkflowState().siteAssistant || {};
-        if (!(assistant.turns || []).length && !(liveSlot().chat || []).length && !liveSlot().svgCode) {
+        const started = Boolean((assistant.turns || []).length || (liveSlot().chat || []).length || liveSlot().svgCode);
+        if (!started) {
+          if (input) input.value = '';
+          await startVisualConceptSiteChat(message);
           return;
         }
         visualConceptSiteAssistantBusy = true;

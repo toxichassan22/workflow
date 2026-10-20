@@ -240,7 +240,7 @@
         ? '<div class="visual-plan-site-controls"><button type="button" class="btn ghost small" data-visual-action="restart-site-plan" data-visual-slot="plan_site" ' +
           (assistantBusy || resetBusy || locked ? 'disabled' : '') + '>البدء من جديد</button></div>'
         : '';
-      const canCompose = conversationStarted && !assistantBusy && !locked;
+      const canCompose = !assistantBusy && !locked;
       const chat = chatMessages.map(item => {
         const isUser = item.role === 'user';
         const choices = !isUser && Array.isArray(item.choices) && item.choices.length
@@ -254,7 +254,7 @@
         ? assistantProgressMarkup
         : '<div class="tenant-hint visual-plan-site-empty-chat"><p>لا توجد رسائل بعد.</p>' +
           (!conversationStarted ? '<button type="button" class="btn primary small" data-visual-action="start-site-chat" data-visual-slot="plan_site" ' +
-            (locked ? 'disabled' : '') + '>بدء المحادثة</button>' : '') + '</div>');
+            (locked || assistantBusy ? 'disabled' : '') + '>بدء التحليل</button>' : '') + '</div>');
       const assistantStatus = assistantBusy
         ? (chatMessages.length ? assistantProgressMarkup : '') : '';
       const preview = image
@@ -276,7 +276,7 @@
         restart +
         '<div class="visual-plan-site-messages" role="log" aria-live="polite">' + chat + assistantStatus + '</div>' +
         '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(workflow.jobTodos, workflow.jobError) : '') + '</div>' +
-        '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="رسالة جديدة" ' + (!canCompose ? 'disabled' : '') + '></textarea>' +
+        '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="' + (conversationStarted ? 'رسالة جديدة' : 'ملاحظات وشروط المخطط...') + '" ' + (!canCompose ? 'disabled' : '') + '></textarea>' +
         '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="plan_site" ' + (!canCompose ? 'disabled' : '') + '>إرسال</button></div>' +
         '</section>' +
         '<aside class="visual-plan-site-preview-panel"><h4>معاينة المخطط</h4>' + preview +
