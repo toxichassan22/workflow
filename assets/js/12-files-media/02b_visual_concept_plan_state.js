@@ -39,7 +39,8 @@
       return {
         turns: turns.slice(-PLANS_CHAT_MEMORY_MAX_TURNS).map(item => ({
           role: item?.role === 'assistant' ? 'assistant' : 'user',
-          text: String(item?.text ?? item?.content ?? '').slice(0, 4000),
+          // A turn is never cut: the client's own words are a contract.
+          text: String(item?.text ?? item?.content ?? ''),
           // A question the assistant asked: the choices ride with the turn so
           // the client can answer with one click.
           choices: (Array.isArray(item?.choices) ? item.choices : [])

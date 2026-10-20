@@ -10,6 +10,8 @@
  * reason the server gave when the turn fails — never a made-up one. */
 
     let visualConceptDistributionChatBusy = false;
+    // The words the model has written so far, shown live in the conversation.
+    let visualConceptDistributionChatPartial = '';
     const VISUAL_CONCEPT_DISTRIBUTION_CHAT_POLL_MS = 2500;
     const VISUAL_CONCEPT_DISTRIBUTION_CHAT_MAX_SECONDS = 600;
 
@@ -85,8 +87,8 @@
         + escapeHtml(WFT('plans.distribution_chat_restart', 'ابدأ من جديد')) + '</button>'
         + '</div>';
       const typing = visualConceptDistributionChatBusy
-        ? '<div class="plans-distribution-chat-msg assistant typing">'
-          + escapeHtml(WFT('plans.distribution_chat_typing', 'يكتب…')) + '</div>' : '';
+        ? '<div class="plans-distribution-chat-msg assistant typing" data-plans-distribution-chat-partial>'
+          + escapeHtml(visualConceptDistributionChatPartial || WFT('plans.distribution_chat_typing', 'يكتب…')) + '</div>' : '';
       return '<div class="plans-distribution-chat">'
         + '<div class="plans-workflow-panel-head"><h4>'
         + escapeHtml(WFT('plans.distribution_chat_title', 'مناقشة توزيع المكونات')) + '</h4></div>'
@@ -94,7 +96,7 @@
         + empty + messages + typing + '</div>'
         + actions
         + '<div class="plans-distribution-chat-composer">'
-        + '<textarea rows="2" maxlength="4000" data-plans-distribution-chat-input data-i18n-ph="plans.distribution_chat_placeholder" placeholder="'
+        + '<textarea rows="2" data-plans-distribution-chat-input data-i18n-ph="plans.distribution_chat_placeholder" placeholder="'
         + escapeHtml(WFT('plans.distribution_chat_placeholder', 'سؤالك أو طلبك عن التوزيع...')) + '"></textarea>'
         + '<button type="button" class="btn primary small" data-plans-workflow-action="distribution-chat-send">'
         + escapeHtml(WFT('plans.distribution_chat_send', 'إرسال')) + '</button>'
@@ -186,7 +188,7 @@
       // step the server is on and the words the model has already written are
       // the honest signs that the turn is alive.
       let currentStep = '';
-      let partialAnswer = '';
+      visualConceptDistributionChatPartial = '';
       const tick = () => {
         const elapsed = visualConceptDistributionChatElapsed((Date.now() - startedAt) / 1000);
         const elapsedText = WFT('plans.distribution_chat_elapsed', 'يعمل الآن… {time}', { time: elapsed });
@@ -207,7 +209,7 @@
         // The layout the assistant already described, applied as it is.
         payload.applyProposal = options.applyProposal === true;
         payload.history = (reset ? [] : turns.slice(0, -1)).map(item => ({
-          role: item.role, content: String(item.text || '').slice(0, 4000)
+          role: item.role, content: String(item.text || '')
         }));
         payload.memory = reset ? '' : (chat.memory || '');
         payload.decisions = reset ? [] : (chat.decisions || []);
@@ -217,13 +219,17 @@
         response = await visualConceptDistributionChatJob(payload, (todos, partial) => {
           const steps = visualConceptDistributionChatSteps(todos);
           if (steps.active) currentStep = steps.active;
+          if (steps.text && typeof updateLoaderMessage === 'function') {
+            // The loader carries the work, not the answer: the answer belongs
+            // in the conversation, and the progress card is not a chat.
+            updateLoaderMessage(steps.text);
+          }
           const partialText = String(partial || '').trim();
-          if (partialText) partialAnswer = partialText;
-          if (typeof updateLoaderMessage !== 'function') return;
-          // The words the model has already written come first: the client is
-          // waiting for the answer, not for a checklist.
-          const shown = partialAnswer || steps.text;
-          if (shown) updateLoaderMessage(shown);
+          if (partialText) {
+            visualConceptDistributionChatPartial = partialText;
+            const bubble = document.querySelector('[data-plans-distribution-chat-partial]');
+            if (bubble) bubble.textContent = partialText;
+          }
         });
       } catch (error) {
         clearInterval(elapsedTimer);
@@ -244,7 +250,7 @@
         return;
       }
       const state = visualConceptPlansWorkflowState();
-      const reply = String(response.reply || '').slice(0, 6000);
+      const reply = String(response.reply || '');
       const choices = Array.isArray(response.choices) ? response.choices : [];
       // A question the assistant asked: it rides with the turn so the client
       // can answer with one click.

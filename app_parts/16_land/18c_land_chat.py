@@ -454,7 +454,7 @@ def api_land_chat():
     _billing_guard = _require_billing_balance('ai_text')
     if _billing_guard is not None:
         return _billing_guard
-    message = _visual_concept_text(data.get('message'), 4000)
+    message = _visual_concept_text(data.get('message'), 0)
     if not message:
         return jsonify({'success': False, 'error': 'اكتب السؤال أولاً',
                         'error_code': 'MESSAGE_REQUIRED'}), 400

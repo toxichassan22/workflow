@@ -28,9 +28,12 @@ CHAT_MEMORY_STORED_TURNS = 600
 CHAT_MEMORY_VERBATIM_TURNS = 60
 CHAT_MEMORY_INPUT_TOKEN_BUDGET = 160000
 CHAT_MEMORY_DIGEST_CHARS = 40000
-CHAT_MEMORY_TURN_CHARS = 4000
-CHAT_MEMORY_CLIENT_LINE_CHARS = 1500
-CHAT_MEMORY_ASSISTANT_LINE_CHARS = 400
+# A turn is never cut: the client's own words are a contract, and a silent
+# cut loses the end of the request he wrote. The token budget and the digest
+# size are the real bounds.
+CHAT_MEMORY_TURN_CHARS = 0
+CHAT_MEMORY_CLIENT_LINE_CHARS = 40000
+CHAT_MEMORY_ASSISTANT_LINE_CHARS = 40000
 CHAT_MEMORY_DECISIONS = 40
 
 
@@ -62,7 +65,8 @@ def normalize_turns(raw, limit=CHAT_MEMORY_STORED_TURNS):
         content = str(content or '').strip()
         if not content:
             continue
-        turn = {'role': role, 'content': content[:CHAT_MEMORY_TURN_CHARS]}
+        turn = {'role': role, 'content': (content[:CHAT_MEMORY_TURN_CHARS]
+                                          if CHAT_MEMORY_TURN_CHARS else content)}
         slides = item.get('slides') if isinstance(item, dict) and isinstance(item.get('slides'), list) else []
         numbers = []
         for value in slides[:40]:

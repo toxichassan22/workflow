@@ -383,9 +383,10 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
     assert.equal(steps.some(entry => /يعمل الآن/.test(entry[1])), true);
   });
 
-  test('the words the model has already written show while it writes them', async () => {
+  test('the words the model has already written show in the chat, not in the loader', async () => {
     const context = fixture();
     const messages = [];
+    const bubble = { textContent: '' };
     let polls = 0;
     context.setTimeout = fn => setTimeout(fn, 0);
     context.hasPermission = () => true;
@@ -395,6 +396,8 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
     context.markVisualConceptDirty = () => {};
     context.renderVisualConceptPage = () => {};
     context.updateLoaderMessage = text => messages.push(text);
+    context.document.querySelector = selector =>
+      selector === '[data-plans-distribution-chat-partial]' ? bubble : null;
     context.collectVisualConceptPlansWorkflowPayload = async () => ({
       plansWorkflow: { distribution: { rows: [] } }, projectData: {} });
     context.api = async (method) => {
@@ -418,8 +421,11 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
 
     await context.sendVisualConceptDistributionChat('وزّع الأدوار', { expectsTable: true });
 
-    // The answer is on the screen before the turn is over.
-    assert.equal(messages.includes('السكن في الطابق الثاني'), true);
+    // The answer belongs to the conversation, not to the progress card.
+    assert.equal(bubble.textContent, 'السكن في الطابق الثاني');
+    assert.equal(messages.some(text => text.includes('السكن في الطابق الثاني')), false);
+    // The loader carries the work, in words.
+    assert.equal(messages.some(text => text.includes('اقتراح توزيع الأدوار')), true);
     const workflow = context.tenantVisualConceptState.plansWorkflow;
     assert.equal(workflow.distribution.rows.length, 1);
     assert.equal(workflow.distributionChat.turns[1].text, 'السكن في الطابق الثاني');

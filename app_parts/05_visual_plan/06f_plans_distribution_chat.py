@@ -21,6 +21,8 @@ PLANS_DISTRIBUTION_CHAT_SYSTEM_PROMPT = (
     '- أي طلب يقترح توزيعًا أو يعدّله = "action":"update" مع الجدول كاملًا (كل الصفوف، لا الصفوف '
     'المتغيرة فقط). الوصف في "reply" لا يعوّض الجدول: العميل يعدّل الجدول من "rows" وحده. '
     'وإذا لم تستطع بناء جدول كامل، أرجع "action":"explain" واذكر السبب في "reply".\n'
+    '- "reply" سطران على الأكثر: شرح قصير لما تغيّر، والجدول كله في "rows". لا تكرّر الجدول في '
+    '"reply" ولا تشرحه سطرًا سطرًا — الرد الطويل يبطئ التوزيع بلا فائدة.\n'
     '- «اعتمد التوزيع» أو «طبّق التوزيع» أو «اعتماد التوزيع» = "action":"update": العميل يطبّق '
     'الجدول من "rows" لا من الوصف، فالرد الذي يشرح التوزيع بلا جدول لا يغيّر شيئًا.\n'
     '- إذا نقصتك معلومة لا تستطيع استنتاجها من البيانات المعتمدة (وحدة في دور بعينه، عدد الوحدات في '
@@ -195,7 +197,7 @@ def _plans_distribution_chat_execute(data):
     reasoning effort, and the hosting proxy drops a request that stays open
     that long), so this function owns the work and the job owns the waiting.
     """
-    message = _visual_concept_text(data.get('message'), 4000)
+    message = _visual_concept_text(data.get('message'), 0)
     if not message:
         return {'success': False, 'error': 'اكتب طلبك أولاً',
                 'error_code': 'MESSAGE_REQUIRED'}, 400
@@ -222,9 +224,9 @@ def _plans_distribution_chat_execute(data):
                 'error_code': 'PLANS_JOB_EXPIRED'}, 503
     try:
         response = call_openrouter_chat_stream(
-            PLANS_DISTRIBUTION_CHAT_SYSTEM_PROMPT, user_prompt, temperature=None, max_tokens=128000,
-            model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='high', timeout=call_timeout,
-            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data),
+            PLANS_DISTRIBUTION_CHAT_SYSTEM_PROMPT, user_prompt, temperature=None, max_tokens=66000,
+            model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='max', timeout=call_timeout,
+            usage_ctx=_usage_ctx('image', data),
             on_token=_plans_distribution_chat_publish_partial, read_timeout=120)
     except Exception as error:
         # A raised provider error used to be swallowed here, and the route
@@ -277,9 +279,9 @@ def _plans_distribution_chat_execute(data):
         print('[DISTRIBUTION CHAT] no table in the answer — asking once more for the rows')
         try:
             retry = call_openrouter_chat_stream(
-                PLANS_DISTRIBUTION_CHAT_SYSTEM_PROMPT, retry_prompt, temperature=None, max_tokens=128000,
-                model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='high', timeout=call_timeout,
-                response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data),
+                PLANS_DISTRIBUTION_CHAT_SYSTEM_PROMPT, retry_prompt, temperature=None, max_tokens=66000,
+                model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='max', timeout=call_timeout,
+                usage_ctx=_usage_ctx('image', data),
                 on_token=_plans_distribution_chat_publish_partial, read_timeout=120)
         except Exception as error:
             app.logger.warning('Distribution chat retry failed: %s', type(error).__name__)
@@ -289,7 +291,8 @@ def _plans_distribution_chat_execute(data):
             parsed = retry_parsed
             raw_text = _get_chat_response_text(retry)
             print(f'[DISTRIBUTION CHAT] retry chars={len(raw_text or "")}')
-    reply = _visual_concept_plan_sanitize_text(parsed.get('reply'))[:6000]
+    # The answer is the client's: it is never cut behind his back.
+    reply = _visual_concept_plan_sanitize_text(parsed.get('reply'))
     action = 'update' if str(parsed.get('action') or '').lower() == 'update' else 'explain'
     if str(parsed.get('action') or '').lower() == 'ask':
         # The model needs one fact it cannot read from the approved data: it

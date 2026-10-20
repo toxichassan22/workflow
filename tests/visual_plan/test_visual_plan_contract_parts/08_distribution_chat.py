@@ -110,12 +110,12 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
             })
         kwargs = chat_call.call_args[1]
         self.assertEqual(kwargs.get('model'), module.VISUAL_PLAN_DISTRIBUTION_MODEL)
-        # The owner asked for high effort on sol 6.1: maximum effort took too
-        # long for a turn the client waits on.
-        self.assertEqual(kwargs.get('reasoning_effort'), 'high')
-        # The reasoning shares the token budget with the answer, so the cap has
-        # to leave room for the whole table.
-        self.assertEqual(kwargs.get('max_tokens'), 128000)
+        # The owner asked for the same model and the same effort the plan
+        # generation uses: sol 6.1 at maximum effort.
+        self.assertEqual(kwargs.get('reasoning_effort'), 'max')
+        # The same token ceiling as the plan generation: a bigger cap only
+        # makes the answer longer, and the table is small.
+        self.assertEqual(kwargs.get('max_tokens'), 66000)
         # The distribution model is the slide model unless the owner overrides it.
         self.assertEqual(module.VISUAL_PLAN_DISTRIBUTION_MODEL, module.SLIDE_TEXT_MODEL)
         self.assertEqual(module.SLIDE_TEXT_MODEL, 'openai/gpt-6.1-sol')
@@ -246,7 +246,36 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
                 })
         self.assertLessEqual(bounded.call_args[1].get('timeout'), 40)
 
-    def test_a_turn_that_leaves_the_floors_alone_says_so(self):
+    def test_neither_the_request_nor_the_answer_is_cut(self):
+        """A long request and a long answer travel whole: a silent cut loses
+        the end of what the client wrote."""
+        module = self.application_module
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        long_request = 'السكن في الطابق الثاني. ' * 900
+        long_reply = 'تم. ' * 1200
+        model_reply = self._chat_response({
+            'reply': long_reply, 'action': 'explain',
+        })
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply) as chat_call:
+            answer = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
+                'message': long_request,
+                'projectData': self.project(),
+                'plansWorkflow': self._distribution_workflow(),
+            })
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        body = answer.get_json()
+        # The request reached the model whole.
+        prompt = chat_call.call_args[0][1]
+        self.assertIn(long_request.strip()[:4000], prompt)
+        self.assertIn(long_request.strip()[-400:], prompt)
+        # The answer came back whole: the end of it is still there.
+        self.assertTrue(body['reply'].endswith('تم.'))
+        self.assertGreaterEqual(len(body['reply']), len(long_reply) * 0.9)
+        # The stored turn is not cut either.
+        self.assertEqual(len(body['memory'] or ''), 0)
+
+    def test_the_turn_that_leaves_the_floors_alone_says_so(self):
         """A finished turn that did not change the table must not look like an
         applied layout — the client says what actually happened."""
         module = self.application_module

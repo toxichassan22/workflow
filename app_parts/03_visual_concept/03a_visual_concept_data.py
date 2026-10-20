@@ -1,14 +1,22 @@
 def _visual_concept_text(value, limit=4000):
+    """One piece of client text, optionally bounded.
+
+    A limit of 0 means no bound at all: a client's own words are never cut
+    behind his back. The provider's own window is the real bound, and it
+    fails loudly instead of silently dropping the end of a request.
+    """
     if value is None:
         return ''
     if isinstance(value, (int, float)) and not isinstance(value, bool):
         return str(value)
     if isinstance(value, list):
         parts = [_visual_concept_text(item, 400) for item in value]
-        return '، '.join(part for part in parts if part).strip()[:limit]
+        return '، '.join(part for part in parts if part).strip()[:limit] if limit else '، '.join(part for part in parts if part).strip()
     if isinstance(value, dict):
-        return json.dumps(value, ensure_ascii=False)[:limit]
-    return str(value).strip()[:limit]
+        text = json.dumps(value, ensure_ascii=False)
+        return text[:limit] if limit else text
+    text = str(value).strip()
+    return text[:limit] if limit and limit > 0 else text
 
 
 def _visual_concept_parse_json(value, fallback=None):
