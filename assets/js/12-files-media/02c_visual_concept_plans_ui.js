@@ -191,6 +191,7 @@
         : '';
       return resultHtml +
         '<div class="visual-concept-actions">' +
+        '<button type="button" class="btn ghost small" data-plans-workflow-action="check-distribution" ' + (rows.length ? '' : 'disabled') + '>فحص التعارضات</button>' +
         '<button type="button" class="btn primary small" data-plans-workflow-action="approve-distribution" ' + (canApprove ? '' : 'disabled') + '>اعتماد التوزيع</button>' +
         (distribution.approved ? '<span class="plans-workflow-success">التوزيع معتمد</span>' : '') +
         '</div>';
@@ -361,8 +362,15 @@
         '<div class="visual-concept-actions"><button type="button" class="btn primary small" data-plans-workflow-action="approve-verification" ' + (!canApprove ? 'disabled' : '') + '>اعتماد نتيجة التحقق</button></div>' +
         '</section>' +
         '<section class="plans-workflow-panel plans-workflow-distribution-panel" data-plans-workflow-stage="boundary"' + (activeStage !== 'boundary' ? ' hidden' : '') + '>' +
-        '<div data-plans-distribution-chat>' + visualConceptDistributionChatHtml() + '</div>' +
+        '<div class="plans-workflow-panel-head"><h4>توزيع المكونات على الأدوار</h4><button type="button" class="btn primary small" data-plans-workflow-action="propose-distribution">اقتراح التوزيع</button></div>' +
+        '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.distribution_notes_title', 'ملاحظات التوزيع')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
+        '<textarea rows="3" maxlength="1000000" data-plans-distribution-notes>' + escapeHtml(workflow.distributionNotes) + '</textarea>' +
         '<div data-plans-distribution-editor>' + visualConceptDistributionEditorHtml(distribution) + '</div>' +
+        '<div class="plans-distribution-revise">' +
+        '<label for="plansDistributionRevision">' + escapeHtml(WFT('plans.dist_revise_label', 'طلب تعديل التوزيع')) + '</label>' +
+        '<input id="plansDistributionRevision" type="text" maxlength="4000" data-plans-distribution-revision value="' + escapeHtml(workflow.distributionRevision || '') + '">' +
+        '<button type="button" class="btn ghost small" data-plans-workflow-action="revise-distribution"' + ((Array.isArray(distribution.rows) && distribution.rows.length) ? '' : ' disabled') + '>' + escapeHtml(WFT('plans.dist_revise_button', 'تطبيق التعديل')) + '</button>' +
+        '</div>' +
         '<div data-plans-distribution-results>' + visualConceptDistributionResultsHtml(distribution) + '</div>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.notes_title', 'ملاحظات توليد المخططات')) + '</h4><span class="tenant-hint">' + escapeHtml(WFT('plans.notes_optional', 'اختياري')) + '</span></div>' +
         '<textarea id="visualConceptPlanClientNotes" data-plans-client-notes rows="4" maxlength="1000000">' + escapeHtml(workflow.clientNotes) + '</textarea>' +
@@ -422,10 +430,9 @@
           const state = visualConceptPlansWorkflowState();
           if (action === 'verify') verifyVisualConceptPlans();
           else if (action === 'approve-verification') approveVisualConceptPlansVerification();
-          else if (action === 'distribution-chat-start') startVisualConceptDistributionChat();
-          else if (action === 'distribution-chat-apply') applyVisualConceptDistributionChat();
-          else if (action === 'distribution-chat-restart') restartVisualConceptDistributionChat();
-          else if (action === 'distribution-chat-send') submitVisualConceptDistributionChat();
+          else if (action === 'propose-distribution') proposeVisualConceptPlansDistribution();
+          else if (action === 'revise-distribution') reviseVisualConceptPlansDistribution();
+          else if (action === 'check-distribution') checkVisualConceptPlansDistribution('ai');
           else if (action === 'check-notes') checkVisualConceptPlanNotes();
           else if (action === 'add-distribution-row') {
             const building = actionBtn.getAttribute('data-dist-building') || '';
@@ -447,8 +454,23 @@
             }
             return;
           }
-          const chatInput = event.target.closest('[data-plans-distribution-chat-input]');
-          if (chatInput) return;
+          const revisionInput = event.target.closest('[data-plans-distribution-revision]');
+          if (revisionInput) {
+            const state = visualConceptPlansWorkflowState();
+            state.distributionRevision = String(revisionInput.value || '').slice(0, 4000);
+            markVisualConceptDirty();
+            return;
+          }
+          const distNotesInput = event.target.closest('[data-plans-distribution-notes]');
+          if (distNotesInput) {
+            const state = visualConceptPlansWorkflowState();
+            const notes = String(distNotesInput.value || '').slice(0, 1000000);
+            if (state.distributionNotes !== notes) {
+              state.distributionNotes = notes;
+            }
+            markVisualConceptDirty();
+            return;
+          }
           const input = event.target.closest('[data-plans-client-notes]');
           if (!input) return;
           setVisualConceptPlanNotes(input.value);
@@ -457,13 +479,6 @@
           if (notesHost) notesHost.innerHTML = visualConceptPlanNotesResultsHtml(state);
           const check = root.querySelector('[data-plans-workflow-action="check-notes"]');
           if (check) check.disabled = !state.clientNotes.trim();
-        });
-        root.addEventListener('keydown', event => {
-          const chatInput = event.target.closest('[data-plans-distribution-chat-input]');
-          if (!chatInput) return;
-          if (event.key !== 'Enter' || event.shiftKey) return;
-          event.preventDefault();
-          submitVisualConceptDistributionChat();
         });
         root.addEventListener('change', event => {
           const input = event.target.closest('[data-dist-field]');

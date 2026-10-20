@@ -22,7 +22,7 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
     return calls;
   }
 
-  test('the boundary stage renders the distribution chat and drops the separate controls', () => {
+  test('the boundary stage renders the separate controls and direct proposal button', () => {
     const context = fixture();
     const root = { innerHTML: '', dataset: {}, querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {} };
     context.document.getElementById = id => id === 'visualConceptPlansWorkflow' ? root : null;
@@ -45,21 +45,16 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
 
     context.renderVisualConceptPlansWorkflow();
     const html = root.innerHTML;
-    // The conversation owns the stage.
-    assert.ok(html.includes('plans-distribution-chat'));
-    assert.ok(html.includes('data-plans-distribution-chat-input'));
-    // The table stays editable by hand.
+    // The separate controls own Stage 2 for fast, direct interaction.
+    assert.ok(html.includes('data-plans-workflow-action="propose-distribution"'));
+    assert.ok(html.includes('data-plans-workflow-action="revise-distribution"'));
+    assert.ok(html.includes('data-plans-workflow-action="check-distribution"'));
+    assert.ok(html.includes('data-plans-distribution-notes'));
+    assert.ok(html.includes('data-plans-distribution-revision'));
     assert.ok(html.includes('data-plans-distribution-editor'));
-    // The proposal / notes / revision / conflict-check controls are gone —
-    // the chat does all four.
-    assert.ok(!html.includes('data-plans-workflow-action="propose-distribution"'));
-    assert.ok(!html.includes('data-plans-workflow-action="revise-distribution"'));
-    assert.ok(!html.includes('data-plans-workflow-action="check-distribution"'));
-    assert.ok(!html.includes('data-plans-distribution-notes'));
-    assert.ok(!html.includes('data-plans-distribution-revision'));
   });
 
-  test('an empty table offers the proposal as the first turn of the chat', () => {
+  test('an empty table offers the proposal button directly', () => {
     const context = fixture();
     const root = { innerHTML: '', dataset: {}, querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {} };
     context.document.getElementById = id => id === 'visualConceptPlansWorkflow' ? root : null;
@@ -75,8 +70,7 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
 
     context.renderVisualConceptPlansWorkflow();
     const html = root.innerHTML;
-    assert.ok(html.includes('data-plans-workflow-action="distribution-chat-start"'));
-    assert.ok(html.includes('data-plans-distribution-chat-input'));
+    assert.ok(html.includes('data-plans-workflow-action="propose-distribution"'));
   });
 
   test('the chat state keeps the turns and the memory and reads the legacy array', () => {
@@ -310,11 +304,8 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
 
     context.renderVisualConceptPlansWorkflow();
     const html = root.innerHTML;
-    // The two one-click actions the client asked for.
-    assert.ok(html.includes('data-plans-workflow-action="distribution-chat-start"'));
-    assert.ok(html.includes('data-plans-workflow-action="distribution-chat-restart"'));
-    assert.ok(html.includes('توزيع الأدوار'));
-    assert.ok(html.includes('ابدأ من جديد'));
+    // The fast direct proposal action.
+    assert.ok(html.includes('data-plans-workflow-action="propose-distribution"'));
 
     await context.restartVisualConceptDistributionChat();
 
