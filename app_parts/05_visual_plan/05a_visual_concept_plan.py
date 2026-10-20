@@ -951,7 +951,8 @@ def _visual_concept_plan_regulation_input(project_data, context):
 
 
 def _visual_concept_plan_workflow_error(data, slot_id, require_distribution=False):
-    if _visual_concept_plan_kind(slot_id) not in VISUAL_CONCEPT_PLAN_KIND_BY_ID.values():
+    kind = _visual_concept_plan_kind(slot_id)
+    if kind not in VISUAL_CONCEPT_PLAN_KIND_BY_ID.values() or kind in ('uses', 'massing'):
         return None
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
     verification = workflow.get('verification') if isinstance(workflow.get('verification'), dict) else {}

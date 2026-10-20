@@ -341,11 +341,9 @@
       const otherPlans = VISUAL_CONCEPT_PLAN_KINDS.filter(item => item.kind !== 'site');
       const otherHasImage = otherPlans.some(item => tenantVisualConceptState.slots[item.id]?.imageUrl);
       const sitePlanCard = renderVisualConceptSitePlanCard();
-      const otherPlanCards = promptReady || otherHasImage
-        ? '<div class="visual-concept-stack">' + otherPlans.map(definition =>
-          renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, visualConceptSlotLocked(definition.id))
-        ).join('') + '</div>'
-        : '<p class="tenant-hint">مخططا الاستخدامات والكتلة غير جاهزين للتوليد.</p>';
+      const otherPlanCards = '<div class="visual-concept-stack">' + otherPlans.map(definition =>
+        renderVisualConceptSlot({ id: definition.id, label: definition.label, group: 'plans' }, visualConceptSlotLocked(definition.id))
+      ).join('') + '</div>';
       root.innerHTML =
         '<div class="plans-workflow-card">' +
         '<ol class="plans-workflow-steps">' +
@@ -383,7 +381,7 @@
         '</section>' +
         '<section class="plans-workflow-panel" data-plans-workflow-stage="other"' + (activeStage !== 'other' ? ' hidden' : '') + '>' +
         '<div class="plans-workflow-panel-head"><h4>' + escapeHtml(WFT('plans.stage_other_title', 'مخططا الاستخدامات والكتلة')) + '</h4>' + (promptReady ? '<button type="button" class="btn ghost small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_other_refresh', 'إعادة تجهيز المخططات')) + '</button>' : '<button type="button" class="btn primary small" data-plans-workflow-action="prepare-prompts">' + escapeHtml(WFT('plans.stage_other_prepare', 'تجهيز المخططات')) + '</button>') + '</div>' +
-        '<p class="tenant-hint">' + escapeHtml(promptReady ? WFT('plans.stage_other_ready', 'مخططا الاستخدامات والكتلة جاهزان للتوليد.') : (workflow.promptsError ? WFT('plans.stage_other_error', 'تعذر تجهيز المخططات: {error}', { error: workflow.promptsError }) : WFT('plans.stage_other_not_ready', 'مخططا الاستخدامات والكتلة غير جاهزين للتوليد.'))) + '</p>' +
+        '<p class="tenant-hint">' + escapeHtml(workflow.promptsError ? WFT('plans.stage_other_error', 'تعذر تجهيز المخططات: {error}', { error: workflow.promptsError }) : WFT('plans.stage_other_ready', 'مخططا الاستخدامات والكتلة جاهزان للتوليد.')) + '</p>' +
         '<div data-plans-workflow-prompts>' + otherPlanCards + '</div>' +
         '</section>' +
         '</div>';
@@ -399,8 +397,8 @@
             const stage = tab.getAttribute('data-plans-workflow-tab');
             const state = visualConceptPlansWorkflowState();
             if (stage === 'boundary' && !state.verification.approved) return;
-            if ((stage === 'generate' || stage === 'other')
-                && !(state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
+            if (stage === 'generate' && !(state.distribution.approved && visualConceptPlanNotesCleared(state))) return;
+            if (stage === 'other' && !(state.distribution.approved || (Array.isArray(state.distribution?.rows) && state.distribution.rows.length))) return;
             state.viewStage = stage;
             persistVisualConceptDraftState();
             renderVisualConceptPage();

@@ -474,7 +474,7 @@
       const slots = tenantVisualConceptState?.slots || {};
       const map = {};
       VISUAL_CONCEPT_PLAN_KINDS.forEach(item => {
-        const url = durableImageUrl(slots[item.id]?.approvedImageUrl);
+        const url = durableImageUrl(slots[item.id]?.approvedImageUrl || slots[item.id]?.imageUrl);
         if (url) map[item.kind] = url;
       });
       return map;
@@ -484,10 +484,14 @@
       if (isVisualConceptWorkflowPlan(slotId)) {
         if (slotId !== 'plan_site') {
           const wf = tenantVisualConceptState?.plansWorkflow;
-          if (!wf?.distribution?.approved) return WFT('plans.dist_required_lock', 'مقفل حتى اعتماد توزيع المكونات.');
-          if (!wf?.promptReady && !(wf?.prompts && wf.prompts[visualConceptPlanKind(slotId)]) && !tenantVisualConceptState?.slots?.[slotId]?.prompt) {
-            return WFT('plans.prompt_not_prepared', 'غير مجهز للتوليد — يتطلب تجهيز المخططات.');
+          const rows = wf?.distribution?.rows;
+          if ((!Array.isArray(rows) || !rows.length) && !wf?.distribution?.approved) {
+            return WFT('plans.dist_required_lock', 'مقفل حتى إدخال توزيع المكونات.');
           }
+          if (typeof visualConceptPlansPromptsPending !== 'undefined' && visualConceptPlansPromptsPending) {
+            return WFT('plans.scene_busy', 'المخطط قيد المعالجة.');
+          }
+          return '';
         }
         return typeof visualConceptPlanScenePending !== 'undefined' && visualConceptPlanScenePending
           ? WFT('plans.scene_busy', 'المخطط قيد المعالجة.')
@@ -506,14 +510,17 @@
 
     function visualConceptSlotLocked(slotId) {
       // Stage three site plan remains available through its own assistant.
-      // Stage four diagrams require approved distribution and prepared prompts.
+      // Stage four diagrams are direct image generation cards based on stage 2 distribution.
       if (isVisualConceptPlanSlot(slotId)) {
         if (!isVisualConceptWorkflowPlan(slotId)) return false;
-        if (Boolean(visualConceptPlanScenePending)) return true;
-        if (slotId === 'plan_site') return false;
+        if (slotId === 'plan_site') return Boolean(visualConceptPlanScenePending);
+        if (Boolean(visualConceptPlansPromptsPending)) return true;
         const wf = tenantVisualConceptState?.plansWorkflow;
-        if (!wf?.distribution?.approved) return true;
-        return !wf?.promptReady && !(wf?.prompts && wf.prompts[visualConceptPlanKind(slotId)]) && !tenantVisualConceptState?.slots?.[slotId]?.prompt;
+        const rows = wf?.distribution?.rows;
+        if (!Array.isArray(rows) || !rows.length) {
+          return !wf?.distribution?.approved;
+        }
+        return false;
       }
       if (isVisualConceptInteriorSlot(slotId)) {
         // Interior renders consume the approved hero as their building

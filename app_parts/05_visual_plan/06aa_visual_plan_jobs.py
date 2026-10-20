@@ -188,30 +188,38 @@ def _visual_plan_execute(kind, data, slot_id=''):
                       'prompts': prompts,
                       'context': context, 'referenceUrl': reference_url}
         elif kind == 'prompt':
-            # The drawing prompt is fully derived from the fixed context and the
-            # approved distribution — the sealed scene only proves the inputs are
-            # still identical. Render and edit keep demanding it; the prompt text
-            # stays available so a stale draft can be refreshed before re-sealing.
             workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
-            posted_scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
-            scene = None
-            if (posted_scene and posted_scene.get('version') == VISUAL_PLAN_SCENE_VERSION
-                    and isinstance(posted_scene.get('token'), str) and posted_scene['token'].strip()):
-                scene, _contract, context, _program = _visual_plan_scene_from_request(data)
-            else:
+            kind_type = _visual_concept_plan_kind(slot_id)
+            if kind_type in ('uses', 'massing'):
                 context = _visual_plan_prompt_context(data)
-                notes_gate = _visual_plan_notes_gate(data, context)
-                if not notes_gate.get('cleared'):
-                    raise visual_plan_geometry.PlanGeometryError(
-                        notes_gate.get('message') or 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
-                        'PLANS_NOTES_CHECK_REQUIRED')
-            context['client_notes'] = _visual_plan_notes(data)
-            distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
-            model = (_visual_concept_plan_model_from_distribution(distribution, context, context.get('regulations') or {})
-                     or _visual_concept_plan_model(context, context.get('regulations') or {}))
-            result = {'success': True, 'slotId': slot_id, 'scene': scene,
-                      'prompt': _visual_concept_plan_drawing_prompt(_visual_concept_plan_kind(slot_id), context, model),
-                      'engine': 'surveyed_geometry' if scene else 'deterministic', 'reply': ''}
+                context['client_notes'] = _visual_plan_notes(data)
+                distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
+                model = (_visual_concept_plan_model_from_distribution(distribution, context, context.get('regulations') or {})
+                         or _visual_concept_plan_model(context, context.get('regulations') or {}))
+                scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
+                result = {'success': True, 'slotId': slot_id, 'scene': scene,
+                          'prompt': _visual_concept_plan_drawing_prompt(kind_type, context, model),
+                          'engine': 'surveyed_geometry' if scene else 'image_generation', 'reply': ''}
+            else:
+                posted_scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
+                scene = None
+                if (posted_scene and posted_scene.get('version') == VISUAL_PLAN_SCENE_VERSION
+                        and isinstance(posted_scene.get('token'), str) and posted_scene['token'].strip()):
+                    scene, _contract, context, _program = _visual_plan_scene_from_request(data)
+                else:
+                    context = _visual_plan_prompt_context(data)
+                    notes_gate = _visual_plan_notes_gate(data, context)
+                    if not notes_gate.get('cleared'):
+                        raise visual_plan_geometry.PlanGeometryError(
+                            notes_gate.get('message') or 'فحص الملاحظات الحالية غير مكتمل أو يحتوي تعارضًا.',
+                            'PLANS_NOTES_CHECK_REQUIRED')
+                context['client_notes'] = _visual_plan_notes(data)
+                distribution = workflow.get('distribution') if isinstance(workflow.get('distribution'), dict) else {}
+                model = (_visual_concept_plan_model_from_distribution(distribution, context, context.get('regulations') or {})
+                         or _visual_concept_plan_model(context, context.get('regulations') or {}))
+                result = {'success': True, 'slotId': slot_id, 'scene': scene,
+                          'prompt': _visual_concept_plan_drawing_prompt(_visual_concept_plan_kind(slot_id), context, model),
+                          'engine': 'surveyed_geometry' if scene else 'deterministic', 'reply': ''}
         elif kind == 'notes':
             review, frontage = _visual_plan_review_notes(data)
             result = {'success': True, 'notesReview': review, 'primaryFrontage': frontage}

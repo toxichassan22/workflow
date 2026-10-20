@@ -40,6 +40,7 @@ function fixture(includeVisualPage = false) {
       (match, name) => params[name] ?? match),
     setDraftDirty() {}, renderVisualConceptPage() {},
     resetTenantGenerationStop() {},
+    trDynamicI18n: value => value,
     normalizeVisualConceptSketch: value => value || {}, emptyVisualConceptSketch: () => ({}),
     visualConceptReferenceNameSeed: value => value,
   });

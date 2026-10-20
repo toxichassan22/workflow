@@ -136,20 +136,35 @@
       const timeoutMessage = WFT('plans.job_timeout', 'انتهت مهلة معالجة المخطط الهندسي.');
       let job = initial;
       updateVisualConceptPlanJobUi(job);
-      while (job && (job.status === 'queued' || job.status === 'running')) {
-        const remaining = deadline - Date.now();
-        if (remaining <= 0) break;
-        await new Promise(resolve => setTimeout(resolve, Math.min(1500, remaining)));
-        const requestTimeout = Math.min(15000, deadline - Date.now());
-        if (requestTimeout <= 0) break;
-        job = await apiWithTimeout(
-          'GET', '/api/visual-concept/plans-jobs/' + encodeURIComponent(initial.jobId),
-          null, requestTimeout, WFT('plans.job_status_timeout', 'تعذر الاتصال بحالة معالجة المخطط.'));
-        updateVisualConceptPlanJobUi(job);
-        if (job?.error && !job?.result) {
-          failVisualConceptPlanJobUi(job.error);
-          return { success: false, error: job.error, error_code: job.error_code };
+      const jobId = String(initial.jobId || '');
+      if (typeof registerTenantGenerationRun === 'function') registerTenantGenerationRun(jobId);
+      try {
+        while (job && (job.status === 'queued' || job.status === 'running')) {
+          const remaining = deadline - Date.now();
+          if (remaining <= 0) break;
+          if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) break;
+          const slept = typeof interruptiblePollSleep === 'function'
+            ? await interruptiblePollSleep(Math.min(1500, remaining))
+            : await new Promise(resolve => setTimeout(resolve, Math.min(1500, remaining)));
+          if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) break;
+          const requestTimeout = Math.min(15000, deadline - Date.now());
+          if (requestTimeout <= 0) break;
+          job = await apiWithTimeout(
+            'GET', '/api/visual-concept/plans-jobs/' + encodeURIComponent(initial.jobId),
+            null, requestTimeout, WFT('plans.job_status_timeout', 'تعذر الاتصال بحالة معالجة المخطط.'));
+          updateVisualConceptPlanJobUi(job);
+          if (job?.error && !job?.result) {
+            failVisualConceptPlanJobUi(job.error);
+            return { success: false, error: job.error, error_code: job.error_code };
+          }
         }
+      } finally {
+        if (typeof releaseTenantGenerationRun === 'function') releaseTenantGenerationRun(jobId);
+      }
+      if ((typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) || job?.status === 'cancelled') {
+        const cancelMsg = WFT('gen.job_cancelled', 'تم إيقاف المهمة');
+        failVisualConceptPlanJobUi(cancelMsg);
+        return { success: false, error: cancelMsg, error_code: 'RUN_CANCELLED', cancelled: true };
       }
       if (job && job.result && typeof job.result === 'object') return job.result;
       if (job && job.error) return { success: false, error: job.error, error_code: job.error_code };
@@ -698,7 +713,7 @@
 
     async function prepareVisualConceptPlansPrompts() {
       const initialWorkflow = visualConceptPlansWorkflowState();
-      if (!initialWorkflow.verification.approved || !initialWorkflow.distribution.approved || !visualConceptPlanNotesCleared(initialWorkflow)) return;
+      if (!initialWorkflow.distribution.approved && (!Array.isArray(initialWorkflow.distribution?.rows) || !initialWorkflow.distribution.rows.length)) return;
       if (visualConceptPlansPromptsPending) return;
       visualConceptPlansPromptsPending = true;
       visualConceptPlanScenePending = true;

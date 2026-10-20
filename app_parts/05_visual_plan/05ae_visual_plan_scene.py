@@ -819,15 +819,10 @@ def _visual_plan_dependency_images(data, workflow, kind):
 
 
 def _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=False):
-    """The rule that holds for the diagrams this one is drawn on.
-
-    It states what the attached diagrams are and what may not change, so the
-    drawing is derived from them instead of invented around them.
-    """
+    """The rule that holds for the diagrams this one is drawn on."""
     if not dependency_kinds:
         return ''
-    labels = {'site': 'Plan 1 — the approved site plan',
-              'uses': 'Plan 2 — the approved floor allocation'}
+    labels = {'site': 'Plan 1 — the approved site plan', 'uses': 'Plan 2 — the approved floor allocation'}
     listed = '; '.join(labels.get(item, item) for item in dependency_kinds)
     lead = 'The attached images that follow are' if base_image else 'The attached images are'
     if kind == 'uses':
@@ -851,12 +846,8 @@ def _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=False):
 def _visual_plan_render_response(data, slot_id):
     kind = _visual_concept_plan_kind(slot_id)
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
-    # Every diagram renders the same sealed engineering scene. The scene is
-    # validated for all three of them: a diagram drawn without it is drawn
-    # from loose prompt text, so it drifts away from Plan 1 and from the
-    # approved program instead of following them.
-    scene, contract, context, _program = _visual_plan_scene_from_request(data)
     if kind == 'site':
+        scene, contract, context, _program = _visual_plan_scene_from_request(data)
         prompt = _visual_plan_slot_prompt(workflow, kind, context)
         image, reference_count, model_used = _visual_plan_render_site_svg(prompt, contract, data)
         return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
@@ -864,38 +855,49 @@ def _visual_plan_render_response(data, slot_id):
                 'model': model_used, 'geometryMode': 'surveyed_xy_schematic_z',
                 'referenceCount': reference_count}
 
-    # Stage 4 diagrams (uses and massing) are drawn on the approved diagrams
-    # they depend on: Plan 2 on Plan 1, Plan 3 on Plan 1 AND Plan 2.
+    # Stage 4 diagrams (uses and massing): direct image generation from stage 2 distribution
+    context = _visual_plan_prompt_context(data)
     prompt = _visual_plan_slot_prompt(workflow, kind, context)
     base_image = _visual_concept_edit_base_image(data, g.tenant_id)
     references = [base_image] if base_image else []
-
-    dependency_kinds = list(_VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ()))
-    dependency_images = _visual_plan_dependency_images(data, workflow, kind)
-    for dependency_image in dependency_images:
-        dependency_uris = _visual_concept_reference_uris(
-            urls=[dependency_image], tenant_id=g.tenant_id)
-        for dependency_uri in dependency_uris:
-            if dependency_uri not in references:
-                references.append(dependency_uri)
+    scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
 
     boundary_points = ((workflow.get('boundary') or {}).get('points')
                        or context.get('boundary_points')
-                       or (contract.get('geometry') or {}).get('surveyPoints'))
+                       or (scene.get('contract') or {}).get('geometry', {}).get('surveyPoints') if isinstance(scene, dict) else None)
     if boundary_points:
         try:
             boundary_url = _visual_concept_render_plan_boundary_reference(boundary_points, g.tenant_id)
             if boundary_url:
-                references += _visual_concept_reference_uris(urls=[boundary_url], tenant_id=g.tenant_id)
+                for uri in _visual_concept_reference_uris(urls=[boundary_url], tenant_id=g.tenant_id):
+                    if uri not in references:
+                        references.append(uri)
         except Exception:
             pass
 
-    image_prompt = (prompt
-        + ('\nThe first attached image is the current approved illustration of this plan — '
-           'keep its look and every unrequested detail identical. ' if base_image else '\n')
-        + _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=bool(base_image))
-        + 'The attached outline is the true surveyed parcel boundary — trace it exactly and '
-        'draw only the buildings, entries and open areas the prompt describes, nothing else.')
+    outline_text = ('The attached outline is the true surveyed parcel boundary — trace it exactly and '
+                    'draw only the buildings, entries and open areas the prompt describes, nothing else.')
+
+    if kind == 'uses':
+        image_prompt = (prompt
+            + ('\nThe first attached image is the current approved illustration of this diagram — '
+               'keep its look and every unrequested detail identical.\n' if base_image else '\n')
+            + outline_text)
+    else:
+        dependency_kinds = list(_VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ()))
+        dependency_images = _visual_plan_dependency_images(data, workflow, kind)
+        for dependency_image in dependency_images:
+            dependency_uris = _visual_concept_reference_uris(
+                urls=[dependency_image], tenant_id=g.tenant_id)
+            for dependency_uri in dependency_uris:
+                if dependency_uri not in references:
+                    references.append(dependency_uri)
+
+        image_prompt = (prompt
+            + ('\nThe first attached image is the current approved illustration of this plan — '
+               'keep its look and every unrequested detail identical.\n' if base_image else '\n')
+            + _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=bool(base_image))
+            + outline_text)
 
     image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             timeout=_visual_plan_job_call_timeout(180),
@@ -911,7 +913,7 @@ def _visual_plan_render_response(data, slot_id):
             'PLANS_PROVIDER_FAILED')
 
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
-            'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry',
+            'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry' if scene else 'image_generation',
             'model': VISUAL_CONCEPT_IMAGE_MODEL,
             'referenceCount': len(references)}
 
