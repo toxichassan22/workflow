@@ -36,6 +36,11 @@ def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
     max_steps, max_tokens, reasoning_effort) pass straight through to
     run_browse_agent, and so do the job-scoped ``evidence_pool``/``deadline``/
     ``session`` — once the agent signature carries them.
+
+    The market research rides ``MARKET_STUDY_MODEL`` (the configured market
+    model). A caller must NOT pass a model of its own: every market search
+    answered on a different brain than the one the owner configured, and the
+    price verification stopped being the same mind that found the page.
     """
     try:
         # Flat module, attribute call: `web_browse.agent` would bind a second
@@ -189,7 +194,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     # is search_not_run, never proof the name is fabricated.
     response = _browse_agent_call(
         market_study.build_consultant_system_prompt(offer_lang), prompt,
-        usage_ctx, model=GEMINI_TEXT_MODEL,
+        usage_ctx,
         search_provider='searxng',
         evidence_pool=evidence_pool, deadline=deadline,
         session=session, reasoning_effort='low', on_event=on_event)

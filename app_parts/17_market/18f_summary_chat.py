@@ -11,6 +11,9 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
+import chat_memory
+
+
 _SUMMARY_CHAT_MESSAGE_MAX = 4000
 _SUMMARY_CHAT_HISTORY_MAX = 12
 _SUMMARY_CHAT_SOURCES_MAX = 8
@@ -47,17 +50,13 @@ def _summary_chat_axis(value):
 
 
 def _summary_chat_history(raw):
-    """Caller sends the last messages of this thread; keep real turns only."""
-    history = []
-    items = raw if isinstance(raw, list) else []
-    for item in items[-_SUMMARY_CHAT_HISTORY_MAX:]:
-        if not isinstance(item, dict):
-            continue
-        role = str(item.get('role') or '').strip()
-        content = str(item.get('content') or '').strip()[:_SUMMARY_CHAT_MESSAGE_MAX]
-        if role in ('user', 'assistant') and content:
-            history.append({'role': role, 'content': content})
-    return history
+    """The whole thread, not the last twelve turns.
+
+    The summary chat used to carry a fixed slice of the conversation, so it
+    answered a fresh question and contradicted the client mid-thread. The
+    digest keeps the client's own words when the thread grows.
+    """
+    return chat_memory.normalize_turns(raw)
 
 
 def _summary_chat_state(data):
@@ -192,6 +191,9 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     research_allowed = str(data.get('research') or 'auto').strip().lower() != 'off'
     history = _summary_chat_history(data.get('history'))
     state = _summary_chat_state(data)
+    conversation = chat_memory.build_context(
+        history, memory=data.get('memory') if isinstance(data.get('memory'), str) else '')
+    state['memory'] = conversation['memory']
     offer_lang = slide_engine.resolve_offer_lang(data)
     if tenant_id is None:
         try:
@@ -254,7 +256,7 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
         # deadline bound the native search like every other market search.
         chat_pool = _new_evidence_pool()
         research_res = _browse_agent_call(
-            system_prompt, research_prompt, usage_ctx, model=GEMINI_TEXT_MODEL,
+            system_prompt, research_prompt, usage_ctx,
             evidence_pool=chat_pool,
             deadline=time.time() + _SUMMARY_CHAT_JOB_TIME_BUDGET,
             local_tools=True, search_provider='searxng', search_budget=3,
@@ -320,6 +322,7 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
         'proposal': proposal,
         'searchPerformed': search_performed,
         'citations': citations,
+        'memory': conversation['memory'],
     }
     if clarification:
         result['clarification'] = True

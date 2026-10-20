@@ -538,7 +538,10 @@ def _summary_chat_context_block(payload, axis, message, history, state):
         f'{_summary_chat_flags_block(state)}\n\n'
         'جدول المصادر الحالي (الاسم | الرابط | تاريخ البيانات):\n'
         f'{_summary_chat_sources_block(state.get("sources"))}\n\n'
-        'سجل هذا النقاش:\n'
+        + ('ذاكرة المحادثة (ما سبق — التزم به ولا تخالفه):\n'
+           + str(state.get('memory') or '').strip() + '\n\n'
+           if str(state.get('memory') or '').strip() else '')
+        + 'سجل هذا النقاش:\n'
         f'{_summary_chat_history_block(history)}\n\n'
         'رسالة المستخدم:\n'
         f'{str(message or "").strip()}\n'
