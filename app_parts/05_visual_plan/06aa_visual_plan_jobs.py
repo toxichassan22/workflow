@@ -2,6 +2,22 @@ _VISUAL_PLAN_JOB_NAMESPACE = '.visual_plan_jobs'
 _VISUAL_PLAN_JOB_TIMEOUT_SECONDS = 600
 
 
+def _visual_plan_job_subject(kind):
+    """What the job is working on — the wording follows the job, not the plans.
+
+    The same queue also carries the visual-concept image and chat jobs, and
+    telling a client its image generation expired «المخطط الهندسي» would be
+    a lie about what it was doing.
+    """
+    if kind == 'image':
+        return 'التصور البصري'
+    if kind == 'chat':
+        return 'وصف التصور البصري'
+    if kind == 'edit_image':
+        return 'تعديل التصور البصري'
+    return 'المخطط الهندسي'
+
+
 def _visual_plan_job_call_timeout(default=1200):
     """Keep provider requests inside their job's absolute deadline."""
     if not has_request_context():
@@ -12,7 +28,8 @@ def _visual_plan_job_call_timeout(default=1200):
     remaining = deadline - time.time()
     if remaining <= 0:
         raise visual_plan_geometry.PlanGeometryError(
-            'انتهت مهلة معالجة المخطط الهندسي.', 'PLANS_JOB_EXPIRED')
+            'انتهت مهلة معالجة ' + _visual_plan_job_subject(
+                getattr(g, 'visual_plan_job_kind', '')) + '.', 'PLANS_JOB_EXPIRED')
     return max(1, min(int(default), int(remaining)))
 
 
@@ -28,6 +45,9 @@ def _visual_plan_job_todos(kind, state='running', active_index=None):
                       'مراجعة الإجابات السابقة', 'تحليل المتطلبات وتحديد السؤال'],
         'site_generate': ['تأكيد اكتمال المتطلبات', 'كتابة أقسام كود SVG', 'فحص المخطط وتجهيز المعاينة'],
         'site_edit': ['قراءة كود SVG والطلب', 'تعديل القسم المستهدف', 'فحص المخطط وتجهيز المعاينة'],
+        'image': ['قراءة وصف التصور البصري', 'توليد الصورة'],
+        'chat': ['قراءة طلب التعديل', 'تحديث وصف الصورة'],
+        'edit_image': ['قراءة طلب التعديل والصورة الحالية', 'توليد الصورة المعدّلة'],
     }.get(kind, ['معالجة المخطط'])
     active = (active_index if active_index is not None else
               {'prepare': 0, 'render': 1, 'edit': 1, 'prompt': 1, 'notes': 0}.get(kind, 0))
@@ -185,6 +205,15 @@ def _visual_plan_execute(kind, data, slot_id=''):
         elif kind in ('site_chat', 'site_generate', 'site_edit'):
             result, status = _visual_plan_site_assistant_execute(data, kind.removeprefix('site_'))
             return result, status
+        elif kind == 'image':
+            result, status = _visual_concept_generate_image_result(data, slot_id)
+            return result, status
+        elif kind == 'chat':
+            result, status = _visual_concept_chat_result(data, slot_id)
+            return result, status
+        elif kind == 'edit_image':
+            result, status = _visual_concept_edit_result(data, slot_id)
+            return result, status
         else:
             return {'success': False, 'error_code': 'PLANS_OPERATION_INVALID'}, 400
         return result, 200
@@ -201,7 +230,9 @@ def _visual_plan_execute(kind, data, slot_id=''):
             response = app.make_response(fatal)
             return response.get_json(), response.status_code
         app.logger.warning('Visual plan operation failed: %s', type(error).__name__)
-        return {'success': False, 'error': 'تعذرت معالجة المخطط الهندسي.', 'error_code': 'PLANS_PROVIDER_FAILED'}, 503
+        return {'success': False,
+                'error': 'تعذرت معالجة ' + _visual_plan_job_subject(kind) + '.',
+                'error_code': 'PLANS_PROVIDER_FAILED'}, 503
 
 
 def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
@@ -258,12 +289,14 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                             'timeoutSeconds': initial_job.get('timeoutSeconds', _VISUAL_PLAN_JOB_TIMEOUT_SECONDS),
                             'todos': _visual_plan_job_todos(kind)})
                 if time.time() >= g.visual_plan_job_deadline:
-                    result, status = {'success': False, 'error': 'انتهت مهلة معالجة المخطط الهندسي.',
+                    result, status = {'success': False,
+                                      'error': 'انتهت مهلة معالجة ' + _visual_plan_job_subject(kind) + '.',
                                       'error_code': 'PLANS_JOB_EXPIRED'}, 503
                 else:
                     result, status = _visual_plan_execute(kind, data, slot_id)
             if time.time() >= g.visual_plan_job_deadline:
-                result, status = {'success': False, 'error': 'انتهت مهلة معالجة المخطط الهندسي.',
+                result, status = {'success': False,
+                                  'error': 'انتهت مهلة معالجة ' + _visual_plan_job_subject(kind) + '.',
                                   'error_code': 'PLANS_JOB_EXPIRED'}, 503
             final_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
             existing_result = final_job.get('result') if isinstance(final_job.get('result'), dict) else {}
@@ -298,8 +331,9 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                                    active_index=active_index),
                                'httpStatus': 503,
                                'result': {'success': False,
-                                          'error': ('انتهت مهلة معالجة المخطط الهندسي.' if expired
-                                                    else 'تعذرت معالجة المخطط الهندسي.'),
+                                          'error': ('انتهت مهلة معالجة ' + _visual_plan_job_subject(kind) + '.'
+                                                    if expired
+                                                    else 'تعذرت معالجة ' + _visual_plan_job_subject(kind) + '.'),
                                           'error_code': ('PLANS_JOB_EXPIRED' if expired
                                                          else 'PLANS_PROVIDER_FAILED')}})
             _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, failed_job)

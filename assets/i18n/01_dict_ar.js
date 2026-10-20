@@ -724,6 +724,8 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "gen.stopped_title": "تم إيقاف التوليد",
   "gen.stopped_detail": "تم حفظ {n} شريحة ويمكن استكمال العرض لاحقًا.",
   "gen.stopped_toast": "تم إيقاف التوليد",
+  "gen.job_timeout": "انتهت مهلة المهمة.",
+  "gen.job_status_timeout": "تعذر الاتصال بحالة المهمة.",
   "loader.writing_content": "جاري صياغة المحتوى وبناء التصميم...",
   "changelog.from_to": "من «{old}» إلى «{new}»",
   "changelog.added": "أُضيف «{value}»",

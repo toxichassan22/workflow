@@ -172,6 +172,31 @@ def api_visual_concept_edit():
             'error': 'لا توجد صورة حالية قابلة للتعديل في هذا الحقل',
             'error_code': 'IMAGE_REQUIRED',
         }), 400
+    # The paid half runs in a job: the stop button has to reach it.
+    return _visual_plan_dispatch('edit_image', data, slot_id)
+
+
+def _visual_concept_edit_result(data, slot_id):
+    """The paid half of a visual-concept edit: the check and the new image.
+
+    It runs inside a job so the stop button reaches it, and the inputs are
+    re-checked because the job may start after the request was answered.
+    """
+    instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
+    if not instruction:
+        return {'success': False, 'error': 'اكتب طلب التعديل أولاً',
+                'error_code': 'MESSAGE_REQUIRED'}, 400
+    _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
+    if missing:
+        return {'success': False,
+                'error': 'أكمل الحقول الناقصة قبل تعديل التصور البصري',
+                'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
+                'missingFields': missing}, 400
+    base_image = _visual_concept_edit_base_image(data, tenant_id=getattr(g, 'tenant_id', None))
+    if not base_image:
+        return {'success': False,
+                'error': 'لا توجد صورة حالية قابلة للتعديل في هذا الحقل',
+                'error_code': 'IMAGE_REQUIRED'}, 400
     ref_uris = _visual_concept_edit_reference_uris(data)
     usage_ctx = _usage_ctx('image', data)
     clarity = _visual_concept_edit_clarity(
@@ -179,26 +204,31 @@ def api_visual_concept_edit():
         _visual_concept_edit_chat_tail(data, slot_id))
     if isinstance(clarity, dict) and clarity.get('clear') is False:
         question = _visual_concept_text(clarity.get('question'), 600) or 'حدد ما الذي تريد تغييره في الصورة بالضبط.'
-        return jsonify({
+        return {
             'success': True,
             'slotId': slot_id,
             'needsClarification': True,
             'question': question,
-        })
+        }, 200
     edit_prompt = _visual_concept_edit_prompt(instruction, slot_id, facts, len(ref_uris))
     image = call_images_api(edit_prompt, [base_image] + ref_uris, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             usage_ctx=usage_ctx)
     if not image:
-        fatal = _ai_fatal_http_response(last_images_api_error())
-        if fatal is not None:
-            return fatal
+        error = last_images_api_error() or {}
+        if error.get('fatal') or error.get('error_code') in _FATAL_AI_ERROR_CODES:
+            status = error.get('http_status') if isinstance(error.get('http_status'), int) else 503
+            return {'success': False, 'error': _client_safe_llm_error(error.get('message') or ''),
+                    'error_code': error.get('error_code') or 'IMAGE_FAILED'}, status
         if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
-            return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'}), 400
-        return jsonify({'success': False, 'error': 'تعذر تعديل الصورة', 'error_code': 'IMAGE_FAILED'}), 503
-    return jsonify({
+            return {'success': False,
+                    'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.',
+                    'error_code': 'NO_API_KEY'}, 400
+        return {'success': False, 'error': 'تعذر تعديل الصورة',
+                'error_code': 'IMAGE_FAILED'}, 503
+    return {
         'success': True,
         'slotId': slot_id,
         'image': persist_generated_image(image, g.tenant_id),
         'reply': 'تم تعديل الصورة حسب طلبك.',
         'model': VISUAL_CONCEPT_IMAGE_MODEL,
-    })
+    }, 200

@@ -516,6 +516,7 @@
 
     async function generateVisualConceptImage(slotId) {
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
+      resetTenantGenerationStop();
       // Never hold a slot reference across an await or a render: renderVisualConceptPage
       // reassigns tenantVisualConceptState through normalizeVisualConceptState, so a
       // captured slot is detached and the generated image was written to a dead object.
@@ -542,7 +543,8 @@
       if (sitePlan) visualConceptSiteAssistantBusy = true;
       liveSlot().status = 'generating';
       renderVisualConceptPage();
-      showLoader('جاري توليد التصور البصري', WFT('vc.generating_slot', 'يتم توليد {slot}...', { slot: wfTr(visualConceptSlotLabel(slotId)) }));
+      showLoader('جاري توليد التصور البصري', WFT('vc.generating_slot', 'يتم توليد {slot}...', { slot: wfTr(visualConceptSlotLabel(slotId)) }),
+        { stoppable: true });
       try {
         const payload = sitePlan
           ? await collectVisualConceptPlansWorkflowPayload({
@@ -557,7 +559,8 @@
           ? await visualConceptPlanJobApi('POST', '/api/visual-concept/site-plan-assistant', payload)
           : (isVisualConceptWorkflowPlan(slotId)
             ? await visualConceptPlanJobApi('POST', '/api/visual-concept/generate', payload)
-            : await apiWithTimeout('POST', '/api/visual-concept/generate', payload, 180000, 'انتهت مهلة توليد الصورة؛ أعد المحاولة.'));
+            : await runTenantGenerationJob('POST', '/api/visual-concept/generate', payload,
+              '/api/visual-concept/plans-jobs/'));
         hideLoader();
         if (sitePlan && response?.success && !response.image) {
           applyVisualConceptSiteAssistantResponse(response);
@@ -718,6 +721,7 @@
     }
 
     async function sendVisualConceptChat(slotId) {
+      resetTenantGenerationStop();
       if (slotId === 'plan_site' && visualConceptSiteAssistantBusy) return;
       if (!hasPermission('generate_images')) { toast('لا تملك صلاحية توليد الصور'); return; }
       if (visualConceptSlotLocked(slotId)) {
@@ -765,7 +769,8 @@
       } else {
         showLoader(
           editImage ? WFT('vc.edit_running', 'جاري تعديل الصورة') : WFT('vc.edit_running', 'جاري تعديل وصف الصورة'),
-          editImage ? WFT('vc.edit_running_detail', 'يتم تطبيق التعديل على نفس الصورة دون تغيير باقي تفاصيلها...') : 'يتم تطبيق ملاحظاتك على نفس المشروع...');
+          editImage ? WFT('vc.edit_running_detail', 'يتم تطبيق التعديل على نفس الصورة دون تغيير باقي تفاصيلها...') : 'يتم تطبيق ملاحظاتك على نفس المشروع...',
+          { stoppable: true });
       }
       try {
         if (sitePlan) {
@@ -801,8 +806,10 @@
           : (planWorkflowSlot
             ? await visualConceptPlanJobApi('POST', '/api/visual-concept/edit', payload)
           : (editImage
-            ? await apiWithTimeout('POST', '/api/visual-concept/edit', payload, 180000, WFT('vc.edit_timeout', 'انتهت مهلة تعديل الصورة؛ أعد المحاولة.'))
-            : await api('POST', '/api/visual-concept/chat', payload)));
+            ? await runTenantGenerationJob('POST', '/api/visual-concept/edit', payload,
+              '/api/visual-concept/plans-jobs/')
+            : await runTenantGenerationJob('POST', '/api/visual-concept/chat', payload,
+              '/api/visual-concept/plans-jobs/')));
         if (!sitePlan) hideLoader();
         if (sitePlan && response?.success) {
           applyVisualConceptSiteAssistantResponse(response);

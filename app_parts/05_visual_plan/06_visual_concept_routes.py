@@ -518,23 +518,55 @@ def api_visual_concept_generate():
     # The suffix goes to the model only — the stored slot prompt stays clean
     # so a regenerate never bakes a duplicate line into it.
     image_prompt = _visual_concept_attach_style_reference_suffix(prompt, facts, slot_id)
+    # The paid half runs in a job: the stop button has to reach it, and a
+    # long provider call must not hold the request open.
+    return _visual_plan_dispatch('image', data, slot_id)
+
+
+def _visual_concept_generate_image_result(data, slot_id):
+    """The paid half of a visual-concept image: one provider call, one image.
+
+    It runs inside a job so the stop button reaches it — a user who
+    notices the wrong prompt must not pay for the whole call. The inputs are
+    re-checked here: the job may start after the request was answered.
+    """
+    prompt = _visual_concept_sanitize_prompt(data.get('prompt'))
+    if not prompt:
+        return {'success': False, 'error': 'وصف التصور البصري مطلوب',
+                'error_code': 'PROMPT_REQUIRED'}, 400
+    _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
+    if missing:
+        return {'success': False,
+                'error': 'أكمل الحقول الناقصة قبل توليد التصور البصري',
+                'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
+                'missingFields': missing}, 400
+    cover_image = _visual_concept_cover_image(data)
+    references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
+    # The suffix goes to the model only — the stored slot prompt stays clean
+    # so a regenerate never bakes a duplicate line into it.
+    image_prompt = _visual_concept_attach_style_reference_suffix(prompt, facts, slot_id)
     image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             usage_ctx=_usage_ctx('image', data))
     if not image:
-        fatal = _ai_fatal_http_response(last_images_api_error())
-        if fatal is not None:
-            return fatal
+        error = last_images_api_error() or {}
+        if error.get('fatal') or error.get('error_code') in _FATAL_AI_ERROR_CODES:
+            status = error.get('http_status') if isinstance(error.get('http_status'), int) else 503
+            return {'success': False, 'error': _client_safe_llm_error(error.get('message') or ''),
+                    'error_code': error.get('error_code') or 'IMAGE_FAILED'}, status
         if not _has_any_openrouter_key(tenant_id=getattr(g, 'tenant_id', None)):
-            return jsonify({'success': False, 'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.', 'error_code': 'NO_API_KEY'}), 400
-        return jsonify({'success': False, 'error': 'تعذر توليد صورة التصور البصري', 'error_code': 'IMAGE_FAILED'}), 503
-    return jsonify({
+            return {'success': False,
+                    'error': 'خدمة الذكاء الاصطناعي غير متاحة حاليًا — تواصل مع الدعم الفني.',
+                    'error_code': 'NO_API_KEY'}, 400
+        return {'success': False, 'error': 'تعذر توليد صورة التصور البصري',
+                'error_code': 'IMAGE_FAILED'}, 503
+    return {
         'success': True,
         'slotId': slot_id,
         'image': persist_generated_image(image, g.tenant_id),
         'prompt': prompt,
         'referenceCount': len(references),
         'model': VISUAL_CONCEPT_IMAGE_MODEL,
-    })
+    }, 200
 
 
 @app.route('/api/visual-concept/chat', methods=['POST'])
@@ -585,27 +617,53 @@ def api_visual_concept_chat():
     # Images the client pinned to this message ride along so the writer can
     # see exactly what "use this style" points at.
     references += _visual_concept_edit_reference_uris(data)
+    # The paid half runs in a job: the stop button has to reach it.
+    return _visual_plan_dispatch('chat', data, slot_id)
+
+
+def _visual_concept_chat_result(data, slot_id):
+    """The paid half of a visual-concept chat: one prompt rewrite.
+
+    It runs inside a job so the stop button reaches it, and the inputs are
+    re-checked because the job may start after the request was answered.
+    """
+    instruction = _visual_concept_text(data.get('message') or data.get('instruction'), 4000)
+    if not instruction:
+        return {'success': False, 'error': 'اكتب طلب التعديل أولاً',
+                'error_code': 'MESSAGE_REQUIRED'}, 400
+    _project_data, facts, missing = _visual_concept_request_bundle(data, slot_id)
+    if missing:
+        return {'success': False,
+                'error': 'أكمل الحقول الناقصة قبل تعديل التصور البصري',
+                'error_code': 'VISUAL_CONCEPT_DATA_INCOMPLETE',
+                'missingFields': missing}, 400
+    current_prompt = _visual_concept_sanitize_prompt(data.get('currentPrompt') or data.get('prompt'))
+    cover_image = _visual_concept_cover_image(data)
+    references = _visual_concept_collect_generation_references(facts, slot_id, cover_image)
+    references += _visual_concept_edit_reference_uris(data)
     try:
         prompt, reply = _visual_concept_generate_prompt_text(
             facts, slot_id, current_prompt=current_prompt, instruction=instruction, image_references=references,
             usage_ctx=_usage_ctx('image', data),
         )
         if not prompt:
-            return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري', 'error_code': 'TEXT_PROVIDER_INVALID'}), 503
-        return jsonify({
+            return {'success': False, 'error': 'تعذر تعديل وصف التصور البصري',
+                    'error_code': 'TEXT_PROVIDER_INVALID'}, 503
+        return {
             'success': True,
             'slotId': slot_id,
             'prompt': prompt,
             'reply': reply or 'تم تحديث وصف الصورة حسب طلبك.',
             'referenceCount': len(references),
-        })
+        }, 200
     except Exception as exc:
         app.logger.exception('Visual concept chat failed')
         fatal = _ai_fatal_http_response(exc)
         if fatal is not None:
-            return fatal
-        return jsonify({'success': False, 'error': 'تعذر تعديل وصف التصور البصري',
-                        'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}), 503
+            body = fatal[0].get_json() if hasattr(fatal[0], 'get_json') else {}
+            return body, fatal[1]
+        return {'success': False, 'error': 'تعذر تعديل وصف التصور البصري',
+                'detail': str(exc)[:400], 'error_code': 'TEXT_PROVIDER_FAILED'}, 503
 
 
 @app.route('/api/render-slide-image', methods=['POST'])
