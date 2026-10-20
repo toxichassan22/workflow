@@ -430,9 +430,9 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                          'https://rega.gov.sa/city-data')
         self.assertTrue(result['browse_trace'])
 
-    def test_aggregator_timeout_defaults_to_ten_minutes(self):
+    def test_aggregator_timeout_defaults_to_thirty_minutes(self):
         module = self.module
-        self.assertEqual(module._SUMMARY_AGGREGATOR_TIMEOUT, 600)
+        self.assertEqual(module._SUMMARY_AGGREGATOR_TIMEOUT, 1800)
         captured = {}
 
         def fake_chat(system, prompt, **kwargs):
@@ -445,7 +445,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 deadline=None)
 
         self.assertIn('choices', result)
-        self.assertEqual(captured.get('timeout'), 600)
+        self.assertEqual(captured.get('timeout'), 1800)
 
     def test_aggregator_retries_using_the_provider_affordable_token_cap(self):
         module = self.module
