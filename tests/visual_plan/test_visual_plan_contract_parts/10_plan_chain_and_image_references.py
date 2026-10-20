@@ -74,6 +74,29 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
             'Create hero image.', facts, 'cover')
         self.assertIn('approved master site plan (Plan 1)', suffix)
 
+    def test_an_exterior_render_takes_both_site_and_uses_plans_when_massing_absent(self):
+        module = self.application_module
+        facts = {
+            'plan_image_map': {
+                'site': '/uploads/creative/tenant/plan1.svg',
+                'uses': '/uploads/creative/tenant/plan2.svg',
+            },
+            'overview_map_url': '/uploads/maps/site.png',
+            'style_reference_file_ids': [],
+        }
+        with patch.object(module, '_visual_concept_reference_uris',
+                          side_effect=lambda urls=None, **_kwargs: list(urls or [])), \
+                self.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            cover_refs = module._visual_concept_collect_generation_references(facts, 'cover')
+
+        self.assertIn('/uploads/creative/tenant/plan1.svg', cover_refs)
+        self.assertIn('/uploads/creative/tenant/plan2.svg', cover_refs)
+        suffix = module._visual_concept_exterior_conformity_suffix(
+            'Create hero image.', facts, 'cover')
+        self.assertIn('approved master site plan (Plan 1)', suffix)
+        self.assertIn('vertical program distribution diagram (Plan 2)', suffix)
+
     def test_an_exterior_angle_keeps_the_massing_and_the_hero_only(self):
         module = self.application_module
         facts = {'plan_image_map': {'massing': '/uploads/creative/tenant/plan3.svg'}}

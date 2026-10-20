@@ -2,8 +2,12 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     tenant_id = tenant_id or getattr(g, 'tenant_id', None)
     plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
     # The exterior render is grounded on the approved massing diagram (Plan 3),
-    # or falls back to the approved site plan (Plan 1) when massing is not available.
-    primary_plan_url = plan_map.get('massing') or plan_map.get('site') or ''
+    # or falls back to both the approved site plan (Plan 1) and floor uses (Plan 2)
+    # when massing is not available.
+    if plan_map.get('massing'):
+        plan_urls = [plan_map['massing']]
+    else:
+        plan_urls = [url for url in (plan_map.get('site'), plan_map.get('uses')) if url]
     # Exterior slots render the approved plans: the plan diagram leads the
     # reference set, then the map and every named style ref — 4 urls + 5 files
     # must all fit so the enumerated order matches the attached order.
@@ -11,9 +15,9 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     if slot_id == 'cover':
         file_ids = list(facts.get('style_reference_file_ids') or [])
         map_urls = [facts['overview_map_url']] if facts.get('overview_map_url') else []
-        if primary_plan_url:
+        if plan_urls:
             return _visual_concept_reference_uris(
-                urls=[primary_plan_url] + map_urls, file_ids=file_ids,
+                urls=plan_urls + map_urls, file_ids=file_ids,
                 max_images=external_cap, urls_first=True, tenant_id=tenant_id)
         file_ids = file_ids[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
         if len(file_ids) >= VISUAL_CONCEPT_MAX_REFERENCE_IMAGES:
@@ -48,7 +52,7 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     # Angle slots re-render the approved hero image from another viewpoint —
     # the hero already carries the style, so style references would only fight it.
     return _visual_concept_reference_uris(
-        urls=([primary_plan_url] if primary_plan_url else []) + urls,
+        urls=plan_urls + urls,
         max_images=external_cap, urls_first=True, tenant_id=tenant_id)
 
 
@@ -71,6 +75,17 @@ def _visual_concept_exterior_conformity_suffix(prompt, facts, slot_id):
             'area. Do not invent anything that is not in it. The other attached images are reference '
             'material only — the site map and the client style references: they set the design '
             'language, never the geometry.'
+        )
+    if plan_map.get('site') and plan_map.get('uses'):
+        return (
+            f'{prompt} The attached reference images include the approved master site plan (Plan 1) '
+            'and the approved vertical program distribution diagram (Plan 2): '
+            'place the building masses, entries, and surface parking lots exactly within the footprints, '
+            'frontages, and site arrangement shown in Plan 1. Extrude them into realistic 3D architectural '
+            'volumes following the approved floor counts, heights, and vertical uses established in Plan 2. '
+            'Do not alter building positions or parking locations shown in Plan 1. The other attached images '
+            'are reference material only — the site map and client style references: they set the architectural '
+            'facade design language and materials.'
         )
     if plan_map.get('site'):
         return (
