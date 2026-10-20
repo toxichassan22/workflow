@@ -1406,7 +1406,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
 
         approved_rows = [{
             'building': 'Main Tower', 'floor_range': '26-52', 'component': 'Luxury Apartments',
-            'units_per_floor': 9, 'floor_area_sqm': 1350, 'circulation': 'main core'}]
+            'units_per_floor': 9, 'floor_area_sqm': 400, 'circulation': 'main core'}]
         gated = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
             'projectData': project_data,
             'plansWorkflow': {
@@ -1442,7 +1442,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         # Every diagram renders the sealed engineering scene, so the scene is
         # sealed from the current project data before the diagram is drawn.
         layout = json.dumps({'buildings': [{'id': 'b1',
-            'footprint': [[60, 8], [70, 8], [70, 13], [60, 13]]}],
+            'footprint': [[0, 0], [20, 0], [20, 20], [0, 20]]}],
             'entries': [], 'openAreas': []})
         with patch.object(module, 'call_openrouter_chat', return_value={
                 'choices': [{'message': {'content': layout}}]
