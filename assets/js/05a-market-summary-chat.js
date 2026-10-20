@@ -9,7 +9,7 @@
        that need a consolidate pass. */
 
     const MARKET_SUMMARY_CHAT_GENERAL = 'general';
-    const MARKET_SUMMARY_CHAT_HISTORY_SEND = 12;
+    const MARKET_SUMMARY_CHAT_HISTORY_SEND = 40;
     const MARKET_SUMMARY_CHAT_HISTORY_KEEP = 40;
     const MARKET_SUMMARY_CHAT_SECTION_KEY = 'section-market-study';
     const MARKET_SUMMARY_CHAT_POS_KEY = 'marketSummaryChatFabPos';
@@ -88,6 +88,23 @@
         .map(turn => ({ role: turn.role, content: String(turn.content || '').slice(0, 4000) }));
     }
 
+    // The memory digest the server folds the older turns into. It travels with
+    // every request, so the chat answers from what was agreed instead of
+    // contradicting it.
+    function marketSummaryChatMemory(state, axis) {
+      const store = state && state.summaryChatMemory && typeof state.summaryChatMemory === 'object'
+        ? state.summaryChatMemory : {};
+      return String(store[axis] || '').slice(0, 40000);
+    }
+
+    function marketSummaryChatSetMemory(state, axis, value) {
+      if (!state || typeof state.summaryChatMemory !== 'object' || Array.isArray(state.summaryChatMemory)) {
+        state.summaryChatMemory = {};
+      }
+      state.summaryChatMemory[axis] = String(value || '').slice(0, 40000);
+      return state.summaryChatMemory[axis];
+    }
+
     function marketSummaryChatLocked() {
       return tenantProjectSectionStatuses?.[MARKET_SUMMARY_CHAT_SECTION_KEY] === 'approved';
     }
@@ -149,7 +166,8 @@
         swot: { ...(state && state.swot) },
         sources: Array.isArray(state && state.sources) ? state.sources.slice() : [],
         summaryStale: { ...(state && state.summaryStale) },
-        summaryChat: (state && state.summaryChat) || {}
+        summaryChat: (state && state.summaryChat) || {},
+        summaryChatMemory: (state && state.summaryChatMemory) || {}
       };
       const summaryKeys = new Set((MARKET_STUDY_SUMMARY_SECTIONS || []).map(item => item.key));
       const swotKeys = new Set((MARKET_STUDY_SWOT_SECTIONS || []).map(item => item.key));
@@ -673,6 +691,7 @@
         payload.message = message;
         payload.research = marketSummaryChatResearchOn ? 'auto' : 'off';
         payload.history = marketSummaryChatHistory(thread.slice(0, -1));
+        payload.memory = marketSummaryChatMemory(state, axis);
         payload.decision = state.decision || '';
         payload.oneBlockSummary = state.one_block_summary || '';
         let res = await api('POST', '/api/market-study/summary/chat', payload);
@@ -684,6 +703,7 @@
           });
         }
         state = marketSummaryChatState();
+        if (res && res.memory) marketSummaryChatSetMemory(state, axis, res.memory);
         if (res && res.success && res.reply) {
           const turn = { role: 'assistant', content: String(res.reply) };
           if (res.searchPerformed) turn.searchPerformed = true;

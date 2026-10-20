@@ -23,13 +23,18 @@ PLANS_DISTRIBUTION_CHAT_SYSTEM_PROMPT = (
     'وإذا لم تستطع بناء جدول كامل، أرجع "action":"explain" واذكر السبب في "reply".\n'
     '- «اعتمد التوزيع» أو «طبّق التوزيع» أو «اعتماد التوزيع» = "action":"update": العميل يطبّق '
     'الجدول من "rows" لا من الوصف، فالرد الذي يشرح التوزيع بلا جدول لا يغيّر شيئًا.\n'
+    '- إذا نقصتك معلومة لا تستطيع استنتاجها من البيانات المعتمدة (وحدة في دور بعينه، عدد الوحدات في '
+    'مبنى، استخدام معيّن في مكان معيّن) فلا تخمّن: أرجع "action":"ask" مع "question" سؤال واحد واضح '
+    'و"choices" من 2 إلى 4 خيارات، ولا ترسل جدولاً. سؤال واحد في كل رد، وبعد الإجابة ترجع '
+    'إلى "action":"update" بالجدول كاملًا.\n'
     '- احكم على كل بند فحص آلي مرقّم: «متعارض» لمخالفة حقيقية تمنع الاعتماد، «يحتاج تأكيد» تستدعي مراجعة '
     'العميل دون منع، «مطابق» إنذار كاذب لأن التوزيع سليم فعلًا. البند الذي لا تحكم عليه يبقى على حكمه الآلي.\n'
     '- ذاكرة المحادثة إلزامية: لا تخالف ما اتُّفق عليه سابقًا ولا تعِد اقتراحًا رُفض، وإذا غيّر العميل قرارًا '
     'سابقًا فاذكر التغيير صراحة في الرد.\n'
     '- لا تذكر أسماء ملفات أو أرقام صفحات أو مصادر داخلية؛ استخدم «البيانات التنظيمية الموثقة».\n'
     '- ممنوع تنسيق Markdown تمامًا (لا ** ولا ### ولا جداول) — نص عادي ونقاط قصيرة فقط.\n'
-    'أعد JSON فقط: {"reply":"","action":"explain|update","rows":[],"removedComponents":[],'
+    'أعد JSON فقط: {"reply":"","action":"explain|update|ask","rows":[],"removedComponents":[],'
+    '"question":"","choices":[],'
     '"reviews":[{"index":0,"result":"متعارض|يحتاج تأكيد|مطابق","detail":"","fixable":true}],'
     '"issues":[{"title":"","points":[""],"suggestion":"","action":"","severity":"high"}],'
     '"memory":"","decisions":[]}'
@@ -94,7 +99,8 @@ def _plans_distribution_chat_state(data, workflow):
     }
 
 
-def _plans_distribution_chat_prompt(data, workflow, context, current, state, reset):
+def _plans_distribution_chat_prompt(data, workflow, context, current, state, reset,
+                                   apply_proposal=False):
     """The prompt for one turn: the approved facts, the table, the checks, the thread."""
     indexed_checks = [
         {'index': index, 'item': check.get('item'), 'detail': check.get('detail'),
@@ -120,7 +126,66 @@ def _plans_distribution_chat_prompt(data, workflow, context, current, state, res
         prompt += (
             '\n\nالعميل طلب بدء التوزيع من جديد: لا تعتمد على أي توزيع سابق ولا على أي قرار '
             'سابق، واقترح توزيعًا كاملًا من بيانات المشروع المعتمدة وحدها.')
+    if apply_proposal:
+        prompt += (
+            '\n\nالعميل طلب تطبيق ما وصفته في ردك السابق: أعد توزيعك السابق كما هو في "rows" '
+            '(نفس المباني ونفس الأدوار ونفس المكونات)، بدون اقتراح جديد ولا تغيير ولا حذف.')
     return prompt, conversation
+
+
+# A message that asks for the layout itself, not for an answer about one.
+PLANS_DISTRIBUTION_TABLE_INTENTS = (
+    'اعتمد', 'اعتماد', 'طبّق', 'طبق', 'وزّع', 'وزع', 'اقترح', 'أعد توزيع', 'اعد توزيع',
+)
+
+
+# The answer as the model writes it, so the client shows it while it is still
+# being written instead of waiting for the whole turn.
+_PLANS_DISTRIBUTION_PARTIAL = {'at': 0.0, 'text': ''}
+
+
+def _plans_distribution_chat_publish_partial(text):
+    """Publish the reply as it arrives. The job file carries it, the browser
+    polls it, and the client shows the words while the model still writes."""
+    run_id, tenant_id = run_control.current_run()
+    if not run_id or not tenant_id:
+        return
+    match = re.search(r'"reply"\s*:\s*"((?:[^"\\]|\\.)*)', text or '')
+    partial = match.group(1) if match else ''
+    if not partial:
+        return
+    now = time.time()
+    if now - _PLANS_DISTRIBUTION_PARTIAL['at'] < 0.8 and partial != _PLANS_DISTRIBUTION_PARTIAL['text']:
+        return
+    _PLANS_DISTRIBUTION_PARTIAL['at'] = now
+    _PLANS_DISTRIBUTION_PARTIAL['text'] = partial
+    try:
+        current = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, run_id) or {}
+    except Exception:
+        return
+    current['partial'] = partial[-4000:]
+    try:
+        _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, run_id, current)
+    except Exception:
+        pass
+
+
+def _plans_distribution_chat_wants_table(data):
+    """The client asked for a layout, not for an answer about one.
+
+    The button says so in the request; a typed «اعتمد التوزيع» says it in the
+    message, and the table has to come back for it to be applied.
+    """
+    if bool((data or {}).get('expectTable')):
+        return True
+    message = str((data or {}).get('message') or '')
+    return any(marker in message for marker in PLANS_DISTRIBUTION_TABLE_INTENTS)
+
+
+def _plans_distribution_chat_has_table(parsed):
+    """Whether the answer carries the table itself, not a description of it."""
+    rows = parsed.get('rows') if isinstance(parsed, dict) else None
+    return isinstance(rows, list) and bool(rows)
 
 
 def _plans_distribution_chat_execute(data):
@@ -148,17 +213,19 @@ def _plans_distribution_chat_execute(data):
     if reset:
         state = {'turns': [], 'memory': '', 'decisions': []}
     user_prompt, conversation = _plans_distribution_chat_prompt(
-        data, workflow, context, current, state, reset)
+        data, workflow, context, current, state, reset,
+        apply_proposal=bool(data.get('applyProposal')))
     try:
-        call_timeout = _visual_plan_job_call_timeout(900)
+        call_timeout = _visual_plan_job_call_timeout(600)
     except Exception:
         return {'success': False, 'error': 'انتهت مهلة تنفيذ الطلب على التوزيع.',
                 'error_code': 'PLANS_JOB_EXPIRED'}, 503
     try:
-        response = call_openrouter_chat(
+        response = call_openrouter_chat_stream(
             PLANS_DISTRIBUTION_CHAT_SYSTEM_PROMPT, user_prompt, temperature=None, max_tokens=128000,
-            model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='max', timeout=call_timeout,
-            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
+            model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='high', timeout=call_timeout,
+            response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data),
+            on_token=_plans_distribution_chat_publish_partial, read_timeout=120)
     except Exception as error:
         # A raised provider error used to be swallowed here, and the route
         # answered 200 with an empty body: the client could not tell a failed
@@ -189,8 +256,69 @@ def _plans_distribution_chat_execute(data):
         return {'success': False,
                 'error': 'ما جا رد مفهوم من النموذج — لم يتغير التوزيع.',
                 'error_code': PLANS_DISTRIBUTION_ERROR_UNREADABLE}, 503
+    # The client asked for a layout. A model that described the layout in
+    # prose instead of returning the rows is asked once more for the table:
+    # the client applies "rows", and a described layout never reaches the
+    # floors table on its own.
+    if _plans_distribution_chat_wants_table(data) and not _plans_distribution_chat_has_table(parsed):
+        if data.get('applyProposal'):
+            retry_prompt = (
+                user_prompt
+                + '\n\nمهم: لم يأتِ جدول في "rows". أعد توزيعك الذي وصفته في ردك السابق كما هو في '
+                  '"rows" — نفس المباني ونفس الأدوار ونفس المكونات — ولا تصفه ولا تقترح جديدًا.'
+            )
+        else:
+            retry_prompt = (
+                user_prompt
+                + '\n\nمهم: لم يأتِ جدول في "rows". أعد الجدول كاملًا في "rows" فقط — كل صف فيه building '
+                  'وfloor_range وcomponent وunits_per_floor وfloor_area_sqm — ولا تصفه في "reply". '
+                  'و"reply" يبقى سطرًا واحدًا يقول إن الجدول جاهز.'
+            )
+        print('[DISTRIBUTION CHAT] no table in the answer — asking once more for the rows')
+        try:
+            retry = call_openrouter_chat_stream(
+                PLANS_DISTRIBUTION_CHAT_SYSTEM_PROMPT, retry_prompt, temperature=None, max_tokens=128000,
+                model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='high', timeout=call_timeout,
+                response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data),
+                on_token=_plans_distribution_chat_publish_partial, read_timeout=120)
+        except Exception as error:
+            app.logger.warning('Distribution chat retry failed: %s', type(error).__name__)
+            retry = {}
+        retry_parsed = parse_json_object(_get_chat_response_text(retry))
+        if isinstance(retry_parsed, dict) and retry_parsed:
+            parsed = retry_parsed
+            raw_text = _get_chat_response_text(retry)
+            print(f'[DISTRIBUTION CHAT] retry chars={len(raw_text or "")}')
     reply = _visual_concept_plan_sanitize_text(parsed.get('reply'))[:6000]
     action = 'update' if str(parsed.get('action') or '').lower() == 'update' else 'explain'
+    if str(parsed.get('action') or '').lower() == 'ask':
+        # The model needs one fact it cannot read from the approved data: it
+        # asks, and the table stays exactly as it was until it is answered.
+        question = _visual_concept_plan_sanitize_text(parsed.get('question'))[:2000]
+        choices = []
+        for choice in (parsed.get('choices') if isinstance(parsed.get('choices'), list) else [])[:6]:
+            text = _visual_concept_plan_sanitize_text(choice)[:200]
+            if text and text not in choices:
+                choices.append(text)
+        if question:
+            chat_memory.apply_model_memory(conversation, parsed)
+            return {
+                'success': True,
+                'reply': reply or question,
+                'action': 'ask',
+                'question': question,
+                'choices': choices,
+                'rows': current['rows'],
+                'totals': current['totals'],
+                'checks': current['checks'],
+                'issues': current['issues'],
+                'canProceed': not any(check.get('result') == 'متعارض' for check in current['checks']),
+                'tableChanged': False,
+                'memory': conversation['memory'],
+                'decisions': conversation['decisions'],
+                'reset': reset,
+            }, 200
+        action = 'explain'
     rows = current['rows']
     totals = current['totals']
     checks = current['checks']

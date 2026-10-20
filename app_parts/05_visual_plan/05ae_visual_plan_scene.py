@@ -851,8 +851,12 @@ def _visual_plan_dependency_prompt(kind, dependency_kinds, base_image=False):
 def _visual_plan_render_response(data, slot_id):
     kind = _visual_concept_plan_kind(slot_id)
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
+    # Every diagram renders the same sealed engineering scene. The scene is
+    # validated for all three of them: a diagram drawn without it is drawn
+    # from loose prompt text, so it drifts away from Plan 1 and from the
+    # approved program instead of following them.
+    scene, contract, context, _program = _visual_plan_scene_from_request(data)
     if kind == 'site':
-        scene, contract, context, _program = _visual_plan_scene_from_request(data)
         prompt = _visual_plan_slot_prompt(workflow, kind, context)
         image, reference_count, model_used = _visual_plan_render_site_svg(prompt, contract, data)
         return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
@@ -862,7 +866,6 @@ def _visual_plan_render_response(data, slot_id):
 
     # Stage 4 diagrams (uses and massing) are drawn on the approved diagrams
     # they depend on: Plan 2 on Plan 1, Plan 3 on Plan 1 AND Plan 2.
-    context = _visual_plan_prompt_context(data)
     prompt = _visual_plan_slot_prompt(workflow, kind, context)
     base_image = _visual_concept_edit_base_image(data, g.tenant_id)
     references = [base_image] if base_image else []
@@ -876,7 +879,9 @@ def _visual_plan_render_response(data, slot_id):
             if dependency_uri not in references:
                 references.append(dependency_uri)
 
-    boundary_points = (workflow.get('boundary') or {}).get('points') or context.get('survey_points')
+    boundary_points = ((workflow.get('boundary') or {}).get('points')
+                       or context.get('boundary_points')
+                       or (contract.get('geometry') or {}).get('surveyPoints'))
     if boundary_points:
         try:
             boundary_url = _visual_concept_render_plan_boundary_reference(boundary_points, g.tenant_id)
@@ -906,7 +911,8 @@ def _visual_plan_render_response(data, slot_id):
             'PLANS_PROVIDER_FAILED')
 
     return {'success': True, 'slotId': slot_id, 'image': persist_generated_image(image, g.tenant_id),
-            'prompt': prompt, 'model': VISUAL_CONCEPT_IMAGE_MODEL,
+            'prompt': prompt, 'scene': scene, 'engine': 'surveyed_geometry',
+            'model': VISUAL_CONCEPT_IMAGE_MODEL,
             'referenceCount': len(references)}
 
 

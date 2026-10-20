@@ -207,6 +207,10 @@ def _visual_plan_site_prompt_contract(project, workflow):
                      or boundary.get('points') or [])
     return {
         'projectName': _visual_concept_read(project, 'project_name', 'projectName'),
+        # The site plan is drawn in English: an English project name is used
+        # when the client recorded one, and an Arabic-only name is left out of
+        # the drawing rather than printed in Arabic.
+        'projectNameEn': _visual_concept_read(project, 'project_name_en', 'projectNameEn'),
         'projectIdea': _visual_concept_read(project, 'project_idea', 'projectIdea'),
         'approvedFinancialAreaSqm': approved_area_number if approved_area_number is not None else land_area,
         'croquisLandAreaSqm': croquis_source,
@@ -253,6 +257,7 @@ def _visual_plan_site_packet(data):
         'primaryFrontage': (scene.get('primaryFrontage') if scene_is_current
                             else prompt_contract.get('primaryFrontage')),
         'projectName': prompt_contract.get('projectName'),
+        'projectNameEn': prompt_contract.get('projectNameEn'),
         'landArea': prompt_contract.get('landAreaSqm'),
     }
     context = {'components': prompt_contract.get('financialComponents') or []}

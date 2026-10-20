@@ -575,10 +575,10 @@ def _visual_concept_slot_instruction(slot_id, facts):
                 'No style-reference image was supplied; invent the architecture from the project facts only. '
             )
         plan_note = (
-            'The attached planning diagrams (site plan, vertical program, conceptual massing) are the '
-            'approved design: the building massing, heights, use bands, footprints, and entries in the '
-            'render must match them exactly. '
-            if facts.get('plan_image_urls') else ''
+            'The attached approved massing diagram (Plan 3) is the only geometry authority: the building '
+            'massing, heights, use bands, footprints, and entries in the render must match it exactly, '
+            'and nothing may be added to it or resized. '
+            if (facts.get('plan_image_map') or {}).get('massing') else ''
         )
         return (
             f'Create the primary architectural hero photograph of {name}. '
@@ -590,8 +590,9 @@ def _visual_concept_slot_instruction(slot_id, facts):
     if slot_id == 'main_facade':
         return (
             f'Render a clear, straight-on primary street-facing architectural elevation of {name}. '
-            + ('The approved planning diagrams define the exact building massing, height, and use bands; preserve them. '
-               if facts.get('plan_image_urls') else '')
+            + ('The attached approved massing diagram (Plan 3) defines the exact building massing, height, '
+               'and use bands; preserve them and add nothing. '
+               if (facts.get('plan_image_map') or {}).get('massing') else '')
             + 'Show the complete main facade as the hero subject, with a calm, realistic street-level camera and daylight. '
             'Keep the architecture consistent with the approved project image and style references. '
             'Do not make an aerial, side, rear, interior, or generic hero view.'
@@ -600,9 +601,9 @@ def _visual_concept_slot_instruction(slot_id, facts):
         view_name = _visual_concept_slot_label(slot_id, facts)
         return (
             f'Render the "{view_name}" view of the exact same building shown in the attached hero image of {name}. '
-            + ('The attached approved planning diagrams define its massing, heights, and use bands — keep the '
-               'architecture, materials, height, and massing identical to both. '
-               if facts.get('plan_image_urls') else
+            + ('The attached approved massing diagram (Plan 3) defines its massing, heights, and use bands — '
+               'keep the architecture, materials, height, and massing identical to it. '
+               if (facts.get('plan_image_map') or {}).get('massing') else
                'Keep the architecture, materials, height, and massing unchanged. ')
             + 'Follow the named viewpoint.'
         )
@@ -728,16 +729,36 @@ def _visual_concept_sanitize_prompt(prompt):
     return _visual_concept_text(prompt, 12000)
 
 
+# The images endpoint accepts jpeg, png and webp only. An SVG reference — a
+# site-plan diagram, an uploaded vector reference — is refused by the provider
+# with "unsupported mimetype ('image/svg+xml')", and that refusal kills the
+# whole call: the client only ever saw the generic "تعذر توليد الصورة".
+IMAGES_API_SUPPORTED_MIMES = ('image/jpeg', 'image/png', 'image/webp')
+
+
+def _images_api_reference_mime(value):
+    if not isinstance(value, str) or not value.startswith('data:image/'):
+        return ''
+    header = value.split(',', 1)[0]
+    return header[5:].split(';', 1)[0].strip().lower()
+
+
 def _normalize_image_references(references, tenant_id=None):
     prepared = []
     for reference in references or []:
-        item = _prepare_image_reference_for_model(reference, tenant_id) if isinstance(reference, str) and not str(reference).startswith('data:image/') else reference
-        if isinstance(item, str) and item.startswith('data:image/'):
-            prepared.append(item)
-        elif isinstance(item, str) and item:
-            resolved = _prepare_image_reference_for_model(item, tenant_id)
-            if resolved:
-                prepared.append(resolved)
+        if not isinstance(reference, str) or not reference.strip():
+            continue
+        # Every reference goes through the same preparation: it rasterizes an
+        # SVG data uri into a PNG and refuses a remote url. Skipping the
+        # data-uri case is what let an SVG reach the provider unchanged.
+        item = _prepare_image_reference_for_model(reference, tenant_id)
+        if not isinstance(item, str) or not item:
+            continue
+        mime = _images_api_reference_mime(item)
+        if mime and mime not in IMAGES_API_SUPPORTED_MIMES:
+            print(f'[IMAGE ERROR] Unsupported reference image type for the images API: {mime}')
+            continue
+        prepared.append(item)
     return prepared
 
 

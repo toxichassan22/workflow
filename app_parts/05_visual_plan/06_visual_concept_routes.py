@@ -545,6 +545,9 @@ def _visual_concept_generate_image_result(data, slot_id):
     # The suffix goes to the model only — the stored slot prompt stays clean
     # so a regenerate never bakes a duplicate line into it.
     image_prompt = _visual_concept_attach_style_reference_suffix(prompt, facts, slot_id)
+    # The exterior render is bound to the approved massing diagram: the rule
+    # lives on the server, so a client prompt cannot talk the model out of it.
+    image_prompt = _visual_concept_exterior_conformity_suffix(image_prompt, facts, slot_id)
     image = call_images_api(image_prompt, references, model=VISUAL_CONCEPT_IMAGE_MODEL,
                             usage_ctx=_usage_ctx('image', data))
     if not image:

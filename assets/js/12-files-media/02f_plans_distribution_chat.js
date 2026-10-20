@@ -55,18 +55,31 @@
       const rows = workflow.distribution.rows || [];
       const messages = turns.map(turn => (
         '<div class="plans-distribution-chat-msg ' + (turn.role === 'user' ? 'user' : 'assistant') + '">'
-        + escapeHtml(turn.text) + '</div>'
+        + escapeHtml(turn.text)
+        + ((turn.choices || []).length
+          ? '<div class="plans-distribution-chat-choices">'
+            + turn.choices.map(choice => (
+              '<button type="button" class="btn ghost small" data-plans-distribution-chat-choice="'
+              + escapeHtml(choice) + '">' + escapeHtml(choice) + '</button>'
+            )).join('') + '</div>'
+          : '')
+        + '</div>'
       )).join('');
       const empty = turns.length ? '' : '<p class="plans-workflow-empty">'
         + escapeHtml(WFT('plans.distribution_chat_empty',
           'مساعد توزيع المكونات: يقترح التوزيع، ويجيب عن أسئلتك، ويعدّل الجدول بناءً على كلامك.'))
         + '</p>';
       // Two one-click actions: distribute the floors, or start the whole
-      // distribution over instead of continuing on the current one.
+      // distribution over instead of continuing on the current one. The third
+      // one turns the layout the assistant already described into the table.
+      const hasAssistantTurn = turns.some(turn => turn.role === 'assistant');
       const actions = '<div class="visual-concept-actions plans-distribution-chat-actions">'
         + '<button type="button" class="btn primary small" data-plans-workflow-action="distribution-chat-start"'
         + (visualConceptDistributionChatBusy ? ' disabled' : '') + '>'
         + escapeHtml(WFT('plans.distribution_chat_distribute', 'توزيع الأدوار')) + '</button>'
+        + '<button type="button" class="btn ghost small" data-plans-workflow-action="distribution-chat-apply"'
+        + (visualConceptDistributionChatBusy || !hasAssistantTurn ? ' disabled' : '') + '>'
+        + escapeHtml(WFT('plans.distribution_chat_apply', 'طبّق ما في الشات')) + '</button>'
         + '<button type="button" class="btn ghost small" data-plans-workflow-action="distribution-chat-restart"'
         + (visualConceptDistributionChatBusy || (!rows.length && !turns.length) ? ' disabled' : '') + '>'
         + escapeHtml(WFT('plans.distribution_chat_restart', 'ابدأ من جديد')) + '</button>'
@@ -93,10 +106,26 @@
       return input ? String(input.value || '') : '';
     }
 
+    // The steps the server is working through, in words. A percentage and a
+    // clock say nothing about what is happening; the client has to see the
+    // work itself.
+    function visualConceptDistributionChatSteps(todos) {
+      const rows = Array.isArray(todos) ? todos : [];
+      const active = rows.find(item => item.status === 'active');
+      const text = rows.map(item => {
+        const label = String(item.label || '').trim();
+        if (item.status === 'active') {
+          return label + ' (' + WFT('plans.step_active', 'قيد التنفيذ') + ')';
+        }
+        return label;
+      }).filter(Boolean).join(' — ');
+      return { text, active: String(active?.label || '').trim() };
+    }
+
     // The turn runs off the request path: the answer comes from a job the
     // browser polls, so the hosting edge never sees a request that stays open
     // for minutes.
-    async function visualConceptDistributionChatJob(payload) {
+    async function visualConceptDistributionChatJob(payload, onStep) {
       const initial = await api('POST', '/api/visual-concept/plans-distribution-chat', payload);
       if (!initial || initial.success === false) {
         return initial || { success: false, error: '' };
@@ -115,6 +144,7 @@
           await new Promise(resolve => setTimeout(resolve, VISUAL_CONCEPT_DISTRIBUTION_CHAT_POLL_MS));
           job = await api('GET', '/api/visual-concept/plans-jobs/' + encodeURIComponent(jobId), null);
           if (typeof updateVisualConceptPlanJobUi === 'function') updateVisualConceptPlanJobUi(job);
+          if (typeof onStep === 'function') onStep(job.todos, job.partial);
           if (job && job.error && !job.result) {
             return { success: false, error: job.error, error_code: job.error_code };
           }
@@ -138,9 +168,9 @@
         toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات'));
         return;
       }
-      const reset = options.reset === true;
       const workflow = visualConceptPlansWorkflowState();
       const chat = visualConceptDistributionChatState();
+      const reset = options.reset === true || chat.fresh === true;
       const turns = reset
         ? [{ role: 'user', text }]
         : chat.turns.slice().concat([{ role: 'user', text }]);
@@ -152,19 +182,30 @@
       showLoader(WFT('plans.distribution_chat_loading', 'جاري تنفيذ الطلب على التوزيع'),
         WFT('plans.distribution_chat_loading_detail', 'يتم تحديث جدول التوزيع ومراجعته...'), 30,
         { stoppable: true });
-      // The bar of a thinking model is not a percentage: the elapsed time is
-      // the honest sign that the turn is alive.
-      const elapsedTimer = setInterval(() => {
+      // The bar of a thinking model is not a percentage: the elapsed time, the
+      // step the server is on and the words the model has already written are
+      // the honest signs that the turn is alive.
+      let currentStep = '';
+      let partialAnswer = '';
+      const tick = () => {
         const elapsed = visualConceptDistributionChatElapsed((Date.now() - startedAt) / 1000);
+        const elapsedText = WFT('plans.distribution_chat_elapsed', 'يعمل الآن… {time}', { time: elapsed });
         if (typeof updateLoaderProgress === 'function') {
-          updateLoaderProgress(30, WFT('plans.distribution_chat_elapsed', 'يعمل الآن… {time}', { time: elapsed }));
+          updateLoaderProgress(30, currentStep ? currentStep + ' — ' + elapsedText : elapsedText);
         }
-      }, 1000);
+      };
+      tick();
+      const elapsedTimer = setInterval(tick, 1000);
       let response = null;
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         payload.message = text;
         payload.reset = reset;
+        // The server must return the table itself for this turn, not a
+        // description of one: a described layout never reaches the floors.
+        payload.expectTable = options.expectsTable === true || reset === true;
+        // The layout the assistant already described, applied as it is.
+        payload.applyProposal = options.applyProposal === true;
         payload.history = (reset ? [] : turns.slice(0, -1)).map(item => ({
           role: item.role, content: String(item.text || '').slice(0, 4000)
         }));
@@ -173,7 +214,17 @@
         payload.distribution = {
           rows: reset ? [] : (workflow.distribution.rows || []).slice()
         };
-        response = await visualConceptDistributionChatJob(payload);
+        response = await visualConceptDistributionChatJob(payload, (todos, partial) => {
+          const steps = visualConceptDistributionChatSteps(todos);
+          if (steps.active) currentStep = steps.active;
+          const partialText = String(partial || '').trim();
+          if (partialText) partialAnswer = partialText;
+          if (typeof updateLoaderMessage !== 'function') return;
+          // The words the model has already written come first: the client is
+          // waiting for the answer, not for a checklist.
+          const shown = partialAnswer || steps.text;
+          if (shown) updateLoaderMessage(shown);
+        });
       } catch (error) {
         clearInterval(elapsedTimer);
         hideLoader();
@@ -194,16 +245,23 @@
       }
       const state = visualConceptPlansWorkflowState();
       const reply = String(response.reply || '').slice(0, 6000);
-      const updated = turns.concat(reply ? [{ role: 'assistant', text: reply }] : []);
+      const choices = Array.isArray(response.choices) ? response.choices : [];
+      // A question the assistant asked: it rides with the turn so the client
+      // can answer with one click.
+      const asked = response.action === 'ask' && !!(response.question || reply);
+      const updated = turns.concat(reply
+        ? [{ role: 'assistant', text: reply, choices: asked ? choices : [] }]
+        : []);
       state.distributionChat = {
         turns: updated,
         memory: String(response.memory || chat.memory || '').slice(0, PLANS_CHAT_MEMORY_MAX_CHARS),
-        decisions: Array.isArray(response.decisions) ? response.decisions : (chat.decisions || [])
+        decisions: Array.isArray(response.decisions) ? response.decisions : (chat.decisions || []),
+        // The fresh start was used: the next turn continues from this table.
+        fresh: false
       };
       const rows = Array.isArray(response.rows) ? response.rows : null;
       const tableChanged = response.action === 'update' && !!(rows && rows.length);
       if (tableChanged) {
-        const stamp = visualConceptPlanInputStamp();
         state.distribution = normalizeVisualConceptPlansWorkflow({
           distribution: {
             rows,
@@ -212,20 +270,38 @@
             issues: Array.isArray(response.issues) ? response.issues : []
           }
         }).distribution;
+        // The review belongs to the table that was just reviewed: the stamp is
+        // taken after the new rows land, or the next reload reads the review as
+        // stale and locks the approval.
         state.distribution.aiReviewed = true;
-        state.distribution.reviewSignature = stamp;
+        state.distribution.reviewSignature = visualConceptPlanInputStamp();
         state.distribution.canProceed = response.canProceed !== false;
         state.distribution.approved = false;
         invalidateVisualConceptPlanGeneration(state, false);
       }
       markVisualConceptDirty();
       renderVisualConceptPage();
-      if (options.expectsTable && !tableChanged) {
+      if (options.expectsTable && !tableChanged && !asked) {
         // The turn asked for a layout and the answer carried none: saying
         // nothing would look like a finished distribution that never happened.
         toast(WFT('plans.distribution_chat_table_unchanged',
           'وصل الرد بدون جدول توزيع — لم يتغير توزيع الأدوار.'));
       }
+    }
+
+    // Apply the layout the assistant already described: the model re-sends its
+    // own proposal as the table, and nothing is proposed afresh.
+    function applyVisualConceptDistributionChat() {
+      const chat = visualConceptDistributionChatState();
+      const turns = chat.turns || [];
+      if (!turns.some(turn => turn.role === 'assistant')) {
+        toast(WFT('plans.distribution_chat_apply_empty', 'لا يوجد رد في المحادثة لتطبيقه.'));
+        return;
+      }
+      sendVisualConceptDistributionChat(
+        WFT('plans.distribution_chat_apply_prompt',
+          'طبّق التوزيع الذي وصفته في ردك السابق على جدول الأدوار.'),
+        { expectsTable: true, applyProposal: true });
     }
 
     function startVisualConceptDistributionChat() {
@@ -234,9 +310,9 @@
         { expectsTable: true });
     }
 
-    // Start the distribution over: the current floors and the thread that
-    // agreed on them are dropped, and the model proposes a clean layout from
-    // the approved project data.
+    // Start the distribution over: the floors, the notes and the thread that
+    // agreed on them are dropped, and nothing is sent to the model — the
+    // client writes the notes first and asks for the distribution afterwards.
     async function restartVisualConceptDistributionChat() {
       if (visualConceptDistributionChatBusy) return;
       if (!hasPermission('generate_images')) {
@@ -244,21 +320,22 @@
         return;
       }
       if (typeof confirm !== 'function' || !confirm(WFT('plans.distribution_chat_restart_confirm',
-        'سيُمسح توزيع الأدوار الحالي وتبدأ المحادثة من جديد. هل تريد المتابعة؟'))) {
+        'سيُمسح توزيع الأدوار الحالي وملاحظاته ومحادثته، ولن يبدأ توزيع جديد حتى تكتب ملاحظاتك وتطلب التوزيع. هل تريد المتابعة؟'))) {
         return false;
       }
       const workflow = visualConceptPlansWorkflowState();
       workflow.distribution = {
         ...workflow.distribution,
-        rows: [], totals: [], checks: [], issues: [],
-        aiReviewed: false, approved: false, canProceed: false, reviewSignature: '',
+        rows: [], totals: [], notes: [], checks: [], issues: [],
+        aiReviewed: false, approved: false, canProceed: null, reviewSignature: ''
       };
-      workflow.distributionChat = { turns: [], memory: '', decisions: [] };
+      workflow.distributionNotes = '';
+      workflow.distributionChat = { turns: [], memory: '', decisions: [], fresh: true };
       markVisualConceptDirty();
       renderVisualConceptPage();
-      await sendVisualConceptDistributionChat(
-        WFT('plans.distribution_chat_start_prompt', 'اقترح توزيع المكونات على المباني والأدوار.'),
-        { reset: true });
+      // The composer waits for the notes: nothing is distributed on its own.
+      const input = document.querySelector('[data-plans-distribution-chat-input]');
+      if (input && typeof input.focus === 'function') input.focus();
       return true;
     }
 
@@ -267,5 +344,12 @@
       if (!text) return;
       const input = document.querySelector('[data-plans-distribution-chat-input]');
       if (input) input.value = '';
+      sendVisualConceptDistributionChat(text);
+    }
+
+    // The answer to the assistant's question, with one click.
+    function submitVisualConceptDistributionChatChoice(choice) {
+      const text = String(choice || '').trim();
+      if (!text) return;
       sendVisualConceptDistributionChat(text);
     }

@@ -359,6 +359,27 @@ def _visual_concept_plan_prompt_header(kind, context):
     place = '، '.join(part for part in (
         _visual_concept_text(context.get('city'), 80),
         _visual_concept_text(context.get('district'), 100)) if part)
+    if kind in ('uses', 'massing'):
+        # The plan diagrams are drawn in English whatever language the project
+        # data is in. An Arabic project name or place is left out of the prompt
+        # entirely: a model that sees it may write it on the drawing.
+        latin_name = '' if re.search(r'[\u0600-\u06FF]', name) else name
+        english_place = ', '.join(part for part in (
+            _visual_concept_text(context.get('city'), 80),
+            _visual_concept_text(context.get('district'), 100)) if part)
+        if re.search(r'[\u0600-\u06FF]', english_place):
+            english_place = ''
+        header = ''
+        if latin_name:
+            header = (f'PROJECT: {latin_name}'
+                      + (f' — {english_place}' if english_place else '') + '\n')
+        requested = ('vertical program — the floor-by-floor use allocation diagram'
+                     if kind == 'uses'
+                     else 'conceptual massing — a 3D isometric volume diagram')
+        return (
+            header
+            + f'DRAWING REQUESTED: {requested}.\n'
+            'Write every label of the drawing in English and never write Arabic characters.\n')
     return (f'اسم المشروع: {name}' + (f' — {place}' if place else '')
             + f'\nنوع الصورة المطلوبة: {arabic} {english}\n')
 

@@ -460,4 +460,4 @@ def api_visual_concept_plan_job(job_id):
         _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id, job)
     return jsonify({key: job[key] for key in
                     ('status', 'success', 'progress', 'todos', 'checkpoint', 'result', 'httpStatus',
-                     'timeoutSeconds', 'createdAt', 'updatedAt', 'timings') if key in job})
+                     'timeoutSeconds', 'createdAt', 'updatedAt', 'timings', 'partial') if key in job})

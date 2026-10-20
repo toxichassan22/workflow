@@ -672,12 +672,16 @@ class SummaryChatApiTests(unittest.TestCase):
             research_url in str(row.get('url') or '')
             for row in proposal.get('sourcesAdd') or []))
 
-    def test_history_is_capped_to_the_last_12_messages(self):
+    def test_history_travels_whole_and_the_old_turns_fold_into_the_memory(self):
+        """The chat used to carry only the last twelve messages, so it answered a
+        fresh question and contradicted the client mid-thread. The whole thread
+        now travels: the newest turns stay verbatim and the older ones fold into
+        the memory digest."""
         module = self.application_module
         history = [
             {'role': 'user' if index % 2 == 0 else 'assistant',
-             'content': f'm{index:02d}'}
-            for index in range(20)
+             'content': f'm{index:03d}'}
+            for index in range(200)
         ]
         captured = {}
 
@@ -691,10 +695,11 @@ class SummaryChatApiTests(unittest.TestCase):
             module._execute_market_summary_chat(
                 self._chat_data(history=history), tenant_id=self.tenant)
         prompt = captured['prompt']
-        self.assertIn('m19', prompt)
-        self.assertIn('m08', prompt)
-        self.assertNotIn('m07', prompt)
-        self.assertNotIn('m00', prompt)
+        self.assertIn('m199', prompt)
+        # Nothing the client said is lost: the turns the verbatim window could
+        # not hold travel in the memory digest.
+        self.assertIn('m000', prompt)
+        self.assertIn('ذاكرة المحادثة', prompt)
 
     def test_empty_message_is_refused(self):
         module = self.application_module

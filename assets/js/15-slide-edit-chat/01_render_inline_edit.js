@@ -635,7 +635,7 @@
     // the conversation to «أي شريحة؟».
     function applyDesignerChatMemory(reply) {
       if (!reply || typeof reply !== 'object') return;
-      if (typeof reply.memory === 'string') tenantDesignerChatMemory = reply.memory.slice(0, 4000);
+      if (typeof reply.memory === 'string') tenantDesignerChatMemory = reply.memory.slice(0, 40000);
       if (Array.isArray(reply.focusIndexes) && reply.focusIndexes.length) {
         tenantChatFocusIndexes = reply.focusIndexes
           .map(value => Number(value))

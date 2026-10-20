@@ -39,11 +39,18 @@
       return {
         turns: turns.slice(-PLANS_CHAT_MEMORY_MAX_TURNS).map(item => ({
           role: item?.role === 'assistant' ? 'assistant' : 'user',
-          text: String(item?.text ?? item?.content ?? '').slice(0, 4000)
+          text: String(item?.text ?? item?.content ?? '').slice(0, 4000),
+          // A question the assistant asked: the choices ride with the turn so
+          // the client can answer with one click.
+          choices: (Array.isArray(item?.choices) ? item.choices : [])
+            .map(choice => String(choice || '').slice(0, 200)).filter(Boolean).slice(0, 6)
         })).filter(item => item.text),
         memory: String(source.memory || '').slice(0, PLANS_CHAT_MEMORY_MAX_CHARS),
         decisions: (Array.isArray(source.decisions) ? source.decisions : [])
-          .map(item => String(item || '').slice(0, 400)).filter(Boolean).slice(0, 40)
+          .map(item => String(item || '').slice(0, 400)).filter(Boolean).slice(0, 40),
+        // A clean start: the floors and the thread are gone, so the next turn
+        // is a fresh proposal and not a continuation of what was dropped.
+        fresh: Boolean(source.fresh)
       };
     }
 

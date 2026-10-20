@@ -1,16 +1,22 @@
 def _visual_concept_collect_generation_references(facts, slot_id, cover_image='', tenant_id=None):
     tenant_id = tenant_id or getattr(g, 'tenant_id', None)
-    plan_urls = list(facts.get('plan_image_urls') or [])
-    # Exterior slots render the approved plans: the three diagrams lead the
+    plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
+    # The exterior render is grounded on the approved massing diagram (Plan 3)
+    # plus the client reference images. Plans 1 and 2 are diagram inputs for the
+    # plans themselves — attaching them to a render made the model reproduce
+    # schematic elements instead of a building, so they are not part of the
+    # exterior reference set.
+    massing_url = plan_map.get('massing') or ''
+    # Exterior slots render the approved plans: the massing diagram leads the
     # reference set, then the map and every named style ref — 4 urls + 5 files
     # must all fit so the enumerated order matches the attached order.
     external_cap = 4 + VISUAL_CONCEPT_MAX_REFERENCE_IMAGES
     if slot_id == 'cover':
         file_ids = list(facts.get('style_reference_file_ids') or [])
         map_urls = [facts['overview_map_url']] if facts.get('overview_map_url') else []
-        if plan_urls:
+        if massing_url:
             return _visual_concept_reference_uris(
-                urls=plan_urls + map_urls, file_ids=file_ids,
+                urls=[massing_url] + map_urls, file_ids=file_ids,
                 max_images=external_cap, urls_first=True, tenant_id=tenant_id)
         file_ids = file_ids[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
         if len(file_ids) >= VISUAL_CONCEPT_MAX_REFERENCE_IMAGES:
@@ -32,7 +38,7 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     if _visual_concept_is_plan_slot(slot_id):
         kind = _visual_concept_plan_kind(slot_id, facts.get('plan_kind'))
         boundary_url = facts.get('plan_boundary_reference_url')
-        plan_map = facts.get('plan_image_map') or {}
+        plan_map = plan_map or {}
         urls = [plan_map[dependency]
                 for dependency in _VISUAL_PLAN_KIND_DEPENDENCIES.get(kind, ())
                 if plan_map.get(dependency)]
@@ -45,7 +51,31 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     # Angle slots re-render the approved hero image from another viewpoint —
     # the hero already carries the style, so style references would only fight it.
     return _visual_concept_reference_uris(
-        urls=plan_urls + urls, max_images=external_cap, urls_first=True, tenant_id=tenant_id)
+        urls=([massing_url] if massing_url else []) + urls,
+        max_images=external_cap, urls_first=True, tenant_id=tenant_id)
+
+
+def _visual_concept_exterior_conformity_suffix(prompt, facts, slot_id):
+    """State the rule the exterior render must hold whatever the prompt says.
+
+    The stored slot prompt is client text, so the server states the rule that
+    cannot be negotiated: the approved massing diagram fixes the volumes, their
+    sizes and their positions, and nothing may be added, moved or resized.
+    """
+    if slot_id not in VISUAL_CONCEPT_EXTERNAL_SLOTS:
+        return prompt
+    plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
+    if not plan_map.get('massing'):
+        return prompt
+    return (
+        f'{prompt} The first attached image is the approved massing diagram (Plan 3) of this project, '
+        'and it is the only geometry authority: reproduce its buildings, their positions, their '
+        'footprints, their heights and their volumes exactly as drawn. Do not add, remove, merge, '
+        'split, move, rotate or resize any mass, and do not change any count, number, dimension or '
+        'area. Do not invent anything that is not in it. The other attached images are reference '
+        'material only — the site map and the client style references: they set the design '
+        'language, never the geometry.'
+    )
 
 
 def _visual_concept_attach_style_reference_suffix(prompt, facts, slot_id):
@@ -132,6 +162,9 @@ def _visual_concept_request_bundle(data, slot_id):
             facts['approved_plan_context'] = _visual_concept_plan_context_text(context, diagram_rules=False)
     if slot_id in VISUAL_CONCEPT_EXTERNAL_SLOTS:
         facts['plan_image_urls'] = _visual_concept_plan_image_urls(data)
+        # The exterior render is grounded on the massing diagram alone, so the
+        # per-kind map is what the reference set and the prompt read.
+        facts['plan_image_map'] = _visual_concept_plan_image_map(data)
     elif is_plan:
         facts['plan_image_map'] = _visual_concept_plan_image_map(data)
     missing = _visual_concept_missing_fields(facts, slot_id)

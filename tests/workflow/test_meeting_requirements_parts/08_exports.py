@@ -1439,12 +1439,32 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertNotIn('اشتراطات1', serialized_prompts)
         self.assertNotIn('اشتراطات2', serialized_prompts)
 
+        # Every diagram renders the sealed engineering scene, so the scene is
+        # sealed from the current project data before the diagram is drawn.
+        layout = json.dumps({'buildings': [{'id': 'b1',
+            'footprint': [[60, 8], [70, 8], [70, 13], [60, 13]]}],
+            'entries': [], 'openAreas': []})
+        with patch.object(module, 'call_openrouter_chat', return_value={
+                'choices': [{'message': {'content': layout}}]
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                scene, _context, _ref = module._visual_plan_create_scene({
+                    'projectData': project_data,
+                    'plansWorkflow': {
+                        'verification': {'approved': True},
+                        'boundary': {'approved': True, 'points': points,
+                                     'referenceUrl': '/uploads/creative/parcel-ref.png'},
+                        'distribution': {'approved': True, 'rows': approved_rows},
+                    }})
+
         with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/uses.png'):
             generated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                 'slotId': 'plan_uses', 'planKind': 'uses', 'prompt': 'USES PROMPT',
                 'planBoundaryReferenceUrl': '/uploads/creative/parcel-ref.png',
-                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}, 'distribution': {'approved': True, 'rows': approved_rows}, 'prompts': prompts.get_json()['prompts']},
+                'plansWorkflow': {'verification': {'approved': True}, 'boundary': {'approved': True, 'points': points, 'referenceUrl': '/uploads/creative/parcel-ref.png'}, 'distribution': {'approved': True, 'rows': approved_rows}, 'prompts': prompts.get_json()['prompts'], 'scene': scene},
                 'projectData': project_data
             })
         self.assertEqual(generated.status_code, 200, generated.get_json())
@@ -1884,31 +1904,41 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         layout = {'buildings': [{'id': 'b1', 'footprint': [[60, 8], [75, 8], [75, 18], [60, 18]]}]}
         with patch.object(module, 'call_openrouter_chat', return_value={
             'choices': [{'message': {'content': json.dumps(layout)}}]
-        }):
-            prepared = client.post('/api/visual-concept/plans-prompts', headers=self._headers(self.token_a), json={
-                'projectData': project_data, 'plansWorkflow': workflow})
-        self.assertEqual(prepared.status_code, 200, prepared.get_json())
-        scene = prepared.get_json()['scene']
+        }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
+                patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                scene, _context, _ref = module._visual_plan_create_scene({
+                    'projectData': project_data, 'plansWorkflow': workflow})
         self.assertEqual(scene['buildings'][0]['footprint'], layout['buildings'][0]['footprint'])
+        sealed_workflow = {**workflow, 'scene': scene}
 
         with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
-            for slot in ('plan_massing', 'plan_uses', 'plan_site'):
+            for slot in ('plan_massing', 'plan_uses'):
                 response = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
                     'slotId': slot, 'prompt': 'PROMPT', 'projectData': project_data,
-                    'plansWorkflow': {**workflow, 'scene': scene}})
+                    'plansWorkflow': sealed_workflow})
                 self.assertEqual(response.status_code, 200, (slot, response.get_json()))
                 self.assertEqual(response.get_json()['image'], '/uploads/creative/out.png')
                 self.assertEqual(response.get_json()['engine'], 'surveyed_geometry')
                 self.assertEqual(response.get_json()['scene']['token'], scene['token'])
+
+            # Plan 1 renders the same sealed scene through its own renderer.
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                site = module._visual_plan_render_response({
+                    'projectData': project_data, 'plansWorkflow': sealed_workflow}, 'plan_site')
+            self.assertTrue(site['success'])
+            self.assertEqual(site['scene']['token'], scene['token'])
 
         # The gate trusts the sealed contract, not posted order or images: a
         # footprint moved outside the edit path breaks the token.
         tampered = json.loads(json.dumps(scene))
         tampered['buildings'][0]['footprint'][0] = [0, 0]
         refused = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
-            'slotId': 'plan_site', 'prompt': 'PROMPT', 'projectData': project_data,
-            'plansWorkflow': {**workflow, 'scene': tampered}})
+            'slotId': 'plan_uses', 'prompt': 'PROMPT', 'projectData': project_data,
+            'plansWorkflow': {**sealed_workflow, 'scene': tampered}})
         self.assertEqual(refused.status_code, 400, refused.get_json())
         self.assertEqual(refused.get_json()['error_code'], 'PLANS_SCENE_INVALID')
 

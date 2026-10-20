@@ -1,6 +1,12 @@
 # Projected SVG layout computation for the master site plan.
 
-def _visual_plan_site_short_label(value):
+def _visual_plan_site_short_label(value, fallback='Building'):
+    """English label for the drawing — never the Arabic source text.
+
+    The general site plan is drawn in English whatever language the project
+    data is in, so an unmatched Arabic label falls back to an English generic
+    label instead of leaking Arabic characters into the drawing.
+    """
     label = str(value or '').strip()
     label = re.sub(r'\([^)]*\)|\[[^]]*\]', '', label)
     label = re.sub(r'\s*[-–—|/]\s*.*$', '', label)
@@ -29,8 +35,8 @@ def _visual_plan_site_short_label(value):
             return 'Padel Court'
         if re.search(r'أطفال|اطفال', label):
             return "Children's Playground"
-        return label[:32]
-    return label[:32]
+        return fallback
+    return label[:32] or fallback
 
 
 def _visual_plan_site_street_label(source, direction=''):
@@ -64,9 +70,27 @@ def _visual_plan_site_street_label(source, direction=''):
         m = re.search(r'شارع\s+(.+)', name)
         clean_name = (m.group(1).strip() + ' Street') if m else name
     else:
-        clean = _visual_plan_site_short_label(name)
-        clean_name = clean or (direction.title() + ' Street' if direction else name)
+        clean = _visual_plan_site_short_label(name, 'Street')
+        clean_name = clean or (direction.title() + ' Street' if direction else 'Street')
+    if re.search(r'[\u0600-\u06FF]', clean_name):
+        # The plan is drawn in English: a recorded Arabic street name is named
+        # by its position instead of being printed in Arabic.
+        clean_name = (direction.title() + ' Street') if direction else 'Street'
     return clean_name + width_str
+
+
+def _visual_plan_site_english_identity(value, limit=120):
+    """Identity text for the drawing — English only.
+
+    The plan is drawn in English whatever language the project data is in, so
+    an Arabic project or developer name is left out instead of printed in
+    Arabic: the fixed English title already identifies the drawing.
+    """
+    value = re.sub(r'[\x00-\x1f\x7f]', ' ', str(value or ''))
+    value = re.sub(r'\s+', ' ', value).strip()[:limit]
+    if re.search(r'[\u0600-\u06FF]', value):
+        return ''
+    return value
 
 
 def _visual_plan_site_identity_value(value, limit=120):
@@ -187,7 +211,8 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
         category = (feature_type if feature_type in ('pool', 'padel', 'playground', 'landscape') else
                     source.get('category') or ('parking' if item.get('kind') == 'surface_parking' else 'landscape'))
         label = _visual_plan_site_short_label(
-            source.get('label') or visual_plan_renderer.USE_LABELS.get(category, 'Open space'))
+            source.get('label') or visual_plan_renderer.USE_LABELS.get(category, 'Open space'),
+            'Open space')
         if feature_type in ('pool', 'padel', 'playground'):
             label = {'pool': 'Swimming Pool', 'padel': 'Padel Court',
                      'playground': "Children's Playground"}[feature_type]
@@ -271,8 +296,10 @@ def _visual_plan_site_projected_layout(scene, contract, program, identity=None):
                                      'playground': '#F5E5AB'}[feature_type]})
     identity = identity if isinstance(identity, dict) else {}
     identity = {
-        'projectName': _visual_plan_site_identity_value(identity.get('projectName') or contract.get('projectName')),
-        'developerName': _visual_plan_site_identity_value(identity.get('developerName')),
+        'projectName': _visual_plan_site_english_identity(
+            identity.get('projectNameEn') or contract.get('projectNameEn')
+            or identity.get('projectName') or contract.get('projectName')),
+        'developerName': _visual_plan_site_english_identity(identity.get('developerName')),
         'landArea': _visual_plan_site_identity_value(contract.get('landArea'), 32),
         'frontage': _visual_plan_site_identity_value(
             (contract.get('primaryFrontage') or {}).get('direction', '').title(), 32),

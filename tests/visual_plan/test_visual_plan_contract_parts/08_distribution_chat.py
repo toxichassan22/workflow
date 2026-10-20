@@ -26,7 +26,7 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
             'memory': 'العميل يفضّل السكن في الطابق الأول.',
             'decisions': ['السكن في الطابق الأول'],
         })
-        with patch.object(module, 'call_openrouter_chat', return_value=model_reply) as chat_call:
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply) as chat_call:
             answer = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
                 'message': 'حوّل السكن للطابق الأول',
                 'projectData': self.project(),
@@ -56,7 +56,7 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
             'rows': [{'building': 'المبنى أ', 'floor_range': 'أرضي',
                       'component': 'Retail', 'units_per_floor': 2, 'floor_area_sqm': 80}],
         })
-        with patch.object(module, 'call_openrouter_chat', return_value=model_reply):
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply):
             answer = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
                 'message': 'خلي المحل في الأرضي',
                 'projectData': self.project(),
@@ -74,7 +74,7 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
         client = self.app.test_client()
         headers = self._headers(self.token_a)
         model_reply = self._chat_response({'reply': 'لم يتغير شيء.', 'action': 'update', 'rows': []})
-        with patch.object(module, 'call_openrouter_chat', return_value=model_reply):
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply):
             answer = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
                 'message': 'غيّر شيء',
                 'projectData': self.project(),
@@ -102,7 +102,7 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
         client = self.app.test_client()
         headers = self._headers(self.token_a)
         model_reply = self._chat_response({'reply': 'تمام.', 'action': 'explain'})
-        with patch.object(module, 'call_openrouter_chat', return_value=model_reply) as chat_call:
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply) as chat_call:
             client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
                 'message': 'اشرح التوزيع',
                 'projectData': self.project(),
@@ -110,12 +110,15 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
             })
         kwargs = chat_call.call_args[1]
         self.assertEqual(kwargs.get('model'), module.VISUAL_PLAN_DISTRIBUTION_MODEL)
-        self.assertEqual(kwargs.get('reasoning_effort'), 'max')
+        # The owner asked for high effort on sol 6.1: maximum effort took too
+        # long for a turn the client waits on.
+        self.assertEqual(kwargs.get('reasoning_effort'), 'high')
         # The reasoning shares the token budget with the answer, so the cap has
         # to leave room for the whole table.
         self.assertEqual(kwargs.get('max_tokens'), 128000)
         # The distribution model is the slide model unless the owner overrides it.
         self.assertEqual(module.VISUAL_PLAN_DISTRIBUTION_MODEL, module.SLIDE_TEXT_MODEL)
+        self.assertEqual(module.SLIDE_TEXT_MODEL, 'openai/gpt-6.1-sol')
 
     def test_a_failed_turn_is_named_instead_of_answering_an_empty_success(self):
         """A swallowed provider error used to answer 200 with an empty body, so
@@ -127,27 +130,27 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
         payload = {'message': 'اقترح توزيعًا', 'projectData': self.project(),
                    'plansWorkflow': self._distribution_workflow()}
 
-        with patch.object(module, 'call_openrouter_chat', side_effect=RuntimeError('boom')):
+        with patch.object(module, 'call_openrouter_chat_stream', side_effect=RuntimeError('boom')):
             raised = client.post('/api/visual-concept/plans-distribution-chat',
                                  headers=headers, json=payload)
         self.assertEqual(raised.status_code, 503, raised.get_json())
         self.assertEqual(raised.get_json()['error_code'], 'PLANS_PROVIDER_FAILED')
 
-        with patch.object(module, 'call_openrouter_chat', return_value={
+        with patch.object(module, 'call_openrouter_chat_stream', return_value={
                 'error': {'message': 'انتهت مهلة الاتصال بالمزوّد (300 ثانية)'}}):
             timed_out = client.post('/api/visual-concept/plans-distribution-chat',
                                     headers=headers, json=payload)
         self.assertEqual(timed_out.status_code, 503, timed_out.get_json())
         self.assertEqual(timed_out.get_json()['error_code'], 'PLANS_PROVIDER_TIMEOUT')
 
-        with patch.object(module, 'call_openrouter_chat',
+        with patch.object(module, 'call_openrouter_chat_stream',
                           return_value={'choices': [{'message': {'content': 'ليس JSON'}}]}):
             unreadable = client.post('/api/visual-concept/plans-distribution-chat',
                                      headers=headers, json=payload)
         self.assertEqual(unreadable.status_code, 503, unreadable.get_json())
         self.assertEqual(unreadable.get_json()['error_code'], 'PLANS_ANSWER_UNREADABLE')
 
-        with patch.object(module, 'call_openrouter_chat', return_value={
+        with patch.object(module, 'call_openrouter_chat_stream', return_value={
                 'choices': [{'message': {'content': json.dumps({'action': 'explain'})}}]}):
             empty = client.post('/api/visual-concept/plans-distribution-chat',
                                 headers=headers, json=payload)
@@ -174,7 +177,7 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
                          ['قراءة بيانات المشروع والتوزيع', 'اقتراح توزيع الأدوار', 'مراجعة النتيجة'])
         worker = thread.call_args.kwargs
         model_reply = self._chat_response({'reply': 'تم توزيع الأدوار.', 'action': 'explain'})
-        with patch.object(module, 'call_openrouter_chat', return_value=model_reply), \
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply), \
                 patch.object(module.auth, '_load_token_user', return_value=(None, None)), \
                 patch.object(module.auth, '_session_state_error', return_value=None), \
                 patch.object(module, '_landloom_can', return_value=True):
@@ -196,7 +199,7 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
             'rows': [{'building': 'المبنى ب', 'floor_range': 'أرضي',
                       'component': 'Residential', 'units_per_floor': 2, 'floor_area_sqm': 90}],
         })
-        with patch.object(module, 'call_openrouter_chat', return_value=model_reply) as chat_call:
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply) as chat_call:
             answer = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
                 'message': 'ابدأ من جديد',
                 'reset': True,
@@ -225,17 +228,17 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
         client = self.app.test_client()
         headers = self._headers(self.token_a)
         model_reply = self._chat_response({'reply': 'تمام.', 'action': 'explain'})
-        with patch.object(module, 'call_openrouter_chat', return_value=model_reply) as chat_call:
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply) as chat_call:
             client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
                 'message': 'اشرح التوزيع',
                 'projectData': self.project(),
                 'plansWorkflow': self._distribution_workflow(),
             })
-        # A quarter hour of provider time for the slowest model the product owns.
-        self.assertEqual(chat_call.call_args[1].get('timeout'), 900)
+        # Ten minutes of provider time for the slowest model the product owns.
+        self.assertEqual(chat_call.call_args[1].get('timeout'), 600)
         with self.app.test_request_context('/'):
             module.g.visual_plan_job_deadline = module.time.time() + 40
-            with patch.object(module, 'call_openrouter_chat', return_value=model_reply) as bounded:
+            with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply) as bounded:
                 client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
                     'message': 'اشرح التوزيع',
                     'projectData': self.project(),
@@ -250,7 +253,7 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
         client = self.app.test_client()
         headers = self._headers(self.token_a)
         model_reply = self._chat_response({'reply': 'السكن في الطابق الأول.', 'action': 'explain'})
-        with patch.object(module, 'call_openrouter_chat', return_value=model_reply):
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply):
             answer = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
                 'message': 'اشرح التوزيع',
                 'projectData': self.project(),
@@ -261,7 +264,7 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
         self.assertFalse(body['tableChanged'])
         self.assertEqual(body['rows'][0]['component'], 'Residential')
 
-        with patch.object(module, 'call_openrouter_chat', return_value=self._chat_response({
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=self._chat_response({
                 'reply': 'تم.', 'action': 'update',
                 'rows': [{'building': 'المبنى أ', 'floor_range': '1',
                           'component': 'Residential', 'units_per_floor': 4, 'floor_area_sqm': 120}]})):
@@ -271,3 +274,104 @@ class VisualPlanContractTestsPart08(VisualPlanContractBase):
                 'plansWorkflow': self._distribution_workflow(),
             })
         self.assertTrue(applied.get_json()['tableChanged'])
+
+    def test_the_model_asks_instead_of_guessing(self):
+        """A fact the approved data cannot answer is a question, not a guess:
+        the chat asks, and the table stays as it was until it is answered."""
+        module = self.application_module
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        model_reply = self._chat_response({
+            'reply': 'أين تريد الوحدات التجارية؟',
+            'action': 'ask',
+            'question': 'أين تريد الوحدات التجارية؟',
+            'choices': ['في الأرضي', 'في الطابق الأول'],
+        })
+        with patch.object(module, 'call_openrouter_chat_stream', return_value=model_reply):
+            answer = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
+                'message': 'وزّع المكونات',
+                'projectData': self.project(),
+                'plansWorkflow': self._distribution_workflow(),
+            })
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        body = answer.get_json()
+        self.assertEqual(body['action'], 'ask')
+        self.assertEqual(body['question'], 'أين تريد الوحدات التجارية؟')
+        self.assertEqual(body['choices'], ['في الأرضي', 'في الطابق الأول'])
+        # The question is not a layout: the floors are untouched.
+        self.assertFalse(body['tableChanged'])
+        self.assertEqual(body['rows'][0]['component'], 'Residential')
+
+    def test_a_described_layout_is_asked_for_again_as_a_table(self):
+        """The model described the layout instead of returning it: the client
+        asked for the table, so the server asks once more for the rows. A
+        described layout never reaches the floors table on its own."""
+        module = self.application_module
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        described = self._chat_response({
+            'reply': 'السكن في الطابق الثاني والتخزين في البدروم.',
+            'action': 'explain'})
+        with patch.object(module, 'call_openrouter_chat_stream',
+                          side_effect=[described, described]) as chat_call:
+            plain = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
+                'message': 'اشرح التوزيع',
+                'projectData': self.project(),
+                'plansWorkflow': self._distribution_workflow(),
+            })
+        # A question about the layout is not a request for the layout: the
+        # model is not asked twice.
+        self.assertEqual(plain.status_code, 200, plain.get_json())
+        self.assertEqual(chat_call.call_count, 1)
+        self.assertFalse(plain.get_json()['tableChanged'])
+
+        with patch.object(module, 'call_openrouter_chat_stream', side_effect=[
+                described,
+                self._chat_response({
+                    'reply': 'تم.', 'action': 'update',
+                    'rows': [{'building': 'المبنى أ', 'floor_range': '2',
+                              'component': 'Residential', 'units_per_floor': 4,
+                              'floor_area_sqm': 120}]})]) as chat_call:
+            applied = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
+                'message': 'اعتمد التوزيع',
+                'projectData': self.project(),
+                'plansWorkflow': self._distribution_workflow(),
+            })
+        self.assertEqual(applied.status_code, 200, applied.get_json())
+        self.assertEqual(chat_call.call_count, 2)
+        # The second call asks for the rows, not for another description.
+        self.assertIn('rows', chat_call.call_args_list[1].args[1])
+        self.assertTrue(applied.get_json()['tableChanged'])
+        self.assertEqual(applied.get_json()['rows'][0]['floor_range'], '2')
+
+    def test_applying_the_described_layout_asks_for_the_same_table(self):
+        """«طبّق ما في الشات» is not a new proposal: the model is asked to
+        re-send the layout it described, and the retry asks for the same one."""
+        module = self.application_module
+        client = self.app.test_client()
+        headers = self._headers(self.token_a)
+        described = self._chat_response({
+            'reply': 'السكن في الطابق الثاني والتخزين في البدروم.',
+            'action': 'explain'})
+        with patch.object(module, 'call_openrouter_chat_stream', side_effect=[
+                described,
+                self._chat_response({
+                    'reply': 'تم.', 'action': 'update',
+                    'rows': [{'building': 'المبنى أ', 'floor_range': '2',
+                              'component': 'Residential', 'units_per_floor': 4,
+                              'floor_area_sqm': 120}]})]) as chat_call:
+            answer = client.post('/api/visual-concept/plans-distribution-chat', headers=headers, json={
+                'message': 'طبّق ما في الشات',
+                'applyProposal': True,
+                'expectTable': True,
+                'projectData': self.project(),
+                'plansWorkflow': self._distribution_workflow(),
+            })
+        self.assertEqual(answer.status_code, 200, answer.get_json())
+        # The prompt asks for the same layout, not for a new one.
+        prompt = chat_call.call_args_list[0].args[1]
+        self.assertIn('أعد توزيعك السابق كما هو', prompt)
+        self.assertNotIn('اقترح توزيعًا كاملًا', prompt)
+        retry_prompt = chat_call.call_args_list[1].args[1]
+        self.assertIn('نفس المباني ونفس الأدوار', retry_prompt)
+        self.assertTrue(answer.get_json()['tableChanged'])

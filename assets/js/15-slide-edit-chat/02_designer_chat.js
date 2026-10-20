@@ -1008,7 +1008,7 @@
         })).slice(-DESIGNER_CHAT_HISTORY_KEPT * 2)
         : [];
       tenantDesignerChatMemory = presentationMatches && typeof stored.memory === 'string'
-        ? stored.memory.slice(0, 4000) : '';
+        ? stored.memory.slice(0, 40000) : '';
       tenantChatFocusIndexes = presentationMatches && Array.isArray(stored.focusIndexes)
         ? stored.focusIndexes.map(Number).filter(value => Number.isInteger(value) && value >= 1).slice(0, 30)
         : [];

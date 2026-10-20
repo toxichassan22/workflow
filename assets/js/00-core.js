@@ -101,6 +101,13 @@
       startLoaderProgressTimer();
     }
 
+    // The work a long operation is doing right now, in words. The percentage is
+    // not a step: the client has to see what the server is actually doing.
+    function updateLoaderMessage(text) {
+      const el = document.getElementById('globalLoaderText');
+      if (el) el.textContent = String(text || '');
+    }
+
     function updateLoaderProgress(pct, stepText) {
       const prog = document.getElementById('globalLoaderProgress');
       if (prog) prog.style.display = 'block';

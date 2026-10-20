@@ -318,21 +318,114 @@ module.exports = function registerDistributionChatTests({ test, fixture, plain }
 
     await context.restartVisualConceptDistributionChat();
 
-    // The old floors and the old thread are gone, and the model is told to
-    // start from scratch. The new turn and its answer are the only ones left.
+    // The old floors, the old notes and the old thread are gone — and
+    // nothing was sent: the client writes the notes first.
     const workflow = context.tenantVisualConceptState.plansWorkflow;
     assert.equal(workflow.distribution.rows.length, 0);
-    assert.equal(workflow.distributionChat.turns.length, 2);
-    assert.equal(workflow.distributionChat.turns[0].role, 'user');
-    assert.equal(workflow.distributionChat.turns[1].role, 'assistant');
+    assert.equal(workflow.distributionNotes, '');
+    assert.equal(workflow.distributionChat.turns.length, 0);
     assert.equal(workflow.distributionChat.memory, '');
+    assert.equal(workflow.distributionChat.fresh, true);
+    assert.equal(calls.length, 0);
+
+    // The first turn after the clean start is a fresh proposal, not a
+    // continuation of what was dropped.
+    await context.sendVisualConceptDistributionChat('السكن في الطابق الثاني');
     assert.equal(calls[0].body.reset, true);
     assert.equal(calls[0].body.distribution.rows.length, 0);
     assert.equal(calls[0].body.history.length, 0);
+    assert.equal(calls[0].body.memory, '');
   });
 
-  test('a cancelled clean start leaves the floors and the thread as they were', async () => {
+  test('the loader names the step the server is on and the time it takes', async () => {
     const context = fixture();
+    const messages = [];
+    const steps = [];
+    let polls = 0;
+    context.setTimeout = fn => setTimeout(fn, 0);
+    context.hasPermission = () => true;
+    context.showLoader = () => {};
+    context.hideLoader = () => {};
+    context.toast = () => {};
+    context.markVisualConceptDirty = () => {};
+    context.renderVisualConceptPage = () => {};
+    context.updateLoaderMessage = text => messages.push(text);
+    context.updateLoaderProgress = (pct, step) => steps.push([pct, step]);
+    context.collectVisualConceptPlansWorkflowPayload = async () => ({
+      plansWorkflow: { distribution: { rows: [] } }, projectData: {} });
+    context.api = async (method) => {
+      if (method === 'POST') {
+        return { success: true, jobId: 'job-9', status: 'queued', timeoutSeconds: 600 };
+      }
+      polls += 1;
+      if (polls === 1) {
+        return { status: 'running', success: true, todos: [
+          { id: '1', label: 'قراءة بيانات المشروع والتوزيع', status: 'done' },
+          { id: '2', label: 'اقتراح توزيع الأدوار', status: 'active' },
+          { id: '3', label: 'مراجعة النتيجة', status: 'pending' },
+        ] };
+      }
+      return { status: 'completed', success: true, result: {
+        success: true, action: 'explain', reply: 'تمام.', rows: [], checks: [], issues: [] } };
+    };
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: {},
+      plansWorkflow: { viewStage: 'boundary', verification: { approved: true },
+        distribution: { approved: false, aiReviewed: false, rows: [], checks: [], issues: [] } } });
+
+    await context.sendVisualConceptDistributionChat('اقترح توزيعًا');
+
+    // The work itself is on the screen, not only a clock.
+    assert.equal(messages.length > 0, true);
+    assert.match(messages[messages.length - 1], /اقتراح توزيع الأدوار/);
+    assert.match(messages[messages.length - 1], /قراءة بيانات المشروع والتوزيع/);
+    assert.equal(steps.length > 0, true);
+    assert.equal(steps.some(entry => /يعمل الآن/.test(entry[1])), true);
+  });
+
+  test('the words the model has already written show while it writes them', async () => {
+    const context = fixture();
+    const messages = [];
+    let polls = 0;
+    context.setTimeout = fn => setTimeout(fn, 0);
+    context.hasPermission = () => true;
+    context.showLoader = () => {};
+    context.hideLoader = () => {};
+    context.toast = () => {};
+    context.markVisualConceptDirty = () => {};
+    context.renderVisualConceptPage = () => {};
+    context.updateLoaderMessage = text => messages.push(text);
+    context.collectVisualConceptPlansWorkflowPayload = async () => ({
+      plansWorkflow: { distribution: { rows: [] } }, projectData: {} });
+    context.api = async (method) => {
+      if (method === 'POST') {
+        return { success: true, jobId: 'job-10', status: 'queued', timeoutSeconds: 600 };
+      }
+      polls += 1;
+      if (polls === 1) {
+        return { status: 'running', success: true, partial: 'السكن في الطابق الثاني',
+          todos: [{ id: '1', label: 'اقتراح توزيع الأدوار', status: 'active' }] };
+      }
+      return { status: 'completed', success: true, result: {
+        success: true, action: 'update', reply: 'السكن في الطابق الثاني',
+        rows: [{ id: 'r1', building: 'المبنى أ', floor_range: '2', component: 'سكني' }],
+        checks: [], issues: [], canProceed: true } };
+    };
+    context.tenantVisualConceptState = context.normalizeVisualConceptState({
+      slots: {},
+      plansWorkflow: { viewStage: 'boundary', verification: { approved: true },
+        distribution: { approved: false, aiReviewed: false, rows: [], checks: [], issues: [] } } });
+
+    await context.sendVisualConceptDistributionChat('وزّع الأدوار', { expectsTable: true });
+
+    // The answer is on the screen before the turn is over.
+    assert.equal(messages.includes('السكن في الطابق الثاني'), true);
+    const workflow = context.tenantVisualConceptState.plansWorkflow;
+    assert.equal(workflow.distribution.rows.length, 1);
+    assert.equal(workflow.distributionChat.turns[1].text, 'السكن في الطابق الثاني');
+  });
+
+  test('a cancelled clean start leaves the floors and the thread as they were', async () => {    const context = fixture();
     context.hasPermission = () => true;
     context.confirm = () => false;
     context.toast = () => {};

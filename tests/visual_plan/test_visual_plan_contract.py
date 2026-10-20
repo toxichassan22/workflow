@@ -90,10 +90,10 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertEqual(module._visual_concept_section_requirement('main_facade'), 'plans2d')
         instruction = module._visual_concept_slot_instruction('main_facade', {
             'project_name': 'Fixed Parcel', 'slot_label': 'الواجهة الرئيسية',
-            'plan_image_urls': ['/site.svg', '/uses.svg', '/massing.svg'],
+            'plan_image_map': {'massing': '/uploads/creative/massing.svg'},
         })
         self.assertIn('straight-on primary street-facing', instruction)
-        self.assertIn('approved planning diagrams', instruction)
+        self.assertIn('approved massing diagram (Plan 3)', instruction)
         self.assertIn('Do not make an aerial', instruction)
 
     def test_site_plan_interview_keeps_choices_answers_and_compacts_at_input_threshold(self):
@@ -547,13 +547,11 @@ class VisualPlanContractTests(VisualPlanContractBase):
             'choices': [{'message': {'content': layout}}]
         }), patch.object(module, 'persist_generated_image', return_value='/uploads/creative/ref.png'), \
                 patch.object(module, '_prepare_image_reference_for_model', return_value='ref:parcel'):
-            prepared = client.post('/api/visual-concept/plans-prompts',
-                headers=self._headers(self.token_a),
-                json={'projectData': project, 'plansWorkflow': self.workflow(project)})
-        self.assertEqual(prepared.status_code, 200, prepared.get_json())
-        scene = prepared.get_json()['scene']
-        workflow = {**self.workflow(project), 'scene': scene,
-                    'prompts': prepared.get_json()['prompts']}
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                scene, _context, _ref = module._visual_plan_create_scene({
+                    'projectData': project, 'plansWorkflow': self.workflow(project)})
+        workflow = {**self.workflow(project), 'scene': scene}
 
         with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT') as image_call, \
                 patch.object(module.visual_plan_renderer, 'render_plan') as pil_render, \

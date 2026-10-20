@@ -411,12 +411,19 @@
             return;
           }
           const actionBtn = event.target.closest('[data-plans-workflow-action]');
+          const choiceBtn = event.target.closest('[data-plans-distribution-chat-choice]');
+          if (choiceBtn && !choiceBtn.disabled) {
+            submitVisualConceptDistributionChatChoice(
+              choiceBtn.getAttribute('data-plans-distribution-chat-choice'));
+            return;
+          }
           if (!actionBtn || actionBtn.disabled) return;
           const action = actionBtn.getAttribute('data-plans-workflow-action');
           const state = visualConceptPlansWorkflowState();
           if (action === 'verify') verifyVisualConceptPlans();
           else if (action === 'approve-verification') approveVisualConceptPlansVerification();
           else if (action === 'distribution-chat-start') startVisualConceptDistributionChat();
+          else if (action === 'distribution-chat-apply') applyVisualConceptDistributionChat();
           else if (action === 'distribution-chat-restart') restartVisualConceptDistributionChat();
           else if (action === 'distribution-chat-send') submitVisualConceptDistributionChat();
           else if (action === 'check-notes') checkVisualConceptPlanNotes();

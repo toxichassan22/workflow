@@ -3,15 +3,27 @@
  * it; the server answers only from the recorded land data and must state
  * uncertainty instead of guessing. */
 
-    const LAND_CHAT_HISTORY_KEPT = 10;
+    const LAND_CHAT_HISTORY_KEPT = 60;
     const LAND_CHAT_POS_KEY = 'landChatFabPos';
     const LAND_CHAT_SIZE_KEY = 'landChatPanelSize';
     const LAND_CHAT_FAB_SIZE = 56;
     let landChatBusy = false;
     const landChatMessages = [];
+    let landChatMemoryDigest = '';
 
     function landChatHistory() {
       return landChatMessages;
+    }
+
+    // The memory digest the server folds the older turns into. It travels with
+    // every request, so the chat answers from what was agreed instead of
+    // contradicting it.
+    function landChatMemory() {
+      return String(landChatMemoryDigest || '').slice(0, 40000);
+    }
+
+    function setLandChatMemory(value) {
+      landChatMemoryDigest = String(value || '').slice(0, 40000);
     }
 
     function landChatClampFabPosition(left, top) {
@@ -271,6 +283,7 @@
 
     function confirmEndLandChat() {
       landChatMessages.length = 0;
+      landChatMemoryDigest = '';
       renderLandChatMessages();
       hideLandChatEndConfirm();
       toggleLandChat(false);
@@ -326,12 +339,14 @@
         const data = await api('POST', '/api/land-chat', {
           message,
           history: messages.slice(0, -1).slice(-LAND_CHAT_HISTORY_KEPT).map(item => ({
-            role: item.role, content: String(item.content || '').slice(0, 2000)
+            role: item.role, content: String(item.content || '').slice(0, 4000)
           })),
+          memory: landChatMemory(),
           projectData: tenantProjectData || {}
         });
         if (data && data.reply) reply = data.reply;
         else if (data && data.error) reply = data.error;
+        if (data && data.memory) setLandChatMemory(data.memory);
       } catch (error) {}
       messages.push({ role: 'assistant', content: reply });
       landChatBusy = false;
