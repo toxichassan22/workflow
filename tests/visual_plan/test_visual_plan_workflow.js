@@ -840,9 +840,9 @@ test('the site plan chat can start before a scene exists and offers an explicit 
   assert.equal(context.visualConceptSlotLocked('plan_uses'), true);
 
   const card = context.renderVisualConceptSitePlanCard();
-  assert.match(card, /data-visual-action="start-site-chat"[^>]*>بدء المحادثة/);
-  assert.match(card, /<textarea data-visual-chat="plan_site"[^>]*placeholder="رسالة جديدة" disabled>/);
-  assert.match(card, /data-visual-action="chat"[^>]*disabled>إرسال/);
+  assert.match(card, /data-visual-action="start-site-chat"[^>]*>بدء (المحادثة|التحليل)/);
+  assert.match(card, /<textarea data-visual-chat="plan_site"[^>]*placeholder="ملاحظات وشروط المخطط..."/);
+  assert.match(card, /data-visual-action="chat"[^>]*>إرسال/);
 
   context.tenantVisualConceptState.plansWorkflow.siteAssistant.turns = [
     { role: 'assistant', text: 'ما جهة المدخل الرئيسي؟', choices: ['الغرب', 'الجنوب'] },

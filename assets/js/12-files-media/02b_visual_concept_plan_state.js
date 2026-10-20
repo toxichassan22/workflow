@@ -338,9 +338,18 @@
       const dynamicRows = model.dynamicRows && typeof model.dynamicRows === 'object' ? model.dynamicRows : {};
       const components = Array.isArray(dynamicRows.components) ? dynamicRows.components
         .filter(row => row && typeof row === 'object' && !Array.isArray(row))
+        .map(row => ({
+          id: String(row.id || ''),
+          name: String(row.name || ''),
+          type: String(row.type || ''),
+          area: String(row.area || row.builtUpArea || row.bua || '')
+        }))
         .slice().sort((left, right) => String(left.id || '').localeCompare(String(right.id || ''))) : [];
       const parkingPlan = model.parkingPlan && typeof model.parkingPlan === 'object'
-        && !Array.isArray(model.parkingPlan) ? model.parkingPlan : {};
+        && !Array.isArray(model.parkingPlan) ? {
+          requiredSpaces: model.parkingPlan.requiredSpaces,
+          providedSpaces: model.parkingPlan.providedSpaces,
+        } : {};
       // Calculated projections and report tables are rebuilt on draft load. Only
       // the parking inputs and plan affect visual-plan context and its checks.
       return visualConceptPlanStableInput({ basementArea: inputs.basementArea ?? '', components, parkingPlan });
@@ -398,10 +407,25 @@
       markVisualConceptDirty();
     }
 
-    function syncVisualConceptPlanInputs(projectData) {
-      const workflow = visualConceptPlansWorkflowState();
+    function syncVisualConceptPlanInputs(projectDataOrWorkflow, maybeProjectData) {
+      let workflow, projectData;
+      if (projectDataOrWorkflow && (projectDataOrWorkflow.distribution || projectDataOrWorkflow.verification)) {
+        workflow = projectDataOrWorkflow;
+        projectData = maybeProjectData;
+      } else {
+        workflow = visualConceptPlansWorkflowState();
+        projectData = projectDataOrWorkflow;
+      }
       const currentStamp = visualConceptPlanInputStamp(projectData);
       const distribution = workflow.distribution;
+
+      // Preserving user approvals on draft reloads when no sourceStamp was recorded yet
+      if (!workflow.sourceStamp && (distribution.approved || workflow.verification?.approved)) {
+        distribution.reviewSignature = currentStamp;
+        workflow.sourceStamp = currentStamp;
+        return;
+      }
+
       // Older saved reviews have no per-review signature. The persisted
       // aiReviewed flag is itself proof that the AI check completed; bind that
       // legacy result to the hydrated inputs once, then invalidate normally on

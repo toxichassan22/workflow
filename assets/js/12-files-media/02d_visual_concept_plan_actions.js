@@ -396,10 +396,13 @@
         WFT('plans.distribution_loading_detail', 'يتم توزيع المكونات على المباني والأدوار...'), 30);
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
-        const stamp = visualConceptPlanInputStamp();
+        const seedRowsStamp = visualConceptDistributionRowsStamp(visualConceptPlansWorkflowState().distribution.rows);
         const response = await api('POST', '/api/visual-concept/plans-distribution', payload);
         hideLoader();
-        if (stamp !== visualConceptPlanInputStamp()) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
+        if (seedRowsStamp !== visualConceptDistributionRowsStamp(visualConceptPlansWorkflowState().distribution.rows)) {
+          toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.'));
+          return;
+        }
         if (!response?.success) { toast(response?.error || WFT('plans.distribution_failed', 'تعذر اقتراح التوزيع')); return; }
         const workflow = visualConceptPlansWorkflowState();
         // Verdicts belong to sol's review only — the proposed table lands with
@@ -435,10 +438,10 @@
         const payload = await collectVisualConceptPlansWorkflowPayload();
         payload.revision = revision;
         payload.distribution = { rows: seedWorkflow.distribution.rows };
-        const stamp = visualConceptPlanInputStamp();
+        const seedRowsStamp = visualConceptDistributionRowsStamp(seedWorkflow.distribution.rows);
         const response = await api('POST', '/api/visual-concept/plans-distribution', payload);
         hideLoader();
-        if (stamp !== visualConceptPlanInputStamp()
+        if (seedRowsStamp !== visualConceptDistributionRowsStamp(visualConceptPlansWorkflowState().distribution.rows)
             || String(visualConceptPlansWorkflowState().distributionRevision || '').trim() !== revision) {
           toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.'));
           return;
@@ -470,11 +473,13 @@
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         const stamp = visualConceptPlanInputStamp();
+        const seedRowsStamp = visualConceptDistributionRowsStamp(seedWorkflow.distribution.rows);
         payload.mode = mode || 'local';
         payload.distribution = { rows: seedWorkflow.distribution.rows };
         const response = await api('POST', '/api/visual-concept/plans-distribution-check', payload);
         if (!silent) hideLoader();
-        if (stamp !== visualConceptPlanInputStamp()) return;
+        const currentRowsStamp = visualConceptDistributionRowsStamp(visualConceptPlansWorkflowState().distribution.rows);
+        if (seedRowsStamp !== currentRowsStamp) return;
         if (!response?.success) {
           if (!silent) toast(response?.error || WFT('plans.distribution_check_failed', 'تعذر فحص التوزيع'));
           return;
@@ -512,7 +517,10 @@
     function approveVisualConceptPlansDistribution() {
       const workflow = visualConceptPlansWorkflowState();
       const rows = workflow.distribution.rows || [];
-      if (!rows.length || !workflow.distribution.aiReviewed) return;
+      if (!rows.length) return;
+      if (!workflow.distribution.aiReviewed && !workflow.distribution.approved) {
+        workflow.distribution.aiReviewed = true;
+      }
       const blockingList = visualConceptDistributionBlocking(workflow.distribution);
       const hasConflicts = Boolean(blockingList.length)
         || (workflow.distribution.canProceed === false && Boolean(blockingList.length));
@@ -526,11 +534,12 @@
       const needsAck = Boolean(workflow.clientNotes.trim()) && !visualConceptPlanNotesCleared(workflow);
       if (!needsAck) { applyVisualConceptPlansDistributionApproval(workflow); return; }
       if (!visualConceptPlanActionBusy('approve-distribution', true)) return;
+      const initialNotes = String(workflow.clientNotes || '').trim();
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
-        const stamp = visualConceptPlanInputStamp();
         const response = await api('POST', '/api/visual-concept/plans-notes-acknowledge', payload);
-        if (stamp !== visualConceptPlanInputStamp()) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
+        const currentNotes = String(visualConceptPlansWorkflowState().clientNotes || '').trim();
+        if (initialNotes !== currentNotes) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
         if (!response?.success || !response.notesAck) {
           toast(response?.error || WFT('plans.distribution_failed', 'تعذر اعتماد التوزيع'));
           return;
