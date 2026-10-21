@@ -49,10 +49,14 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
             map_url = facts.get('overview_map_url')
             urls = [map_url] if map_url else []
         return _visual_concept_reference_uris(urls=urls, tenant_id=tenant_id)
-    # Angle slots re-render the approved hero image from another viewpoint —
-    # the hero already carries the style, so style references would only fight it.
+    # Angle slots re-render the approved hero image from another viewpoint, and
+    # the client's named style references travel with it: a name belongs to the
+    # element it describes, and the model must not invent a name for an element
+    # the client already named.
+    file_ids = list(facts.get('style_reference_file_ids') or [])[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
     return _visual_concept_reference_uris(
         urls=plan_urls + urls,
+        file_ids=file_ids,
         max_images=external_cap, urls_first=True, tenant_id=tenant_id)
 
 
@@ -103,11 +107,12 @@ def _visual_concept_exterior_conformity_suffix(prompt, facts, slot_id):
 
 
 def _visual_concept_attach_style_reference_suffix(prompt, facts, slot_id):
-    """The stored cover prompt may predate the client naming the style
+    """The stored prompt may predate the client naming the style
     references — it is hidden, so nothing regenerates it. Re-state the ordered
     name map right before the image call so the current assignment always
-    reaches the model; cover always attaches the style refs last."""
-    if slot_id != 'cover':
+    reaches the model. Every exterior slot carries the references, so every
+    exterior slot carries the names: the cover and the angles alike."""
+    if slot_id not in VISUAL_CONCEPT_EXTERNAL_SLOTS:
         return prompt
     meta = list(facts.get('style_references') or [])
     if not any(item.get('name') or item.get('description') for item in meta):

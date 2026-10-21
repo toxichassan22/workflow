@@ -11,7 +11,10 @@ import concurrent.futures
 import html as html_lib
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
-from numeric_precision import format_precise_number
+from numeric_precision import (
+    format_financial_number, format_millions, format_precise_number,
+    normalize_grouped_number_text, round_half_up, sar_in_millions,
+)
 from html.parser import HTMLParser
 from design_templates import (
     build_design_rules, contrast_ratio, dark_surface_color, extract_slide_elements,
@@ -28,7 +31,7 @@ _ICON_RE = re.compile(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D]')
 # builders or plan normalization change: every normalized plan carries it, the
 # client folds it into the generation-checkpoint fingerprint, and stored slides
 # produced by older code can no longer be resumed into a new presentation.
-SLIDE_ENGINE_VERSION = '2026-09-22.3'
+SLIDE_ENGINE_VERSION = '2026-10-22.1'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Content Distribution Rules

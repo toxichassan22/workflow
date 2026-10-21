@@ -447,8 +447,10 @@ def _clean_numeric_val_strict(val):
 def _format_sar_display(val):
     val_m = val / 1e6
     if abs(val_m) >= 0.1:
-        return f"{format_precise_number(val_m)} ر.س"
-    return f"{format_precise_number(val)} ر.س"
+        # Millions are a display unit, not a new value: the amount is rounded
+        # half-up to the hundredth so the label reads like the financial study.
+        return f"{format_millions(val_m)} ر.س"
+    return f"{format_financial_number(val)} ر.س"
 
 
 def _competitor_candidates(comp):

@@ -249,19 +249,19 @@ def _build_sol_waterfall_slide(slide, source, branding=None, slide_num=None, tot
     total = w_data.get('total') or {}
 
     total_cost_m = total.get('value_millions', 0.0)
-    total_cost_display = total.get('display', f"{format_precise_number(total_cost_m)} ر.س")
+    total_cost_display = total.get('display', f"{format_millions(total_cost_m)} ر.س")
     sorted_items = sorted(items, key=lambda x: x.get('value_millions', 0), reverse=True)
     top2_pct = sum(it.get('pct_of_total', 0) for it in sorted_items[:2]) if sorted_items else 0
     top1_name = sorted_items[0].get('name', 'المكون الرئيسي') if sorted_items else 'المكون الرئيسي'
     top1_val = sorted_items[0].get('display', '—') if sorted_items else '—'
 
     waterfall_rows = [
-        [it.get('name', ''), f"{format_precise_number(it.get('value_sar', 0))} ر.س" if it.get('value_sar') else it.get('display', ''), f"{format_precise_number(it.get('pct_of_total', 0), grouped=False)}%"]
+        [it.get('name', ''), f"{format_financial_number(it.get('value_sar', 0))} ر.س" if it.get('value_sar') else it.get('display', ''), f"{format_financial_number(it.get('pct_of_total', 0), grouped=False)}%"]
         for it in items
     ]
     if total:
         tot_val_sar = total.get('value_sar', 0)
-        tot_val_display = f"{format_precise_number(tot_val_sar)} ر.س" if tot_val_sar else total.get('display', '')
+        tot_val_display = f"{format_financial_number(tot_val_sar)} ر.س" if tot_val_sar else total.get('display', '')
         waterfall_rows.append([
             total.get('name', 'إجمالي تكلفة المشروع'),
             tot_val_display,
@@ -297,7 +297,7 @@ def _build_sol_waterfall_slide(slide, source, branding=None, slide_num=None, tot
       </div>
       <div class="luxury-kpi-card accent" style="border-right-color:{accent};">
         <div class="kpi-label">المكونان الرئيسيان</div>
-        <div class="kpi-val">{format_precise_number(top2_pct, grouped=False)}%</div>
+        <div class="kpi-val">{format_financial_number(top2_pct, grouped=False)}%</div>
       </div>
       <div class="luxury-kpi-card">
         <div class="kpi-label">{top1_name}</div>
@@ -345,10 +345,10 @@ def _build_sol_combo_slide(slide, source, branding=None, slide_num=None, total_s
 
     if (total_inflow == '—' or total_inflow.endswith(' 0.0 ر.س')) and items:
         tot_inf = sum(it.get('net_flow_m', 0) for it in items if it.get('net_flow_m', 0) > 0)
-        total_inflow = f"{format_precise_number(tot_inf)} مليون ر.س"
+        total_inflow = f"{format_millions(tot_inf)} مليون ر.س"
     if peak_outflow == '—' and items:
         min_cum = min((it.get('cumulative_m', 0) for it in items), default=0)
-        peak_outflow = f"{format_precise_number(abs(min_cum))} مليون ر.س"
+        peak_outflow = f"{format_millions(abs(min_cum))} مليون ر.س"
     if payback_year == '—' and items:
         for it in items:
             if it.get('cumulative_m', 0) > 0:
@@ -360,8 +360,8 @@ def _build_sol_combo_slide(slide, source, branding=None, slide_num=None, total_s
         y = html_lib.escape(str(it.get('year') or ''))
         f_val = it.get('net_val') if 'net_val' in it else (it.get('net_flow_m', 0.0) * 1e6)
         c_val = it.get('cum_val') if 'cum_val' in it else (it.get('cumulative_m', 0.0) * 1e6)
-        f_str = f"({format_precise_number(abs(f_val))})" if f_val < 0 else format_precise_number(f_val)
-        c_str = f"({format_precise_number(abs(c_val))})" if c_val < 0 else format_precise_number(c_val)
+        f_str = f"({format_financial_number(abs(f_val))})" if f_val < 0 else format_financial_number(f_val)
+        c_str = f"({format_financial_number(abs(c_val))})" if c_val < 0 else format_financial_number(c_val)
         f_style = 'color:#dc2626;' if f_val < 0 else 'color:#059669;'
         c_style = 'color:#dc2626;' if c_val < 0 else f'color:{primary};'
         table_rows.append(f'''<tr>
@@ -676,7 +676,7 @@ def _build_sol_horizontal_bar_slide(slide, source, branding=None, slide_num=None
         hi = max((it['price_max_num'] for it in first_items), default=0.0)
         unit_hint = first_items[0].get('display_price', '').split()[-1] if ' ' in first_items[0].get('display_price', '') else ''
         group_caption = items[0].get('group_label') or unit_hint
-        lo_text, hi_text = format_precise_number(lo), format_precise_number(hi)
+        lo_text, hi_text = format_financial_number(lo), format_financial_number(hi)
         range_text = (f'{lo_text} – {hi_text}' if en else f'من {lo_text} إلى {hi_text}') if hi > lo else lo_text
         shown_text = f'{len(competitors)} competitors shown' if en else f'{len(competitors)} منافسًا معروضًا'
         range_label = 'Range' if en else 'نطاق'

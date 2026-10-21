@@ -555,25 +555,33 @@ def _visual_concept_slot_label(slot_id, facts=None):
         if _visual_concept_is_plan_slot(slot_id) else 'تصور داخلي للمكون')
 
 
+def _visual_concept_style_reference_note(facts):
+    """The named-reference clause: which attached image belongs to which element.
+
+    The client names the style references, so the model must bind each name to
+    the element it describes instead of inventing a label for it.
+    """
+    style_refs = facts.get('style_references') or []
+    if not style_refs:
+        return (
+            'No style-reference image was supplied; invent the architecture from the project facts only. '
+        )
+    mapping = '; '.join(
+        f'{index}) "{item["name"] or "unnamed"}"'
+        + (f' — {item["description"]}' if item.get('description') else '')
+        for index, item in enumerate(style_refs, 1))
+    return (
+        f'The last {len(style_refs)} attached images are client style references, in order: {mapping}. '
+        "Apply each named reference's architectural signature, materials, and design language only "
+        'to the element its name describes — a reference never spills onto other elements. Unnamed '
+        'references shape the overall project style. Write reference names in English. '
+    )
+
+
 def _visual_concept_slot_instruction(slot_id, facts):
     name = facts.get('project_name') or 'the project'
     if slot_id == 'cover':
-        style_refs = facts.get('style_references') or []
-        if style_refs:
-            mapping = '; '.join(
-                f'{index}) "{item["name"] or "unnamed"}"'
-                + (f' — {item["description"]}' if item.get('description') else '')
-                for index, item in enumerate(style_refs, 1))
-            style_note = (
-                f'The last {len(style_refs)} attached images are client style references, in order: {mapping}. '
-                "Apply each named reference's architectural signature, materials, and design language only "
-                'to the element its name describes — a reference never spills onto other elements. Unnamed '
-                'references shape the overall project style. Write reference names in English. '
-            )
-        else:
-            style_note = (
-                'No style-reference image was supplied; invent the architecture from the project facts only. '
-            )
+        style_note = _visual_concept_style_reference_note(facts)
         plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
         if plan_map.get('massing'):
             plan_note = (
@@ -664,9 +672,15 @@ def _visual_concept_slot_instruction(slot_id, facts):
             )
         else:
             mass_note = 'Keep the architecture, materials, height, and massing unchanged. '
+        # The named style references travel with this view too: the client
+        # named the elements, so the model must not invent a name for them.
+        style_note = _visual_concept_style_reference_note(facts)
+        if not (facts.get('style_references') or []):
+            style_note = ''
         return (
             f'Render the "{view_name}" view of the exact same building shown in the attached hero image of {name}. '
             + mass_note
+            + style_note
             + 'Follow the named viewpoint.'
         )
     if _visual_concept_is_internal_slot(slot_id):

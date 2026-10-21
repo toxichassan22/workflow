@@ -371,34 +371,27 @@ def _build_market_sources_slide(slide, source, branding=None, slide_num=None, to
         return f'<div dir="{direction}" style="font-size:{size};line-height:1.2;word-break:break-word;overflow-wrap:anywhere;">{_market_value_html(value)}</div>'
 
     def render_column(column_rows, column_index):
+        # The deck shows the source and its link. The data date, the access
+        # date, the reliability rating and the operator's note are internal
+        # working fields — they stay on the platform screen, where the client
+        # reads them while approving the study.
         header = (
-            '<div style="display:grid;grid-template-columns:1.12fr 1.55fr 1.18fr 1.25fr;'
+            '<div style="display:grid;grid-template-columns:1.25fr 2fr;'
             f'gap:0;background:{primary};color:#fff;font-size:9px;font-weight:800;text-align:center;line-height:1.2;">'
-            '<div style="padding:7px 5px;">المصدر</div><div style="padding:7px 5px;">الرابط</div>'
-            '<div style="padding:7px 5px;">التواريخ والموثوقية</div><div style="padding:7px 5px;">الملاحظات</div></div>'
+            '<div style="padding:7px 5px;">المصدر</div><div style="padding:7px 5px;">الرابط</div></div>'
         )
         start_number = row_offset + 1 + sum(len(item) for item in columns[:column_index])
         end_number = start_number + len(column_rows) - 1
         range_title = f'مصادر {start_number} - {end_number}' if column_rows else 'مصادر'
         rows_html = []
         for row_index, row in enumerate(column_rows):
-            name, url, data_date, accessed, reliability, note = list(row) + [''] * max(0, 6 - len(row))
-            meta_parts = []
-            if str(data_date or '').strip():
-                meta_parts.append('تاريخ البيانات: ' + str(data_date).strip())
-            if str(accessed or '').strip():
-                meta_parts.append('تاريخ الوصول: ' + str(accessed).strip())
-            if str(reliability or '').strip():
-                meta_parts.append('الموثوقية: ' + str(reliability).strip())
-            meta = '<br>'.join(html_lib.escape(part) for part in meta_parts) or 'غير متوفر'
+            name, url = list(row)[:2] if row else ('', '')
             bg = '#f8fafc' if row_index % 2 else '#ffffff'
             rows_html.append(
-                f'<div style="display:grid;grid-template-columns:1.12fr 1.55fr 1.18fr 1.25fr;gap:0;'
+                f'<div style="display:grid;grid-template-columns:1.25fr 2fr;gap:0;'
                 f'background:{bg};border-bottom:1px solid #e2e8f0;align-items:center;">'
                 f'<div style="padding:8px 6px;text-align:center;font-size:9.3px;line-height:1.35;word-break:break-word;">{_market_value_html(name)}</div>'
                 f'<div style="padding:8px 6px;text-align:center;">{field(url, "ltr", "8px")}</div>'
-                f'<div style="padding:8px 6px;text-align:center;font-size:8.4px;line-height:1.35;word-break:break-word;">{meta}</div>'
-                f'<div style="padding:8px 6px;text-align:center;">{field(note, "rtl", "8.7px")}</div>'
                 '</div>'
             )
         return (

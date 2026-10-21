@@ -818,7 +818,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         client = self.app.test_client()
         source = read_module_source('app.py')
         self.assertIn("VISUAL_CONCEPT_MOODBOARD_SLOTS = ('right', 'left', 'top', 'back')", source)
-        self.assertIn("VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back')", source)
+        # The exterior slots carry the cover, the four angles and the main
+        # facade — the constant grew a slot and the assertion follows it.
+        self.assertIn("VISUAL_CONCEPT_EXTERNAL_SLOTS = ('cover', 'right', 'left', 'top', 'back', 'main_facade')", source)
         self.assertIn("'overview_map', 'خريطة الأرض / المبنى'", source)
         self.assertIn('style_reference_file_id', source)
         self.assertIn('style_reference_file_ids', source)
@@ -915,10 +917,16 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(cover.status_code, 200, cover.get_json())
         self.assertEqual(cover.get_json()['image'], '/uploads/creative/cover.png')
         self.assertTrue(image_call.called)
-        self.assertEqual(image_call.call_args.args[0], 'Hero image from the project facts')
+        # The server appends its own rules to the prompt it sends (the
+        # approved massing diagram binds the render); the stored prompt the
+        # client typed stays exactly as it is.
+        self.assertTrue(image_call.call_args.args[0].startswith('Hero image from the project facts'))
         cover_refs = [str(item) for item in image_call.call_args.args[1]]
-        self.assertTrue(any('plan_site.png' in item for item in cover_refs))
+        # The cover render is grounded on the approved 3D massing diagram
+        # (Plan 3) as its single geometric base, so the 2D site plan is not
+        # part of its reference set.
         self.assertTrue(any('plan_massing.png' in item for item in cover_refs))
+        self.assertFalse(any('plan_site.png' in item for item in cover_refs))
 
         with patch.object(self.application_module, '_visual_concept_generate_prompt_text', return_value=('Revised right prompt', 'تم')):
             east_prompt = client.post('/api/visual-concept/prompt', headers=self._headers(self.token_a), json={
@@ -1102,10 +1110,11 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('«البرج الفندقي»', refs_text)
         self.assertIn('مبنى منخفض بطراز إسلامي', refs_text)
 
-        # Angle slots re-render the approved hero: style refs stay out of their
-        # reference set entirely — the massing diagram and the cover image lead
-        # it instead. The two 2D diagrams are inputs to the plans themselves,
-        # never to the render.
+        # Angle slots re-render the approved hero: the massing diagram and the
+        # cover image lead the reference set, and the client's named style
+        # references trail it — the names belong to the elements they describe,
+        # so the model must not invent a label for them. The two 2D diagrams are
+        # inputs to the plans themselves, never to the render.
         with patch.object(self.application_module, 'call_images_api', return_value='data:image/png;base64,DDDD') as angle_call, \
                 patch.object(self.application_module, 'persist_generated_image', return_value='/uploads/creative/right.png'), \
                 patch.object(self.application_module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
@@ -1123,13 +1132,17 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertTrue(any('plan_massing.png' in item for item in angle_refs))
         self.assertFalse(any('plan_site.png' in item for item in angle_refs))
         self.assertFalse(any('plan_uses.png' in item for item in angle_refs))
-        self.assertFalse(any(
+        # The named references travel with the view, in the order the client gave.
+        self.assertTrue(any(
             'ref-club-w' in item or 'ref-tower-h' in item or 'ref-club-m' in item
             for item in angle_refs))
+        angle_prompt = str(angle_call.call_args.args[0])
+        self.assertIn('نادي النساء', angle_prompt)
 
         # The stored prompt may predate the names — a generation-time suffix
         # re-states the ordered map so a stale hidden prompt still binds each
-        # named image to its element.
+        # named image to its element. The map travels with every exterior slot,
+        # so the angles name their elements too.
         stale_prompt = 'Hero massing render, anonymous refs'
         suffixed = self.application_module._visual_concept_attach_style_reference_suffix(
             stale_prompt, facts_meta, 'cover')
@@ -1137,9 +1150,15 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('last 3 attached images', suffixed)
         self.assertIn('"نادي النساء"', suffixed)
         self.assertIn('مبنى منخفض بطراز إسلامي', suffixed)
+        angle_suffixed = self.application_module._visual_concept_attach_style_reference_suffix(
+            stale_prompt, facts_meta, 'right')
+        self.assertTrue(angle_suffixed.startswith(stale_prompt))
+        self.assertIn('last 3 attached images', angle_suffixed)
+        self.assertIn('"نادي النساء"', angle_suffixed)
+        # An interior view carries no style reference, so it carries no names.
         self.assertEqual(
             self.application_module._visual_concept_attach_style_reference_suffix(
-                stale_prompt, facts_meta, 'right'), stale_prompt)
+                stale_prompt, facts_meta, 'interior_comp_1'), stale_prompt)
         unnamed_facts = {'style_references': [{'id': 'a', 'name': '', 'description': ''}]}
         self.assertEqual(
             self.application_module._visual_concept_attach_style_reference_suffix(
@@ -1342,6 +1361,93 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertNotIn("function addConceptualPlansSection(form, before)", index_source)
         self.assertNotIn('data-key="conceptual_plans"', index_source)
         self.assertEqual(self.application_module._visual_concept_interior_component_id('interior_comp-1::3'), 'comp-1')
+
+    def test_the_named_style_references_reach_every_exterior_slot(self):
+        """The client names the style references, so every exterior view must
+        carry the images and their names — otherwise the model invents a label
+        for an element the client already named."""
+        module = self.application_module
+        facts = {
+            'project_name': 'برج الاختبار',
+            'project_idea': 'أبراج مكتبية على أرض تجارية',
+            'land_and_building_summary': 'أرض تجارية بواجهة شرقية وغربية',
+            'target_audience': 'شركات ومكاتب',
+            'approved_financial_area': 8500,
+            'approved_floor_count': 12,
+            'approved_coverage_ratio': 60,
+            'approved_floor_area_ratio': 6,
+            'facades_count': 2,
+            'facades_directions': 'شرق وغرب',
+            'allowed_uses': 'تجاري مكتبي',
+            'directions_table': [
+                {'direction': 'east', 'regulation_text': 'شارع تجاري 30م'},
+                {'direction': 'west', 'regulation_text': 'شارع فرعي 15م'},
+            ],
+            'project_components_data': [{'name': 'مكاتب', 'useType': 'office', 'units': 20, 'builtArea': 4000}],
+            'tenantCreativeImages': {'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'}},
+            'visual_concept': {
+                'styleReferenceFileIds': ['ref-club-w', 'ref-tower-h'],
+                'styleReferenceLabels': ['نادي النساء', 'البرج الفندقي'],
+                'styleReferenceDescriptions': ['مبنى منخفض بطراز إسلامي', ''],
+                'sectionApprovals': {'plans2d': True},
+            },
+        }
+        plan_images = {
+            'site': '/uploads/creative/plan_site.png',
+            'uses': '/uploads/creative/plan_uses.png',
+            'massing': '/uploads/creative/plan_massing.png',
+        }
+        built = module._visual_concept_facts(facts)
+        self.assertEqual([item['name'] for item in built['style_references']],
+                         ['نادي النساء', 'البرج الفندقي'])
+
+        with patch.object(module, '_prepare_image_reference_for_model', side_effect=lambda url, tenant_id=None: f'data:image/png;base64,{str(url).rsplit("/", 1)[-1]}'), \
+                patch.object(module, '_visual_concept_project_file_data_uri', side_effect=lambda file_id, tenant_id=None: f'data:image/png;base64,{file_id}'):
+            angle_refs = module._visual_concept_collect_generation_references(
+                built, 'right', '/uploads/creative/cover.png', tenant_id='tenant-a')
+        names = [str(ref).rsplit(',', 1)[-1] for ref in angle_refs]
+        # The named references trail the view's own references, in the order the
+        # client gave them.
+        self.assertIn('ref-club-w', names)
+        self.assertIn('ref-tower-h', names)
+        self.assertLess(names.index('ref-club-w'), names.index('ref-tower-h'))
+
+        # The names travel with the prompt of every exterior slot.
+        stale_prompt = 'Right elevation'
+        for slot_id in ('cover', 'right', 'left', 'top', 'back', 'main_facade'):
+            suffixed = module._visual_concept_attach_style_reference_suffix(
+                stale_prompt, built, slot_id)
+            self.assertTrue(suffixed.startswith(stale_prompt), slot_id)
+            self.assertIn('last 2 attached images', suffixed, slot_id)
+            self.assertIn('"نادي النساء"', suffixed, slot_id)
+        # An interior view carries no style reference, so it carries no names.
+        self.assertEqual(
+            module._visual_concept_attach_style_reference_suffix(
+                stale_prompt, built, 'interior_comp-1'), stale_prompt)
+
+        # The angle prompt names the references too, not only the cover.
+        angle_instruction = module._visual_concept_slot_instruction('right', built)
+        self.assertIn('style references, in order:', angle_instruction)
+        self.assertIn('نادي النساء', angle_instruction)
+
+    def test_the_divider_background_is_the_slides_own_and_can_be_removed(self):
+        """The photo behind a section divider belongs to the slide.
+
+        The client used to plant it again on every render with ``!important``,
+        so neither the client nor the designer chat could drop it. Now the
+        element in the slide's own HTML decides, and the client only follows
+        the current cover image.
+        """
+        source = read_frontend_text()
+        start = source.index('function forceSectionDividerBackgroundHtml')
+        body = source[start:source.index('function processSlideHtmlClient', start)]
+        self.assertNotIn('!important', body)
+        self.assertIn('data-section-divider-background', body)
+        # The client can drop the background, and the chat can drop it too:
+        # the element lives in the slide's own HTML.
+        self.assertIn('function removeTenantSlideBackground(index)', source)
+        self.assertIn('removeTenantSlideBackground(', source)
+        self.assertIn('gen.slide_no_background', source)
 
     def test_plans_workflow_verifies_sources_anonymously_and_uses_boundary_context(self):
         module = self.application_module

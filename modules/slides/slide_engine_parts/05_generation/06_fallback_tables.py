@@ -17,9 +17,9 @@ def _fallback_table_data(slide, project_data):
         items = w_data.get('items') or []
         if items:
             headers = ['بند التكلفة', 'القيمة (ر.س)']
-            rows = [[it.get('name', ''), f"{format_precise_number(it.get('value_sar', 0))} ر.س" if it.get('value_sar') else it.get('display', '')] for it in items]
+            rows = [[it.get('name', ''), f"{format_financial_number(it.get('value_sar', 0))} ر.س" if it.get('value_sar') else it.get('display', '')] for it in items]
             if w_data.get('total'):
-                rows.append([w_data['total'].get('name', 'الإجمالي'), f"{format_precise_number(w_data['total'].get('value_sar', 0))} ر.س" if w_data['total'].get('value_sar') else w_data['total'].get('display', '')])
+                rows.append([w_data['total'].get('name', 'الإجمالي'), f"{format_financial_number(w_data['total'].get('value_sar', 0))} ر.س" if w_data['total'].get('value_sar') else w_data['total'].get('display', '')])
             return headers, rows
     elif chart_type == 'heatmap':
         h_data = _extract_heatmap_chart_data(chart_source, model, project_data)
@@ -47,22 +47,10 @@ def _fallback_table_data(slide, project_data):
     if source == 'financial_indicators':
         # The closing financial summary when the report carries no dedicated
         # cost/return groups. Render the study's own key figures (same labels
-        # as the PDF note) instead of an empty table.
-        projection = model.get('projection') if isinstance(model.get('projection'), dict) else {}
-        inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
-        calc = _parse_financial_dict(project_data.get('financial_calc_data'))
-        indicator_rows = []
-        for key, label in _FINANCIAL_INDICATOR_LABELS:
-            value = projection.get(key)
-            if value in (None, '', [], {}) and inputs.get(key) not in (None, '', [], {}):
-                value = inputs.get(key)
-            if value in (None, '', [], {}) and calc.get(key) not in (None, '', [], {}):
-                value = calc.get(key)
-            if value in (None, '', [], {}, -1):
-                continue
-            indicator_rows.append([label, value])
-            if len(indicator_rows) >= 12:
-                break
+        # as the PDF note) instead of an empty table. The values are the
+        # approved display strings — a raw projection decimal («0.2345») would
+        # contradict the number the client approved on screen.
+        indicator_rows = _financial_indicator_display_rows(model, project_data, limit=12)
         return ['البند', 'القيمة'], indicator_rows
     match = re.fullmatch(r'financial_table:([^:]+):(\d+):(\d+)', source)
     if match:
@@ -188,7 +176,7 @@ def _format_table_num(val):
         f = float(clean)
         if 1950 <= f <= 2050 and '.' not in raw_num and not is_pct:
             return str(int(f)), True
-        res = format_precise_number(clean, grouped=True)
+        res = format_financial_number(clean, grouped=True)
         if is_pct:
             res += '%'
         return res, True

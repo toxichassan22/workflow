@@ -258,6 +258,26 @@
       renderTenantSlides._batchTimer = setTimeout(processBatch, 0);
       if (typeof reapplyDesignerSlideActivity === 'function') reapplyDesignerSlideActivity();
     }
+    function tenantSlideHasBackground(slide) {
+      return /data-section-divider-background\s*=\s*["']?1/i.test(String((slide || {}).html || ''));
+    }
+
+    // The background is the slide's own element, so the client can drop it —
+    // the same freedom the designer chat has.
+    function removeTenantSlideBackground(index) {
+      const slide = tenantSlidesData[index];
+      if (!slide || !tenantSlideHasBackground(slide)) return;
+      beginPresentationUndoChange();
+      slide.html = String(slide.html || '').replace(
+        /<div\b[^>]*data-section-divider-background\s*=\s*["']?1["']?[^>]*>[\s\S]*?<\/div>/gi, ''
+      );
+      renumberTenantSlides();
+      renderTenantSlides();
+      selectTenantSlide(index);
+      triggerAutoSaveDraft();
+      toast(WFT('gen.slide_background_removed', 'أُزيلت خلفية الشريحة'));
+    }
+
     function renderTenantSlidesDesignerChat() { renderTenantDesignerChat(); }
 
     function moveTenantSlide(fromIdx, toIdx) {
@@ -296,10 +316,14 @@
         const deleteBtn = hasPermission('create_presentation') && tenantSlidesData.length > 1
           ? '<button type="button" class="ge-thumb-delete" title="حذف الشريحة" aria-label="حذف الشريحة" onclick="event.stopPropagation(); deleteSlide(' + i + ')">حذف</button>'
           : '';
+        const backgroundBtn = hasPermission('create_presentation') && tenantSlideHasBackground(s)
+          ? '<button type="button" class="ge-thumb-delete" title="' + escapeHtml(WFT('gen.slide_no_background', 'بدون خلفية')) + '" aria-label="' + escapeHtml(WFT('gen.slide_no_background', 'بدون خلفية')) + '"' +
+            ' onclick="event.stopPropagation(); removeTenantSlideBackground(' + i + ')">' + escapeHtml(WFT('gen.slide_no_background', 'بدون خلفية')) + '</button>'
+          : '';
 
         thumb.innerHTML = '<span class="ge-thumb-num">' + (i + 1) + '</span>' +
           '<span class="ge-thumb-title" title="' + escapeHtml(s.title || '') + '">' + escapeHtml(s.title || 'شريحة بدون عنوان') + '</span>' +
-          '<div class="ge-thumb-actions">' + moveUpBtn + moveDownBtn + regenerateBtn + deleteBtn + '</div>';
+          '<div class="ge-thumb-actions">' + moveUpBtn + moveDownBtn + regenerateBtn + backgroundBtn + deleteBtn + '</div>';
         sidebar.appendChild(thumb);
       });
       if (typeof reapplyDesignerSlideActivity === 'function') reapplyDesignerSlideActivity();

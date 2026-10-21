@@ -686,8 +686,23 @@ def _format_presentation_numeric_text(html):
             sign = '-' if exact.startswith('-') else ''
             exact = exact[1:] if sign else exact
             whole, separator, fraction = exact.partition('.')
+            # A float artifact (189750000.00000004) must never reach the deck.
+            # Only a large figure is rounded: a coordinate or a ratio keeps every
+            # digit it was given, because rounding those would lose meaning.
+            if separator and len(fraction) > 2 and len(whole.lstrip('-')) >= 4:
+                rounded = round_half_up(number, 2)
+                if rounded is not None:
+                    exact = format(rounded, 'f')
+                    sign = '-' if exact.startswith('-') else ''
+                    exact = exact[1:] if sign else exact
+                    whole, separator, fraction = exact.partition('.')
             return sign + f'{int(whole):,}' + (separator + fraction if separator else '')
 
+        # A number that already carries thousands separators never matched the
+        # pattern above (the lookaround blocked every position), so it reached
+        # the deck untouched — `923,938,343` and `923.938,343` both did. The
+        # grouping is fixed first; no decimal digit is changed.
+        text = normalize_grouped_number_text(text)
         return number_pattern.sub(format_number, text)
 
     recent_text = ''

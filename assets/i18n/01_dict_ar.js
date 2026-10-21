@@ -712,6 +712,8 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "gen.regenerate_slide_confirm": "سيتم إعادة توليد الشريحة «{title}» فقط، مع إبقاء باقي الشرائح كما هي. هل تريد المتابعة؟",
   "gen.slide_moved": "تم نقل الشريحة {from} إلى الموقع {to} بنجاح",
   "gen.slide_delete_confirm": "حذف الشريحة {n}؟",
+  "gen.slide_no_background": "بدون خلفية",
+  "gen.slide_background_removed": "أُزيلت خلفية الشريحة",
   "gen.paused_at_slide": "توقف التوليد مؤقتًا عند الشريحة {n}",
   "gen.checkpoint_saved_detail": "تم حفظ {n} شريحة ويمكن استكمال العرض لاحقًا.",
   "gen.checkpoint_missing_detail": "تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.",

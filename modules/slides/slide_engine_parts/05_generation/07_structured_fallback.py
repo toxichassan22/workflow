@@ -419,28 +419,7 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
         and bool(re.fullmatch(r'market_study_data\.competitors(?::\d+:\d+)?', market_source))
         and chart_type == 'horizontal_bar'
     )
-    fixed_land_boundary_diagram = market_source == 'land_boundary_diagram'
-    fixed_map_slide = slide.get('type') in {
-        'map_overview', 'map_landmarks', 'map_access', 'map_catchment'
-    }
-    deterministic_market_source = bool(
-        re.fullmatch(r'market_study_data\.(?:scope|summary|sources)(?::\d+:\d+)?', market_source)
-        or bool(re.fullmatch(r'market_study_data\.competitors(?::\d+:\d+)?', market_source))
-        or market_source in {
-            'market_study_data.swot',
-            'executive_content.risks', 'market_study_data.risk_analysis',
-            'market_study_data.risk_register', 'market_study_data.risks',
-            'market_study_data.summary.risks',
-        }
-    )
     free_market_slide = _slide_section_key(slide) == 'market' and not fixed_market_comparison
-    # The timeline slide is a fixed layout too: it renders the dated Gantt from
-    # the client's phases, so the model can never drop the chart or reinvent it.
-    fixed_timeline = (
-        (market_source == 'timeline_table_data'
-         or str((slide or {}).get('design_style') or '') == 'timeline'
-         or _slide_section_key(slide) == 'timeline')
-        and bool(parse_timeline_phases(project_data)))
     # A stale plan must not turn an arbitrary market page into a chart or a
     # fixed market template.  The sole fixed market page is the competitor
     # comparison; approved financial charts remain fixed in the financial
@@ -458,15 +437,12 @@ def generate_single_slide(system_prompt, slide, slide_num, total_slides, brandin
                 branding=branding, project_data=project_data,
                 content_source=str((slide or {}).get('content_source') or ''),
             )
-    if (fixed_market_comparison
-            or fixed_land_boundary_diagram
-            or fixed_map_slide
-            or fixed_timeline
-            or deterministic_market_source
-            or (_slide_section_key(slide) != 'market'
-                and (chart_type in APPROVED_CHART_TYPES
-                     or market_source == 'land_and_building_summary'
-                     or _slide_section_key(slide) == 'financial'))):
+    # The renderer policy decides who draws this page: the model composes the
+    # pages whose content is a reading, and a template renders the reference
+    # data the client signed off. The market summary, the study scope and the
+    # risk register used to be injected as static tables, which is why they
+    # shipped as identical rows with no design.
+    if slide_content_renderer(slide, project_data) == CONTENT_RENDERER_DETERMINISTIC:
         deterministic_slide = _build_structured_fallback_slide(slide, project_data, branding, slide_num=slide_num, total_slides=total_slides)
         if deterministic_slide:
             return postprocess_slide(

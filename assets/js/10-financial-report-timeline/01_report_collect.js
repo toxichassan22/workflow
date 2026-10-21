@@ -59,6 +59,26 @@
       return model;
     }
 
+    // The deck must show the very number the client approved on screen. The
+    // projection object holds raw decimals (a ROI of 0.2345 is shown as
+    // «23.45%»), so the display values travel with the model as their own map
+    // and the server never has to guess the unit of a value.
+    const FINANCIAL_INDICATOR_PERCENT_KEYS = ['roi', 'projectIrr', 'equityIrr'];
+    const FINANCIAL_INDICATOR_YEAR_KEYS = ['payback', 'equityPayback', 'developmentYears'];
+
+    function collectFinancialFormattedIndicators() {
+      const projection = window.__financialProjection || {};
+      const out = {};
+      Object.keys(projection || {}).forEach(key => {
+        const value = projection[key];
+        if (typeof value !== 'number' || !Number.isFinite(value)) return;
+        if (FINANCIAL_INDICATOR_PERCENT_KEYS.includes(key)) out[key] = resultPercent(value * 100);
+        else if (FINANCIAL_INDICATOR_YEAR_KEYS.includes(key)) out[key] = resultNumber(value);
+        else out[key] = resultMoney(value);
+      });
+      return out;
+    }
+
     function collectFinancialStudyModel() {
       if (typeof calculateAll === 'function') {
         try { calculateAll(); } catch (error) { console.warn('calculateAll failed during draft collect:', error); }
@@ -95,6 +115,7 @@
         inputs,
         tables,
         projection: preserveFinancialResults(window.__financialProjection || {}),
+        formattedIndicators: collectFinancialFormattedIndicators(),
         dynamicRows: collectFinancialDynamicRows(),
         parkingPlan: typeof financialParkingPlan === 'function' && financialParkingPlan().id ? financialParkingPlan() : undefined,
         parkingSnapshot: typeof financialParkingSnapshot === 'function' && financialParkingPlan().id ? financialParkingSnapshot() : undefined,

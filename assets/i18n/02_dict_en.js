@@ -712,6 +712,8 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "gen.regenerate_slide_confirm": "Only slide \"{title}\" will be regenerated, leaving the rest of the deck as it is. Continue?",
   "gen.slide_moved": "Slide {from} moved to position {to}",
   "gen.slide_delete_confirm": "Delete slide {n}?",
+  "gen.slide_no_background": "No background",
+  "gen.slide_background_removed": "The slide background was removed",
   "gen.paused_at_slide": "Generation paused at slide {n}",
   "gen.checkpoint_saved_detail": "{n} slides were saved and the deck can be resumed later.",
   "gen.checkpoint_missing_detail": "Could not save the resume point — the finished slides are held in this session only.",

@@ -278,27 +278,19 @@
 
     function forceSectionDividerBackgroundHtml(html, coverImage) {
       if (!html || !coverImage) return String(html || '');
-      const safeCover = String(coverImage).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      const declaration = "background-image:url('" + safeCover + "')!important;" +
-        'background-size:cover!important;background-position:center center!important;' +
-        'background-repeat:no-repeat!important;';
-      let replaced = false;
-      let output = String(html).replace(
-        /background(?:-image)?\s*:\s*(?:url\([^)]*\)|none)\s*;?/i,
-        () => {
-          replaced = true;
-          return declaration;
-        }
-      );
-      if (!replaced) {
-        const background = '<div data-section-divider-background="1" aria-hidden="true" ' +
-          'style="position:absolute;top:0;right:0;left:0;bottom:0;' + declaration + '"></div>';
-        output = output.replace(
-          /(<div\b[^>]*\bclass=["'][^"']*\bslide\b[^"']*["'][^>]*>)/i,
-          '$1' + background
-        );
+      // The stored divider owns its photo: the element is in the slide's own
+      // HTML, and the designer chat may remove it. This used to plant the photo
+      // again on every render with a forced declaration, so neither the client
+      // nor the chat could drop the background. Now it only follows the current
+      // cover image, and only when the slide still carries the element.
+      if (!/data-section-divider-background\s*=\s*["']?1/i.test(String(html))) {
+        return String(html || '');
       }
-      return output;
+      const safeCover = String(coverImage).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      return String(html).replace(
+        /(data-section-divider-background\s*=\s*["']?1["']?[^>]*?background-image\s*:\s*url\()([^)]*)(\))/i,
+        (match, head, url, tail) => head + safeCover + tail
+      );
     }
 
     function processSlideHtmlClient(html, slideType) {

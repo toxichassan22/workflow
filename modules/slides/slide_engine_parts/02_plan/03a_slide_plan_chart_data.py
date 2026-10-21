@@ -47,7 +47,7 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
     for t in ticks:
         ty = y_for(t)
         grid_lines.append(f'<line x1="{pad_left}" y1="{ty}" x2="{width - pad_right}" y2="{ty}" stroke="#e2e8f0" stroke-width="1" />')
-        val_str = format_precise_number(t)
+        val_str = format_millions(t)
         tick_texts.append(f'<text x="{pad_left - 8}" y="{ty + 4}" font-size="10" fill="#94a3b8" text-anchor="end">{val_str}</text>')
 
     col_slot = chart_w / max(n_cols, 1)
@@ -100,7 +100,7 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
         bars_svg.append(f'<rect x="{bx}" y="{top_y}" width="{bar_w}" height="{bar_h}" fill="{color}" rx="3" />')
 
         pct = it.get('pct_of_total', (val_m / total_val_m) * 100)
-        disp = it.get('display', f"{format_precise_number(val_m)} ر.س")
+        disp = it.get('display', f"{format_millions(val_m)} ر.س")
         labels_svg.append(f'<text x="{cx}" y="{top_y - 8}" font-size="9.5" font-weight="700" fill="#0f172a" text-anchor="middle">{disp}</text>')
         labels_svg.append(f'<text x="{cx}" y="{top_y - 20}" font-size="8.5" font-weight="600" fill="#64748b" text-anchor="middle">{pct}%</text>')
 
@@ -127,7 +127,7 @@ def _build_waterfall_svg(items, total, width=1050, height=340, primary='#16405f'
         connectors_svg.append(f'<line x1="{prev_top_x}" y1="{prev_top_y}" x2="{tot_bx}" y2="{prev_top_y}" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3 3" />')
 
     bars_svg.append(f'<rect x="{tot_bx}" y="{tot_top_y}" width="{bar_w}" height="{tot_h}" fill="{primary}" rx="3" />')
-    tot_disp = total.get('display', f"{format_precise_number(total_val_m)} ر.س")
+    tot_disp = total.get('display', f"{format_millions(total_val_m)} ر.س")
     labels_svg.append(f'<text x="{tot_cx}" y="{tot_top_y - 8}" font-size="10.5" font-weight="800" fill="{primary}" text-anchor="middle">{tot_disp}</text>')
     labels_svg.append(f'<text x="{tot_cx}" y="{tot_top_y - 22}" font-size="8.5" font-weight="700" fill="{primary}" text-anchor="middle">100%</text>')
 
@@ -423,12 +423,12 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
             items.append({
                 'year': year_label,
                 'net_flow_m': net_val / 1e6,
-                'net_flow_display': f"{format_precise_number(net_val / 1e6)} ر.س",
-                'net_flow_full': f"({format_precise_number(abs(net_val))})" if net_val < 0 else format_precise_number(net_val),
+                'net_flow_display': f"{sar_in_millions(net_val)} ر.س",
+                'net_flow_full': f"({format_financial_number(abs(net_val))})" if net_val < 0 else format_financial_number(net_val),
                 'net_val': net_val,
                 'cumulative_m': effective_cum / 1e6,
-                'cumulative_display': f"{format_precise_number(effective_cum / 1e6)} ر.س",
-                'cumulative_full': f"({format_precise_number(abs(effective_cum))})" if effective_cum < 0 else format_precise_number(effective_cum),
+                'cumulative_display': f"{sar_in_millions(effective_cum)} ر.س",
+                'cumulative_full': f"({format_financial_number(abs(effective_cum))})" if effective_cum < 0 else format_financial_number(effective_cum),
                 'cum_val': effective_cum,
                 'is_positive': net_val >= 0,
             })
@@ -523,9 +523,9 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
         stroke = "#94a3b8" if t['is_zero'] else "#e2e8f0"
         stroke_w = "1.5" if t['is_zero'] else "1"
         grid_lines.append(f'<line x1="{m_left - 8}" y1="{t["y"]}" x2="{vb_w - m_right}" y2="{t["y"]}" stroke="{stroke}" stroke-width="{stroke_w}"/>')
-        label_txt = format_precise_number(t['val'])
+        label_txt = format_millions(t['val'])
         if t['val'] < 0:
-            label_txt = '-' + format_precise_number(abs(t['val']))
+            label_txt = '-' + format_millions(abs(t['val']))
         y_labels.append(f'<text x="{m_left - 12}" y="{t["y"] + 3.5}" fill="#64748b" font-size="9" text-anchor="end" direction="ltr">{label_txt}</text>')
 
     bars_svg = []
@@ -549,15 +549,15 @@ def _extract_combo_chart_data(part_or_table, model=None, project_data=None):
         # Labels: avoid overlap between bar and circle when close
         if abs(by - it['cy']) > 22:
             if net_m > 40:
-                data_labels_svg.append(f'<text x="{cx}" y="{by - 6}" fill="#0b1f33" font-size="9" font-weight="700" text-anchor="middle">{format_precise_number(net_m, grouped=False)}</text>')
+                data_labels_svg.append(f'<text x="{cx}" y="{by - 6}" fill="#0b1f33" font-size="9" font-weight="700" text-anchor="middle">{format_millions(net_m)}</text>')
         if not it['is_positive']:
-            neg_txt = '-' + format_precise_number(abs(net_m), grouped=False)
+            neg_txt = '-' + format_millions(abs(net_m))
             data_labels_svg.append(f'<text x="{cx}" y="{by + bh + 14}" fill="#b89564" font-size="9" font-weight="700" text-anchor="middle" direction="ltr">{neg_txt}</text>')
 
         # Key milestone cumulative points
         if i in (0, 1, 2, 3, 4, 9) or abs(net_m - cum_m) > 50:
             c_offset = -9 if it['cy'] < y_zero else 15
-            data_labels_svg.append(f'<text x="{cx}" y="{it["cy"] + c_offset}" fill="#0284c7" font-size="9" font-weight="700" text-anchor="middle">{format_precise_number(cum_m, grouped=False)}</text>')
+            data_labels_svg.append(f'<text x="{cx}" y="{it["cy"] + c_offset}" fill="#0284c7" font-size="9" font-weight="700" text-anchor="middle">{format_millions(cum_m)}</text>')
 
     svg_code = f'''<svg data-chart="combo" class="combo-chart" viewBox="0 0 {int(vb_w)} {int(vb_h)}" style="width: 100%; height: auto; max-height: 290px; display: block;" role="img" aria-label="مخطط التدفقات النقدية السنوية والرصيد التراكمي">
   <defs>
@@ -610,16 +610,16 @@ def _format_heatmap_value_display(metric_key, val_raw, num_val):
         sign = '-' if num_val < 0 else ''
         val_m = abs(num_val) / 1e6
         if val_m >= 0.1:
-            return f"{sign}{format_precise_number(val_m)} ر.س"
-        return f"{sign}{format_precise_number(abs(num_val))} ر.س"
+            return f"{sign}{format_millions(val_m)} ر.س"
+        return f"{sign}{format_financial_number(abs(num_val))} ر.س"
     elif metric_key in ('roi', 'project_irr', 'equity_irr'):
         if '%' in str(val_raw):
             return str(val_raw).strip()
-        return f"{format_precise_number(num_val, grouped=False)}%"
+        return f"{format_financial_number(num_val, grouped=False)}%"
     elif metric_key == 'payback':
         if 'سنة' in str(val_raw) or 'عام' in str(val_raw):
             return str(val_raw).strip()
-        return f"{format_precise_number(num_val, grouped=False)} سنة"
+        return f"{format_financial_number(num_val, grouped=False)} سنة"
     return str(val_raw)
 
 
