@@ -575,34 +575,34 @@ def _visual_concept_slot_instruction(slot_id, facts):
                 'No style-reference image was supplied; invent the architecture from the project facts only. '
             )
         plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
-        if plan_map.get('massing') and plan_map.get('site'):
+        if plan_map.get('massing'):
             plan_note = (
-                'The attached reference images are the project\'s three authoritative plans: '
-                'Master Site Plan (Plan 1) fixes the exact surveyed parcel boundary, land coordinates, building footprints, villa counts, and surface parking layout; '
-                'Vertical Program Distribution (Plan 2) fixes the exact floor counts and heights; '
-                'and Conceptual 3D Massing (Plan 3) fixes the volumetric 3D massing and composition. '
-                'You MUST strictly respect the true parcel boundaries, villa counts, and building placements from the site plan, matching the 3D massing heights. '
+                'The attached reference image is the project\'s approved 3D massing diagram (Plan 3). '
+                'Render the finished architectural design directly ONTO this exact 3D massing diagram: '
+                'faithfully convert this 3D massing diagram into a photorealistic architectural photograph. '
+                'Preserve the exact camera angle, elevated perspective, building positions, villa counts, heights, swimming pool, padel courts, and parking layout exactly as shown in Plan 3. '
+                'Do not move, remove, add, or alter any buildings or elements. '
+                'Dress each mass with realistic modern facade materials, glass curtain walls, textures, lush landscaping, paved roads, and natural lighting. '
             )
-        elif plan_map.get('massing'):
-            plan_note = (
-                'The attached approved 3D massing diagram (Plan 3) is the primary geometry authority: '
-                'faithfully translate these exact 3D building volumes, heights, footprints, and orientations into realistic architecture. '
-            )
+            camera_note = 'Match the exact viewpoint and elevated perspective of the attached Plan 3 massing diagram. '
         elif plan_map.get('site') and plan_map.get('uses'):
             plan_note = (
                 'The attached approved site plan (Plan 1) and floor distribution (Plan 2) define the layout and floor heights: '
                 'extrude the building footprints into realistic 3D architecture matching these heights and positions. '
             )
+            camera_note = 'Eye-level or elevated human-scale 3/4 perspective exterior view, captured during golden hour or dusk. '
         elif plan_map.get('site'):
             plan_note = (
                 'The attached approved site plan (Plan 1) defines the parcel layout, building footprints and entries: '
                 'render realistic 3D building architecture matching these exact footprints and site boundaries. '
             )
+            camera_note = 'Eye-level or elevated human-scale 3/4 perspective exterior view, captured during golden hour or dusk. '
         else:
             plan_note = ''
+            camera_note = 'Eye-level or elevated human-scale 3/4 perspective exterior view, captured during golden hour or dusk. '
         return (
             f'Create a breathtaking, photorealistic architectural hero photograph of {name}. '
-            'Eye-level or elevated human-scale 3/4 perspective exterior view, captured during golden hour or dusk. '
+            + camera_note
             + plan_note +
             'Show the main building facade, modern luxury architecture, glass and stone materials, warm interior and exterior lighting, '
             'landscaped streetscape, palm trees, and upscale urban surroundings. '
@@ -613,18 +613,10 @@ def _visual_concept_slot_instruction(slot_id, facts):
         )
     if slot_id == 'main_facade':
         plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
-        if plan_map.get('massing') and plan_map.get('site'):
-            plan_note = (
-                'The attached reference images are the project\'s three authoritative plans: '
-                'Master Site Plan (Plan 1) fixes the exact surveyed parcel boundary, land coordinates, building footprints, villa counts, and surface parking layout; '
-                'Vertical Program Distribution (Plan 2) fixes the exact floor counts and heights; '
-                'and Conceptual 3D Massing (Plan 3) fixes the volumetric 3D massing and composition. '
-                'You MUST strictly respect the true parcel boundaries, villa counts, and building placements from the site plan, matching the 3D massing heights. '
-            )
-        elif plan_map.get('massing'):
+        if plan_map.get('massing'):
             plan_clause = (
                 'The attached approved massing diagram (Plan 3) defines the exact building massing, height, '
-                'and use bands; preserve them and add nothing. '
+                'and use bands; render the main facade matching this exact architecture and proportion. '
             )
         elif plan_map.get('site'):
             plan_clause = (
@@ -643,15 +635,7 @@ def _visual_concept_slot_instruction(slot_id, facts):
     if slot_id in VISUAL_CONCEPT_MOODBOARD_SLOTS:
         view_name = _visual_concept_slot_label(slot_id, facts)
         plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
-        if plan_map.get('massing') and plan_map.get('site'):
-            plan_note = (
-                'The attached reference images are the project\'s three authoritative plans: '
-                'Master Site Plan (Plan 1) fixes the exact surveyed parcel boundary, land coordinates, building footprints, villa counts, and surface parking layout; '
-                'Vertical Program Distribution (Plan 2) fixes the exact floor counts and heights; '
-                'and Conceptual 3D Massing (Plan 3) fixes the volumetric 3D massing and composition. '
-                'You MUST strictly respect the true parcel boundaries, villa counts, and building placements from the site plan, matching the 3D massing heights. '
-            )
-        elif plan_map.get('massing'):
+        if plan_map.get('massing'):
             mass_note = (
                 'The attached approved massing diagram (Plan 3) defines its massing, heights, and use bands — '
                 'keep the architecture, materials, height, and massing identical to it. '

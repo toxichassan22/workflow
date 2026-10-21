@@ -1,11 +1,13 @@
 def _visual_concept_collect_generation_references(facts, slot_id, cover_image='', tenant_id=None):
     tenant_id = tenant_id or getattr(g, 'tenant_id', None)
     plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
-    # Ground the exterior render on all available architectural plans in order:
-    # Plan 1 (site plan for exact boundary, coordinates, counts & layout),
-    # Plan 2 (floor distribution for heights and vertical program),
-    # and Plan 3 (3D conceptual massing for volumetric composition).
-    plan_urls = [url for url in (plan_map.get('site'), plan_map.get('uses'), plan_map.get('massing')) if url]
+    # The exterior render is grounded directly on the approved 3D massing diagram (Plan 3)
+    # as the single 3D geometric base, or falls back to both the approved site plan (Plan 1)
+    # and floor uses (Plan 2) when massing is not available.
+    if plan_map.get('massing'):
+        plan_urls = [plan_map['massing']]
+    else:
+        plan_urls = [url for url in (plan_map.get('site'), plan_map.get('uses')) if url]
     # Exterior slots render the approved plans: the plan diagram leads the
     # reference set, then the map and every named style ref — 4 urls + 5 files
     # must all fit so the enumerated order matches the attached order.
@@ -64,32 +66,15 @@ def _visual_concept_exterior_conformity_suffix(prompt, facts, slot_id):
     if slot_id not in VISUAL_CONCEPT_EXTERNAL_SLOTS:
         return prompt
     plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
-    if plan_map.get('massing') and plan_map.get('site'):
-        return (
-            f'{prompt} The attached reference images include the project\'s three authoritative architectural plans in order: '
-            '1. Master Site Plan (Plan 1): The absolute authority on 2D parcel boundary, land coordinates, shape, setbacks, '
-            'road edges, and exact positions and counts of all buildings, villas, surface parking lots, swimming pool, and padel courts. '
-            '2. Vertical Program Distribution (Plan 2): Follow this diagram for exact floor counts, building heights, and use categories. '
-            '3. Conceptual 3D Massing (Plan 3): The 3D geometry authority for volumetric massing, proportions, and 3D architectural composition. '
-            'Reproduce its buildings, their positions, their footprints, their heights and their volumes exactly as drawn. '
-            'Do not add, remove, merge, split, move, rotate or resize any mass, and do not change any count, number, dimension or area. '
-            'Do not invent anything that is not in it. '
-            'CRITICAL ARCHITECTURAL RENDERING RULES: Render this as a breathtaking, photorealistic architectural '
-            'perspective photograph. Strictly match the exact parcel boundary, building counts, and parking placement from Plan 1, '
-            'extruded to the exact heights and 3D massing from Plan 2 and Plan 3. '
-            'NEVER copy or render any text, titles, labels, "CONCEPTUAL 3D MASSING", program keys, or 2D diagram overlays.'
-        )
     if plan_map.get('massing'):
         return (
-            f'{prompt} The first attached image is the approved massing diagram (Plan 3) of this project, '
-            'and it is the only geometry authority: reproduce its buildings, their positions, their '
-            'footprints, their heights and their volumes exactly as drawn. Do not add, remove, merge, '
-            'split, move, rotate or resize any mass, and do not change any count, number, dimension or '
-            'area. Do not invent anything that is not in it. The other attached images are reference '
-            'material only — the site map and the client style references: they set the design '
-            'language, never the geometry. '
-            'CRITICAL ARCHITECTURAL RENDERING RULES: Render this as a breathtaking, photorealistic architectural '
-            'perspective photograph with realistic materials, glass, warm lighting, and luxury streetscape. '
+            f'{prompt} The first attached image is the approved massing diagram (Plan 3) of this project. '
+            'Your task is direct image-to-image architectural rendering: render the finished architectural design directly ONTO this exact 3D diagram, converting it into a finished, photorealistic architectural photograph. '
+            'Faithfully preserve the exact 3D perspective, camera viewpoint, building positions, villa counts, heights, footprints, swimming pool, padel courts, and parking layout exactly as drawn in Plan 3. '
+            'Do not add, remove, merge, split, move, rotate or resize any mass, and do not change any count, number, dimension or area. Do not invent anything that is not in it. '
+            'The other attached images are reference material only (such as client style references): they set the design language and materials, never the geometry. '
+            'Dress the exact masses with luxurious modern materials, glass curtain walls, realistic street surfaces, and landscaping. '
+            'CRITICAL ARCHITECTURAL RENDERING RULES: Render this as a breathtaking, photorealistic architectural photograph directly corresponding to the 3D massing. '
             'NEVER copy or render any text, titles, labels, "CONCEPTUAL 3D MASSING", program keys, or 2D diagram overlays.'
         )
     if plan_map.get('site') and plan_map.get('uses'):
