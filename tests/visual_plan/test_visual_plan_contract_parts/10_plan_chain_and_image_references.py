@@ -10,7 +10,7 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
     "unsupported mimetype ('image/svg+xml')" and kills the whole call, which
     the client could only report as the generic "تعذر توليد الصورة". And the
     diagrams build on each other in a fixed order: Plan 2 on Plan 1, Plan 3 on
-    Plan 1 and Plan 2, and the exterior render on Plan 3 alone.
+    Plan 1 and Plan 2, and the exterior render on all three plans.
     """
 
     def test_an_svg_reference_is_rasterized_before_the_images_api_sees_it(self):
@@ -33,7 +33,7 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
 
         self.assertEqual(prepared, [])
 
-    def test_the_exterior_render_is_grounded_on_the_massing_diagram_only(self):
+    def test_the_exterior_render_is_grounded_on_all_three_plans_when_available(self):
         module = self.application_module
         facts = {
             'plan_image_map': {
@@ -50,9 +50,19 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
             module.g.tenant_id = self.tenant_a
             cover_refs = module._visual_concept_collect_generation_references(facts, 'cover')
 
+        self.assertIn('/uploads/creative/tenant/plan1.svg', cover_refs)
+        self.assertIn('/uploads/creative/tenant/plan2.svg', cover_refs)
         self.assertIn('/uploads/creative/tenant/plan3.svg', cover_refs)
-        self.assertNotIn('/uploads/creative/tenant/plan1.svg', cover_refs)
-        self.assertNotIn('/uploads/creative/tenant/plan2.svg', cover_refs)
+        self.assertEqual(cover_refs[:3], [
+            '/uploads/creative/tenant/plan1.svg',
+            '/uploads/creative/tenant/plan2.svg',
+            '/uploads/creative/tenant/plan3.svg',
+        ])
+        suffix = module._visual_concept_exterior_conformity_suffix(
+            'Create hero image.', facts, 'cover')
+        self.assertIn('three authoritative architectural plans in order', suffix)
+        self.assertIn('Master Site Plan (Plan 1)', suffix)
+        self.assertIn('Conceptual 3D Massing (Plan 3)', suffix)
 
     def test_an_exterior_render_falls_back_to_site_plan_when_massing_absent(self):
         module = self.application_module
