@@ -404,7 +404,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(research['error'], 'رصيد غير كافٍ')
         self.assertIn('fatal.example', started)
 
-    def test_aggregator_calls_sol_max_and_preserves_only_received_citations(self):
+    def test_aggregator_calls_sonnet_and_preserves_only_received_citations(self):
         module = self.module
         response = {'choices': [{'message': {'content': '{}', 'annotations': []}}]}
         captured = {}
@@ -421,8 +421,8 @@ class SummaryBrowseAgentTests(unittest.TestCase):
 
         self.assertIs(result, response)
         self.assertEqual(captured['model'], module._SUMMARY_AGGREGATOR_MODEL)
-        self.assertEqual(captured['model'], 'openai/gpt-6.1-sol')
-        self.assertEqual(captured['reasoning_effort'], 'medium')
+        self.assertEqual(captured['model'], 'anthropic/claude-sonnet-5.5')
+        self.assertIsNone(captured.get('reasoning_effort'))
         self.assertEqual(captured['max_tokens'], 66000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         annotations = result['choices'][0]['message']['annotations']
