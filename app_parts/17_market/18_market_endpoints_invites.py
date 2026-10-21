@@ -942,10 +942,6 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
 
 def _start_market_job(kind, executor):
     data = request.json or {}
-    _billing_guard = _require_billing_balance(
-        'market_competitors' if kind == 'competitors' else 'market_summary')
-    if _billing_guard is not None:
-        return _billing_guard
     use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
     if not use_background:
         result = executor(data)

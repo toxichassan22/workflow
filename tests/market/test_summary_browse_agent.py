@@ -572,6 +572,26 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         resumable_job['resumeState']['researchers'] = {}
         self.assertFalse(module._market_job_can_resume(resumable_job))
 
+    def test_market_job_can_resume_on_credit_or_saved_researchers(self):
+        module = self.module
+        # Credit/billing failures are always resumable
+        self.assertTrue(module._market_job_can_resume({
+            'kind': 'summary', 'status': 'failed', 'failureReason': 'insufficient_credit'
+        }))
+        self.assertTrue(module._market_job_can_resume({
+            'kind': 'summary', 'status': 'failed', 'failureReason': 'billing_refused'
+        }))
+        # General failure with saved researchers in resumeState is resumable
+        self.assertTrue(module._market_job_can_resume({
+            'kind': 'summary', 'status': 'failed', 'failureReason': 'job_failed',
+            'resumeState': {'researchers': {'task-abc': {'pages': 2}}}
+        }))
+        # General failure without saved researchers is not resumable
+        self.assertFalse(module._market_job_can_resume({
+            'kind': 'summary', 'status': 'failed', 'failureReason': 'job_failed',
+            'resumeState': {'researchers': {}}
+        }))
+
     def test_summary_prompt_assigns_research_to_playwright_workers(self):
         prompt = market_study.build_summary_user_prompt(
             {'city': 'جدة', 'summaryScope': {'cities': [

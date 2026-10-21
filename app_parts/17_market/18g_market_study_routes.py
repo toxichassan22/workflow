@@ -147,9 +147,6 @@ def api_market_study_research_trace(job_id):
 def api_resume_market_study_job(job_id):
     if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
         return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
-    billing_guard = _require_billing_balance('market_summary')
-    if billing_guard is not None:
-        return billing_guard
     with _MARKET_JOB_RESUME_LOCK:
         job = _read_market_job(g.tenant_id, job_id)
         if not job:

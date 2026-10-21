@@ -1,17 +1,18 @@
 # OpenRouter chat and streaming request paths.
 
-def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, tool_choice=None, usage_ctx=None, _credit_recovery_attempted=False):
-    gate = _tenant_key_gate(usage_ctx)
-    if gate is not None:
-        return {"error": gate}
-    if not _has_any_openrouter_key(usage_ctx):
+def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, tool_choice=None, usage_ctx=None, _credit_recovery_attempted=False, _force_platform=False):
+    if not _force_platform:
+        gate = _tenant_key_gate(usage_ctx)
+        if gate is not None:
+            return {"error": gate}
+    if not _has_any_openrouter_key(usage_ctx, force_platform=_force_platform):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     # A cancelled run must never reach the provider — the whole point of the
     # stop button is that these tokens are never spent.
     if run_control.run_is_cancelled(usage_ctx):
         return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
-    headers = _openrouter_headers(usage_ctx)
+    headers = _openrouter_headers(usage_ctx, force_platform=_force_platform)
     user_message_content = user_content
     if image_references:
         user_message_content = [{"type": "text", "text": str(user_content)}]
@@ -84,6 +85,23 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
                         plugins=plugins, max_tool_calls=max_tool_calls,
                         tool_choice=tool_choice, usage_ctx=usage_ctx,
                         _credit_recovery_attempted=True,
+                        _force_platform=_force_platform,
+                    )
+                if (_ai_call_uses_tenant_key(usage_ctx)
+                        and not _force_platform
+                        and OPENROUTER_KEY):
+                    print(f"[OPENROUTER CHAT FALLBACK] Tenant key refusal ({fatal.get('error_code')}), retrying with platform key...")
+                    return call_openrouter_chat(
+                        system_prompt, user_content,
+                        temperature=temperature, max_tokens=max_tokens,
+                        model=model, timeout=timeout,
+                        reasoning_effort=reasoning_effort,
+                        response_format=response_format, provider=provider,
+                        image_references=image_references, tools=tools,
+                        plugins=plugins, max_tool_calls=max_tool_calls,
+                        tool_choice=tool_choice, usage_ctx=usage_ctx,
+                        _credit_recovery_attempted=True,
+                        _force_platform=True,
                     )
                 return {"error": fatal}
             if isinstance(error, dict) and 'message' in error:
@@ -169,7 +187,7 @@ def call_text_chat_parallel(system_prompt, user_content, temperature=0.7, max_to
     raise Exception(f"All {attempts} parallel text attempts failed")
 
 
-def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None, on_token=None, read_timeout=60):
+def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, usage_ctx=None, on_token=None, read_timeout=60, _credit_recovery_attempted=False, _force_platform=False):
     """Streaming twin of call_openrouter_chat: identical request, tokens via on_token.
 
     The payload carries the same model, messages and limits with stream mode on,
@@ -182,16 +200,17 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
     same {"error": ...} shape; only on_token is new, and it must never raise.
     """
     import time as _time
-    gate = _tenant_key_gate(usage_ctx)
-    if gate is not None:
-        return {"error": gate}
-    if not _has_any_openrouter_key(usage_ctx):
+    if not _force_platform:
+        gate = _tenant_key_gate(usage_ctx)
+        if gate is not None:
+            return {"error": gate}
+    if not _has_any_openrouter_key(usage_ctx, force_platform=_force_platform):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     # A cancelled run must never reach the provider.
     if run_control.run_is_cancelled(usage_ctx):
         return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
-    headers = _openrouter_headers(usage_ctx)
+    headers = _openrouter_headers(usage_ctx, force_platform=_force_platform)
     user_message_content = user_content
     if image_references:
         user_message_content = [{"type": "text", "text": str(user_content)}]
@@ -273,6 +292,22 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
         _settle_ai_attempt_record(attempt_id, 'error', {}, None)
         fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
         if fatal is not None:
+            if (_ai_call_uses_tenant_key(usage_ctx)
+                    and not _force_platform
+                    and OPENROUTER_KEY):
+                print(f"[OPENROUTER STREAM FALLBACK] Tenant key refusal ({fatal.get('error_code')}), retrying with platform key...")
+                return call_openrouter_chat_stream(
+                    system_prompt, user_content,
+                    temperature=temperature, max_tokens=max_tokens,
+                    model=model, timeout=timeout,
+                    reasoning_effort=reasoning_effort,
+                    response_format=response_format, provider=provider,
+                    image_references=image_references, tools=tools,
+                    plugins=plugins, usage_ctx=usage_ctx,
+                    on_token=on_token, read_timeout=read_timeout,
+                    _credit_recovery_attempted=True,
+                    _force_platform=True,
+                )
             return {"error": fatal}
         if isinstance(error, dict) and 'message' in error:
             error['message'] = f"[{response.status_code}] {error['message']}"
@@ -303,7 +338,13 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
                 return run_control.cancelled_response(''.join(content_parts))
             if not line:
                 continue
-            text = line.strip()
+            if isinstance(line, bytes):
+                try:
+                    text = line.decode('utf-8', errors='ignore').strip()
+                except Exception:
+                    text = str(line).strip()
+            else:
+                text = line.strip()
             if not text.startswith('data:'):
                 continue
             text = text[5:].strip()

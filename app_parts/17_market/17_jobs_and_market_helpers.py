@@ -297,8 +297,7 @@ def _market_job_can_resume(job):
     resume_state = job.get('resumeState')
     researchers = (resume_state.get('researchers')
                    if isinstance(resume_state, dict) else None)
-    return bool(reason == 'aggregator_failed'
-                and isinstance(researchers, dict) and researchers)
+    return bool(isinstance(researchers, dict) and researchers)
 
 
 def _public_job(job):

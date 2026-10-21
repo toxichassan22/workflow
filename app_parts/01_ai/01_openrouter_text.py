@@ -41,38 +41,39 @@ def _worker_app_context():
     return contextlib.nullcontext() if has_app_context() else app.app_context()
 
 
-def _resolve_openrouter_key(usage_ctx=None, tenant_id=None):
+def _resolve_openrouter_key(usage_ctx=None, tenant_id=None, force_platform=False):
     """Provider key for one call: the company key first, global fallback after.
 
     Returns the raw bearer string or None. Never raises: metering and tests
     run outside requests too, and a missing key must surface as a normal
     provider error, not a 500.
     """
-    tid = tenant_id
-    if tid is None:
-        tid = _tenant_id_from_usage_ctx(usage_ctx)
-    if tid:
-        with _worker_app_context():
-            try:
-                raw = db.get_tenant_openrouter_key_raw(tid)
-                if raw:
-                    return raw
-            except Exception as exc:
-                print(f"[OPENROUTER KEY] tenant lookup failed: {exc}")
+    if not force_platform:
+        tid = tenant_id
+        if tid is None:
+            tid = _tenant_id_from_usage_ctx(usage_ctx)
+        if tid:
+            with _worker_app_context():
+                try:
+                    raw = db.get_tenant_openrouter_key_raw(tid)
+                    if raw:
+                        return raw
+                except Exception as exc:
+                    print(f"[OPENROUTER KEY] tenant lookup failed: {exc}")
     return OPENROUTER_KEY
 
 
-def _openrouter_headers(usage_ctx=None, tenant_id=None, title='Real Estate Proposal Generator'):
+def _openrouter_headers(usage_ctx=None, tenant_id=None, title='Real Estate Proposal Generator', force_platform=False):
     return {
-        "Authorization": f"Bearer {_resolve_openrouter_key(usage_ctx, tenant_id)}",
+        "Authorization": f"Bearer {_resolve_openrouter_key(usage_ctx, tenant_id, force_platform=force_platform)}",
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com",
         "X-Title": title,
     }
 
 
-def _has_any_openrouter_key(usage_ctx=None, tenant_id=None):
-    return bool(_resolve_openrouter_key(usage_ctx, tenant_id))
+def _has_any_openrouter_key(usage_ctx=None, tenant_id=None, force_platform=False):
+    return bool(_resolve_openrouter_key(usage_ctx, tenant_id, force_platform=force_platform))
 
 
 # Auto-provisioning is retried at most once per window per tenant — an

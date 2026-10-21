@@ -12,24 +12,26 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
                              response_format=None, model=None, max_tokens=8000,
                              temperature=None, reasoning_effort=None,
                              provider=None, plugins=None, max_tool_calls=None,
-                             timeout=300, usage_ctx=None):
+                             timeout=300, usage_ctx=None,
+                             _credit_recovery_attempted=False, _force_platform=False):
     """One round-trip against /chat/completions with a caller-built message list.
 
     ``messages`` may contain system/user/assistant/tool roles; assistant entries
     keep their ``tool_calls`` so the response can continue a tool loop.
     Returns the raw provider dict (same shape as call_openrouter_chat).
     """
-    gate = _tenant_key_gate(usage_ctx)
-    if gate is not None:
-        return {"error": gate}
-    if not _has_any_openrouter_key(usage_ctx):
+    if not _force_platform:
+        gate = _tenant_key_gate(usage_ctx)
+        if gate is not None:
+            return {"error": gate}
+    if not _has_any_openrouter_key(usage_ctx, force_platform=_force_platform):
         return {"error": {"message": "OPENROUTER_KEY is missing"}}
     # A cancelled run must never reach the provider — the agent's planner is
     # one of the most expensive calls in the product.
     if run_control.run_is_cancelled(usage_ctx):
         return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
-    headers = _openrouter_headers(usage_ctx)
+    headers = _openrouter_headers(usage_ctx, force_platform=_force_platform)
     payload = {
         "model": model_name,
         "messages": messages if isinstance(messages, list) else [],
@@ -73,6 +75,18 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
             _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id)
             fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
             if fatal is not None:
+                if (_ai_call_uses_tenant_key(usage_ctx)
+                        and not _force_platform
+                        and OPENROUTER_KEY):
+                    print(f"[OPENROUTER MESSAGES FALLBACK] Tenant key refusal ({fatal.get('error_code')}), retrying with platform key...")
+                    return call_openrouter_messages(
+                        messages, tools=tools, tool_choice=tool_choice,
+                        response_format=response_format, model=model, max_tokens=max_tokens,
+                        temperature=temperature, reasoning_effort=reasoning_effort,
+                        provider=provider, plugins=plugins, max_tool_calls=max_tool_calls,
+                        timeout=timeout, usage_ctx=usage_ctx,
+                        _credit_recovery_attempted=True, _force_platform=True,
+                    )
                 return {"error": fatal}
             if isinstance(error, dict) and 'message' in error:
                 error['message'] = f"[{response.status_code}] {error['message']}"

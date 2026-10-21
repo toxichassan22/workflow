@@ -137,6 +137,48 @@ class GenerationBillingErrorTests(unittest.TestCase):
         self.assertEqual(post.call_count, 2)
         repair.assert_called_once_with(usage_ctx)
 
+    def test_tenant_key_refusal_falls_back_to_platform_key_and_succeeds(self):
+        module = self.application_module
+        usage_ctx = {'tenant_id': self.tenant_id, 'billing_flow': 'market_summary'}
+        success = {'choices': [{'message': {'content': 'platform fallback answer'}}]}
+        with self.app.app_context(), \
+             patch.object(module, '_tenant_key_gate', return_value=None), \
+             patch.object(module, '_has_any_openrouter_key', return_value=True), \
+             patch.object(module, '_ai_call_uses_tenant_key', return_value=True), \
+             patch.object(module, '_repair_tenant_key_limit_after_refusal', return_value=False), \
+             patch.object(module, 'OPENROUTER_KEY', 'sk-or-platform-master'), \
+             patch.object(module.requests, 'post', side_effect=[
+                 _FakeResponse({'error': {'message': 'Key limit exceeded', 'code': 402}}, 402),
+                 _FakeResponse(success),
+             ]) as post:
+            result = module.call_openrouter_chat(
+                'sys', 'hi', max_tokens=10, usage_ctx=usage_ctx)
+        self.assertEqual(result, success)
+        self.assertEqual(post.call_count, 2)
+
+    def test_stream_tenant_key_refusal_falls_back_to_platform_key_and_succeeds(self):
+        module = self.application_module
+        usage_ctx = {'tenant_id': self.tenant_id, 'billing_flow': 'market_summary'}
+        success_stream = _FakeResponse({}, 200)
+        success_stream.iter_lines = lambda **_kw: [
+            'data: {"choices": [{"delta": {"content": "تحليل"}}]}',
+            'data: [DONE]'
+        ]
+        with self.app.app_context(), \
+             patch.object(module, '_tenant_key_gate', return_value=None), \
+             patch.object(module, '_has_any_openrouter_key', return_value=True), \
+             patch.object(module, '_ai_call_uses_tenant_key', return_value=True), \
+             patch.object(module, 'OPENROUTER_KEY', 'sk-or-platform-master'), \
+             patch.object(module.requests, 'post', side_effect=[
+                 _FakeResponse({'error': {'message': 'Insufficient credits', 'code': 402}}, 402),
+                 success_stream,
+             ]) as post:
+            result = module.call_openrouter_chat_stream(
+                'sys', 'hi', max_tokens=10, usage_ctx=usage_ctx)
+        self.assertIn('choices', result)
+        self.assertEqual(result['choices'][0]['message']['content'], 'تحليل')
+        self.assertEqual(post.call_count, 2)
+
     def test_key_cap_recovery_only_runs_when_wallet_entitlement_covers_estimate(self):
         module = self.application_module
         with self.app.app_context():
