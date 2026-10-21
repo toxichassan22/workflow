@@ -142,6 +142,12 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
     district = _norm(row.get('district') or row.get('neighborhood') or row.get('الحي'))
     distance_km = _clean_numeric(_first_nonempty(
         row.get('distance_km'), row.get('distanceKm'), row.get('distance'), row.get('المسافة')))
+    if distance_km:
+        try:
+            d_dec = Decimal(distance_km)
+            distance_km = format(round(d_dec, 2), 'f').rstrip('0').rstrip('.')
+        except (InvalidOperation, TypeError, ValueError):
+            pass
     lat = _clean_numeric(_first_nonempty(row.get('lat'), row.get('latitude'), row.get('خط العرض')))
     lng = _clean_numeric(_first_nonempty(
         row.get('lng'), row.get('lon'), row.get('longitude'), row.get('خط الطول')))

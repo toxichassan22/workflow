@@ -422,7 +422,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIs(result, response)
         self.assertEqual(captured['model'], module._SUMMARY_AGGREGATOR_MODEL)
         self.assertEqual(captured['model'], 'openai/gpt-6.1-sol')
-        self.assertEqual(captured['reasoning_effort'], 'max')
+        self.assertEqual(captured['reasoning_effort'], 'high')
         self.assertEqual(captured['max_tokens'], 66000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         annotations = result['choices'][0]['message']['annotations']
@@ -846,6 +846,21 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 {}, group, [host], 'جدة', 'الروضة')
             for url in catalog_urls.get(host, []):
                 self.assertIn(url, prompt)
+
+    def test_normalize_competitor_row_rounds_distance_km(self):
+        normalized = market_study.normalize_competitor_row({
+            'name': 'The Luxury Collection Hotel',
+            'distance_km': '29.58504816161824125',
+        })
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized['distance_km'], '29.59')
+
+    def test_summary_prompt_prohibits_unrequested_divisions(self):
+        prompt_ar = market_study.build_summary_user_prompt({'summaryScope': {'cities': [{'name': 'جدة'}]}}, [])
+        self.assertIn('يُمنع منعًا باتًا إجراء أي عمليات قسمة حسابية يدوية', prompt_ar)
+        self.assertIn('افصل تمامًا وبدقة بين مسافة المنافس بالكيلومتر distance_km وبين أسعار الوحدات', prompt_ar)
+        prompt_en = market_study.build_summary_user_prompt({'summaryScope': {'cities': [{'name': 'Jeddah'}]}}, [], offer_lang='en')
+        self.assertIn('Strictly forbid performing unrequested ad-hoc mathematical divisions', prompt_en)
 
 
 if __name__ == '__main__':

@@ -316,7 +316,7 @@ def _competitor_distance_from_coordinates(row, scope):
     delta_lng = math.radians(lng - origin_lng)
     haversine = (math.sin(delta_lat / 2) ** 2
                  + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2)
-    return 6371.0 * 2 * math.asin(math.sqrt(min(1.0, haversine)))
+    return round(6371.0 * 2 * math.asin(math.sqrt(min(1.0, haversine))), 2)
 
 
 def competitor_matches_location_scope(row, scope, city='', district=''):
