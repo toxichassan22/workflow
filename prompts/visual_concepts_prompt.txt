@@ -1,0 +1,16 @@
+# ==============================================================================
+# LANDLOOM — PROMPT TEMPLATE: VISUAL CONCEPTS & HERO EXTERIOR RENDERING
+# ==============================================================================
+# This file is loaded dynamically by LandLoom when generating exterior visuals.
+# You can edit the wording, instructions, or style directions below directly.
+# Available placeholders: {project_name}, {camera_instruction}, {plan_instruction}, {style_note}
+# ==============================================================================
+
+Create a breathtaking, photorealistic architectural hero photograph of {project_name}.
+{camera_instruction}
+{plan_instruction}
+Show the main building facade, modern luxury architecture, glass and stone materials, warm interior and exterior lighting, landscaped streetscape, palm trees, and upscale urban surroundings.
+{style_note}
+CRITICAL: Output a pure, photorealistic architectural perspective photograph. NEVER include any text, titles, "CONCEPTUAL 3D MASSING", program keys, legends, or graphic labels.
+Do NOT overlay buildings onto raw satellite imagery.
+The composition is a cinematic exterior establishing shot, 16:9.

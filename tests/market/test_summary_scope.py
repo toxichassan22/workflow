@@ -93,6 +93,21 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertNotIn('بحث جوجل الأصلي', prompt)
         self.assertNotIn('حيين مجاورين مختلفين ممنوع', prompt)
 
+    def test_market_prompt_template_file_is_respected(self):
+        with tempfile.NamedTemporaryFile('w', encoding='utf-8', suffix='.txt', delete=False) as tf:
+            tf.write("CUSTOM_MARKET_TEST_RULE: ركز فقط على العائد الاستثماري")
+            tf_path = Path(tf.name)
+        try:
+            orig = getattr(market_study, '_MARKET_STUDY_PROMPT_FILE', None)
+            setattr(market_study, '_MARKET_STUDY_PROMPT_FILE', tf_path)
+            prompt = market_study.build_summary_user_prompt({'projectType': 'سكني'}, [])
+            self.assertIn('CUSTOM_MARKET_TEST_RULE: ركز فقط على العائد الاستثماري', prompt)
+        finally:
+            if orig is not None:
+                setattr(market_study, '_MARKET_STUDY_PROMPT_FILE', orig)
+            if tf_path.exists():
+                tf_path.unlink()
+
     def test_summary_activity_profile_ignores_competitor_comparison_types(self):
         profile = market_study.summary_activity_profile({
             'projectType': 'سكني', 'comparisonTypes': ['hotel', 'commercial']})

@@ -304,3 +304,11 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
         err = module._visual_concept_external_gate(data_missing_uses, 'cover')
         self.assertIsNotNone(err)
         self.assertEqual(err['error_code'], 'PLANS_IMAGES_REQUIRED')
+
+    def test_visual_concept_prompt_template_file_is_respected(self):
+        """Exterior cover slot instruction reads and formats prompts/visual_concepts_prompt.txt."""
+        module = self.application_module
+        facts = {'project_name': 'Test Oasis Project', 'plan_image_map': {}}
+        instruction = module._visual_concept_slot_instruction('cover', facts)
+        self.assertIn('Test Oasis Project', instruction)
+        self.assertIn('Create a breathtaking, photorealistic architectural hero photograph', instruction)

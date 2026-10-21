@@ -1,5 +1,11 @@
 """Geographic and project-activity scope rules for market summaries."""
 
+import os
+
+_MARKET_STUDY_PROMPT_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+    'prompts', 'market_study_prompt.txt')
+
 
 def summary_activity_profile(payload):
     """Resolve only the project's selected activities, excluding comparison filters."""
@@ -230,6 +236,18 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'The one_block_summary is a separate, cohesive executive paragraph with no fixed word limit; keep the '
             'detailed axis analysis clearly divided into lines.\n')
         decision = 'Allowed decision values: ' + ', '.join(DECISION_OPTIONS) + '.\n'
+        prompt_file = str(globals().get('_MARKET_STUDY_PROMPT_FILE') or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+            'prompts', 'market_study_prompt.txt'))
+        if os.path.exists(prompt_file):
+            try:
+                with open(prompt_file, 'r', encoding='utf-8') as pf:
+                    lines = [l for l in pf.readlines() if not l.strip().startswith('#')]
+                    custom_market = ''.join(lines).strip()
+                    if custom_market:
+                        narrative_rules = custom_market + '\n' + narrative_rules
+            except Exception:
+                pass
         current = (
             'Previous draft, sources, and SWOT are context only; verify every retained claim against current evidence.\n'
             + json.dumps({'summary': current_summary, 'sources': current_sources,
@@ -310,6 +328,18 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'في project_evaluation وضح المدخلات التي لا تكفي للحكم ولا تخترع حالة مالية. اجعل one_block_summary '
             'فقرة تنفيذية متماسكة ومسترسلة رفيعة الصياغة بلا حد للكلمات؛ وتبقى محاور التحليل التفصيلية متدفقة ومكتملة الأركان.\n')
         decision = 'قيم القرار المسموحة: ' + '، '.join(DECISION_OPTIONS) + '.\n'
+        prompt_file = str(globals().get('_MARKET_STUDY_PROMPT_FILE') or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))),
+            'prompts', 'market_study_prompt.txt'))
+        if os.path.exists(prompt_file):
+            try:
+                with open(prompt_file, 'r', encoding='utf-8') as pf:
+                    lines = [l for l in pf.readlines() if not l.strip().startswith('#')]
+                    custom_market = ''.join(lines).strip()
+                    if custom_market:
+                        narrative_rules = custom_market + '\n' + narrative_rules
+            except Exception:
+                pass
         current = (
             'الملخص والمصادر وSWOT السابقة للسياق فقط؛ تحقق من كل معلومة ستبقيها على الدليل الحالي.\n'
             + json.dumps({'summary': current_summary, 'sources': current_sources,

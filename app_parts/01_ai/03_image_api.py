@@ -601,6 +601,22 @@ def _visual_concept_slot_instruction(slot_id, facts):
         else:
             plan_note = ''
             camera_note = 'Eye-level or elevated human-scale 3/4 perspective exterior view, captured during golden hour or dusk. '
+        prompt_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                                   'prompts', 'visual_concepts_prompt.txt')
+        if os.path.exists(prompt_file):
+            try:
+                with open(prompt_file, 'r', encoding='utf-8') as pf:
+                    lines = [l for l in pf.readlines() if not l.strip().startswith('#')]
+                    template = ''.join(lines).strip()
+                    if template:
+                        return template.format(
+                            project_name=name,
+                            camera_instruction=camera_note,
+                            plan_instruction=plan_note,
+                            style_note=style_note,
+                        )
+            except Exception:
+                pass
         return (
             f'Create a breathtaking, photorealistic architectural hero photograph of {name}. '
             + camera_note
