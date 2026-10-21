@@ -320,6 +320,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             '\nFinal output rules override any earlier conflicting instruction. Use a formal real-estate advisory tone. '
             'Keep the narrative cohesive, fluent, and well-structured, with every selected activity and property type thoroughly analyzed. '
             'Ensure natural phrasing for monetary figures in SAR without mechanical currency repetitions. '
+            'Round all numbers, monetary amounts, and percentages to whole integers or at most two decimal places (e.g. 218.76 or 219); never output long floating-point decimals or unrounded fractions like 218.763680126269923099. '
+            'Express all findings in fluent, coherent, and grammatically complete sentences without stacking raw disconnected tags or table headers. '
             'Every district present in summaryLocalBenchmarks must have its own standalone analytical paragraph. '
             'Every rental category in rental_groups must include both its transaction count and its average annual rental value. '
             'Give every evidence-supported category comparable depth and include all useful figures; impose no word limit. '
@@ -330,6 +332,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
         final_output_rules = (
             '\nقواعد الإخراج النهائية تتقدم على أي تعليمات سابقة تتعارض معها. استخدم صياغة استشارية عقارية رسمية وفورمال ومسترسلة. '
             'حافظ على ترابط الفقرات وتدفقها السلس مع إبراز كل نشاط ونوع عقار وفئة وحدات دون تجزئة جافة مخلة. '
+            'اكتب بأسلوب لغوي عربي سليم ومترابط وفصيح؛ يُمنع منعًا باتًا رصف الكلمات أو الأعمدة أو التصنيفات بدون صياغة جملية متماسكة (مثل تجنب صياغات عشوائية كـ «مبيت زائر سائح محلي» أو «توزعوا بـ ...»). '
+            'قرّب جميع المبالغ المالية والأرقام والنسب الإحصائية إلى أرقام صحيحة أو منزلتين عشريتين كحد أقصى (مثال: 218.76 ألف ريال أو 219 ألف ريال)، ويُمنع منعًا باتًا كتابة أرقام بفواصل عائمة طويلة أو كسور غير مقربة مثل 218.763680126269923099. '
             'اكتب اسم العملة «ريال» أو «ريال سعودي» بأسلوب لغوي سليم، وتجنب تماماً أي تكرار ميكانيكي أو لفظي مثل «ريال سعودي سعوديًا». '
             'لكل حي يظهر في الصفقات المرجعية المرفقة فقرة تحليلية مستقلة ببياناته الكاملة دون دمج حيين معًا. '
             'ولكل فئة إيجارية في المؤشر الإيجاري اذكر عدد الصفقات ومتوسط القيمة الإيجارية السنوية معًا. '
@@ -376,13 +380,15 @@ def build_summary_chat_system(offer_lang=None):
                    'district scope; city_position always covers the full city, while sector_performance, supply, '
                    'and demand give a concise city overview plus detailed listed districts. No nearby substitute. '
                    'Use a formal advisory tone. Omit unavailable subcategories without saying they are missing. '
-                   'Show all monetary values in SAR after verified conversion; never mention access dates in narrative.\n')
+                   'Show all monetary values in SAR after verified conversion; never mention access dates in narrative. '
+                   'Round all numbers to whole integers or at most two decimal places and avoid long floating-point decimals.\n')
     else:
         prompt += ('حلل الأنشطة والمكونات المختارة في هذا المشروع فقط. التزم بالمدينة والأحياء الاختيارية؛ city_position '
                    'يغطي المدينة كاملة دائمًا، وsector_performance وsupply وdemand تعرض قراءة موجزة للمدينة ثم '
                    'تفصيل الأحياء المدخلة. لا تستخدم حيًا بديلًا قريبًا. استخدم صياغة استشارية رسمية. احذف الفئات '
                    'الفرعية غير المتاحة دون ذكر غيابها. اعرض كل مبلغ بالريال السعودي بعد تحويل موثوق، ولا تذكر تاريخ '
-                   'الوصول في النص. لا تكتب كلمة «وسيط»؛ استخدم «متوسطًا حسابيًا» فقط عند حسابه فعلًا.\n')
+                   'الوصول في النص. قرّب الأرقام لمنزلتين عشريتين كحد أقصى وتجنب الفواصل العائمة الطويلة. '
+                   'لا تكتب كلمة «وسيط»؛ استخدم «متوسطًا حسابيًا» فقط عند حسابه فعلًا.\n')
     return prompt
 
 

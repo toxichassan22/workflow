@@ -533,10 +533,35 @@ def _summary_sar_amount(raw_amount, currency):
         if rate is None:
             return ''
         converted = amount * Decimal(str(rate))
+        converted = converted.quantize(Decimal('0.01')) if converted != converted.to_integral() else converted.to_integral()
         from numeric_precision import format_precise_number
         return format_precise_number(converted, grouped=True)
     except (InvalidOperation, TypeError, ValueError):
         return ''
+
+
+def sanitize_summary_floats(text):
+    """Round long floating-point numbers in prose to at most 2 decimal places."""
+    if not text:
+        return text
+
+    def _round_float(m):
+        full = m.group(0)
+        arabic_digits = '٠١٢٣٤٥٦٧٨٩'
+        has_arabic_digits = any(ch in full for ch in arabic_digits)
+        standardized = full.translate(str.maketrans(arabic_digits, '0123456789')).replace('٫', '.').replace('٬', ',')
+        try:
+            val = Decimal(standardized.replace(',', ''))
+            rounded = val.quantize(Decimal('0.01'))
+            res = format(rounded, 'f').rstrip('0').rstrip('.') if '.' in format(rounded, 'f') else str(int(rounded))
+            if has_arabic_digits:
+                res = res.translate(str.maketrans('0123456789.', arabic_digits + '٫'))
+            return res
+        except Exception:
+            return full
+
+    pattern = r'(?<![/\w@#&-])[0-9٠-٩]+(?:[,،٬][0-9٠-٩]{3})*[.٫][0-9٠-٩]{3,}(?![/\w@#&-])'
+    return re.sub(pattern, _round_float, str(text))
 
 
 def normalize_summary_currency(text):
@@ -574,6 +599,7 @@ def normalize_summary_currency(text):
 
 def _normalize_summary_axis_text(value):
     text = normalize_summary_currency(value)
+    text = sanitize_summary_floats(text)
     lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
     while lines and not lines[0]:
         lines.pop(0)
@@ -627,7 +653,7 @@ def normalize_summary(raw):
                 'data_date': _norm(row.get('data_date') or row.get('dataDate')),
                 'accessed_at': _norm(row.get('accessed_at') or row.get('accessedAt')) or date.today().isoformat(),
                 'reliability': _norm(row.get('reliability')) or official_source_reliability('', name, url),
-                'note': normalize_summary_currency(row.get('note')),
+                'note': sanitize_summary_floats(normalize_summary_currency(row.get('note'))),
             })
     disclaimer = _norm(data.get('disclaimer')) or (
         'هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.'
@@ -654,6 +680,7 @@ def normalize_summary(raw):
         or data.get('executive_summary')
     )
     one_block_summary = normalize_summary_currency(raw_one_block)
+    one_block_summary = sanitize_summary_floats(one_block_summary)
     one_block_summary = one_block_summary.replace('\\r\\n', '\n').replace('\\n', '\n')
     one_block_summary = re.sub(r'[ \t]+', ' ', one_block_summary)
     one_block_summary = re.sub(r'\n{3,}', '\n\n', one_block_summary)

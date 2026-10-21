@@ -33,8 +33,10 @@ def load_app_parts(root, application):
                          for target in node.targets))
     runtime = (importlib.import_module('staging_deploy_runtime')
                if importlib.util.find_spec('staging_deploy_runtime') else None)
+    import run_control
     scope = {'__file__': str(root / 'app.py'), 'os': os, 'app': application,
-             'staging_deploy_runtime': runtime}
+             'staging_deploy_runtime': runtime, 'run_control': run_control,
+             'UPLOADS_DIR': str(root / 'uploads')}
     exec(compile(ast.Module(body=tree.body[start:], type_ignores=[]), 'app.py', 'exec'), scope)
     return scope
 

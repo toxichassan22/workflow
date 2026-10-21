@@ -61,10 +61,12 @@ _SUMMARY_RESEARCH_SEARCH_BUDGET = 1000
 _SUMMARY_RESEARCHER_MODEL = 'anthropic/claude-haiku-5.5'
 _SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS = 66000
 _SUMMARY_AGGREGATOR_MAX_OUTPUT_TOKENS = 66000
+_SUMMARY_AGGREGATOR_MODEL = (os.environ.get('SUMMARY_AGGREGATOR_MODEL') or 'openai/gpt-6.1-sol').strip()
+_SUMMARY_AGGREGATOR_REASONING_EFFORT = (os.environ.get('SUMMARY_AGGREGATOR_REASONING_EFFORT') or 'max').strip()
 try:
-    _SUMMARY_AGGREGATOR_TIMEOUT = max(60, int(os.environ.get('SUMMARY_AGGREGATOR_TIMEOUT') or 1800))
+    _SUMMARY_AGGREGATOR_TIMEOUT = max(60, int(os.environ.get('SUMMARY_AGGREGATOR_TIMEOUT') or 3600))
 except (TypeError, ValueError):
-    _SUMMARY_AGGREGATOR_TIMEOUT = 1800
+    _SUMMARY_AGGREGATOR_TIMEOUT = 3600
 _SUMMARY_RESEARCH_REQUIRED_URLS = {
     'rei.rega.gov.sa': [
         'https://rei.rega.gov.sa',
@@ -955,8 +957,8 @@ def _run_market_summary_aggregator(system_prompt, prompt, usage_ctx,
         # rest of the summary instead of paying for all of it — and it is not
         # retried, because a stopped run is final.
         result = run_control.raise_if_cancelled(call_text_chat_stream(
-            system_prompt, prompt, model=GEMINI_TEXT_MODEL,
-            max_tokens=cap, reasoning_effort='medium',
+            system_prompt, prompt, model=_SUMMARY_AGGREGATOR_MODEL,
+            max_tokens=cap, reasoning_effort=_SUMMARY_AGGREGATOR_REASONING_EFFORT,
             timeout=min(_SUMMARY_AGGREGATOR_TIMEOUT, remaining or _SUMMARY_AGGREGATOR_TIMEOUT), usage_ctx=usage_ctx))
         if _ai_fatal_error_dict(result) is not None:
             return result
@@ -988,10 +990,7 @@ def _run_market_summary_aggregator(system_prompt, prompt, usage_ctx,
                 for item in annotations if isinstance(item, dict)}
         for url in research.get('citation_urls') or []:
             if url and url not in seen:
-                annotations.append({'url_citation': {'url': url,
-                                  'title': 'مصدر مفتوح أثناء البحث', 'content': ''}})
+                annotations.append({'url_citation': {'url': url, 'title': 'مصدر مفتوح أثناء البحث', 'content': ''}})
                 seen.add(url)
-    result['browse_trace'] = [
-        {'url': url, 'title': '', 'chars': 0}
-        for url in research.get('citation_urls') or []]
+    result['browse_trace'] = [{'url': url, 'title': '', 'chars': 0} for url in research.get('citation_urls') or []]
     return result

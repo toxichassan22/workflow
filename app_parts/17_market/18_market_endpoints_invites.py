@@ -88,10 +88,10 @@ def _prepare_market_payload(data, tenant_id=None):
 # handing the next stage work the job no longer has time for.
 def _market_job_time_budget(raw_value):
     try:
-        configured = int(raw_value) if str(raw_value or '').strip() else 1800
+        configured = int(raw_value) if str(raw_value or '').strip() else 3600
     except (TypeError, ValueError):
-        configured = 1800
-    return min(1800, max(60, configured))
+        configured = 3600
+    return min(7200, max(60, configured))
 
 
 _MARKET_JOB_TIME_BUDGET = _market_job_time_budget(

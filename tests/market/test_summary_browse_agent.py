@@ -404,7 +404,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertEqual(research['error'], 'رصيد غير كافٍ')
         self.assertIn('fatal.example', started)
 
-    def test_aggregator_calls_argon_and_preserves_only_received_citations(self):
+    def test_aggregator_calls_sol_max_and_preserves_only_received_citations(self):
         module = self.module
         response = {'choices': [{'message': {'content': '{}', 'annotations': []}}]}
         captured = {}
@@ -420,9 +420,9 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 deadline=time.time() + 30)
 
         self.assertIs(result, response)
-        self.assertEqual(captured['model'], module.GEMINI_TEXT_MODEL)
-        self.assertEqual(captured['model'], 'google/gemini-4-argon')
-        self.assertEqual(captured['reasoning_effort'], 'medium')
+        self.assertEqual(captured['model'], module._SUMMARY_AGGREGATOR_MODEL)
+        self.assertEqual(captured['model'], 'openai/gpt-6.1-sol')
+        self.assertEqual(captured['reasoning_effort'], 'max')
         self.assertEqual(captured['max_tokens'], 66000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         annotations = result['choices'][0]['message']['annotations']
@@ -430,9 +430,9 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                          'https://rega.gov.sa/city-data')
         self.assertTrue(result['browse_trace'])
 
-    def test_aggregator_timeout_defaults_to_thirty_minutes(self):
+    def test_aggregator_timeout_defaults_to_one_hour(self):
         module = self.module
-        self.assertEqual(module._SUMMARY_AGGREGATOR_TIMEOUT, 1800)
+        self.assertEqual(module._SUMMARY_AGGREGATOR_TIMEOUT, 3600)
         captured = {}
 
         def fake_chat(system, prompt, **kwargs):
@@ -445,7 +445,40 @@ class SummaryBrowseAgentTests(unittest.TestCase):
                 deadline=None)
 
         self.assertIn('choices', result)
-        self.assertEqual(captured.get('timeout'), 1800)
+        self.assertEqual(captured.get('timeout'), 3600)
+
+    def test_normalize_summary_rounds_long_floating_point_numbers(self):
+        import market_study
+        raw = {
+            'summary': {
+                'city_position': 'توزعوا ب 218.763680126269923099 ألف ريال سعودي خلال عام 2024 مبيت زائر',
+                'sector_performance': 'بلغ المعدل 12.345678% في تاريخ 2024-10-20 وموقع https://example.com/item.12345',
+                'supply': 'قيمة ٢١٨٫٧٦٣٦٨٠١٢٦ ألف ريال',
+            },
+            'one_block_summary': 'إجمالي الإنفاق 218.763680126269923099 ألف ريال سعودي في السوق',
+            'sources': [{'name': 'مصدر رسمي', 'url': 'https://example.com', 'note': 'بمتوسط 45.6789123 ريال'}],
+        }
+        normalized = market_study.normalize_summary(raw)
+        self.assertIn('218.76 ألف ريال سعودي', normalized['summary']['city_position'])
+        self.assertNotIn('218.763680126269923099', normalized['summary']['city_position'])
+        self.assertIn('12.35%', normalized['summary']['sector_performance'])
+        self.assertIn('2024-10-20', normalized['summary']['sector_performance'])
+        self.assertIn('https://example.com/item.12345', normalized['summary']['sector_performance'])
+        self.assertIn('٢١٨٫٧٦ ألف ريال', normalized['summary']['supply'])
+        self.assertIn('218.76 ألف ريال سعودي', normalized['one_block_summary'])
+        self.assertIn('45.68 ريال', normalized['sources'][0]['note'])
+
+    def test_summary_prompt_carries_rounding_and_natural_phrasing_rules(self):
+        import market_study
+        prompt_ar = market_study.build_summary_user_prompt({'summaryScope': {'cities': [{'name': 'جدة'}]}}, [])
+        self.assertIn('218.76', prompt_ar)
+        self.assertIn('218.763680126269923099', prompt_ar)
+        self.assertIn('قرّب جميع المبالغ المالية والأرقام', prompt_ar)
+
+        prompt_en = market_study.build_summary_user_prompt(
+            {'summaryScope': {'cities': [{'name': 'Jeddah'}]}}, [], offer_lang='en')
+        self.assertIn('Round all numbers', prompt_en)
+        self.assertIn('218.763680126269923099', prompt_en)
 
     def test_aggregator_retries_using_the_provider_affordable_token_cap(self):
         module = self.module
