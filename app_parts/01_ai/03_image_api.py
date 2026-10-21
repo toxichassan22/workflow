@@ -579,12 +579,13 @@ def _visual_concept_slot_instruction(slot_id, facts):
             plan_note = (
                 'The attached reference image is the project\'s approved 3D massing diagram (Plan 3). '
                 'Render the finished architectural design directly ONTO this exact 3D massing diagram: '
-                'faithfully convert this 3D massing diagram into a photorealistic architectural photograph. '
-                'Preserve the exact camera angle, elevated perspective, building positions, villa counts, heights, swimming pool, padel courts, and parking layout exactly as shown in Plan 3. '
-                'Do not move, remove, add, or alter any buildings or elements. '
-                'Dress each mass with realistic modern facade materials, glass curtain walls, textures, lush landscaping, paved roads, and natural lighting. '
+                'CRITICAL CONSTRAINTS: '
+                '1. DO NOT CHANGE THE CAMERA ANGLE: Maintain the exact camera angle, elevated perspective, viewpoint, and framing of the attached Plan 3 massing diagram without any rotation, shift, or tilt. '
+                '2. BUILD STRICTLY ON THE PLOT: Build the architecture strictly within the surveyed plot boundary shown in the diagram; do not expand or improvise beyond it. '
+                '3. DO NOT REDISTRIBUTE, RESTRUCTURE, OR RE-PARTITION: Do not move, rearrange, split, merge, or change the positions of any building or element. Strictly preserve the exact positions, footprints, heights, and counts of the main tower, every residential villa, the swimming pool, padel courts, and surface parking lots exactly as placed on the parcel in Plan 3. '
+                '4. DIRECT ARCHITECTURAL SKINNING: Dress the exact 3D masses on the plot with realistic modern luxury materials, glass curtain walls, textures, lush landscaping, paved roads, and natural lighting. '
             )
-            camera_note = 'Match the exact viewpoint and elevated perspective of the attached Plan 3 massing diagram. '
+            camera_note = 'Maintain the exact camera angle, perspective, and viewpoint of the attached Plan 3 massing diagram without any alteration. '
         elif plan_map.get('site') and plan_map.get('uses'):
             plan_note = (
                 'The attached approved site plan (Plan 1) and floor distribution (Plan 2) define the layout and floor heights: '

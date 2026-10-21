@@ -253,16 +253,16 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
         self.assertIn('Every word in the drawing is English', prompt)
         self.assertIn('VERTICAL PROGRAM DISTRIBUTION', prompt)
 
-    def test_visual_concept_image_model_defaults_to_gemini_flash_image(self):
+    def test_visual_concept_image_model_defaults_to_sunburst(self):
         """The default model for generating visual concepts and images is
-        pinned to google/gemini-3.1-flash-image."""
+        pinned to openai/gpt-image-2.5-sunburst."""
         module = self.application_module
-        self.assertEqual(module.IMAGE_MODEL, 'google/gemini-3.1-flash-image')
-        self.assertEqual(module.VISUAL_CONCEPT_IMAGE_MODEL, 'google/gemini-3.1-flash-image')
+        self.assertEqual(module.IMAGE_MODEL, 'openai/gpt-image-2.5-sunburst')
+        self.assertEqual(module.VISUAL_CONCEPT_IMAGE_MODEL, 'openai/gpt-image-2.5-sunburst')
 
-    def test_call_images_api_uses_gemini_flash_image_by_default(self):
+    def test_call_images_api_uses_sunburst_by_default(self):
         """When no model override is passed, call_images_api routes to
-        google/gemini-3.1-flash-image."""
+        openai/gpt-image-2.5-sunburst."""
         module = self.application_module
         captured_payload = {}
 
@@ -280,7 +280,7 @@ class VisualPlanContractTestsPart10(VisualPlanContractBase):
                 patch.object(module.requests, 'post', side_effect=_fake_post):
             module.call_images_api('render hero facade', usage_ctx={'tenant_id': self.tenant_a})
 
-        self.assertEqual(captured_payload.get('model'), 'google/gemini-3.1-flash-image')
+        self.assertEqual(captured_payload.get('model'), 'openai/gpt-image-2.5-sunburst')
 
     def test_plans2d_section_approval_and_external_gate_without_massing(self):
         """Plan 3 is optional: the client can approve the plans section

@@ -70,12 +70,12 @@ def _visual_concept_exterior_conformity_suffix(prompt, facts, slot_id):
         return (
             f'{prompt} The first attached image is the approved massing diagram (Plan 3) of this project. '
             'Your task is direct image-to-image architectural rendering: render the finished architectural design directly ONTO this exact 3D diagram, converting it into a finished, photorealistic architectural photograph. '
-            'Faithfully preserve the exact 3D perspective, camera viewpoint, building positions, villa counts, heights, footprints, swimming pool, padel courts, and parking layout exactly as drawn in Plan 3. '
-            'Do not add, remove, merge, split, move, rotate or resize any mass, and do not change any count, number, dimension or area. Do not invent anything that is not in it. '
-            'The other attached images are reference material only (such as client style references): they set the design language and materials, never the geometry. '
-            'Dress the exact masses with luxurious modern materials, glass curtain walls, realistic street surfaces, and landscaping. '
-            'CRITICAL ARCHITECTURAL RENDERING RULES: Render this as a breathtaking, photorealistic architectural photograph directly corresponding to the 3D massing. '
-            'NEVER copy or render any text, titles, labels, "CONCEPTUAL 3D MASSING", program keys, or 2D diagram overlays.'
+            'MANDATORY GEOMETRIC INTEGRITY RULES: '
+            '1. DO NOT CHANGE THE CAMERA ANGLE: Maintain the exact same camera angle, elevation, viewpoint, and perspective as Plan 3. Do not rotate, flip, tilt, or alter the camera position. '
+            '2. BUILD STRICTLY ON THE PLOT: Build the architecture strictly within the surveyed plot boundary shown in the diagram; do not expand or improvise beyond it. '
+            '3. DO NOT REDISTRIBUTE, RESTRUCTURE, OR RE-PARTITION: Do not rearrange, re-partition, split, merge, move, or resize any building mass or site feature, and do not change any count, number, dimension or area. Do not invent anything that is not in it. The exact positions, footprints, counts, and heights of the tower, villas, swimming pool, padel courts, and parking lots on the parcel are strictly fixed. '
+            '4. DIRECT ARCHITECTURAL SKINNING: Dress the exact 3D masses on the parcel with photorealistic materials (glass curtain walls, limestone, warm wood accents, asphalt roads, lush landscaping, clear pool water). '
+            '5. NO TEXT OR GRAPHICS: Do not render any text, signs, building names (e.g. "THE ICONIC"), street labels, titles, "CONCEPTUAL 3D MASSING", or diagram overlays anywhere in the image.'
         )
     if plan_map.get('site') and plan_map.get('uses'):
         return (
