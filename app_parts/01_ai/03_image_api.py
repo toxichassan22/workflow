@@ -575,37 +575,45 @@ def _visual_concept_slot_instruction(slot_id, facts):
                 'No style-reference image was supplied; invent the architecture from the project facts only. '
             )
         plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
-        if plan_map.get('site'):
+        if plan_map.get('massing'):
+            plan_note = (
+                'The attached approved 3D massing diagram (Plan 3) is the primary geometry authority: '
+                'faithfully translate these exact 3D building volumes, heights, footprints, and orientations into realistic architecture. '
+            )
+        elif plan_map.get('site') and plan_map.get('uses'):
+            plan_note = (
+                'The attached approved site plan (Plan 1) and floor distribution (Plan 2) define the layout and floor heights: '
+                'extrude the building footprints into realistic 3D architecture matching these heights and positions. '
+            )
+        elif plan_map.get('site'):
             plan_note = (
                 'The attached approved site plan (Plan 1) defines the parcel layout, building footprints and entries: '
                 'render realistic 3D building architecture matching these exact footprints and site boundaries. '
             )
-        elif plan_map.get('massing'):
-            plan_note = (
-                'The attached approved massing diagram (Plan 3) is the only geometry authority: the building '
-                'massing, heights, use bands, footprints, and entries in the render must match it exactly, '
-                'and nothing may be added to it or resized. '
-            )
         else:
             plan_note = ''
         return (
-            f'Create the primary architectural hero photograph of {name}. '
+            f'Create a breathtaking, photorealistic architectural hero photograph of {name}. '
+            'Eye-level or elevated human-scale 3/4 perspective exterior view, captured during golden hour or dusk. '
             + plan_note +
-            'Use the attached site/map image as the actual ground and plot background when it is included. Place the building on that plot. '
+            'Show the main building facade, modern luxury architecture, glass and stone materials, warm interior and exterior lighting, '
+            'landscaped streetscape, palm trees, and upscale urban surroundings. '
             + style_note +
+            'CRITICAL: Output a pure, photorealistic architectural perspective photograph. NEVER include any text, titles, "CONCEPTUAL 3D MASSING", program keys, legends, or graphic labels. '
+            'Do NOT overlay buildings onto raw satellite imagery. '
             'The composition is a cinematic exterior establishing shot, 16:9.'
         )
     if slot_id == 'main_facade':
         plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
-        if plan_map.get('site'):
-            plan_clause = (
-                'The attached approved site plan (Plan 1) defines the building footprint and placement; '
-                'render the facade matching this layout. '
-            )
-        elif plan_map.get('massing'):
+        if plan_map.get('massing'):
             plan_clause = (
                 'The attached approved massing diagram (Plan 3) defines the exact building massing, height, '
                 'and use bands; preserve them and add nothing. '
+            )
+        elif plan_map.get('site'):
+            plan_clause = (
+                'The attached approved site plan (Plan 1) defines the building footprint and placement; '
+                'render the facade matching this layout. '
             )
         else:
             plan_clause = ''
@@ -619,15 +627,15 @@ def _visual_concept_slot_instruction(slot_id, facts):
     if slot_id in VISUAL_CONCEPT_MOODBOARD_SLOTS:
         view_name = _visual_concept_slot_label(slot_id, facts)
         plan_map = facts.get('plan_image_map') if isinstance(facts.get('plan_image_map'), dict) else {}
-        if plan_map.get('site'):
-            mass_note = (
-                'The attached approved site plan (Plan 1) defines its layout and footprints — '
-                'keep the architecture, materials, height, and layout consistent with it. '
-            )
-        elif plan_map.get('massing'):
+        if plan_map.get('massing'):
             mass_note = (
                 'The attached approved massing diagram (Plan 3) defines its massing, heights, and use bands — '
                 'keep the architecture, materials, height, and massing identical to it. '
+            )
+        elif plan_map.get('site'):
+            mass_note = (
+                'The attached approved site plan (Plan 1) defines its layout and footprints — '
+                'keep the architecture, materials, height, and layout consistent with it. '
             )
         else:
             mass_note = 'Keep the architecture, materials, height, and massing unchanged. '

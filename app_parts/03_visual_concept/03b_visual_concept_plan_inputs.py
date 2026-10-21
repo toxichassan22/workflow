@@ -14,10 +14,10 @@ def _visual_concept_collect_generation_references(facts, slot_id, cover_image=''
     external_cap = 4 + VISUAL_CONCEPT_MAX_REFERENCE_IMAGES
     if slot_id == 'cover':
         file_ids = list(facts.get('style_reference_file_ids') or [])
-        map_urls = [facts['overview_map_url']] if facts.get('overview_map_url') else []
+        map_urls = [facts['overview_map_url']] if (facts.get('overview_map_url') and not plan_urls) else []
         if plan_urls:
             return _visual_concept_reference_uris(
-                urls=plan_urls + map_urls, file_ids=file_ids,
+                urls=plan_urls, file_ids=file_ids,
                 max_images=external_cap, urls_first=True, tenant_id=tenant_id)
         file_ids = file_ids[:VISUAL_CONCEPT_MAX_REFERENCE_IMAGES]
         if len(file_ids) >= VISUAL_CONCEPT_MAX_REFERENCE_IMAGES:
@@ -74,7 +74,10 @@ def _visual_concept_exterior_conformity_suffix(prompt, facts, slot_id):
             'split, move, rotate or resize any mass, and do not change any count, number, dimension or '
             'area. Do not invent anything that is not in it. The other attached images are reference '
             'material only — the site map and the client style references: they set the design '
-            'language, never the geometry.'
+            'language, never the geometry. '
+            'CRITICAL ARCHITECTURAL RENDERING RULES: Render this as a breathtaking, photorealistic architectural '
+            'perspective photograph with realistic materials, glass, warm lighting, and luxury streetscape. '
+            'NEVER copy or render any text, titles, labels, "CONCEPTUAL 3D MASSING", program keys, or 2D diagram overlays.'
         )
     if plan_map.get('site') and plan_map.get('uses'):
         return (
@@ -85,7 +88,9 @@ def _visual_concept_exterior_conformity_suffix(prompt, facts, slot_id):
             'volumes following the approved floor counts, heights, and vertical uses established in Plan 2. '
             'Do not alter building positions or parking locations shown in Plan 1. The other attached images '
             'are reference material only — the site map and client style references: they set the architectural '
-            'facade design language and materials.'
+            'facade design language and materials. '
+            'CRITICAL ARCHITECTURAL RENDERING RULES: Render this as a breathtaking, photorealistic architectural '
+            'perspective photograph. NEVER include any text, titles, labels, legends, or 2D diagram overlays.'
         )
     if plan_map.get('site'):
         return (
@@ -93,7 +98,8 @@ def _visual_concept_exterior_conformity_suffix(prompt, facts, slot_id):
             'place the building masses exactly within the footprints, boundaries and site arrangement '
             'shown in this plan. Extrude them into realistic 3D architectural volumes following the approved '
             'floors and heights. The other attached images are reference material only — the site map and '
-            'client style references: they set the architectural facade design language and materials.'
+            'client style references: they set the architectural facade design language and materials. '
+            'CRITICAL ARCHITECTURAL RENDERING RULES: Render this as a pure photorealistic architectural photograph without text or diagram boxes.'
         )
     return prompt
 
