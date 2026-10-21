@@ -422,7 +422,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIs(result, response)
         self.assertEqual(captured['model'], module._SUMMARY_AGGREGATOR_MODEL)
         self.assertEqual(captured['model'], 'openai/gpt-6.1-sol')
-        self.assertEqual(captured['reasoning_effort'], 'high')
+        self.assertEqual(captured['reasoning_effort'], 'medium')
         self.assertEqual(captured['max_tokens'], 66000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         annotations = result['choices'][0]['message']['annotations']
