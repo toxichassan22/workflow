@@ -544,8 +544,8 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('function syncFinancialFromTimeline()', index_source)
 
         # Development duration is derived from the project start/end dates and is not editable here:
-        # the visible box shows the same «سنة وشهر» text the timeline shows, while the hidden
-        # «developmentYears» keeps the whole-year bucket count the cashflow engine needs.
+        # both the visible box and the hidden «developmentYears» carry the exact timeline span
+        # (3 years and 6 months is 3.5), while the cashflow engine derives whole-year buckets.
         self.assertIn('id="developmentDurationText" type="text" value="" readonly class="readonly-highlight"', index_source)
         self.assertIn('id="developmentYears" type="number" min="1" value="" hidden', index_source)
         self.assertNotIn('id="developmentYears" type="number" min="1" value="4" oninput', index_source)
@@ -555,11 +555,10 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         # The duration mirrors on its own: gating it on the stage list left «مدة تطوير المشروع»
         # showing 4 while the timeline said 5, in a box the user cannot edit.
         self.assertNotIn('if (namedStages.length && devYearsInput', index_source)
-        # The span is elapsed days, not the inclusive day count: a clean 3-year period is
-        # 1096 inclusive days, and ceiling that over 365.25 showed 4 while the timeline said 3.
-        self.assertIn('String(Math.max(1, Math.ceil((period.end.ms - period.start.ms) / (365.25 * TIMELINE_DAY_MS))))',
-                      index_source)
-        self.assertNotIn('Math.ceil(timelineSpanDays(period.start.ms, period.end.ms) / 365.25)', index_source)
+        # The exact calendar span is mirrored with no ceiling or rounding, so a 3.5-year
+        # timeline never becomes 4 in the financial study or the sensitivity base.
+        self.assertIn('String(timelineDurationYears(period.start.ms, period.end.ms))', index_source)
+        self.assertNotIn('Math.ceil((period.end.ms - period.start.ms)', index_source)
         self.assertIn('if (devYearsChanged) recalculate();', index_source)
 
     def test_mirrored_financial_inputs_never_show_a_figure_their_source_lacks(self):
@@ -653,7 +652,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('operationYear = inOperation ? year - operationStartYear + 1 : 0', index_source)
 
         # The occupancy ramp's study-year column follows the picked start year too.
-        self.assertIn("const start = Math.round(num('operationStartYear')) || (num('developmentYears') || 0) + 1", index_source)
+        self.assertIn("const start = Math.round(num('operationStartYear')) || Math.ceil(num('developmentYears') || 0) + 1", index_source)
         self.assertIn('studyInput.value = money(occupancyRampStudyYear(index + 1))', index_source)
 
         # The printed report shows the entered year, or the effective fallback when empty.

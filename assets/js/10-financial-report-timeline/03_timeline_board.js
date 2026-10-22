@@ -144,9 +144,9 @@
       return Math.round((endMs - startMs) / TIMELINE_DAY_MS) + 1;
     }
 
-    // Calendar-aware humanization, inclusive of both ends: «سنة و6 شهور», «4 شهور», «12 يوم».
-    function timelineDurationText(startMs, endMs) {
-      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return '';
+    // Calendar-aware span, inclusive of both ends: 3 years and 6 months is 3.5 years.
+    function timelineDurationParts(startMs, endMs) {
+      if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return null;
       const start = new Date(startMs);
       const end = new Date(endMs + TIMELINE_DAY_MS);
       let months = (end.getUTCFullYear() - start.getUTCFullYear()) * 12 + (end.getUTCMonth() - start.getUTCMonth());
@@ -155,13 +155,20 @@
         months -= 1;
         days += new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 0)).getUTCDate();
       }
-      const years = Math.floor(months / 12);
-      months %= 12;
-      const parts = [];
-      if (years) parts.push(WFT('timeline.duration_year', '{n} سنة', { n: years }));
-      if (months) parts.push(WFT('timeline.duration_month', '{n} شهر', { n: months }));
-      if (days) parts.push(WFT('timeline.duration_day', '{n} يوم', { n: days }));
-      return parts.join(WFT('timeline.duration_join', ' و'));
+      return { years: Math.floor(months / 12), months: months % 12, days };
+    }
+    function timelineDurationYears(startMs, endMs) {
+      const parts = timelineDurationParts(startMs, endMs);
+      return parts ? parts.years + parts.months / 12 + parts.days / 365.25 : null;
+    }
+    function timelineDurationText(startMs, endMs) {
+      const parts = timelineDurationParts(startMs, endMs);
+      if (!parts) return '';
+      const labels = [];
+      if (parts.years) labels.push(WFT('timeline.duration_year', '{n} سنة', { n: parts.years }));
+      if (parts.months) labels.push(WFT('timeline.duration_month', '{n} شهر', { n: parts.months }));
+      if (parts.days) labels.push(WFT('timeline.duration_day', '{n} يوم', { n: parts.days }));
+      return labels.join(WFT('timeline.duration_join', ' و'));
     }
 
     // Everything downstream of the two date fields: the conflict flag, the duration label and
@@ -650,15 +657,10 @@
       if (!scheduleBody && !devYearsInput && !devDurationInput) return;
 
       const period = timelineProjectPeriod();
-      // The displayed duration is the same humanized text the timeline shows («سنة و6 شهور»),
-      // while the hidden «developmentYears» keeps the annual buckets the period touches for
-      // the yearly cashflow grid: thirteen months is two development years, four months is
-      // one. The span is the elapsed days, not the inclusive count — a whole-year period is
-      // N*365.25 elapsed days plus one inclusively, which used to ceil into the N+1 bucket
-      // (a 3-year project showed 4).
-      const nextDevYears = period
-        ? String(Math.max(1, Math.ceil((period.end.ms - period.start.ms) / (365.25 * TIMELINE_DAY_MS))))
-        : '';
+      // The visible label and the hidden value both carry the timeline's exact duration:
+      // 3 years and 6 months is 3.5, never a rounded annual bucket. The cashflow engine
+      // derives the whole-year buckets it needs when it builds the yearly grid.
+      const nextDevYears = period ? String(timelineDurationYears(period.start.ms, period.end.ms)) : '';
       if (devDurationInput) devDurationInput.value = period ? timelineDurationText(period.start.ms, period.end.ms) : '';
       let devYearsChanged = false;
       if (devYearsInput && devYearsInput.value !== nextDevYears) {

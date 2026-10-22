@@ -293,7 +293,7 @@
         setCellVisible(tr, 'price', !!visible.price, visible.priceHelp); setCellVisible(tr, 'period', !!visible.period, 'الفترة / الأسابيع'); setCellVisible(tr, 'occupancy', !!visible.occupancy, 'الإشغال السنوي المستهدف');
       });
 
-      const devYears = Math.max(1, Math.round(num('developmentYears') || 1));
+      const devYears = Math.max(1, Math.ceil(num('developmentYears') || 1));
       document.querySelectorAll('#scheduleTable tbody tr').forEach(tr => { const year = parseNumber(tr.dataset.stageYear || 1); if (year > devYears) tr.dataset.stageYear = String(devYears); });
       document.querySelectorAll('#costTable tbody tr').forEach(tr => {
         const method = tr.querySelector('[data-field="method"] select')?.value;
@@ -469,7 +469,7 @@
       applyConditionalVisibility(modeFlags);
       updateDynamicFields();
       updateGraceRevenueOptions();
-      const developmentYears = Math.max(1, Math.min(20, Math.round(num('developmentYears') || 1)));
+      const developmentYears = Math.max(1, Math.min(20, Math.ceil(num('developmentYears') || 1)));
       const operationYears = modeFlags.rental ? Math.max(0, Math.min(40, Math.round(num('operationYears')))) : 0;
       if (modeFlags.rental && document.querySelectorAll('#occupancyRampTable tbody tr').length !== operationYears) syncOccupancyRamp();
       const salesStartYear = Math.max(1, Math.round(num('salesStartYear') || 1));
