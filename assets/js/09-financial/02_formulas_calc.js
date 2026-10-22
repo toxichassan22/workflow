@@ -425,6 +425,9 @@
       setConditionalSelector('#exitBlock .grid.four>div:not(:first-child)', exitOn);
       setConditionalSelector('.cf-sales', flags.sales);
       setConditionalSelector('.cf-rental', flags.rental);
+      if (!flags.rental && val('externalEnabled') === 'yes' && [...document.querySelectorAll('#externalTable tbody tr')].some(tr => tr.querySelector('[data-field="type"] select')?.value === 'opex')) {
+        document.querySelectorAll('#cashflowTable tr > :nth-child(9)').forEach(el => setConditionalVisibility(el, true));
+      }
       setConditionalSelector('.cf-finance', financeOn);
       setConditionalSelector('.cf-fund', feesOn);
       setConditionalSelector('.cf-grace', graceOn);
@@ -654,8 +657,8 @@
         const scheduledGrace = collectGraceSchedule().filter(r => r.year === year).reduce((s, r) => s + r.amount, 0), calculatedGrace = Math.max(0, graceSubjectRevenue) * graceYearFraction(year) * Math.max(0, Math.min(100, num('graceDiscountRate'))) / 100, graceDiscount = val('graceEnabled') === 'yes' ? Math.min(revTotalAnnual + extRevenueAnnual, val('graceMethod') === 'schedule' ? scheduledGrace : calculatedGrace) : 0;
         totalGraceDiscount += graceDiscount;
         const operatingRevenue = Math.max(0, revTotalAnnual + extRevenueAnnual - graceDiscount);
-        let opexAnnual = 0;
-        if (inOperation) { opexRows.forEach(tr => { opexAnnual += calculateOpexRow(tr, operatingRevenue); }); opexAnnual += extOpexAnnual; }
+        let opexAnnual = extOpexAnnual;
+        if (inOperation) { opexRows.forEach(tr => { opexAnnual += calculateOpexRow(tr, operatingRevenue); }); }
         const annualLandRent = (landStatus === 'leased' || landStatus === 'usufruct') ? landRent : 0;
         const noi = operatingRevenue - opexAnnual - annualLandRent;
         if (operationYear === 1) {

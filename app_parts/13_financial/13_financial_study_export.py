@@ -276,7 +276,14 @@ def _filter_cashflow_columns(rows, inputs):
     if not sales_on:
         drop_columns.update({'saleRevenue', 'المبيعات', 'saleExit', 'saleExitGross'})
     if not rental_on:
-        drop_columns.update({'operatingRevenue', 'إيرادات التأجير', 'opex', 'المصروفات', 'noi', 'NOI', 'operatingExit', 'operatingExitGross', 'occupancyReach', 'الوصول للإشغال %'})
+        drop_columns.update({'operatingRevenue', 'إيرادات التأجير', 'noi', 'NOI', 'operatingExit', 'operatingExitGross', 'occupancyReach', 'الوصول للإشغال %'})
+        has_opex_data = any(
+            row.get('opex') not in (None, 0, '0', '', '—', '-') or
+            row.get('المصروفات') not in (None, 0, '0', '', '—', '-')
+            for row in rows if isinstance(row, dict)
+        )
+        if not has_opex_data:
+            drop_columns.update({'opex', 'المصروفات'})
     if not grace_on:
         drop_columns.update({'graceDiscount', 'خصم فترة السماح'})
     if not fund_on:
