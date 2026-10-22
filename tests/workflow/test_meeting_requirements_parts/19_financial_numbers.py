@@ -83,7 +83,7 @@ class MeetingRequirementsTestsPart19(MeetingRequirementsTests):
 
     def test_chart_amounts_in_millions_are_rounded_to_the_hundredth(self):
         engine = self.application_module.slide_engine
-        self.assertEqual(engine._format_sar_display(14354123.456789), '14.35 ر.س')
+        self.assertEqual(engine._format_sar_display(14354123.456789), '14.35 مليون ر.س')
         self.assertEqual(engine._format_sar_display(92000), '92,000 ر.س')
 
     def test_the_client_sends_the_approved_display_values_with_the_model(self):

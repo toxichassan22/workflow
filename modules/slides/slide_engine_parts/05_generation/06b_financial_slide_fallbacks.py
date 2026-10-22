@@ -249,7 +249,7 @@ def _build_sol_waterfall_slide(slide, source, branding=None, slide_num=None, tot
     total = w_data.get('total') or {}
 
     total_cost_m = total.get('value_millions', 0.0)
-    total_cost_display = total.get('display', f"{format_millions(total_cost_m)} ر.س")
+    total_cost_display = total.get('display', f"{format_millions(total_cost_m)} ر.س") if items else '—'
     sorted_items = sorted(items, key=lambda x: x.get('value_millions', 0), reverse=True)
     top2_pct = sum(it.get('pct_of_total', 0) for it in sorted_items[:2]) if sorted_items else 0
     top1_name = sorted_items[0].get('name', 'المكون الرئيسي') if sorted_items else 'المكون الرئيسي'
@@ -271,7 +271,13 @@ def _build_sol_waterfall_slide(slide, source, branding=None, slide_num=None, tot
         ['بند التكلفة', 'القيمة (ر.س)', 'النسبة'], waterfall_rows, primary)
 
     # Use width=580, height=350 to fit the 0.95fr / 1.05fr grid layout cleanly
-    svg_code = _build_waterfall_svg(items, total, width=580, height=350, primary=primary, secondary='#0ea5e9', gold=accent)
+    svg_code = (
+        _build_waterfall_svg(items, total, width=580, height=350, primary=primary,
+                             secondary='#0ea5e9', gold=accent)
+        if items else
+        '<div style="padding:24px;text-align:center;color:#64748b;font-size:13px;">'
+        'لا تتوفر بنود تكلفة معتمدة لعرض المخطط الشلالي.</div>'
+    )
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
 
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">

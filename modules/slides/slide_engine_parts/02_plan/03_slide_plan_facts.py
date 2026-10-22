@@ -449,7 +449,7 @@ def _format_sar_display(val):
     if abs(val_m) >= 0.1:
         # Millions are a display unit, not a new value: the amount is rounded
         # half-up to the hundredth so the label reads like the financial study.
-        return f"{format_millions(val_m)} ر.س"
+        return f"{format_millions(val_m)} مليون ر.س"
     return f"{format_financial_number(val)} ر.س"
 
 
