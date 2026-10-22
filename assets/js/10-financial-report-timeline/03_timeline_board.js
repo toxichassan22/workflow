@@ -657,7 +657,7 @@
       // N*365.25 elapsed days plus one inclusively, which used to ceil into the N+1 bucket
       // (a 3-year project showed 4).
       const nextDevYears = period
-        ? String(Math.max(1, Math.round((period.end.ms - period.start.ms) / (365.25 * TIMELINE_DAY_MS) * 100) / 100))
+        ? String(Math.max(1, Math.ceil((period.end.ms - period.start.ms) / (365.25 * TIMELINE_DAY_MS))))
         : '';
       if (devDurationInput) devDurationInput.value = period ? timelineDurationText(period.start.ms, period.end.ms) : '';
       let devYearsChanged = false;
