@@ -35,7 +35,7 @@ def _branch_value(value):
     return None if value is _ABSENT else value
 
 
-def draft_three_way_merge(base, ours, theirs, prefer_theirs=()):
+def draft_three_way_merge(base, ours, theirs, prefer_theirs=(), base_digests=None):
     """Merge two payloads against their common ancestor.
 
     Returns ``(merged, changes, conflicts)``: the merged payload, the keys
@@ -45,6 +45,11 @@ def draft_three_way_merge(base, ours, theirs, prefer_theirs=()):
     ``prefer_theirs`` names the keys the incoming side always wins on (the
     slides and the chat of a session are its own), so a merge never turns
     them into a conflict nobody can read.
+
+    ``base_digests`` carries the hash of a base value the commit history did
+    not keep (a value above the per-key cap). For those keys the rebuilt
+    ``base`` value is only the current payload, so the hash is the only
+    honest way to tell "untouched here" from "changed there".
     """
     base = base if isinstance(base, dict) else {}
     ours = ours if isinstance(ours, dict) else {}
@@ -56,6 +61,7 @@ def draft_three_way_merge(base, ours, theirs, prefer_theirs=()):
     # content: the two sides always differ on them and they never conflict.
     skip = set(DRAFT_BOOKKEEPING_KEYS or ())
     preferred = set(prefer_theirs or ())
+    digests = base_digests if isinstance(base_digests, dict) else {}
     for key in sorted(set(base) | set(ours) | set(theirs)):
         if key in skip:
             continue
@@ -64,7 +70,7 @@ def draft_three_way_merge(base, ours, theirs, prefer_theirs=()):
         their_value = theirs.get(key, _ABSENT)
         if our_value == their_value:
             continue
-        if key in preferred and their_value != base_value:
+        if key in preferred:
             # The incoming side owns this key outright.
             if their_value is _ABSENT:
                 merged.pop(key, None)
@@ -74,6 +80,37 @@ def draft_three_way_merge(base, ours, theirs, prefer_theirs=()):
                 'key': key,
                 'action': 'delete' if their_value is _ABSENT else 'set',
                 'value': _branch_value(their_value),
+            })
+            continue
+        base_digest = digests.get(key)
+        if base_digest:
+            our_digest = (DRAFT_COMMIT_ABSENT_DIGEST if our_value is _ABSENT
+                          else _draft_commit_digest(our_value))
+            their_digest = (DRAFT_COMMIT_ABSENT_DIGEST if their_value is _ABSENT
+                            else _draft_commit_digest(their_value))
+            if our_digest == base_digest:
+                # Only the incoming side moved this key — the merge takes it.
+                if their_value is _ABSENT:
+                    merged.pop(key, None)
+                else:
+                    merged[key] = their_value
+                changes.append({
+                    'key': key,
+                    'action': 'delete' if their_value is _ABSENT else 'set',
+                    'value': _branch_value(their_value),
+                })
+                continue
+            if their_digest == base_digest:
+                # Only this side moved it — it stays.
+                continue
+            conflicts.append({
+                'key': key,
+                'base': None,
+                'base_unverified': True,
+                'ours': _branch_value(our_value),
+                'theirs': _branch_value(their_value),
+                'ours_absent': our_value is _ABSENT,
+                'theirs_absent': their_value is _ABSENT,
             })
             continue
         if our_value == base_value:
@@ -165,14 +202,16 @@ def draft_merge_preview_for_save(tenant_id, draft_id, base_revision, incoming,
     """
     base_commit_id = draft_commit_at_or_before_revision(tenant_id, draft_id, base_revision)
     base = {}
+    base_digests = {}
     if base_commit_id:
-        state, _meta = draft_state_at_commit(tenant_id, draft_id, base_commit_id)
+        state, meta = draft_state_at_commit(tenant_id, draft_id, base_commit_id)
         base = state if isinstance(state, dict) else {}
+        base_digests = (meta or {}).get('digests') or {}
     current = get_project_draft_by_id(tenant_id, draft_id) or {}
     ours = dict(current.get('draft_data') or {})
     theirs = dict(incoming or {})
     merged, changes, conflicts = draft_three_way_merge(
-        base, ours, theirs, prefer_theirs=prefer_theirs)
+        base, ours, theirs, prefer_theirs=prefer_theirs, base_digests=base_digests)
     return merged, changes, conflicts
 
 
@@ -299,15 +338,18 @@ def draft_branch_merge_preview(tenant_id, draft_id, branch_id):
     if not base_draft or not branch_draft:
         return {'error': 'draft_not_found'}
     base_commit_id = branch.get('base_commit_id')
+    base_digests = {}
     if base_commit_id:
         base_state, _meta = draft_state_at_commit(tenant_id, draft_id, base_commit_id)
         if base_state is None:
             return {'error': 'commit_not_found'}
+        base_digests = (_meta or {}).get('digests') or {}
     else:
         base_state = dict(base_draft.get('draft_data') or {})
     ours = dict(base_draft.get('draft_data') or {})
     theirs = dict(branch_draft.get('draft_data') or {})
-    merged, changes, conflicts = draft_three_way_merge(base_state, ours, theirs)
+    merged, changes, conflicts = draft_three_way_merge(
+        base_state, ours, theirs, base_digests=base_digests)
     return {
         'success': True,
         'branch': branch,

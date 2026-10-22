@@ -118,6 +118,63 @@ class DraftSaveMergeDbTests(unittest.TestCase):
         self.assertEqual(conflicts, [])
         self.assertEqual(merged['tenantSlidesData'], [{'html': '<div>شريحتي</div>'}])
 
+    def _save_large_value(self, value, extra=None):
+        payload = {'project_name': 'برج المشرق', 'city': 'الرياض',
+                   'project_type': 'سكني', 'financial_study_model': value}
+        payload.update(extra or {})
+        db.save_project_draft('tenant-1', 'user-1', payload, {'basic': 'draft'},
+                              'draft', draft_id='draft-1')
+        return int((db.get_project_draft_by_id('tenant-1', 'draft-1') or {}).get('revision') or 0)
+
+    def test_a_value_over_the_commit_cap_is_never_rewound_by_a_merge(self):
+        """A 40KB section blob is skipped from the commit, but its digest still
+        tells the merge that this side did not touch it."""
+        large_old = {'blob': 'x' * 40000}
+        large_new = {'blob': 'y' * 40000}
+        base_revision = self._save_large_value(large_old)
+        # The other side saves a newer financial study.
+        db.save_project_draft('tenant-1', 'user-2',
+                              {'project_name': 'برج المشرق', 'city': 'الرياض',
+                               'project_type': 'سكني', 'financial_study_model': large_new},
+                              {'basic': 'draft'}, 'draft', draft_id='draft-1')
+        # This side only changed the city; its financial model is the older one.
+        incoming = {'project_name': 'برج المشرق', 'city': 'جدة',
+                    'project_type': 'سكني', 'financial_study_model': large_old}
+
+        merged, changes, conflicts = db.draft_merge_preview_for_save(
+            'tenant-1', 'draft-1', base_revision, incoming)
+        self.assertEqual(conflicts, [])
+        self.assertEqual(merged['financial_study_model'], large_new,
+                         'the newer financial study must survive the merge')
+        self.assertEqual(merged['city'], 'جدة')
+        self.assertEqual({item['key'] for item in changes}, {'city'})
+
+    def test_two_sides_changing_a_value_over_the_cap_is_a_real_conflict(self):
+        large_old = {'blob': 'x' * 40000}
+        large_other = {'blob': 'y' * 40000}
+        large_mine = {'blob': 'z' * 40000}
+        base_revision = self._save_large_value(large_old)
+        db.save_project_draft('tenant-1', 'user-2',
+                              {'project_name': 'برج المشرق', 'city': 'الرياض',
+                               'project_type': 'سكني', 'financial_study_model': large_other},
+                              {'basic': 'draft'}, 'draft', draft_id='draft-1')
+        incoming = {'project_name': 'برج المشرق', 'city': 'الرياض',
+                    'project_type': 'سكني', 'financial_study_model': large_mine}
+
+        _merged, _changes, conflicts = db.draft_merge_preview_for_save(
+            'tenant-1', 'draft-1', base_revision, incoming)
+        self.assertEqual([item['key'] for item in conflicts], ['financial_study_model'])
+        self.assertTrue(conflicts[0].get('base_unverified'))
+
+    def test_the_rebuilt_base_reports_the_digest_of_a_skipped_value(self):
+        large_old = {'blob': 'x' * 40000}
+        base_revision = self._save_large_value(large_old)
+        commit = db.draft_commit_at_or_before_revision('tenant-1', 'draft-1', base_revision)
+        _state, meta = db.draft_state_at_commit('tenant-1', 'draft-1', commit)
+        self.assertIn('financial_study_model', meta['unverified_keys'])
+        self.assertEqual(meta['digests']['financial_study_model'],
+                         db._draft_commit_digest(large_old))
+
 
 class DraftSaveMergeApiTests(unittest.TestCase):
     @classmethod
@@ -253,6 +310,31 @@ class DraftSaveMergeApiTests(unittest.TestCase):
                          headers=self.headers()).get_json()
         actions = [str(entry.get('action') or '') for entry in (log.get('log') or [])]
         self.assertTrue(actions, 'the merge wrote no change log entry')
+
+
+class DraftMergeClientWiringTests(unittest.TestCase):
+    """The browser side of the same contract: dirty edits gate the merge apply."""
+
+    @classmethod
+    def setUpClass(cls):
+        import app as application_module
+        parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+        for name in application_module.FRONTEND_JS_ORDER:
+            parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+        cls.source = '\n'.join(parts)
+
+    def test_a_merge_clears_the_dirty_flag_and_applies_the_merged_state(self):
+        start = self.source.index('if (resp && resp.success && resp.merged)')
+        snippet = self.source[start:start + 1200]
+        self.assertIn('applyLiveDraftSync(', snippet)
+        self.assertIn('{ force: true }', snippet)
+        self.assertIn('setDraftDirty(false)', snippet)
+
+    def test_live_sync_never_applies_over_unsaved_edits(self):
+        live = (ROOT / 'assets' / 'js' / '07-project-form' / '07_draft_live_sync.js').read_text(
+            encoding='utf-8')
+        self.assertIn('if (editing && !options.force)', live)
+        self.assertIn('hydrateTenantProjectForm(draftData)', live)
 
 
 if __name__ == '__main__':

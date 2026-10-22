@@ -334,19 +334,6 @@
         } finally {
           if (typeof endDraftLocalSave === 'function') endDraftLocalSave();
         }
-        // A merge means the file on the server now holds both sides' work, so
-        // the workspace is loaded again instead of keeping a stale copy.
-        if (resp && resp.success && resp.merged) {
-          const mergedDraftId = resp.draftId || (tenantProjectData && tenantProjectData.draftId);
-          if (mergedDraftId) {
-            if (typeof applyLiveDraftSync === 'function') {
-              await applyLiveDraftSync(mergedDraftId, resp.revision);
-            } else if (typeof openProjectDraftById === 'function') {
-              await openProjectDraftById(mergedDraftId);
-            }
-            return true;
-          }
-        }
         // The response describes the workspace captured above. A draft-id ack
         // belongs to the draft row, so it lands whenever the same draft is
         // still open — an edit meanwhile does not invalidate it — while the
@@ -356,6 +343,23 @@
           : tenantProjectData === savedWorkspaceRef;
         const stillCurrent = tenantProjectData === savedWorkspaceRef
           && draftEditCounter === savedEditCounter;
+        // A merge means the file on the server now holds both sides' work, so
+        // the workspace is loaded again instead of keeping a stale copy. An
+        // edit typed while the save was on the wire is not overwritten by it:
+        // that edit and the merge are reconciled by the next save instead.
+        if (resp && resp.success && resp.merged) {
+          const mergedDraftId = resp.draftId || (tenantProjectData && tenantProjectData.draftId);
+          if (mergedDraftId) {
+            if (stillCurrent && typeof applyLiveDraftSync === 'function') {
+              const applied = await applyLiveDraftSync(
+                mergedDraftId, resp.revision, { force: true });
+              if (applied) {
+                setDraftDirty(false);
+              }
+            }
+            return true;
+          }
+        }
         if (sameDraftOpen) {
           if (resp.draftId) tenantProjectData.draftId = resp.draftId;
           // The workspace revision and the live poll's baseline move together,

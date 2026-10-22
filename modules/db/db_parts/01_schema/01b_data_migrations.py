@@ -311,6 +311,25 @@ def _migrate_project_draft_columns(conn):
         print(f"[DB DRAFT MIGRATION ERR] {e}")
 
 
+def _migrate_draft_commit_columns(conn):
+    """Add the digest store a merge needs for values too large to commit.
+
+    A commit keeps the difference, not the payload, so a value above the
+    per-key cap is skipped. The digest of that skipped value is what lets a
+    later merge tell "unchanged since the base" apart from "changed on the
+    other side" without storing the value itself.
+    """
+    try:
+        existing = {row['name'] for row in conn.execute("PRAGMA table_info(draft_commits)").fetchall()}
+        if 'skipped_digests' not in existing:
+            conn.execute(
+                "ALTER TABLE draft_commits ADD COLUMN skipped_digests TEXT NOT NULL DEFAULT '{}'")
+            print("[DB MIGRATION] Added draft_commits column: skipped_digests")
+        conn.commit()
+    except Exception as e:
+        print(f"[DB DRAFT COMMIT MIGRATION ERR] {e}")
+
+
 def _migrate_generation_approval_columns(conn):
     """Add the lifecycle bookkeeping column to historical generation approvals."""
     try:

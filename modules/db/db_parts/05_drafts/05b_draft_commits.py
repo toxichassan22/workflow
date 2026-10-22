@@ -22,6 +22,8 @@ The commit is written AFTER the save succeeded, so a refused write (locked
 draft, empty overwrite, revision conflict) leaves no commit behind.
 """
 
+import hashlib
+
 # A single value above this size is not worth a history row: it is an inline
 # image or a slide deck, and the file it belongs to is stored separately.
 DRAFT_COMMIT_MAX_VALUE_BYTES = 32768
@@ -32,6 +34,14 @@ DRAFT_COMMIT_MAX_PATCH_BYTES = 262144
 DRAFT_COMMIT_EXCLUDED_KEYS = ('tenantSlidesData',)
 # Marker stored instead of a value that did not exist in that version.
 DRAFT_COMMIT_DELETED = '__draft_commit_deleted__'
+# A skipped value has no stored content, so its hash stands in for it. The
+# digest of a real value can never equal this marker.
+DRAFT_COMMIT_ABSENT_DIGEST = '__absent__'
+
+
+def _draft_commit_digest(value):
+    """The identity of a value whose full content the commit did not keep."""
+    return hashlib.sha256(_draft_commit_json(value).encode('utf-8')).hexdigest()
 
 
 def _draft_commit_json(value):
@@ -101,7 +111,7 @@ def draft_commit_patch(old_data, new_data):
 
 def record_draft_commit(tenant_id, draft_id, revision, patch, skipped=None,
                         author_id=None, author_name=None, message=None,
-                        kind='save', parent_id=None):
+                        kind='save', parent_id=None, skipped_digests=None):
     """Store one commit of a draft and return its id."""
     conn = get_db()
     if parent_id is None:
@@ -115,12 +125,14 @@ def record_draft_commit(tenant_id, draft_id, revision, patch, skipped=None,
     conn.execute(
         '''INSERT INTO draft_commits
            (id, tenant_id, draft_id, parent_id, revision, kind, message,
-            author_id, author_name, changed_keys, skipped_keys, patch, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            author_id, author_name, changed_keys, skipped_keys, skipped_digests,
+            patch, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (commit_id, tenant_id, draft_id, parent_id, int(revision or 0), kind or 'save',
          (message or '').strip() or None, author_id or None, author_name or None,
          json.dumps(sorted(patch.keys()), ensure_ascii=False),
          json.dumps(sorted(skipped or []), ensure_ascii=False),
+         json.dumps(skipped_digests or {}, ensure_ascii=False),
          json.dumps(patch, ensure_ascii=False), _utcnow().isoformat())
     )
     conn.commit()
@@ -157,6 +169,7 @@ def get_draft_commit(tenant_id, draft_id, commit_id):
     item = dict(row)
     item['changed_keys'] = _draft_commit_json_list(item.get('changed_keys'))
     item['skipped_keys'] = _draft_commit_json_list(item.get('skipped_keys'))
+    item['skipped_digests'] = _json_object(item.get('skipped_digests'))
     item['patch'] = _json_object(item.get('patch'))
     return item
 
@@ -164,7 +177,7 @@ def get_draft_commit(tenant_id, draft_id, commit_id):
 def draft_commit_chain(tenant_id, draft_id):
     """Every commit of a draft, oldest first — the order a replay follows."""
     rows = get_db().execute(
-        '''SELECT id, revision, patch, skipped_keys FROM draft_commits
+        '''SELECT id, revision, patch, skipped_keys, skipped_digests FROM draft_commits
            WHERE tenant_id = ? AND draft_id = ?
            ORDER BY revision ASC, created_at ASC, rowid ASC''',
         (tenant_id, draft_id)
@@ -174,6 +187,7 @@ def draft_commit_chain(tenant_id, draft_id):
         item = dict(row)
         item['patch'] = _json_object(item.get('patch'))
         item['skipped_keys'] = _draft_commit_json_list(item.get('skipped_keys'))
+        item['skipped_digests'] = _json_object(item.get('skipped_digests'))
         chain.append(item)
     return chain
 
@@ -186,6 +200,12 @@ def draft_state_at_commit(tenant_id, draft_id, commit_id):
     field had before it changed. Keys nobody ever committed keep the value
     they have today, and a key too large to keep is reported in
     ``skipped_keys`` so the caller can say so instead of pretending.
+
+    A skipped key's rebuilt VALUE is only a stand-in (the current payload).
+    Its historical identity is still known from the digest the commit kept,
+    so ``meta['digests']`` names the hash to compare against for every key
+    in ``meta['unverified_keys']``; the merge must use that instead of the
+    stand-in value.
     """
     chain = draft_commit_chain(tenant_id, draft_id)
     if not chain:
@@ -196,22 +216,40 @@ def draft_state_at_commit(tenant_id, draft_id, commit_id):
     target_index = ids.index(commit_id)
     draft = get_project_draft_by_id(tenant_id, draft_id)
     state = dict((draft or {}).get('draft_data') or {})
-    touched = set()
+    exact = {}
+    digests = {}
     for item in chain[:target_index + 1]:
-        for key, change in item['patch'].items():
+        for key, change in (item.get('patch') or {}).items():
             _draft_commit_apply(state, key, change.get('to'))
-            touched.add(key)
+            exact[key] = True
+            digests.pop(key, None)
+        for key, hashes in (item.get('skipped_digests') or {}).items():
+            exact[key] = False
+            digests[key] = (hashes or {}).get('to') or DRAFT_COMMIT_ABSENT_DIGEST
     seen_after = set()
     for item in chain[target_index + 1:]:
-        for key, change in item['patch'].items():
-            if key in touched or key in seen_after:
+        for key, change in (item.get('patch') or {}).items():
+            if key in exact or key in seen_after:
                 continue
             _draft_commit_apply(state, key, change.get('from'))
             seen_after.add(key)
+            exact[key] = True
+            digests.pop(key, None)
+        for key, hashes in (item.get('skipped_digests') or {}).items():
+            if key in exact or key in seen_after:
+                continue
+            seen_after.add(key)
+            exact[key] = False
+            digests[key] = (hashes or {}).get('from') or DRAFT_COMMIT_ABSENT_DIGEST
     skipped = set()
     for item in chain:
         skipped.update(item.get('skipped_keys') or [])
-    return state, {'skipped_keys': sorted(skipped), 'commit_index': target_index}
+    return state, {
+        'skipped_keys': sorted(skipped),
+        'commit_index': target_index,
+        'digests': digests,
+        'unverified_keys': sorted(key for key, is_exact in exact.items() if not is_exact),
+    }
 
 
 def draft_commit_diff(tenant_id, draft_id, commit_id):
@@ -330,10 +368,22 @@ def _record_save_commit(args, kwargs, meta, before_data, before_id, result):
     patch, skipped = draft_commit_patch(before_data, new_data)
     if not patch and not skipped:
         return
+    # A skipped value has no stored content, but its identity still belongs in
+    # the history: the merge compares these digests to know which side moved.
+    before = before_data if isinstance(before_data, dict) else {}
+    skipped_digests = {}
+    for key in skipped:
+        skipped_digests[key] = {
+            'from': _draft_commit_digest(before[key])
+            if key in before else DRAFT_COMMIT_ABSENT_DIGEST,
+            'to': _draft_commit_digest(new_data[key])
+            if key in new_data else DRAFT_COMMIT_ABSENT_DIGEST,
+        }
     author_id, author_name = _draft_commit_author(args, kwargs, meta)
     record_draft_commit(
         tenant_id, draft_id, int(row['revision'] or 0), patch, skipped,
         author_id=author_id, author_name=author_name,
         message=meta.get('commit_message'),
-        kind=meta.get('commit_kind') or 'save'
+        kind=meta.get('commit_kind') or 'save',
+        skipped_digests=skipped_digests,
     )

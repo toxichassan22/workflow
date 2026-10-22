@@ -43,6 +43,7 @@ def init_db():
         _migrate_branding_columns(conn)
         _migrate_map_images_presentation_fk(conn)
         _migrate_project_draft_columns(conn)
+        _migrate_draft_commit_columns(conn)
         _migrate_presentation_draft_link(conn)
         _migrate_project_file_table(conn)
         _migrate_location_fields(conn)

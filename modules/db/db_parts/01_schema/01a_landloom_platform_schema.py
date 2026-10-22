@@ -300,6 +300,7 @@ def _create_landloom_tables(conn):
         author_name TEXT,
         changed_keys TEXT NOT NULL DEFAULT '[]',
         skipped_keys TEXT NOT NULL DEFAULT '[]',
+        skipped_digests TEXT NOT NULL DEFAULT '{}',
         patch TEXT NOT NULL DEFAULT '{}',
         created_at TEXT DEFAULT (datetime('now'))
     )''')

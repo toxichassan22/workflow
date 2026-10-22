@@ -1,8 +1,10 @@
-/* tests/workflow/test_draft_live_sync.js — the open workspace follows the file in real-time.
+/* tests/workflow/test_draft_live_sync.js — the open workspace follows the file.
  *
- * Real-time sync: an edit by somebody else updates the form in-place smoothly
- * without full-page reloads, without disrupting focus, and without kicking
- * the user away from their current section.
+ * A remote save is applied only when this side has nothing unsaved. With
+ * unsaved edits the file is not reloaded under the person's hands: the badge
+ * reports it and the next save merges. Applying a remote change rebuilds the
+ * whole form (market/financial/timeline widgets included), not just the plain
+ * inputs.
  *
  * Run from the repo root:  node tests/workflow/test_draft_live_sync.js
  */
@@ -30,8 +32,9 @@ const source = [
 
 const badge = { style: {}, innerHTML: '' };
 const toasts = [];
-const reloads = [];
 const calls = [];
+const hydrated = [];
+let selectionRestored = 0;
 let serverState = { success: true, revision: 1, draftId: 'draft-1' };
 let serverDraftPayload = {
   success: true,
@@ -48,6 +51,9 @@ const domInputs = [
     dataset: { key: 'project_name' },
     value: 'برج قديم',
     type: 'text',
+    selectionStart: 3,
+    selectionEnd: 3,
+    setSelectionRange: () => { selectionRestored += 1; },
     classList: { add: () => {}, remove: () => {} },
   },
   {
@@ -85,7 +91,14 @@ const context = {
   },
   WFT: (key, fallback) => fallback,
   toast: message => toasts.push(message),
-  openProjectDraftById: id => { reloads.push(id); },
+  openProjectDraftById: () => { throw new Error('must not reload the workspace'); },
+  // The real hydrate writes every section's DOM; the test records the call and
+  // mimics the two plain inputs it owns.
+  hydrateTenantProjectForm: data => {
+    hydrated.push(data);
+    domInputs[0].value = data.project_name;
+    domInputs[1].value = data.city;
+  },
   tenantDraftDirty: false,
   tenantProjectMode: 'draft',
   tenantProjectData: { draftId: 'draft-1', project_name: 'برج قديم', city: 'جدة' },
@@ -99,17 +112,17 @@ vm.runInContext(source, context);
 
 (async () => {
   await testOurOwnSaveIsNotSomebodyElsesChange();
-  await testAChangeBySomebodyElseSyncsInPlaceWithoutReload();
-  await testFocusedInputIsNotOverwrittenDuringLiveSync();
+  await testAChangeBySomebodyElseHydratesTheWholeForm();
+  await testUnsavedEditsAreNotOverwrittenByARemoteChange();
   await testTheChangeIsReportedOnce();
   await testThePollWaitsForOurOwnWrite();
-  console.log('Draft live sync harness passed: own save, in-place realtime sync,'
-    + ' focus preservation, single report, in-flight write.');
+  await testTheMergeSaveCanForceTheMergedStateIn();
+  console.log('Draft live sync harness passed: own save, full hydration, dirty guard,'
+    + ' single report, in-flight write, forced merge apply.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
 async function testOurOwnSaveIsNotSomebodyElsesChange() {
-  reloads.length = 0;
-  toasts.length = 0;
+  hydrated.length = 0;
   calls.length = 0;
   context.startDraftLiveSync('draft-1', 1);
   context.setTenantDraftRevision(2);
@@ -117,16 +130,17 @@ async function testOurOwnSaveIsNotSomebodyElsesChange() {
   await context.pollDraftLiveState();
   assert.equal(calls.length, 1);
   assert.ok(calls[0].url.includes('/state?since=2'), calls[0].url);
-  assert.equal(reloads.length, 0, 'our own save must not reload the workspace');
+  assert.equal(hydrated.length, 0, 'our own save must not reload the workspace');
   assert.equal(context.__live().tenantDraftRevision, 2);
   assert.equal(context.__live().draftLiveSyncRevision, 2);
 }
 
-async function testAChangeBySomebodyElseSyncsInPlaceWithoutReload() {
-  reloads.length = 0;
+async function testAChangeBySomebodyElseHydratesTheWholeForm() {
+  hydrated.length = 0;
   calls.length = 0;
+  selectionRestored = 0;
   context.tenantDraftDirty = false;
-  activeElement = null;
+  activeElement = domInputs[0];
   context.startDraftLiveSync('draft-1', 2);
   serverState = { success: true, revision: 3, draftId: 'draft-1' };
   serverDraftPayload = {
@@ -139,44 +153,50 @@ async function testAChangeBySomebodyElseSyncsInPlaceWithoutReload() {
     },
   };
   await context.pollDraftLiveState();
-  assert.equal(reloads.length, 0, 'realtime live sync must NOT reload workspace via openProjectDraftById');
-  assert.equal(domInputs[0].value, 'برج جديد', 'input project_name must update in-place');
-  assert.equal(domInputs[1].value, 'الرياض', 'input city must update in-place');
-  assert.equal(context.tenantProjectData.project_name, 'برج جديد', 'backing data must update');
-  assert.equal(context.tenantProjectSectionStatuses.basic, 'approved', 'section statuses must update');
+  assert.equal(hydrated.length, 1, 'the whole form is hydrated from the remote save');
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(hydrated[0])),
+    { project_name: 'برج جديد', city: 'الرياض' });
+  assert.equal(domInputs[0].value, 'برج جديد');
+  assert.equal(domInputs[1].value, 'الرياض');
+  assert.equal(selectionRestored, 1, 'the caret is put back after hydration');
+  assert.equal(context.tenantProjectData.project_name, 'برج جديد');
+  assert.equal(context.tenantProjectSectionStatuses.basic, 'approved');
   assert.equal(context.__live().tenantDraftRevision, 3);
   assert.equal(context.__live().draftLiveSyncRevision, 3);
+  activeElement = null;
 }
 
-async function testFocusedInputIsNotOverwrittenDuringLiveSync() {
-  reloads.length = 0;
+async function testUnsavedEditsAreNotOverwrittenByARemoteChange() {
+  hydrated.length = 0;
   calls.length = 0;
-  // User is currently typing in project_name
-  activeElement = domInputs[0];
-  domInputs[0].value = 'تعديل المستخدم الحالي';
-  context.tenantProjectData.project_name = 'تعديل المستخدم الحالي';
-
+  context.tenantDraftDirty = true;
+  context.startDraftLiveSync('draft-1', 3);
   serverState = { success: true, revision: 4, draftId: 'draft-1' };
   serverDraftPayload = {
     success: true,
     draft: {
       id: 'draft-1',
       revision: 4,
-      draft_data: { project_name: 'اسم الخادم الذي يجب ألا يمسح حقل المستخدم', city: 'الدمام' },
+      draft_data: { project_name: 'اسم الخادم', city: 'الدمام' },
       section_statuses: { basic: 'approved' },
     },
   };
   await context.pollDraftLiveState();
-  assert.equal(reloads.length, 0);
-  assert.equal(domInputs[0].value, 'تعديل المستخدم الحالي', 'active focused input must NOT be overwritten');
-  assert.equal(domInputs[1].value, 'الدمام', 'non-focused input must update in real time');
-  activeElement = null;
+  assert.equal(calls.filter(c => !c.url.includes('/state')).length, 0,
+    'a dirty workspace must not fetch or apply the remote draft');
+  assert.equal(hydrated.length, 0);
+  assert.equal(context.__live().tenantDraftRevision, 3,
+    'the merge base stays behind so the next save merges instead of overwriting');
+  assert.equal(context.__live().draftLiveSyncRevision, 4,
+    'the change is reported once');
+  assert.match(badge.innerHTML, /اتغيّرت/);
+  context.tenantDraftDirty = false;
 }
 
 async function testTheChangeIsReportedOnce() {
   const currentCalls = calls.length;
   await context.pollDraftLiveState();
-  // Polled state, but revision is still 4 so no duplicate fetch of /project-draft
   const stateCalls = calls.slice(currentCalls).filter(c => !c.url.includes('/state'));
   assert.equal(stateCalls.length, 0, 'the same revision must not be refetched');
 }
@@ -191,4 +211,26 @@ async function testThePollWaitsForOurOwnWrite() {
   context.endDraftLocalSave();
   await context.pollDraftLiveState();
   assert.equal(calls.length, 1);
+}
+
+async function testTheMergeSaveCanForceTheMergedStateIn() {
+  hydrated.length = 0;
+  calls.length = 0;
+  context.tenantDraftDirty = true;
+  serverDraftPayload = {
+    success: true,
+    draft: {
+      id: 'draft-1',
+      revision: 5,
+      draft_data: { project_name: 'النسخة المدمجة', city: 'الرياض' },
+      section_statuses: { basic: 'draft' },
+    },
+  };
+  const applied = await context.applyLiveDraftSync('draft-1', 5, { force: true });
+  assert.equal(applied, true);
+  assert.equal(hydrated.length, 1);
+  assert.equal(context.tenantProjectData.project_name, 'النسخة المدمجة');
+  assert.equal(context.__live().tenantDraftRevision, 5);
+  assert.equal(context.__live().draftLiveSyncRevision, 5);
+  context.tenantDraftDirty = false;
 }

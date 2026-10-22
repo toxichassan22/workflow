@@ -65,8 +65,10 @@
         const data = await api('GET', '/api/project-draft/' + encodeURIComponent(draftId) +
           '/state?since=' + since);
         if (data && data.success && Number(data.revision) > since) {
-          draftLiveSyncRevision = Number(data.revision) || draftLiveSyncRevision;
-          await handleDraftLiveChange(data);
+          // The revision is consumed only after the change was applied (or
+          // deliberately deferred). A failed fetch is retried by the next poll.
+          const handled = await handleDraftLiveChange(data);
+          if (handled) draftLiveSyncRevision = Number(data.revision) || draftLiveSyncRevision;
         }
       } catch (error) {
         // A poll that could not go through is not something to read about.
@@ -74,72 +76,68 @@
       scheduleDraftLiveSync();
     }
 
-    async function applyLiveDraftSync(draftId, newRevision) {
-      if (!draftId) return;
+    function showDraftPendingChangeBadge() {
+      if (typeof document === 'undefined' || !document.getElementById) return;
+      const badge = document.getElementById('draftSyncBadge');
+      if (!badge) return;
+      badge.style.background = '#fef3c7';
+      badge.style.color = '#92400e';
+      badge.innerHTML = WFT('draft_live.pending', 'المسودة اتغيّرت من مستخدم آخر');
+    }
+
+    async function applyLiveDraftSync(draftId, newRevision, options = {}) {
+      if (!draftId) return false;
       const inProject = typeof tenantProjectMode === 'undefined' || tenantProjectMode === 'draft';
-      if (!inProject) return;
+      if (!inProject) return false;
       if (typeof tenantProjectData !== 'undefined' && tenantProjectData && tenantProjectData.draftId && tenantProjectData.draftId !== draftId) {
-        return;
+        return false;
       }
+      // Unsaved edits here must never be replaced by a remote snapshot: the
+      // next save merges them instead of overwriting either side. Only the
+      // save path itself may force the merged state in.
+      const editing = typeof tenantDraftDirty !== 'undefined' && tenantDraftDirty;
+      if (editing && !options.force) {
+        showDraftPendingChangeBadge();
+        return true;
+      }
+
+      const activeEl = (typeof document !== 'undefined') ? document.activeElement : null;
+      const selectionStart = activeEl && typeof activeEl.selectionStart === 'number'
+        ? activeEl.selectionStart : null;
+      const selectionEnd = activeEl && typeof activeEl.selectionEnd === 'number'
+        ? activeEl.selectionEnd : null;
 
       try {
         const resp = await api('GET', '/api/project-draft/' + encodeURIComponent(draftId));
-        if (!resp || !resp.success || !resp.draft) return;
+        if (!resp || !resp.success || !resp.draft) return false;
         const draft = resp.draft;
         const draftData = draft.draft_data || draft.draftData || {};
-        const incomingRev = Number(draft.revision) || Number(newRevision) || tenantDraftRevision;
+        const sectionStatuses = draft.section_statuses || {};
 
-        if (incomingRev > tenantDraftRevision) {
-          tenantDraftRevision = incomingRev;
-          draftLiveSyncRevision = incomingRev;
+        if (typeof tenantProjectData !== 'undefined' && tenantProjectData) {
+          tenantProjectData = { ...tenantProjectData, ...draftData, draftId };
         }
-
-        const activeEl = (typeof document !== 'undefined') ? document.activeElement : null;
-        const focusedKey = (activeEl && activeEl.dataset) ? activeEl.dataset.key : null;
-
-        // In-place DOM update for inputs (preserving the element the user is currently typing in)
-        if (typeof document !== 'undefined' && document.getElementById) {
-          const form = document.getElementById('tenantProjectForm');
-          if (form && form.querySelectorAll) {
-            form.querySelectorAll('[data-key]').forEach(input => {
-              const key = input.dataset.key;
-              if (!key || !(key in draftData) || input.type === 'file') return;
-              if (input === activeEl || (focusedKey && key === focusedKey)) return;
-
-              const newVal = draftData[key];
-              let strVal = '';
-              if (newVal === null || newVal === undefined) {
-                strVal = '';
-              } else if (typeof newVal === 'object') {
-                strVal = JSON.stringify(newVal);
-              } else {
-                strVal = String(newVal);
-              }
-
-              if (input.value !== strVal) {
-                input.value = strVal;
-                if (input.classList && input.classList.add) {
-                  input.classList.add('field-live-updated');
-                  setTimeout(() => {
-                    try { input.classList.remove('field-live-updated'); } catch (e) {}
-                  }, 1200);
-                }
-              }
-            });
+        if (draftData.tenantCreativeImages && typeof tenantCreativeImages !== 'undefined') {
+          tenantCreativeImages = draftData.tenantCreativeImages;
+          if (typeof tenantProjectData !== 'undefined' && tenantProjectData) {
+            tenantProjectData.tenantCreativeImages = tenantCreativeImages;
           }
         }
-
-        // In-place update of backing data
-        if (typeof tenantProjectData !== 'undefined' && tenantProjectData) {
-          Object.keys(draftData).forEach(key => {
-            if (focusedKey && key === focusedKey) return;
-            tenantProjectData[key] = draftData[key];
-          });
-          tenantProjectData.draftId = draftId;
+        if (Array.isArray(draftData.tenantSlidesData) && typeof tenantSlidesData !== 'undefined') {
+          tenantSlidesData = draftData.tenantSlidesData;
+        }
+        if (typeof recoverTenantSlidePlan === 'function') {
+          const plan = recoverTenantSlidePlan(draftData, tenantSlidesData);
+          if (typeof tenantSlidePlan !== 'undefined') tenantSlidePlan = plan;
         }
 
-        // In-place section statuses update
-        const sectionStatuses = draft.section_statuses || {};
+        // Rebuild every section from the incoming payload, not just the plain
+        // inputs: the market, financial, timeline, team and visual widgets read
+        // their own state and used to keep showing the previous file.
+        if (typeof hydrateTenantProjectForm === 'function') {
+          hydrateTenantProjectForm(draftData);
+        }
+
         if (sectionStatuses && typeof applySectionStatuses === 'function') {
           if (typeof tenantProjectSectionStatuses !== 'undefined') {
             tenantProjectSectionStatuses = { ...tenantProjectSectionStatuses, ...sectionStatuses };
@@ -147,18 +145,25 @@
           applySectionStatuses(sectionStatuses);
         }
 
-        // In-place slides update
-        if (Array.isArray(draftData.tenantSlidesData) && typeof tenantSlidesData !== 'undefined') {
-          tenantSlidesData = draftData.tenantSlidesData;
-          if (typeof document !== 'undefined' && document.getElementById) {
-            const slidesEditor = document.getElementById('tenantSlidesEditor');
-            if (slidesEditor && !slidesEditor.hidden && typeof renderTenantSlides === 'function') {
-              renderTenantSlides();
-            }
-          }
+        if (typeof renderTenantSlides === 'function') {
+          renderTenantSlides();
+        }
+        if (typeof getTenantNavigationState === 'function'
+            && (getTenantNavigationState() || {}).pageId === 'tenantVisualConceptPage'
+            && typeof renderVisualConceptPage === 'function') {
+          renderVisualConceptPage();
         }
 
-        // Update badge subtly
+        if (activeEl && selectionStart !== null && typeof activeEl.setSelectionRange === 'function') {
+          try { activeEl.setSelectionRange(selectionStart, selectionEnd); } catch (err) { /* detached input */ }
+        }
+
+        const incomingRev = Number(draft.revision) || Number(newRevision) || 0;
+        if (incomingRev > 0 && typeof tenantDraftRevision !== 'undefined') {
+          tenantDraftRevision = incomingRev;
+          draftLiveSyncRevision = incomingRev;
+        }
+
         if (typeof document !== 'undefined' && document.getElementById) {
           const badge = document.getElementById('draftSyncBadge');
           if (badge) {
@@ -167,15 +172,17 @@
             badge.innerHTML = 'محدّث تلقائيًا';
           }
         }
+        return true;
       } catch (err) {
         console.warn('[DRAFT LIVE SYNC] In-place sync failed:', err);
+        return false;
       }
     }
 
     function handleDraftLiveChange(data) {
-      if (!data || !data.draftId) return Promise.resolve();
+      if (!data || !data.draftId) return Promise.resolve(false);
       const inProject = typeof tenantProjectMode === 'undefined' || tenantProjectMode === 'draft';
-      if (!inProject) return Promise.resolve();
+      if (!inProject) return Promise.resolve(false);
       return applyLiveDraftSync(data.draftId, data.revision);
     }
 
