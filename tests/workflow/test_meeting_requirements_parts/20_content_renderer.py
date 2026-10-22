@@ -139,6 +139,33 @@ class MeetingRequirementsTestsPart20(MeetingRequirementsTests):
         self.assertNotIn('الملاحظات', html)
         self.assertNotIn('التواريخ والموثوقية', html)
 
+    def test_source_links_are_real_anchors_and_urls_survive_formatting(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع الاختبار',
+            'market_study_data': json.dumps({'sources': [
+                {'name': 'منصة صناعات', 'url': 'https://sna3at.com/posts/14332/'},
+                {'name': 'بدون بروتوكول', 'url': 'www.example.com/87958895.html'},
+                {'name': 'رابط غير آمن', 'url': 'javascript:alert(1)'},
+            ]}, ensure_ascii=False),
+        }
+        slide = {
+            'title': 'مصادر دراسة السوق', 'type': 'content', 'section_key': 'market',
+            'design_style': 'table', 'content_source': 'market_study_data.sources',
+        }
+        html = engine._build_market_sources_slide(slide, project, {})
+        # The register used to print every URL as plain text, so the deck had
+        # nothing to click and the PDF carried no link annotation at all.
+        self.assertIn('<a href="https://sna3at.com/posts/14332/"', html)
+        self.assertIn('<a href="https://www.example.com/87958895.html"', html)
+        self.assertNotIn('href="javascript:', html)
+
+        finalized = engine.finalize_slide_html(html, 'content', project, {})
+        self.assertIn('<a href="https://sna3at.com/posts/14332/"', finalized)
+        self.assertIn('<a href="https://www.example.com/87958895.html"', finalized)
+        self.assertNotIn('14,332', finalized)
+        self.assertNotIn('87,958,895', finalized)
+
     def test_a_long_market_summary_becomes_several_pages(self):
         engine = self.application_module.slide_engine
         project = self._market_project()

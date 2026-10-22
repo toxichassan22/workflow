@@ -214,6 +214,11 @@ def _sanitize_export_resource_urls(html, tenant_id, tmp_root=None):
     Runs after the project-file/asset resolvers have produced ``file:`` URIs,
     so legitimate tenant images keep working while hostile ``file://`` reads,
     remote fetches and ``..`` traversals are emptied.
+
+    A navigation link is not a resource: ``<a href="https://…">`` points the
+    reader at a page, it is never fetched to build the PDF. Emptying those
+    hrefs made every source link in an exported deck dead, so the allowlist
+    below keeps http(s)/mailto/tel anchors while still refusing javascript:.
     """
     if not html:
         return html
@@ -221,6 +226,19 @@ def _sanitize_export_resource_urls(html, tenant_id, tmp_root=None):
 
     def _keep(url):
         return _export_url_allowed(url, tenant_id, extra)
+
+    def _navigation_link(match):
+        if not re.fullmatch(r'\s*href\s*=\s*', match.group('prefix'), re.IGNORECASE):
+            return False
+        source = match.string
+        tag_start = source.rfind('<', 0, match.start())
+        if tag_start == -1 or source.rfind('>', 0, match.start()) > tag_start:
+            return False
+        if not re.match(r'<\s*a\b', source[tag_start:match.start()], re.IGNORECASE):
+            return False
+        url = match.group('url').strip()
+        low = ('https:' + url) if url.startswith('//') else url
+        return low.lower().startswith(('http://', 'https://', 'mailto:', 'tel:'))
 
     def _attr(match):
         url = match.group('url')
@@ -235,6 +253,8 @@ def _sanitize_export_resource_urls(html, tenant_id, tmp_root=None):
                     kept.append((source.strip() + ' ' + descriptor.strip()).strip())
             url = ', '.join(kept)
             return match.group('prefix') + match.group('quote') + url + match.group('quote')
+        if _navigation_link(match):
+            return match.group(0)
         if _keep(url.strip()):
             return match.group(0)
         print(f'[EXPORT] blocked resource url: {url.strip()[:120]}')

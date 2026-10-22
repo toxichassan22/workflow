@@ -4,6 +4,39 @@ def _market_value_html(value):
     return html_lib.escape(html_lib.unescape(str(value or 'غير متوفر'))).replace('\n', '<br>')
 
 
+def _source_url(value):
+    """Return a safe absolute http(s) URL, or '' when the value is not one."""
+    url = html_lib.unescape(str(value or '')).strip().strip('"\'<>')
+    if not url:
+        return ''
+    if url.lower().startswith('//'):
+        url = 'https:' + url
+    elif not re.match(r'^[a-z][a-z0-9+.-]*://', url, flags=re.IGNORECASE):
+        # A bare `www.example.com/page` used to reach the deck as written, so a
+        # click resolved against the app origin and the reader landed on a 404.
+        if re.match(r'^(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:[/:?#]|$)',
+                    url, flags=re.IGNORECASE):
+            url = 'https://' + url
+        else:
+            return ''
+    scheme = url.split(':', 1)[0].lower()
+    return url if scheme in ('http', 'https') else ''
+
+
+def _source_url_html(value):
+    """The source cell as a real external link, never as bare text."""
+    raw = str(value or '').strip()
+    url = _source_url(raw)
+    if not url:
+        return _market_value_html(raw)
+    return (
+        f'<a href="{html_lib.escape(url, quote=True)}" target="_blank" '
+        'rel="noopener noreferrer" dir="ltr" '
+        f'style="color:#1d4ed8;text-decoration:underline;word-break:break-all;'
+        f'overflow-wrap:anywhere;">{html_lib.escape(url)}</a>'
+    )
+
+
 def _market_paragraph_blocks(value, count=3):
     """Split approved prose into visual blocks without changing its wording."""
     text = re.sub(r'\s+', ' ', str(value or '').strip())
@@ -367,9 +400,6 @@ def _build_market_sources_slide(slide, source, branding=None, slide_num=None, to
     title = html_lib.escape(str((slide or {}).get('title') or 'مصادر دراسة السوق'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
 
-    def field(value, direction='rtl', size='9px'):
-        return f'<div dir="{direction}" style="font-size:{size};line-height:1.2;word-break:break-word;overflow-wrap:anywhere;">{_market_value_html(value)}</div>'
-
     def render_column(column_rows, column_index):
         # The deck shows the source and its link. The data date, the access
         # date, the reliability rating and the operator's note are internal
@@ -391,7 +421,7 @@ def _build_market_sources_slide(slide, source, branding=None, slide_num=None, to
                 f'<div style="display:grid;grid-template-columns:1.25fr 2fr;gap:0;'
                 f'background:{bg};border-bottom:1px solid #e2e8f0;align-items:center;">'
                 f'<div style="padding:8px 6px;text-align:center;font-size:9.3px;line-height:1.35;word-break:break-word;">{_market_value_html(name)}</div>'
-                f'<div style="padding:8px 6px;text-align:center;">{field(url, "ltr", "8px")}</div>'
+                f'<div style="padding:8px 6px;text-align:center;font-size:8px;line-height:1.2;">{_source_url_html(url)}</div>'
                 '</div>'
             )
         return (

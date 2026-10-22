@@ -661,12 +661,16 @@ _PRESENTATION_EXACT_NUMBER_CONTEXT = re.compile(
 )
 
 
+_URL_IN_SLIDE_TEXT = re.compile(r'(?:https?://|www\.)[^\s<>"\'`]+', re.IGNORECASE)
+
+
 def _format_presentation_numeric_text(html):
     parts = re.split(r'(<[^>]+>)', html)
     ignored = False
+    anchor_depth = 0
     number_pattern = re.compile(r'(?<![\d,٬])(-?(?:\d{4,}(?:\.\d+)?|\d+\.\d{2,}))(?![\d,٬])')
 
-    def format_text(text, prefix=''):
+    def format_numbers(text, prefix=''):
         numeric_only = bool(re.fullmatch(r'\s*-?\d+(?:\.\d+)?%?\s*', text or ''))
 
         def format_number(match):
@@ -705,6 +709,23 @@ def _format_presentation_numeric_text(html):
         text = normalize_grouped_number_text(text)
         return number_pattern.sub(format_number, text)
 
+    def format_text(text, prefix=''):
+        # A URL is an address, not a figure. Grouping a digit run inside it
+        # rewrote the page it points at — `/posts/14332/` became `/posts/14,332/`
+        # and the source link opened a 404. Only the text around a URL is
+        # formatted; the URL itself always leaves verbatim.
+        matches = list(_URL_IN_SLIDE_TEXT.finditer(text))
+        if not matches:
+            return format_numbers(text, prefix)
+        pieces = []
+        cursor = 0
+        for match in matches:
+            pieces.append(format_numbers(text[cursor:match.start()], prefix))
+            pieces.append(match.group(0))
+            cursor = match.end()
+        pieces.append(format_numbers(text[cursor:], prefix))
+        return ''.join(pieces)
+
     recent_text = ''
     for index, part in enumerate(parts):
         if part.startswith('<'):
@@ -712,7 +733,11 @@ def _format_presentation_numeric_text(html):
                 ignored = True
             elif re.match(r'<\s*/\s*(?:style|script)\b', part, flags=re.IGNORECASE):
                 ignored = False
-        elif not ignored:
+            elif re.match(r'<\s*a\b', part, flags=re.IGNORECASE):
+                anchor_depth += 1
+            elif re.match(r'<\s*/\s*a\b', part, flags=re.IGNORECASE):
+                anchor_depth = max(0, anchor_depth - 1)
+        elif not ignored and not anchor_depth:
             parts[index] = format_text(part, recent_text)
             recent_text = (recent_text + ' ' + part)[-160:]
     return ''.join(parts)

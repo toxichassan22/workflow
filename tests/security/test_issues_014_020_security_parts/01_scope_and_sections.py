@@ -272,6 +272,23 @@ class ExportPolicyTests(ScopeTestBase):
         self.assertNotIn('evil.internal', out)
         self.assertNotIn('file:///etc/shadow', out)
 
+    def test_navigation_links_survive_the_export_sanitizer(self):
+        # A source link points the reader at a page; it is never fetched to
+        # build the PDF. Emptying external `<a href>` targets made every
+        # exported source dead, while a remote stylesheet must still be blocked.
+        html = (
+            '<div class="slide">'
+            '<a href="https://sna3at.com/posts/14332/" target="_blank" rel="noopener">المصدر</a>'
+            '<a href="mailto:info@example.com">بريد</a>'
+            '<a href="javascript:alert(1)">x</a>'
+            '<link rel="stylesheet" href="https://evil.internal/x.css">'
+            '</div>')
+        out = self.pdfmod._sanitize_export_resource_urls(html, self.tenant)
+        self.assertIn('href="https://sna3at.com/posts/14332/"', out)
+        self.assertIn('href="mailto:info@example.com"', out)
+        self.assertNotIn('javascript:', out)
+        self.assertNotIn('evil.internal', out)
+
     def test_pptx_image_bytes_policy(self):
         from exports.pptx_export import _resolve_image_bytes
         self.assertEqual(_resolve_image_bytes(f'/uploads/{self.tenant}/ok.png', self.tenant), b'png-bytes')

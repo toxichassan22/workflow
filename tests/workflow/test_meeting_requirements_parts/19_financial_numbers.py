@@ -36,6 +36,22 @@ class MeetingRequirementsTestsPart19(MeetingRequirementsTests):
         self.assertIn('2024', engine._format_presentation_numeric_text(
             '<div>سنة 2024</div>'))
 
+    def test_urls_and_link_text_are_never_read_as_figures(self):
+        engine = self.application_module.slide_engine
+
+        # The formatter grouped a digit run inside a source URL, so the deck
+        # linked to /posts/14,332/ instead of /posts/14332/ and opened a 404.
+        formatted = engine._format_presentation_numeric_text(
+            '<div>https://sna3at.com/posts/14332/</div>'
+            '<a href="https://example.com/87958895.html">المصدر 87958895</a>'
+            '<div>تكلفة 923938343 ريال</div>')
+        self.assertIn('https://sna3at.com/posts/14332/', formatted)
+        self.assertNotIn('14,332', formatted)
+        self.assertIn('href="https://example.com/87958895.html"', formatted)
+        self.assertNotIn('87,958,895', formatted)
+        # Prose around the link still receives the normal formatting.
+        self.assertIn('923,938,343', formatted)
+
     def test_financial_indicators_leave_the_engine_as_display_strings(self):
         engine = self.application_module.slide_engine
         model = {

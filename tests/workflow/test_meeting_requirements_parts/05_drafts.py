@@ -276,7 +276,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('1,750', finished)
         self.assertNotIn('data-market-auto-fit="1"', finished)
 
-    def test_market_sol_design_is_free_and_postprocess_centers_its_content(self):
+    def test_market_sol_design_is_free_and_postprocess_top_aligns_its_content(self):
         engine = self.application_module.slide_engine
         project = {
             'project_name': 'مشروع سوق',
@@ -313,7 +313,7 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         )
         self.assertIn('data-market-auto-fit="1"', normalized)
         self.assertIn('data-market-auto-fit-content="1"', normalized)
-        self.assertIn('justify-content:safe center', normalized)
+        self.assertIn('justify-content:flex-start', normalized)
         self.assertIsNone(re.search(
             r'<[^>]+\bstyle\s*=\s*["\'][^"\']*position\s*:\s*(?:absolute|fixed)',
             normalized, flags=re.IGNORECASE,

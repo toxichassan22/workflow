@@ -2019,6 +2019,56 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertRegex(index_html, r'data-index-page="land"[^>]*>04')
         self.assertRegex(index_html, r'data-index-page="location"[^>]*>05')
 
+    def test_a_preserved_index_is_rebuilt_into_two_balanced_columns(self):
+        engine = self.application_module.slide_engine
+        branding = {
+            'primary_color': '#123B6D', 'secondary_color': '#0b1f33',
+            'accent_color': '#C4A35A', 'background_color': '#ffffff',
+            'text_color': '#111111', 'company_name': 'شركة الاختبار',
+        }
+        project = {'project_name': 'مشروع الفهرس'}
+        page = lambda key, text, number: (
+            f'<div data-index-section="{key}" style="min-height:48px;">'
+            f'<div>{text}</div><div data-index-page="{key}" dir="ltr">{number}</div></div>'
+        )
+        # The row-injection pass piled every entry into the first column and
+        # left the second empty; a preserved/custom index kept that damage
+        # forever because only the rows were patched, never the layout.
+        collapsed_index = (
+            '<div class="slide" dir="rtl" style="width:1280px;height:720px;">'
+            '<div style="display:grid;grid-template-columns:1fr 1fr;">'
+            '<div>'
+            + page('overview', 'نبذة عن المشروع', '03')
+            + page('land', 'بيانات الأرض', '04')
+            + page('location', 'موقع المشروع', '05')
+            + '</div><div></div></div></div>'
+        )
+        slides = [
+            {'title': 'الغلاف', 'type': 'cover', 'html': '<div class="slide">غلاف</div>'},
+            {'title': 'محتويات العرض', 'type': 'index', 'is_custom': True,
+             'html': collapsed_index},
+            {'title': 'نبذة عن المشروع', 'type': 'content', 'section_key': 'overview',
+             'html': '<div class="slide">محتوى 1</div>'},
+            {'title': 'بيانات الأرض', 'type': 'content', 'section_key': 'land',
+             'html': '<div class="slide">محتوى 2</div>'},
+            {'title': 'موقع المشروع', 'type': 'content', 'section_key': 'location',
+             'html': '<div class="slide">محتوى 3</div>'},
+            {'title': 'الخاتمة', 'type': 'closing', 'html': '<div class="slide">ختام</div>'},
+        ]
+        renumbered = engine.renumber_presentation_slides(
+            slides, branding=branding, project_data=project)
+        index_html = renumbered[1]['html']
+        grid = index_html[index_html.index('grid-template-columns:1fr 1fr'):]
+        self.assertEqual(grid.count('data-index-section='), 4)
+        # The canonical two-column design: the second column owns its rows.
+        self.assertIn('</div><div><div data-index-section=', grid)
+        self.assertRegex(index_html, r'data-index-page="overview"[^>]*>03')
+        self.assertRegex(index_html, r'data-index-page="land"[^>]*>04')
+        self.assertRegex(index_html, r'data-index-page="location"[^>]*>05')
+        self.assertRegex(index_html, r'data-index-page="closing"[^>]*>06')
+        self.assertEqual(renumbered, engine.renumber_presentation_slides(
+            renumbered, branding=branding, project_data=project))
+
     def test_presentation_save_update_and_export_enforce_slide_numbers(self):
         engine = self.application_module.slide_engine
         client = self.app.test_client()

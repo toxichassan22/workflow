@@ -165,43 +165,70 @@
         }
       }
       if (type === 'index') {
-        const existingRows = root.querySelectorAll('[data-index-section]');
-        if (existingRows.length === 0 && indexEntries && indexEntries.length > 0) {
-          return buildTenantIndexSlideHtml(indexEntries, index, total);
+        const entries = Array.isArray(indexEntries)
+          ? indexEntries.filter(entry => entry && entry.section_key)
+          : [];
+        const existingRows = Array.from(root.querySelectorAll('[data-index-section]'));
+        if (existingRows.length === 0 && entries.length > 0) {
+          return buildTenantIndexSlideHtml(entries, index, total);
         }
-        const activeSections = new Set((indexEntries || []).map(entry => entry.section_key));
-        if (activeSections.size > 0) {
+        // An empty entries list means the section keys are not known yet —
+        // never wipe a populated index on that pass. A non-empty list must
+        // leave every row in its correct column: patching rows in place used
+        // to pile them into one column after a delete or a refresh.
+        if (entries.length > 0) {
+          const rowsByKey = new Map();
           existingRows.forEach(row => {
-            if (!activeSections.has(row.dataset.indexSection)) row.remove();
+            const key = String(row.getAttribute('data-index-section') || '');
+            if (key && !rowsByKey.has(key)) rowsByKey.set(key, row);
+            else row.remove();
           });
-        }
-        (indexEntries || []).forEach(entry => {
-          let page = root.querySelector('[data-index-page="' + entry.section_key + '"]');
-          if (!page) {
-            const titleNodes = Array.from(root.querySelectorAll('div, span, p, td, h3, h4')).filter(node =>
-              node.children.length === 0 && String(node.textContent || '').trim() === entry.title);
-            for (const title of titleNodes) {
-              const row = title.closest('[data-index-section]') || title.parentElement;
-              if (row) {
-                const candidates = Array.from(row.querySelectorAll('*')).filter(n =>
-                  n !== title && n.children.length === 0 && /^\s*\d{1,3}\s*$/.test(n.textContent || ''));
-                if (candidates.length) {
-                  page = candidates[candidates.length - 1];
-                  break;
-                }
+          const firstRow = existingRows[0];
+          const grid = firstRow?.parentElement?.parentElement;
+          const columns = grid ? Array.from(grid.children).filter(node => node.tagName === 'DIV') : [];
+          if (grid && columns.length) {
+            const templateRow = firstRow.cloneNode(true);
+            const ordered = entries.map(entry => {
+              let row = rowsByKey.get(String(entry.section_key));
+              if (!row) {
+                row = templateRow.cloneNode(true);
+                row.setAttribute('data-index-section', String(entry.section_key));
+                const pageLeaf = row.querySelector('[data-index-page]');
+                if (pageLeaf) pageLeaf.setAttribute('data-index-page', String(entry.section_key));
+                const titleLeaf = Array.from(row.querySelectorAll('div, span, p')).find(node =>
+                  !node.children.length && node !== pageLeaf);
+                if (titleLeaf) titleLeaf.textContent = String(entry.title || '');
               }
-              const sibling = title.nextElementSibling;
-              if (sibling && /^\s*\d+\s*$/.test(sibling.textContent || '')) {
-                page = sibling;
-                break;
+              let page = row.querySelector('[data-index-page]');
+              if (!page) {
+                page = Array.from(row.querySelectorAll('*')).find(node =>
+                  !node.children.length && /^\s*\d{1,3}\s*$/.test(node.textContent || ''));
               }
+              if (page) {
+                page.setAttribute('data-index-page', String(entry.section_key));
+                page.textContent = String(entry.page || 0).padStart(2, '0');
+              }
+              return row;
+            }).filter(Boolean);
+            existingRows.forEach(row => { if (!ordered.includes(row)) row.remove(); });
+            const midpoint = Math.ceil(ordered.length / 2);
+            let second = columns[1];
+            if (!second) {
+              second = columns[0].cloneNode(false);
+              grid.appendChild(second);
             }
+            columns[0].replaceChildren(...ordered.slice(0, midpoint));
+            second.replaceChildren(...ordered.slice(midpoint));
+          } else {
+            entries.forEach(entry => {
+              const page = root.querySelector('[data-index-page="' + entry.section_key + '"]');
+              if (page) {
+                page.dataset.indexPage = entry.section_key;
+                page.textContent = String(entry.page).padStart(2, '0');
+              }
+            });
           }
-          if (page) {
-            page.dataset.indexPage = entry.section_key;
-            page.textContent = String(entry.page).padStart(2, '0');
-          }
-        });
+        }
       }
       return template.innerHTML;
     }
@@ -293,9 +320,49 @@
       );
     }
 
+    function stripReservedSlideHeaderSpacing(tag) {
+      const styleMatch = /style\s*=\s*(["'])([\s\S]*?)\1/i.exec(tag);
+      if (!styleMatch) return tag;
+      const style = styleMatch[2];
+      const px = name => {
+        const match = new RegExp('(?:^|[;\\s])' + name + '\\s*:\\s*(-?\\d+(?:\\.\\d+)?)px', 'i').exec(style);
+        return match ? parseFloat(match[1]) : null;
+      };
+      let marginTop = px('margin-top');
+      if (marginTop === null) marginTop = px('margin');
+      let paddingTop = px('padding-top');
+      if (paddingTop === null) paddingTop = px('padding');
+      const appendStyle = (source, declaration) => source.replace(
+        /style\s*=\s*(["'])([\s\S]*?)\1/i,
+        (match, quote, value) => 'style=' + quote + value.replace(/\s*;?\s*$/, ';') + declaration + quote
+      );
+      let cleaned = tag;
+      if (marginTop !== null && marginTop >= 24) cleaned = appendStyle(cleaned, 'margin-top:0!important;');
+      if (paddingTop !== null && paddingTop >= 48) cleaned = appendStyle(cleaned, 'padding-top:0!important;');
+      return cleaned;
+    }
+
+    // Decks stored before the market frame was top-aligned still carry
+    // `safe center`, and the stripped model header's margin is still on the
+    // first block. The server normalizes both on save/export; the preview
+    // must show the same lane.
+    function normalizeMarketFrameSpacing(html) {
+      if (!html || String(html).indexOf('data-market-auto-fit-content') === -1) return html;
+      let cleaned = String(html).replace(
+        /<div\b[^>]*\bdata-market-auto-fit-content\s*=\s*["']1["'][^>]*>/gi,
+        tag => tag.replace(/justify-content\s*:\s*safe\s+center/gi, 'justify-content:flex-start')
+      );
+      cleaned = cleaned.replace(
+        /(<div\b[^>]*\bdata-market-auto-fit-content\s*=\s*["']1["'][^>]*>\s*)(<[^/!?][^>]*>)/i,
+        (match, frameOpen, firstTag) => frameOpen + stripReservedSlideHeaderSpacing(firstTag)
+      );
+      return cleaned;
+    }
+
     function processSlideHtmlClient(html, slideType) {
       if (!html) return '';
       let cleanHtml = stripSlideFontDeclarations(html);
+      cleanHtml = normalizeMarketFrameSpacing(cleanHtml);
       const projectData = tenantProjectData || {};
       const logoUrl = (tenantBranding && (tenantBranding.logo_path || tenantBranding.logo || tenantBranding.logo_url)) || '/assets/logo.png';
 

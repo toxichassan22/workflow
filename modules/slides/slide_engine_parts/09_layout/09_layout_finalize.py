@@ -1,204 +1,5 @@
 
 
-def _normalize_market_content_layout(html, slide_type='', slide_title='', content_source=''):
-    """Center market content while leaving SOL's internal visual composition intact.
-
-    The model owns the design inside the content frame. This wrapper only gives
-    that design a stable vertical lane between the managed header and footer,
-    and converts the occasional absolute-positioned text block into normal flow
-    when it would otherwise overlap the rest of the market narrative.
-    """
-    if (
-        not html
-        or not _is_market_slide(slide_type, slide_title, content_source)
-        or _is_fixed_competitor_comparison(content_source, slide_title)
-        or 'data-market-auto-fit="1"' in html
-    ):
-        return html
-
-    root_match = re.search(
-        r'<(?P<tag>div)\b[^>]*\bclass\s*=\s*(["\'])[^"\']*\bslide\b[^"\']*\2[^>]*>',
-        html, flags=re.IGNORECASE,
-    )
-    if not root_match:
-        return html
-    root_end = _slide_element_end(html, root_match)
-    root_close_start = html.rfind('</div>', root_match.end(), root_end)
-    if root_close_start <= root_match.end():
-        return html
-
-    root_open = root_match.group(0)
-    inner = html[root_match.end():root_close_start]
-    parts = _split_top_level_html(inner)
-    if not parts:
-        return html
-
-    preserved = []
-    body = []
-    for part in parts:
-        lowered = part.lower()
-        if (
-            re.match(r'\s*<style\b', lowered)
-            or 'data-slide-header' in lowered
-            or 'data-slide-footer' in lowered
-            or re.search(r'class\s*=\s*["\'][^"\']*slide-(?:header|footer)', lowered)
-        ):
-            preserved.append(part)
-        else:
-            body.append(part)
-    body = [part for part in body if part.strip()]
-    if not body:
-        return html
-
-    if 'data-market-auto-fit=' not in root_open:
-        root_open = root_open[:-1] + ' data-market-auto-fit="1">'
-    root_open = _set_tag_style(
-        root_open,
-        ('display', 'flex-direction', 'align-items', 'padding', 'margin', 'box-sizing'),
-        'display:flex!important;flex-direction:column!important;align-items:stretch!important;'
-        'padding:0!important;margin:0!important;box-sizing:border-box!important;',
-    )
-    body_html = ''.join(body)
-    if 'data-market-work-summary' in body_html:
-        # Older saved fallback slides used a grid with fixed height. Some PDF
-        # engines interpret that grid differently from the browser and let the
-        # decision card sit over the narrative. Convert only that emergency
-        # marker to ordinary flow; SOL-authored market compositions remain
-        # untouched.
-        def repair_work_summary(match):
-            return _set_tag_style(
-                match.group(0),
-                ('display', 'grid-template-columns', 'grid-template-areas', 'gap',
-                 'min-height', 'max-height', 'overflow'),
-                'display:block!important;min-height:0!important;max-height:none!important;overflow:visible!important;',
-            )
-
-        body_html = re.sub(
-            r'<div\b[^>]*\bdata-market-work-summary\s*=\s*["\']1["\'][^>]*>',
-            repair_work_summary,
-            body_html,
-            count=1,
-            flags=re.IGNORECASE,
-        )
-        body_html = re.sub(
-            r'grid-area\s*:\s*(?:aside|main)\s*;?',
-            '',
-            body_html,
-            flags=re.IGNORECASE,
-        )
-    absolute_body = bool(re.search(r'position\s*:\s*(?:absolute|fixed)', body_html, flags=re.IGNORECASE))
-    repair_css = ''
-    if absolute_body:
-        selector_scope = '[data-market-auto-fit="1"] [data-market-auto-fit-content="1"]'
-        repair_css = (
-            '<style data-market-auto-flow="1">'
-            f'{selector_scope}[style*="position:absolute"],'
-            f'{selector_scope}[style*="position: absolute"],'
-            f'{selector_scope}[style*="position:fixed"],'
-            f'{selector_scope}[style*="position: fixed"]{{'
-            'position:relative!important;inset:auto!important;'
-            'top:auto!important;right:auto!important;bottom:auto!important;left:auto!important;'
-            'transform:none!important;height:auto!important;min-height:0!important;max-height:none!important;'
-            '}'
-            '</style>'
-        )
-
-        # An inline `!important` declaration wins over any injected stylesheet,
-        # so repair absolute/fixed blocks in the HTML itself as well.  This is
-        # intentionally limited to elements that SOL positioned absolutely;
-        # normal-flow composition, widths, colors, and spacing remain SOL's.
-        def repair_inline_absolute(match):
-            tag = match.group(0)
-            style_match = re.search(r'style\s*=\s*(["\'])(.*?)\1', tag, flags=re.IGNORECASE)
-            if not style_match or not re.search(
-                    r'position\s*:\s*(?:absolute|fixed)', style_match.group(2), flags=re.IGNORECASE):
-                return tag
-            return _set_tag_style(
-                tag,
-                ('position', 'inset', 'top', 'right', 'bottom', 'left', 'transform',
-                 'height', 'min-height', 'max-height'),
-                'position:relative!important;inset:auto!important;'
-                'top:auto!important;right:auto!important;bottom:auto!important;left:auto!important;'
-                'transform:none!important;height:auto!important;min-height:0!important;max-height:none!important;',
-            )
-
-        body_html = re.sub(
-            r'<(?!/|!|\?)[a-z][^>]*>',
-            repair_inline_absolute,
-            body_html,
-            flags=re.IGNORECASE,
-        )
-    frame = (
-        '<div data-market-auto-fit-content="1" style="flex:1 1 auto;min-height:0;'
-        'width:calc(100% - 72px);margin:0 auto;padding:64px 0 52px;box-sizing:border-box;'
-        'display:flex;flex-direction:column;justify-content:safe center;overflow:visible;">'
-        + body_html + '</div>'
-    )
-    replacement = root_open + ''.join(preserved) + repair_css + frame + html[root_close_start:root_end]
-    return html[:root_match.start()] + replacement + html[root_end:]
-
-
-def _strip_market_slide_media(html):
-    """Keep competitor logos while removing maps and unrelated images from market slides."""
-    protected_images = []
-
-    def protect_competitor_region(match):
-        region = match.group(0)
-
-        def stash_image(image_match):
-            marker = f'__MARKET_COMPETITOR_IMAGE_{len(protected_images)}__'
-            protected_images.append((marker, image_match.group(0)))
-            return marker
-
-        return re.sub(r'<img\b[^>]*>', stash_image, region, flags=re.IGNORECASE)
-
-    # Resolved logos no longer contain the token name (for example they may be
-    # /uploads/creative/.../logo.png), so protect the semantic competitor
-    # containers before the generic market-image cleanup runs. This also keeps
-    # already-saved presentations exportable when they are re-numbered.
-    html = re.sub(
-        r'<(?P<tag>table|div)\b[^>]*\bdata-competitor-(?:table|logos)\b[^>]*>.*?</(?P=tag)>',
-        protect_competitor_region, html, flags=re.IGNORECASE | re.DOTALL,
-    )
-
-    # A requested watermark is presentation decoration, not market content.
-    # Protect its image by its containing element: the resolved URL need not
-    # contain the word logo and the image itself may carry no class.
-    html = re.sub(
-        r'<div\b(?=[^>]*(?:\bdata-slide-watermark\s*=\s*["\']true["\']|'
-        r'\bclass\s*=\s*["\'][^"\']*\bslide-watermark\b))[^>]*>.*?</div\s*>',
-        protect_competitor_region, html, flags=re.IGNORECASE | re.DOTALL,
-    )
-
-    def keep_image(match):
-        tag = match.group(0)
-        lowered_tag = tag.lower()
-        src_match = re.search(r'\bsrc\s*=\s*["\']([^"\']*)["\']', tag, flags=re.IGNORECASE)
-        src = str(src_match.group(1) if src_match else '').lower()
-        # The managed company/project logos are part of the fixed chrome, not
-        # market content. They must survive the market media scrub, including
-        # the second pass after the chrome has been injected.
-        if (
-            'presentation-chrome-logo' in lowered_tag
-            or '##logo##' in src
-            or '##project_logo##' in src
-        ):
-            return tag
-        if 'competitor_logo' in src:
-            return tag
-        return ''
-
-    html = re.sub(
-        r'background-image\s*:\s*url\s*\([^)]*(?:map_|/uploads/maps|image_cover|moodboard|land_photo|plan_image|interior)[^)]*\)',
-        'background-image:none', html, flags=re.IGNORECASE,
-    )
-    html = re.sub(r'<img\b[^>]*>', keep_image, html, flags=re.IGNORECASE)
-    html = re.sub(r'#*MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)#*', '', html, flags=re.IGNORECASE)
-    for marker, image in protected_images:
-        html = html.replace(marker, image)
-    return html
-
-
 def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_slides=None,
                        tenant_id=None, branding=None, project_data=None, content_source=None):
     """Post-process a slide while keeping cover and closing free of header/footer.
@@ -389,38 +190,6 @@ def _rewrite_preserved_counter(html, slide_type, slide_num, total_slides):
             parts[i] = re.sub(r'\d+', lambda m: next(values, m.group(0)), parts[i])
         html = html[:match.start()] + open_tag + ''.join(parts) + html[close:]
     return html
-
-
-def _refresh_preserved_index(html, entries, branding=None, project_data=None):
-    """Synchronize managed rows, not the index canvas or surrounding custom content."""
-    row_re = re.compile(r'<(?P<tag>[a-z][\w:-]*)\b[^>]*\bdata-index-section\s*=\s*["\'](?P<key>[^"\']+)["\'][^>]*>', re.IGNORECASE)
-    rows = [(m, _slide_element_end(html, m)) for m in row_re.finditer(html)]
-    entries = [e for e in (entries or []) if isinstance(e, dict)]
-    if not entries:
-        return html
-    if not rows:
-        return build_index_slide({'index_entries': entries}, 2, 2, branding, project_data)
-    by_key = {m.group('key'): html[m.start():end] for m, end in rows}
-    canonical = build_index_slide({'index_entries': entries}, 1, 1, branding, project_data)
-    fallback = {m.group('key'): canonical[m.start():_slide_element_end(canonical, m)]
-                for m in row_re.finditer(canonical)}
-    ordered = [by_key.get(e['section_key'], fallback.get(e['section_key'], '')) for e in entries]
-    for i in range(len(rows) - 1, -1, -1):
-        match, end = rows[i]
-        replacement = (''.join(ordered[i:]) if i == len(rows) - 1
-                       else ordered[i] if i < len(ordered) else '')
-        html = html[:match.start()] + replacement + html[end:]
-    pages = {str(e.get('section_key')): e.get('page') for e in entries}
-    page_re = re.compile(r'(<(?P<tag>[a-z][\w:-]*)\b[^>]*\bdata-index-page\s*=\s*["\'](?P<key>[^"\']+)["\'][^>]*>)(?P<body>[^<]*)(</(?P=tag)\s*>)', re.IGNORECASE)
-
-    def update_page(match):
-        page = pages.get(match.group('key'))
-        if page is None:
-            return match.group(0)
-        body = re.sub(r'\d+', f'{int(page):02d}', match.group('body'), count=1)
-        return match.group(1) + body + match.group(5)
-
-    return page_re.sub(update_page, html)
 
 
 def finalize_designer_slide_html(html, slide_type, project_data, branding, creative_images=None,
@@ -763,13 +532,22 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
     for index, item in enumerate(normalized, 1):
         slide_type = str(item.get('type') or 'content')
         if _designer_preserves_html(item):
+            if slide_type == 'index':
+                # The index is a designed structural page, not a preserved
+                # designer canvas. Rebuilding it as a whole is what keeps its
+                # two columns balanced; patching rows in place collapsed every
+                # entry into one column after a save, a refresh or a delete.
+                index_html = build_index_slide(
+                    item, index, total, branding, project_data, offer_lang=lang)
+                item['html'] = finalize_slide_html(
+                    index_html, slide_type, project_data, branding, tenant_id=tenant_id,
+                    slide_num=index, slide_title=item.get('title') or offer_chrome('index_heading', lang),
+                    total_slides=total, content_source=item.get('content_source'),
+                    allow_all_maps=allow_all_maps,
+                )
+                continue
             html = _rewrite_preserved_counter(item.get('html') or '', slide_type, index, total)
             html = _strip_header_page_marker(html)
-            if slide_type == 'index':
-                if not re.search(r'data-index-(?:section|page)', html, re.IGNORECASE):
-                    html = build_index_slide(item, index, total, branding, project_data, offer_lang=lang)
-                else:
-                    html = _refresh_preserved_index(html, item.get('index_entries'), branding, project_data)
             item['html'] = _strip_presentation_icons(html)
             continue
         # A designer-chat edit, user edit, or custom slide produced this HTML
@@ -792,11 +570,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['_designer_keep_html'] = True
             item['is_custom'] = True
         if slide_type == 'index':
-            existing_html = item.get('html') or ''
-            if existing_html and re.search(r'data-index-(?:section|page)', existing_html, re.IGNORECASE):
-                index_html = _refresh_preserved_index(existing_html, item.get('index_entries'), branding, project_data)
-            else:
-                index_html = build_index_slide(item, index, total, branding, project_data, offer_lang=lang)
+            index_html = build_index_slide(item, index, total, branding, project_data, offer_lang=lang)
             item['html'] = finalize_slide_html(
                 index_html, slide_type, project_data, branding, tenant_id=tenant_id,
                 slide_num=index, slide_title=item.get('title') or offer_chrome('index_heading', lang),
@@ -895,6 +669,9 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                     item['html'], slide_type, content_source=item.get('content_source'),
                     slide_title=title, strip_resolved=False, allow_all_maps=allow_all_maps)
                 if item.get('section_key') == 'market' or _is_market_slide(slide_type, title, item.get('content_source')):
+                    item['html'] = _normalize_market_content_layout(
+                        item['html'], slide_type=slide_type, slide_title=title,
+                        content_source=item.get('content_source'))
                     item['html'] = _strip_market_slide_media(item['html'])
     return normalized
 
