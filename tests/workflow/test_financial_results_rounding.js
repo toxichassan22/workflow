@@ -104,7 +104,8 @@ test('a rendered sensitivity row carries no long decimal tail', () => {
   vm.runInContext(source, context);
   context.calculateAll = () => {};
   context.window.__financialProjection = {
-    adjustedProjectCost: 1000000, projected: [], terminal: 200000, payback: 3.4567,
+    adjustedProjectCost: 1000000, terminal: 200000, payback: 3.4567,
+    projected: [{ saleRevenue: 0, operatingRevenue: 0, terminal: 200000, projectOutflow: 1000000, opex: 0, landRent: 0, financeFee: 0, financeInterest: 0, fundFeesAnnual: 0 }],
     cashflows: [-500, 200, 400], projectCashflows: [-1000, 500, 700],
     fullOccupancyNOI: 123456.789123, equityRequired: 500000.123456
   };

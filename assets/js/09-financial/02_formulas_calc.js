@@ -51,6 +51,13 @@
     }
     function analysisEndYear(period, customYear, developmentYears, totalYears) { if (period === 'development') return developmentYears; if (period === 'custom') return Math.max(1, Math.min(totalYears, Math.round(customYear || totalYears))); return totalYears; }
     function periodLabel(endYear, developmentYears, totalYears) { if (endYear === developmentYears) return `<span>سنوات التطوير</span> 1-${developmentYears}`; if (endYear === totalYears) return `<span>كامل الدراسة</span> 1-${totalYears}`; return `<span>من السنة</span> 1 <span>حتى السنة</span> ${endYear}`; }
+    // In-kind land sits inside the investment base but never enters projectOutflow, so it is added separately.
+    function computeProjectRoi(rows, landContribution) {
+      const list = Array.isArray(rows) ? rows : [];
+      const inflows = list.reduce((sum, r) => sum + r.saleRevenue + r.operatingRevenue + r.terminal, 0);
+      const outflows = list.reduce((sum, r) => sum + r.projectOutflow + r.opex + r.landRent + r.financeFee + r.financeInterest + r.fundFeesAnnual, 0) + Math.max(0, Number(landContribution) || 0);
+      return outflows > 0 ? (inflows - outflows) / outflows : null;
+    }
     document.addEventListener('wf:lang', () => { try { if (document.getElementById('section-financial-calc')) calculateAll(); } catch (e) { /* ignore */ } });
 
     function calculateRevenueBase(row, baseRevenue = 0, occupancyOverride = null) {
@@ -731,8 +738,7 @@
 
       const totalFinanceCost = arrangementFee + totalFinanceInterest, totalFundFees = totalFundManagementFees + totalAdditionalFundFees + fundExitFeeTotal + performanceFeeTotal, projectCostWithFinance = projectCost + totalFinanceCost, adjustedProjectCost = projectCostWithFinance + totalFundFees, landEquityContribution = landContributionType === 'inKind' ? landCostIncluded : 0, totalEquityRequired = landEquityContribution + totalCashEquity, recoveryCashflows = projected.map(row => row.saleRevenue + row.noi + row.terminal), payback = capitalRecoveryPeriod(adjustedProjectCost, recoveryCashflows), equityPayback = cashflowPaybackPeriod([initialEquityLandFlow, ...projected.map(row => row.equityFlowForIrr)]), roiPeriod = val('roiPeriod') || 'full', irrPeriod = val('irrPeriod') || 'full', roiEndYear = analysisEndYear(roiPeriod, num('roiEndYear'), developmentYears, totalYears), irrEndYear = analysisEndYear(irrPeriod, num('irrEndYear'), developmentYears, totalYears), roiRows = projected.filter(r => r.year <= roiEndYear), irrRows = projected.filter(r => r.year <= irrEndYear);
       const projectIrr = irr([initialProjectLandFlow, ...irrRows.map(r => r.unleveredForIrr)]), irrVal = irr([initialEquityLandFlow, ...irrRows.map(r => r.equityFlowForIrr)]);
-      const roiInflows = roiRows.reduce((sum, r) => sum + r.saleRevenue + r.operatingRevenue + r.terminal, 0), roiOutflows = roiRows.reduce((sum, r) => sum + r.projectOutflow + r.opex + r.landRent + r.financeFee + r.financeInterest + r.fundFeesAnnual, 0);
-      const roi = roiOutflows > 0 ? (roiInflows - roiOutflows) / roiOutflows : null, roiScope = periodLabel(roiEndYear, developmentYears, totalYears), irrScope = periodLabel(irrEndYear, developmentYears, totalYears);
+      const roi = computeProjectRoi(roiRows, landEquityContribution), roiScope = periodLabel(roiEndYear, developmentYears, totalYears), irrScope = periodLabel(irrEndYear, developmentYears, totalYears);
       const warnings = [];
       const warnT = (key, fallback, params) => (typeof WFT === 'function' ? WFT(key, fallback, params) : fallback);
       if (saleExitMethod !== 'none' && saleExitYear > roiEndYear) warnings.push(warnT('financial.warn_sale_exit_outside_roi', 'التخارج البيعي في السنة {year} خارج فترة ROI، ولذلك لا يدخل في ROI.', { year: saleExitYear }));
