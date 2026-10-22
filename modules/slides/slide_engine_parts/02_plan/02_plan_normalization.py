@@ -419,6 +419,29 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
                         source_suffix = (f':{column_start}:{column_end}'
                                          if column_start is not None and column_end is not None else '')
                         part_source = f'financial_report:{part_index}:{start}:{end}{source_suffix}'
+                        clarification_rows = [
+                            row for row in rows
+                            if isinstance(row, (list, tuple)) and row
+                            and str(row[0]).strip() == 'الإيضاحات'
+                        ]
+                        if clarification_rows and len(rows) == 1:
+                            # الإيضاحات is client-written prose, not a table cell.
+                            # Rendering it in a two-column table squeezed a whole
+                            # page of text into one wide row.
+                            flush_pending_tables()
+                            add(target_section, {
+                                'title': part_title,
+                                'type': 'content',
+                                'design_style': 'clarifications',
+                                'content_density': 'medium',
+                                'requires_image': False,
+                                'content_source': part_source,
+                                'source_table': f'report_part_{part_index}',
+                                'row_count': end - start,
+                                'financial_template': 'report',
+                                'bullets': [],
+                            })
+                            continue
                         if chartable or column_start is not None or len(column_ranges) > 1 or is_cashflow_part or is_components_part:
                             # Chart slides and wide column-split tables own their slide:
                             # two six-column tables stacked vertically do not fit.

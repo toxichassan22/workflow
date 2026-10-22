@@ -448,6 +448,108 @@ def _build_sol_combo_slide(slide, source, branding=None, slide_num=None, total_s
 </div>'''
 
 
+def _financial_clarifications_text(slide, source):
+    """The client-written الإيضاحات text, from the report part or the study inputs."""
+    try:
+        _headers, rows = _fallback_table_data(slide, source)
+    except Exception:
+        rows = []
+    for row in rows or []:
+        cells = list(row.values()) if isinstance(row, dict) else list(row) if isinstance(row, (list, tuple)) else []
+        if len(cells) >= 2 and 'الإيضاحات' in str(cells[0]):
+            return str(cells[1] or '').strip()
+    model = _parse_financial_dict((source or {}).get('financial_study_model'))
+    inputs = model.get('inputs') if isinstance(model.get('inputs'), dict) else {}
+    return str(inputs.get('financialClarifications') or '').strip()
+
+
+def _clarification_blocks(text):
+    """Keep the client's own line and numbered-point structure."""
+    text = str(text or '').strip()
+    if not text:
+        return []
+    blocks = [block.strip() for block in re.split(r'\r?\n\s*\r?\n', text) if block.strip()]
+    if len(blocks) == 1 and '\n' in blocks[0]:
+        blocks = [block.strip() for block in blocks[0].splitlines() if block.strip()]
+    if len(blocks) == 1:
+        blocks = [block.strip() for block in
+                  re.split(r'(?=\s*\d{1,2}\s*[-.)]\s+)', blocks[0]) if block.strip()]
+    return blocks or [text]
+
+
+def _build_sol_clarifications_slide(slide, source, branding=None, slide_num=None, total_slides=None):
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    title = html_lib.escape(str((slide or {}).get('title') or 'الإيضاحات'))
+    project_title = html_lib.escape(str((source or {}).get('project_name') or (source or {}).get('projectName') or 'THE VIEW'))
+    text = _financial_clarifications_text(slide, source)
+    blocks = _clarification_blocks(text)
+    font_size = 13 if len(text) <= 1800 else (12.5 if len(text) <= 2600 else 12)
+    if not blocks:
+        body_html = (
+            '<p data-financial-clarifications-empty="1" style="margin:0;color:#64748b;">'
+            'لا توجد إيضاحات مدخلة في الدراسة المالية.</p>')
+    elif len(text) > 700 and len(blocks) > 1:
+        total_length = sum(len(block) for block in blocks)
+        prefix = 0
+        split_at = 1
+        best_diff = None
+        for index in range(1, len(blocks)):
+            prefix += len(blocks[index - 1])
+            difference = abs(total_length - (2 * prefix))
+            if best_diff is None or difference < best_diff:
+                best_diff = difference
+                split_at = index
+        columns_html = ''.join(
+            '<div style="flex:1;min-width:0;">' + ''.join(
+                f'<p style="margin:0 0 10px;break-inside:avoid;">{html_lib.escape(block)}</p>'
+                for block in column) + '</div>'
+            for column in (blocks[:split_at], blocks[split_at:])
+        )
+        body_html = (
+            '<div data-financial-clarifications-columns="2" '
+            'style="display:flex;gap:36px;align-items:flex-start;">'
+            + columns_html + '</div>')
+    else:
+        body_html = (
+            '<div data-financial-clarifications-columns="1">'
+            + ''.join(f'<p style="margin:0 0 10px;break-inside:avoid;">{html_lib.escape(block)}</p>'
+                      for block in blocks) + '</div>')
+    slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ""
+    return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
+  <style>{SOL_SLIDES_CSS}</style>
+  <header class="slide-header">
+    <div class="header-left">
+      <div class="header-project">{project_title}</div>
+      <div class="header-cat">FINANCIAL NOTES</div>
+    </div>
+    <div class="header-right">
+      <div class="header-accent-bar" style="background:{accent};"></div>
+      <div class="header-text-group">
+        <h1 class="header-title">{title}</h1>
+        <p class="header-subtitle">الافتراضات والملاحظات المالية المعتمدة للمشروع</p>
+      </div>
+    </div>
+  </header>
+  <div style="padding:0 44px;margin-top:96px;">
+    <div data-financial-clarifications="1" style="max-height:520px;min-height:300px;box-sizing:border-box;background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:22px 28px 18px;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:12px;padding-bottom:12px;margin-bottom:16px;border-bottom:1px solid #dbe4ee;">
+        <span style="font-size:11.5px;font-weight:800;color:#ffffff;background:{primary};padding:5px 12px;border-radius:6px;">الدراسة المالية</span>
+        <span style="font-size:13px;font-weight:700;color:{primary};">الافتراضات والملاحظات المعتمدة</span>
+      </div>
+      <div data-financial-clarifications-text="1" style="width:100%;font-size:{font_size}px;line-height:1.95;color:#334155;text-align:justify;">
+        {body_html}
+      </div>
+    </div>
+  </div>
+  <footer class="slide-footer" data-slide-footer="1">
+    <div class="footer-left">{project_title}</div>
+    <div class="footer-center">الإيضاحات المالية</div>
+    <div class="footer-right" data-slide-counter="1">{slide_num_str}</div>
+  </footer>
+</div>'''
+
+
 def _build_sol_table_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#005f78')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')

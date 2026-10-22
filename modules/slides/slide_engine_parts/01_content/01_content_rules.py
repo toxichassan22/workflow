@@ -789,6 +789,7 @@ def _merge_sparse_plan_slides(groups):
         for slide in slides:
             source = str(slide.get('content_source') or '')
             sparse_financial = (section_key == 'financial' and slide.get('row_count') == 1
+                                and slide.get('design_style') != 'clarifications'
                                 and not source.startswith(('financial_summary:', 'financial_indicators')))
             sparse_generic = (not source and slide.get('design_style') != 'table'
                               and not slide.get('image_tokens')
@@ -808,6 +809,7 @@ def _merge_sparse_plan_slides(groups):
             first = merged[0]
             first_source = str(first.get('content_source') or '')
             first_sparse = (section_key == 'financial' and first.get('row_count') == 1
+                            and first.get('design_style') != 'clarifications'
                             and not first_source.startswith(('financial_summary:', 'financial_indicators')))
             first_generic = (not first_source and first.get('design_style') != 'table'
                              and not first.get('image_tokens')

@@ -231,6 +231,10 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
     if isinstance(content_sources, list) and len(content_sources) > 1:
         return _build_sol_stacked_tables_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
 
+    if str((slide or {}).get('design_style') or '') == 'clarifications':
+        return _build_sol_clarifications_slide(
+            slide, source, branding, slide_num=slide_num, total_slides=total_slides)
+
     headers, rows = _fallback_table_data(slide, source)
     if rows:
         return _build_sol_table_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)

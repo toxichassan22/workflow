@@ -58,6 +58,51 @@ class MeetingRequirementsTestsPart02bFinancialCharts(MeetingRequirementsTests):
         self.assertEqual(by_name.get('بنود أخرى'), 20000000.0)
         self.assertEqual(data['total']['value_sar'], 120000000.0)
 
+    def test_financial_clarifications_are_an_editorial_page_not_a_table(self):
+        engine = self.application_module.slide_engine
+        clarifications = '\n'.join([
+            '1- البيع والتأجير: يتم بيع وحدات المشروع على الخارطة وفق نظام البيع على الخارطة، '
+            'وتأجير الوحدات التجارية بعقود طويلة الأجل مع مراعاة أنظمة وزارة التجارة والاستثمار.',
+            '2- التكاليف: تشمل جميع تكاليف التطوير المباشرة وغير المباشرة، بما في ذلك أعمال '
+            'البنية التحتية والتشطيبات والتجهيزات، واحتُسبت على أساس الأسعار السائدة في السوق.',
+            '3- التمويل: احتُسب التمويل على أساس 60% من إجمالي التكلفة، على أن يتم السحب على '
+            'دفعات وفق مراحل التطوير، وتبدأ عملية السداد بعد اكتمال مرحلة الإنشاء الرئيسية.',
+            '4- الإيرادات: احتُسبت على أساس متوسط أسعار البيع والتأجير في المنطقة، مع نسبة '
+            'إشغال متحفظة في السنة الأولى وزيادة تدريجية حتى الوصول إلى النسبة المستهدفة.',
+            '5- المصروفات: تشمل الصيانة والتأمين والرسوم البلدية وأتعاب إدارة الأصول، وقُدرت '
+            'كنسبة من الإيرادات التشغيلية بناءً على بيانات مشاريع مماثلة في المنطقة.',
+            '6- المخاطر: تشمل مخاطر الأسعار ومخاطر التأخير ومخاطر الإشغال، وقد أُدرجت ضمن '
+            'تحليل الحساسية المعتمد في الدراسة المالية.',
+        ])
+        model = {
+            'inputs': {'projectCost': 1000, 'financialClarifications': clarifications},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': '15. الإيضاحات'},
+                {'type': 'fields', 'rows': [['الإيضاحات', clarifications]]},
+            ]},
+        }
+        project = {'project_name': 'مشروع تجريبي', 'financial_study_model': model}
+        plan = engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'الفهرس', 'type': 'index'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {})
+        clarification_slides = [
+            slide for slide in plan['slides']
+            if slide.get('section_key') == 'financial'
+            and slide.get('design_style') == 'clarifications'
+        ]
+        self.assertEqual(len(clarification_slides), 1, clarification_slides)
+        slide = clarification_slides[0]
+        self.assertIn('الإيضاحات', slide.get('title', ''))
+        html = engine._build_structured_fallback_slide(
+            slide, project, {'primary_color': '#005f78', 'accent_color': '#c59a58'})
+        self.assertIn('data-financial-clarifications="1"', html)
+        self.assertIn('data-financial-clarifications-columns="2"', html)
+        self.assertNotIn('<table', html.lower())
+        self.assertIn('البيع والتأجير', html)
+        self.assertEqual(html.count('<p style="margin:0 0 10px'), 6)
+
     def test_combo_chart_mirrors_the_cashflow_table_and_invents_no_series(self):
         engine = self.application_module.slide_engine
         part = {

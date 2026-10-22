@@ -617,6 +617,10 @@
       tenantSlidesData[index].html = html;
       tenantSlidesData[index]._designer_keep_html = true;
       tenantSlidesData[index].is_custom = true;
+      try {
+        const editedRoot = new DOMParser().parseFromString(html, 'text/html').querySelector('.slide');
+        syncFinancialClarificationsFromSlide(editedRoot);
+      } catch (clarificationError) { /* the slide HTML is still saved */ }
       document.getElementById('slideEditModal').remove();
       renderTenantSlides();
       triggerAutoSaveDraft();

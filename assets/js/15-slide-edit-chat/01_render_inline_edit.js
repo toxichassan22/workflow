@@ -58,6 +58,59 @@
       toast(slideInlineEditStates[index] ? 'تم تفعيل التعديل المباشر لهذه الشريحة' : 'تم إيقاف التعديل المباشر');
     }
 
+    function syncFinancialClarificationsFromSlide(root) {
+      // الإيضاحات is client-written prose. Keep the study's own source in step
+      // with a slide edit so the next regeneration does not restore the old text.
+      if (!root || !root.querySelector) return;
+      const container = root.querySelector('[data-financial-clarifications="1"]');
+      if (!container || container.querySelector('[data-financial-clarifications-empty="1"]')) return;
+      const textRoot = container.querySelector('[data-financial-clarifications-text="1"]') || container;
+      const blocks = Array.from(textRoot.children || [])
+        .filter(el => el && ['P', 'DIV', 'LI'].includes(String(el.tagName || '').toUpperCase()))
+        .map(el => String(el.innerText || el.textContent || '').trim())
+        .filter(Boolean);
+      if (!blocks.length) return;
+      const text = blocks.join('\n');
+      const textarea = document.getElementById('financialClarifications');
+      if (textarea && String(textarea.value || '') === text) return;
+      if (textarea) textarea.value = text;
+      const model = tenantProjectData && tenantProjectData.financial_study_model;
+      if (model && typeof model === 'object') {
+        model.inputs = model.inputs && typeof model.inputs === 'object' ? model.inputs : {};
+        model.inputs.financialClarifications = text;
+      }
+      triggerAutoSaveDraft();
+      toast('تم تحديث الإيضاحات في الدراسة المالية');
+    }
+
+    function slideEditableSafeHtml(element) {
+      // contenteditable="plaintext-only" may still create <br>/<div> blocks when
+      // the client presses Enter. Keep that text structure and drop any markup.
+      const parts = [];
+      const walk = node => {
+        Array.from(node.childNodes || []).forEach(child => {
+          if (child.nodeType === 3) {
+            parts.push(escapeHtml(child.nodeValue || ''));
+            return;
+          }
+          if (child.nodeType !== 1) return;
+          const tag = String(child.tagName || '').toUpperCase();
+          if (tag === 'BR') {
+            parts.push('<br>');
+            return;
+          }
+          if (tag === 'DIV' || tag === 'P' || tag === 'LI') {
+            if (parts.length && parts[parts.length - 1] !== '<br>') parts.push('<br>');
+            walk(child);
+            return;
+          }
+          walk(child);
+        });
+      };
+      walk(element);
+      return parts.join('');
+    }
+
     function commitSlideInlineEdit(stage, index, editedEl) {
       // The deck may have been reordered/rebuilt since this card was rendered
       // (e.g. a designer merge inserting slides) — follow the slide's id to its
@@ -79,22 +132,36 @@
 
       const liveNodes = collectSlideTextNodes(slide);
       const rawNodes = collectSlideTextNodes(rawRoot);
-      // Structure mismatch means we cannot map text safely — keep the original HTML.
-      if (liveNodes.length !== rawNodes.length) return;
-
       let changed = false;
-      liveNodes.forEach((node, i) => {
-        if (editedEl && !editedEl.contains(node)) return;
-        if (rawNodes[i].nodeValue !== node.nodeValue) {
-          rawNodes[i].nodeValue = node.nodeValue;
+      if (liveNodes.length === rawNodes.length) {
+        liveNodes.forEach((node, i) => {
+          if (editedEl && !editedEl.contains(node)) return;
+          if (rawNodes[i].nodeValue !== node.nodeValue) {
+            rawNodes[i].nodeValue = node.nodeValue;
+            changed = true;
+          }
+        });
+      } else {
+        // A line break changes the number of text nodes. Map the edited element
+        // by its path and carry its plain text structure across, instead of
+        // silently keeping the pre-edit HTML.
+        const editedTarget = slideChromeOf(slide, editedEl) || editedEl;
+        if (!editedTarget || !slide.contains(editedTarget)) return;
+        const elementPath = slideElementPath(slide, editedTarget);
+        const rawTarget = elementPath ? elementAtSlidePath(rawRoot, elementPath) : null;
+        if (!rawTarget) return;
+        const safeHtml = slideEditableSafeHtml(editedTarget);
+        if (rawTarget.innerHTML !== safeHtml) {
+          rawTarget.innerHTML = safeHtml;
           changed = true;
         }
-      });
+      }
       if (!changed) return;
 
       pushSlideEditHistory(index);
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
+      syncFinancialClarificationsFromSlide(slide);
       touchSlideEditSession(index);
       renderTenantSlidesSidebar();
       triggerAutoSaveDraft();
