@@ -81,6 +81,18 @@ function setTenantGenerationStopVisible(visible) {
   if (loaderStopButton && !visible) loaderStopButton.style.display = 'none';
 }
 
+// The close control on the progress card means "stop this", not "hide it":
+// a closed popup used to leave the paid work running with nothing on screen
+// showing it. It hides immediately and asks the server to cancel every run
+// the card is following.
+async function closeGenerationPopup() {
+  const runs = tenantGenerationRunsInFlight();
+  if (runs.length) {
+    stopTenantGeneration();
+  }
+  hideLoader();
+}
+
 async function stopTenantGeneration() {
   if (tenantGenerationStopRequested) return;
   tenantGenerationStopRequested = true;

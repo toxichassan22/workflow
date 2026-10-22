@@ -533,6 +533,15 @@ class RunControlClientTests(unittest.TestCase):
         self.assertIn('/api/runs/', self.source)
         self.assertIn('cancelTenantGenerationRun', self.source)
 
+    def test_closing_the_progress_card_cancels_the_run_instead_of_hiding_it(self):
+        """The X used to hide the card and leave the paid job running."""
+        self.assertIn('onclick="closeGenerationPopup()"', self.shell)
+        self.assertIn('async function closeGenerationPopup()', self.source)
+        close_snippet = self.source.split('async function closeGenerationPopup()', 1)[1]
+        close_snippet = close_snippet.split('async function stopTenantGeneration()', 1)[0]
+        self.assertIn('stopTenantGeneration()', close_snippet)
+        self.assertIn('hideLoader()', close_snippet)
+
     def test_the_slide_loop_registers_its_run_so_the_stop_reaches_it(self):
         self.assertIn('registerTenantGenerationRun', self.source)
         self.assertIn('releaseTenantGenerationRun', self.source)
