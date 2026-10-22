@@ -29,8 +29,10 @@ def api_market_study_competitor_logo():
     if competitor.get('logo_file_id') or competitor.get('logo_path'):
         return jsonify({'success': True, 'competitor': competitor})
     official_url = competitor.get('logo_source_url') or competitor.get('source_url')
-    verified_official = bool(official_url and market_study.official_source_reliability(
-        competitor.get('name'), competitor.get('source'), official_url))
+    # Only a page retrieval already proved counts as the official source; a
+    # source label or a name inside the host is not proof, so the discovery
+    # call runs and its citations must confirm the official host.
+    verified_official = bool(official_url and competitor.get('logo_official_verified'))
     if not verified_official:
         _billing_guard = _require_billing_balance('ai_text')
         if _billing_guard is not None:

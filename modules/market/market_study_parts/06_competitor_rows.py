@@ -178,6 +178,8 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'logo_path': _norm(row.get('logo_path') or row.get('logoPath')),
         'logo_url': logo_url,
         'logo_source_url': logo_source_url,
+        'logo_official_verified': bool(
+            row.get('logo_official_verified') or row.get('logoOfficialVerified')),
         'district': district,
         'city': _norm(row.get('city') or row.get('location_city')),
         'distance_km': distance_km,
@@ -201,6 +203,9 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'verify_provider_error': _norm(row.get('verify_provider_error') or row.get('verifyProviderError')),
         'row_source': _norm(row.get('row_source') or row.get('rowSource')) or fallback_source,
     }
+    primary_source = primary_competitor_source_url(result)
+    if primary_source:
+        result['source_url'] = primary_source
     if conversion_error:
         result['price_conversion_error'] = conversion_error
     return result
@@ -239,6 +244,9 @@ def canonicalize_competitor_source_urls(row):
     source_url = _norm(row.get('source_url'))
     if source_url:
         row['source_url'] = canonical_index_source_url(source_url, operation)
+    primary = primary_competitor_source_url(row)
+    if primary:
+        row['source_url'] = primary
     return row
 
 
@@ -661,6 +669,7 @@ def normalize_summary(raw):
                 'reliability': _norm(row.get('reliability')) or official_source_reliability('', name, url),
                 'note': sanitize_summary_floats(normalize_summary_currency(row.get('note'))),
             })
+    sources = dedupe_source_rows(sources)
     disclaimer = _norm(data.get('disclaimer')) or (
         'هذه دراسة أولية استرشادية وليست تقييمًا عقاريًا معتمدًا.'
     )

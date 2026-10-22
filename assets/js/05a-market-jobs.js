@@ -25,7 +25,7 @@
           if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) break;
           const slept = typeof interruptiblePollSleep === 'function'
             ? await interruptiblePollSleep(intervalMs)
-            : await new Promise(resolve => setTimeout(resolve, intervalMs));
+            : (await new Promise(resolve => setTimeout(resolve, intervalMs)), true);
           if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) break;
           res = await api('GET', '/api/market-study/jobs/' + encodeURIComponent(jobId));
           const status = String(res && res.status || '');
@@ -214,10 +214,6 @@
         const state = getMarketStudyState();
         state.competitors = res.competitors || state.competitors;
         state.transaction_benchmarks = res.transactionBenchmarks || null;
-        state.sources = mergeMarketSourceRows(
-          state.sources,
-          res.sources || buildMarketCompetitorSourceRows(state.competitors)
-        );
         applyMarketStudyState(state);
         persistMarketStudyFromDom();
         const extra = res.expansionNote || res.notes || '';
@@ -288,10 +284,7 @@
         const state = getMarketStudyState();
         state.summary = marketSummaryPending.summary;
         state.swot = marketSummaryPending.swot || state.swot;
-        state.sources = mergeMarketSourceRows(
-          marketSummaryPending.sources,
-          buildMarketCompetitorSourceRows(state.competitors)
-        );
+        state.sources = mergeMarketSourceRows(marketSummaryPending.sources, []);
         state.decision = marketSummaryPending.decision;
         state.disclaimer = marketSummaryPending.disclaimer;
         state.one_block_summary = marketSummaryPending.oneBlockSummary || '';
@@ -317,9 +310,11 @@
       if (btn) btn.disabled = true;
       if (fail) fail.textContent = '';
       setMarketResearchTraceJob(rememberedMarketJob('summary'));
-      const scopeCheck = (typeof collectMarketSummaryScope === 'function')
-        ? collectMarketSummaryScope()
-        : { cities: [] };
+      const scopeCheck = (typeof resolveMarketSummaryScope === 'function')
+        ? resolveMarketSummaryScope()
+        : ((typeof collectMarketSummaryScope === 'function')
+          ? collectMarketSummaryScope()
+          : { cities: [] });
       if (!(scopeCheck.cities || []).some(city => String(city?.name || '').trim())) {
         const message = WFT('market.summary_scope_required', 'يجب تحديد مدينة واحدة على الأقل لنطاق الملخص');
         if (fail) fail.textContent = message;
@@ -467,10 +462,7 @@
         const state = getMarketStudyState();
         state.summary = res.summary;
         state.swot = res.swot || {};
-        state.sources = mergeMarketSourceRows(
-          res.sources || [],
-          buildMarketCompetitorSourceRows(state.competitors)
-        );
+        state.sources = mergeMarketSourceRows(res.sources || [], []);
         state.decision = res.decision || '';
         state.disclaimer = res.disclaimer || state.disclaimer;
         state.one_block_summary = res.one_block_summary || res.oneBlockSummary || '';

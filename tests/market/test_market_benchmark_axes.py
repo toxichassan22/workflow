@@ -423,7 +423,9 @@ class BenchmarkExpansionTests(unittest.TestCase):
             result = module._execute_market_competitors(payload)
 
         self.assertTrue(result['success'], result)
-        self.assertEqual(len(calls), 1)
+        # Two axes -> two parallel scans; every axis is already covered, so
+        # no sequential expansion call follows them.
+        self.assertEqual(len(calls), 2)
         self.assertEqual(len(result['competitors']), 10)
 
     def test_distance_scope_reaches_search_and_drops_out_of_radius_rows(self):

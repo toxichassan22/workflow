@@ -201,6 +201,15 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('الأنشطة والمكونات الاستثمارية المحددة: سكني', prompt)
         self.assertNotIn('بحث جوجل الأصلي', prompt)
 
+    def test_summary_prompt_carries_the_binding_period(self):
+        prompt = market_study.build_summary_user_prompt({
+            'summaryPeriodBounds': {'from': '2023-01-01', 'to': '2026-01-01'},
+            'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
+        }, [])
+        self.assertIn('فترة بيانات الملخص الملزمة', prompt)
+        self.assertIn('2023-01-01', prompt)
+        self.assertIn('2026-01-01', prompt)
+
     def test_project_brief_labels_summary_city_scope(self):
         block = market_study._project_input_block({
             'city': 'جدة', 'summaryScope': {
@@ -242,6 +251,24 @@ class SummaryScopePayloadTests(unittest.TestCase):
         self.assertEqual(payload['summaryScope'], {
             'cities': [{'name': 'جدة', 'districts': []}]})
 
+    def test_summary_period_is_independent_from_the_competitor_period(self):
+        payload = self.application_module._prepare_market_payload({
+            'dataPeriod': '12m',
+            'summaryPeriod': '3y',
+        }, tenant_id=None)
+        self.assertEqual(payload['summaryPeriodLabel'], 'آخر 3 سنوات')
+        self.assertNotEqual(payload['summaryPeriodBounds'],
+                            payload['dataPeriodBounds'])
+        self.assertTrue(payload['summaryPeriodBounds'].get('from'))
+
+    def test_old_drafts_without_a_summary_period_keep_the_shared_one(self):
+        payload = self.application_module._prepare_market_payload({
+            'dataPeriod': '24m',
+        }, tenant_id=None)
+        self.assertEqual(payload['summaryPeriodBounds'],
+                         payload['dataPeriodBounds'])
+        self.assertEqual(payload['summaryPeriodLabel'], 'آخر 24 شهرًا')
+
 
 class SummaryScopeFrontendTests(unittest.TestCase):
 
@@ -279,6 +306,19 @@ class SummaryScopeFrontendTests(unittest.TestCase):
         self.assertIn('market.summary_scope_required', text)
         self.assertIn('scopeCheck.cities', text)
         self.assertIn('marketSummaryScopeAddCityBtn', text)
+
+    def test_empty_scope_falls_back_to_the_project_city(self):
+        text = self.frontend
+        self.assertIn('function resolveMarketSummaryScope()', text)
+        self.assertIn('const fallback = defaultMarketSummaryScope();', text)
+        self.assertIn('resolveMarketSummaryScope()', text)
+
+    def test_summary_has_its_own_period_control(self):
+        text = self.frontend
+        self.assertIn('id="marketSummaryPeriod"', text)
+        self.assertIn('id="marketSummaryPeriodFrom"', text)
+        self.assertIn('id="marketSummaryPeriodTo"', text)
+        self.assertIn('summaryPeriod: state.summary_period', text)
 
 
 if __name__ == '__main__':

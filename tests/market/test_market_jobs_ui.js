@@ -29,6 +29,7 @@ const files = [
   'assets/js/05-market-competitors.js',
   'assets/js/05-market-competitors/01_project_data_snapshot.js',
   'assets/js/05-market-competitors/02_table_ux.js',
+  'assets/js/05-market-competitors/03_source_links.js',
   'assets/js/05a-market-jobs.js',
   'assets/js/05a-market-summary-chat.js'
 ];
@@ -95,6 +96,11 @@ function fixture() {
     tenantAllowedFieldSections: {},
     tenantProjectMode: 'draft',
     toasts: [], requests: [], appliedStates: [],
+    // Run-control globals the job flow registers itself with.
+    registerTenantGenerationRun() {},
+    releaseTenantGenerationRun() {},
+    tenantActiveGenerationRuns: new Set(),
+    tenantGenerationStopRequested: false,
     document: {
       addEventListener() {},
       createElement: tag => ({ tagName: tag, className: '', hidden: false, textContent: '' }),

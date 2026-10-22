@@ -606,7 +606,7 @@
     const MARKET_PRICE_TYPES = {
       'بيع': ['سعر الوحدة', 'سعر المتر المربع', 'متوسط سعر الوحدة', 'متوسط سعر المتر', 'يبدأ من', 'نطاق سعري', 'أخرى'],
       'إيجار': ['إيجار الوحدة الشهري', 'إيجار الوحدة السنوي', 'إيجار المتر الشهري', 'إيجار المتر السنوي', 'متوسط إيجار الوحدة', 'متوسط إيجار المتر', 'يبدأ من', 'نطاق سعري', 'أخرى'],
-      'تشغيل فندقي': ['سعر الليلة', 'متوسط سعر الغرفة ADR', 'الإيراد لكل غرفة RevPAR', 'متوسط الإقامة الشهرية', 'يبدأ من', 'نطاق أسعار الغرف', 'أخرى'],
+      'تشغيل فندقي': ['نطاق أسعار الغرف', 'سعر الليلة', 'متوسط سعر الغرفة ADR', 'الإيراد لكل غرفة RevPAR', 'متوسط الإقامة الشهرية', 'يبدأ من', 'أخرى'],
       'أخرى': ['قيمة واحدة', 'نطاق سعري', 'أخرى']
     };
     const MARKET_RANGE_PRICE_TYPES = ['نطاق سعري', 'نطاق أسعار الغرف'];
@@ -621,7 +621,7 @@
     const MARKET_PRICE_TYPES_EN = {
       'Sale': ['Unit Price', 'Price per SQM', 'Average Unit Price', 'Average Price per SQM', 'Starting From', 'Price Range', 'Other'],
       'Rent': ['Monthly Unit Rent', 'Annual Unit Rent', 'Monthly Rent per SQM', 'Annual Rent per SQM', 'Average Unit Rent', 'Average Rent per SQM', 'Starting From', 'Price Range', 'Other'],
-      'Hotel Operation': ['Nightly Rate', 'Average Daily Rate (ADR)', 'RevPAR', 'Average Monthly Stay', 'Starting From', 'Room Price Range', 'Other'],
+      'Hotel Operation': ['Room Price Range', 'Nightly Rate', 'Average Daily Rate (ADR)', 'RevPAR', 'Average Monthly Stay', 'Starting From', 'Other'],
       'Other': ['Single Value', 'Price Range', 'Other']
     };
     const MARKET_RANGE_PRICE_TYPES_EN = ['Price Range', 'Room Price Range'];
@@ -816,6 +816,9 @@
         data_period: '12m',
         data_period_from: '',
         data_period_to: '',
+        summary_period: '12m',
+        summary_period_from: '',
+        summary_period_to: '',
         competitors: [],
         summary,
         swot,
@@ -919,10 +922,15 @@
         ...base,
         ...parsed,
         competitors,
+        // Competitor links belong to their rows, not to the summary register.
         sources: mergeMarketSourceRows(
-          Array.isArray(parsed.sources) ? parsed.sources : [],
-          buildMarketCompetitorSourceRows(competitors)
-        ),
+          Array.isArray(parsed.sources) ? parsed.sources : [], []),
+        // Older drafts shared the competitors' period; the summary now owns one.
+        summary_period: parsed.summary_period || parsed.data_period || '12m',
+        summary_period_from: parsed.summary_period_from
+          || (parsed.summary_period ? '' : (parsed.data_period_from || '')),
+        summary_period_to: parsed.summary_period_to
+          || (parsed.summary_period ? '' : (parsed.data_period_to || '')),
         summary: marketSummaryState(parsed.summary),
         one_block_summary: migratedOneBlock,
         swot: { ...base.swot, ...(parsed.swot || {}) }

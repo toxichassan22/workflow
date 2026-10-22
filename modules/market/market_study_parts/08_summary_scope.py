@@ -377,10 +377,27 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'لا تذكر تاريخ الوصول داخل النص أو ملاحظات المصادر. اذكر تاريخ إصدار الدراسة وتاريخ نشر/بيانات المصدر عند توفره؛ حقل accessed_at للتوثيق فقط. '
             'لا تكتب كلمة «وسيط» في أي نص ظاهر للمستخدم. استخدم «متوسط حسابي» فقط للمعدل الحسابي الحقيقي، واحذف قيمة أي مقياس آخر بدل تسميته متوسطًا.\n')
 
+    period_bounds = (payload.get('summaryPeriodBounds')
+                     or payload.get('dataPeriodBounds'))
+    if isinstance(period_bounds, dict) and period_bounds:
+        period_from = str(period_bounds.get('from') or '').strip() or ('unbounded' if en else 'غير محدد')
+        period_to = str(period_bounds.get('to') or '').strip() or ('today' if en else 'تاريخ اليوم')
+        period_line = (
+            f'Binding summary data period: {period_from} through {period_to}. '
+            'Every figure and source must fall inside it; older data is excluded.\n'
+            if en else
+            f'فترة بيانات الملخص الملزمة: من {period_from} إلى {period_to}. '
+            'كل رقم ومصدر يجب أن يقع داخلها، وتُستبعد البيانات الأقدم.\n')
+    else:
+        period_line = (
+            'No bounded data period was supplied; state each source period and do not imply a window.\n'
+            if en else
+            'لم تُحدد فترة بيانات ملزمة؛ اذكر فترة كل مصدر ولا توحِ بنطاق زمني.\n')
+
     return (
         f'تاريخ إصدار الدراسة: {today}\n'
         + research_rules + local_indicator_rules + transaction_detail_rules
-        + activity_scope_line + scope_line
+        + activity_scope_line + scope_line + period_line
         + 'المهام المحورية: ' + ', '.join(keys) + '. حللها كلها بعمق وبلا إسقاط لأي محور.\n'
         + narrative_rules + lang + '\n' + decision
         + 'الأدلة وصفحات المصادر المفتوحة من الباحثين:\n' + evidence + '\n\n'

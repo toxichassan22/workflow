@@ -6,6 +6,21 @@
       return { cities: city ? [{ name: city, districts: [] }] : [] };
     }
 
+    function resolveMarketSummaryScope() {
+      // An empty scope means "the project's own city" — the study should not
+      // stop and ask for a city the project already states.
+      const current = collectMarketSummaryScope();
+      if ((current.cities || []).some(city => String(city?.name || '').trim())) {
+        return current;
+      }
+      const fallback = defaultMarketSummaryScope();
+      if (fallback.cities.length) {
+        renderMarketSummaryScope(fallback);
+        persistMarketStudyFromDom();
+      }
+      return fallback;
+    }
+
     function collectMarketSummaryScope() {
       const cities = [];
       document.querySelectorAll('#marketSummaryScopeCities [data-summary-city]').forEach(card => {

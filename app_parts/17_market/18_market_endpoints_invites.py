@@ -58,6 +58,25 @@ def _prepare_market_payload(data, tenant_id=None):
         payload.get('dataPeriodFrom') or payload.get('data_period_from'),
         payload.get('dataPeriodTo') or payload.get('data_period_to'),
     )
+    # The summary has its own period window; older drafts that predate it fall
+    # back to the competitors period they used to share.
+    summary_period = (payload.get('summaryPeriod') or payload.get('summary_period'))
+    if summary_period or payload.get('summaryPeriodFrom') or payload.get('summaryPeriodTo'):
+        payload['summaryPeriodLabel'] = _market_period_label({
+            'dataPeriod': summary_period,
+            'dataPeriodFrom': (payload.get('summaryPeriodFrom')
+                               or payload.get('summary_period_from')),
+            'dataPeriodTo': (payload.get('summaryPeriodTo')
+                             or payload.get('summary_period_to')),
+        })
+        payload['summaryPeriodBounds'] = market_study.data_period_bounds(
+            summary_period,
+            payload.get('summaryPeriodFrom') or payload.get('summary_period_from'),
+            payload.get('summaryPeriodTo') or payload.get('summary_period_to'),
+        )
+    else:
+        payload['summaryPeriodLabel'] = payload['dataPeriodLabel']
+        payload['summaryPeriodBounds'] = payload['dataPeriodBounds']
     mixed = payload.get('projectComponents') or payload.get('project_mixed_components') or payload.get('project_components')
     payload['projectComponents'] = mixed
     raw_scope = payload.get('competitorScope') or payload.get('competitor_scope')
@@ -83,7 +102,7 @@ def _prepare_market_payload(data, tenant_id=None):
     return payload
 
 
-# One wall-clock budget for a whole competitors job, capped at 30 minutes.
+# One wall-clock budget for a whole competitors job, capped at two hours.
 # The same deadline rides into every browse call and fetch, so a stage stops
 # handing the next stage work the job no longer has time for.
 def _market_job_time_budget(raw_value):
@@ -305,7 +324,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     payload['competitorScope'] = competitor_scope
     offer_lang = slide_engine.resolve_offer_lang(data)
     axes = market_study.project_competitor_axes(payload)
-    if not axes or not any(axis.get('explicit') for axis in axes):
+    if not axes:
         return {
             'success': False,
             'error': 'لا توجد اختيارات مقارنة صالحة.',
@@ -325,34 +344,32 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                         if tenant_id else '')
     if training_context:
         system_prompt += f"\n\n## بيانات خاصة بالشركة\n{training_context}"
-    user_prompt = market_study.build_competitors_user_prompt(
-        payload, existing, mode=mode, offer_lang=offer_lang)
-    report(10, 'جاري البحث في الويب عن المنافسين وبياناتهم — قد يستغرق دقائق...')
-    # Known sources first: the catalog's deep links land in the evidence pool
-    # before the model searches, so rows built on them verify without refetch.
-    _run_market_source_plan(payload, offer_lang=offer_lang,
-                            evidence_pool=evidence_pool, session=session,
-                            deadline=deadline, report=report)
-    # A competitor scan is the widest single research task — one search per
-    # plausible rival plus the market-wide ones, with room to open the pages
-    # that surface. The model decides the queries; Chromium does the reads.
-    res = _browse_agent_call(
-        system_prompt, user_prompt,
-        _usage_ctx('market', data, tenant_id=tenant_id),
-        search_provider='searxng',
-        evidence_pool=evidence_pool, deadline=deadline, session=session,
-        search_budget=_COMPETITORS_SEARCH_BUDGET,
-        max_steps=_COMPETITORS_MAX_STEPS,
-        max_tokens=14000, reasoning_effort='low',
-        on_event=_market_agent_progress(report, 22, 40,
-                                        'البحث الرئيسي عن المنافسين'))
-    provider_error = _chat_error_message(res) if res.get('error') else ''
-    parsed, parse_error = _parse_market_model_json(res)
-    if parse_error:
-        fatal = _ai_fatal_error_dict(res)
+    report(10, 'جاري البحث في الويب عن المنافسين وبياناتهم بالتوازي — قد يستغرق دقائق...')
+    # The known-sources plan used to block the model scan. It now runs beside
+    # the scans on its own browser thread; its pages still land in the shared
+    # pool before verification and the logo pass read it.
+    locked_report = _locked_report(report)
+    source_thread = _start_source_plan_async(
+        payload, offer_lang=offer_lang, evidence_pool=evidence_pool,
+        deadline=deadline, report=locked_report, session=session)
+    # One scan per comparison axis (plus a complementary portal angle for a
+    # single-axis project), all in flight together. Each thread owns its
+    # browser, and the shared evidence pool keeps them from refetching.
+    scan_results = _run_scan_tasks(
+        _competitor_scan_tasks(axes, offer_lang, mode),
+        payload, existing, mode, offer_lang, tenant_id, data,
+        evidence_pool, deadline, system_prompt, report, band=(22, 40))
+    _await_source_plan(source_thread)
+    aggregate = _aggregate_scan_results(scan_results)
+    provider_error = aggregate['provider_error']
+    if not aggregate['usable']:
+        fatal = next((fatal for fatal in (
+            _ai_fatal_error_dict(item.get('reply') or {})
+            for item in scan_results) if fatal is not None), None)
         credit = (fatal is not None or _is_company_credit_error(provider_error or '')
                   or 'afford' in (provider_error or '').lower())
         wallet_msg = ((fatal or {}).get('message') or provider_error or '').strip()
+        parse_error = aggregate['parse_error'] or 'empty_response'
         return {
             'success': False,
             'error': wallet_msg if credit and wallet_msg else 'تعذر توليد المنافسين.',
@@ -361,10 +378,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             'searchStats': evidence_pool.stats() if evidence_pool is not None else None,
         }
     # Every grounded call's retrieved pages are evidence — collect them across
-    # the main call and all expansion rounds instead of keeping only the
-    # richest single answer, so later rounds keep feeding verification/logos.
-    # Each page also lands in the shared pool, which is what phases 1-2 of
-    # verification and the logo pass match against.
+    # the parallel scans and the expansion round instead of keeping only the
+    # richest single answer, so verification and logos keep their feed.
     citation_pages = []
     citation_urls = []
     _seen_citation_urls = set()
@@ -383,30 +398,19 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                     except Exception:
                         pass
 
-    _collect_citations(res)
-    generated = parsed.get('competitors') if isinstance(parsed.get('competitors'), list) else []
+    for result in scan_results:
+        if result.get('reply'):
+            _collect_citations(result['reply'])
     generated = market_study.filter_and_cap_competitors(
-        generated, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
+        aggregate['competitors'], axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
         offer_lang=offer_lang, scope=payload.get('competitorScope'),
         city=payload.get('city'), district=payload.get('district'))
     named_generated = [row for row in generated
                        if isinstance(row, dict) and str(row.get('name') or '').strip()]
-    # Expansion passes: a thin list usually means the model settled for the
-    # first pages it saw. The minimum is per benchmark axis — a mixed-use
-    # project needs COMPETITOR_MIN_DIRECT direct competitors for every
-    # component — so deficient axes get their own targeted query first, then
-    # the generic angles as a backstop. Stop when every axis is covered or a
-    # pass answers cleanly yet adds nothing.
-    _scope = market_study.competitor_scope_text(payload)
-    _ptype = str(payload.get('projectType') or payload.get('project_type') or 'عقاري')
-    _city = str(payload.get('city') or '')
-    _district = str(payload.get('district') or '')
     axes = market_study.project_competitor_axes(payload)
     multi_axis = len(axes) > 1
     min_per_axis = market_study.COMPETITOR_MIN_DIRECT
     needs_benchmarks = any(axis['key'] != 'general' for axis in axes)
-    axis_label_list = '، '.join(
-        market_study.benchmark_axis_label(axis, offer_lang) for axis in axes)
 
     def _axis_deficits():
         counts = {axis['key']: 0 for axis in axes}
@@ -417,103 +421,48 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                     counts[key] += 1
         return [axis for axis in axes if counts[axis['key']] < min_per_axis]
 
-    axis_queries = {
-        axis['key']: f'{axis["search"]} داخل {_scope} في {_city}'
-        + (' عبر Booking.com' if axis.get('type') == 'hotel' else '')
-        for axis in axes}
     seen_names = {market_study._fold_choice(row.get('name')) for row in named_generated}
-    tried_axes = set()
     round_no = 0
-    max_rounds = max(1, len(axis_queries))
-    while mode != 'fill' and _market_search_ran(res) and round_no < max_rounds:
-        # Near the job's deadline the loop stops so verify and logos keep
-        # their share of the budget — an expansion answer that arrives after
-        # the deadline lands nowhere.
-        if deadline is not None and time.time() >= deadline - _MARKET_EXPANSION_DEADLINE_MARGIN:
-            break
-        deficits = _axis_deficits()
-        if not deficits:
-            break
-        deficit_labels = '، '.join(
-            market_study.benchmark_axis_label(axis, offer_lang) for axis in deficits)
-        target = next((axis for axis in deficits
-                       if axis['key'] not in tried_axes), None)
-        if target is None:
-            break
-        tried_axes.add(target['key'])
-        angle = axis_queries[target['key']]
-        target_label = market_study.benchmark_axis_label(target, offer_lang)
-        priority = (f'أولوية هذه الجولة اختيار العميل «{target_label}» فقط. '
-                    'لا تضف أنواعًا أو عمليات أخرى.')
-        hotel_source_rule = (
-            'لأن هذا محور فندقي، استخدم صفحات Booking.com فقط ولا تضع روابط فنادق من أي نطاق آخر. '
-            if target.get('type') == 'hotel' else '')
-        distance_field = (
-            ', "distance_km":"المسافة الموثقة من موقع المشروع بالكيلومتر"'
-            if payload.get('competitorScope', {}).get('mode') == 'distance' else '')
-        if _pool_covers_angle(evidence_pool, angle):
-            # The corpus already holds this angle — the same query ran before
-            # or stored pages carry its tokens, so a fresh browse call would
-            # mostly read pool hits instead of surfacing new names.
-            continue
-        round_lo = 40 + int(12 * round_no / max_rounds)
-        round_hi = 40 + int(12 * (round_no + 1) / max_rounds)
-        report(round_lo,
-               f'عدد منافسي محور {deficit_labels} أقل من الحد الأدنى — بحث إضافي ({round_no + 1})...'
-               if multi_axis else
-               f'عدد المنافسين أقل من الحد الأدنى — بحث إضافي ({round_no + 1}) عن مشاريع مسماة أخرى...')
-        known = '، '.join(str(row.get('name') or '') for row in named_generated) or 'لا يوجد'
-        expansion_prompt = (
-            f'نُجري دراسة سوق لمشروع {_ptype} في {_city}'
-            + (f' — {_district}' if _district else '')
-            + f'. نطاق المنافسين: {_scope}.\n'
-            + 'انسخ city وdistrict حرفيًا من بيانات المشروع؛ في نطاق الحي لا تذكر حيًا آخر.\n'
-            + f'المنافسون المسجلون حتى الآن: {known}.\n'
-            + f'ابحث عبر SearXNG عن: {angle} — مشاريع مسماة '
-              'حقيقية لم ترد في القائمة. لا تُدرج صفحات مؤشرات أو إحصاءات كمنافس.\n'
-            + (priority + '\n' if priority else '')
-            + (f'قيم benchmarks المسموحة حصرًا: {axis_label_list}.\n'
-               if needs_benchmarks else '')
-            + hotel_source_rule
-            + 'أعد JSON فقط: {"competitors":[{"name":"","city":"انسخ المدينة من بيانات المشروع حرفيًا",'
-              '"district":"","hotel_stars":"",'
-              '"benchmarks":[],"operation_type":"","price_type":"","price_currency":"",'
-              '"price":"","source_urls":[]' + distance_field + '}]} '
-              'مع بقية الحقول المعتادة عند توفرها.'
-              + (' Write every field value in English using the allowed English enum '
-                 'values (status: Operating/Under Construction/Off-Plan; classification: '
-                 'Direct/Indirect/Benchmark; operation_type: Sale/Rent/Hotel Operation/Other).'
-                 if offer_lang == 'en' else ''))
-        res2 = _browse_agent_call(
-            system_prompt, expansion_prompt,
-            _usage_ctx('market', data, tenant_id=tenant_id),
-            search_provider='searxng',
-            evidence_pool=evidence_pool, deadline=deadline, session=session,
-            search_budget=4, max_steps=10, max_tokens=14000,
-            reasoning_effort='low',
-            on_event=_market_agent_progress(
-                report, round_lo, round_hi,
-                f'بحث إضافي ({round_no + 1})'))
-        _err2 = _chat_error_message(res2) if res2.get('error') else ''
-        provider_error = provider_error or _err2
-        _collect_citations(res2)
-        parsed2, _parse_err2 = _parse_market_model_json(res2)
-        more = parsed2.get('competitors') if isinstance(parsed2, dict) else []
-        candidates = market_study.filter_and_cap_competitors(
-            generated + (more if isinstance(more, list) else []), axes,
-            limit_per_axis=min_per_axis, offer_lang=offer_lang,
-            scope=payload.get('competitorScope'), city=payload.get('city'),
-            district=payload.get('district'))
-        candidate_names = {market_study._fold_choice(row.get('name')) for row in candidates}
-        added_this_round = len(candidate_names - seen_names)
-        generated = candidates
-        named_generated = [row for row in generated if str(row.get('name') or '').strip()]
-        seen_names = candidate_names
-        round_no += 1
-        if not added_this_round and not _parse_err2:
-            # A clean response with no new rows means retrieval is exhausted;
-            # a malformed/empty response is a technical miss — try the next angle.
-            break
+    # One expansion round, run for every deficient axis in parallel. The scans
+    # already search per axis; a single round covers a thin first answer
+    # without turning the job back into a sequential chain.
+    if (mode != 'fill' and aggregate['search_ran']
+            and not (deadline is not None
+                     and time.time() >= deadline - _MARKET_EXPANSION_DEADLINE_MARGIN)):
+        expansion_tasks = _expansion_scan_tasks(
+            payload, axes, _axis_deficits(), named_generated,
+            offer_lang=offer_lang, multi_axis=multi_axis,
+            needs_benchmarks=needs_benchmarks, evidence_pool=evidence_pool)
+        if expansion_tasks:
+            report(40, 'عدد المنافسين أقل من الحد الأدنى — بحث إضافي بالتوازي...'
+                   if multi_axis else
+                   'عدد المنافسين أقل من الحد الأدنى — بحث إضافي بالتوازي عن مشاريع مسماة أخرى...')
+            expansion_results = _run_parallel_expansions(
+                expansion_tasks, payload, existing, mode, offer_lang,
+                tenant_id, data, evidence_pool, deadline, system_prompt,
+                report, band=(40, 52))
+            for result in expansion_results:
+                provider_error = (provider_error
+                                  or str(result.get('provider_error') or '').strip())
+                if result.get('reply'):
+                    _collect_citations(result['reply'])
+            more = []
+            for result in expansion_results:
+                rows = (result.get('parsed') or {}).get('competitors')
+                if isinstance(rows, list):
+                    more.extend(row for row in rows if isinstance(row, dict))
+            candidates = market_study.filter_and_cap_competitors(
+                generated + more, axes,
+                limit_per_axis=min_per_axis, offer_lang=offer_lang,
+                scope=payload.get('competitorScope'), city=payload.get('city'),
+                district=payload.get('district'))
+            candidate_names = {market_study._fold_choice(row.get('name')) for row in candidates}
+            if candidate_names - seen_names:
+                generated = candidates
+                named_generated = [row for row in generated
+                                   if str(row.get('name') or '').strip()]
+                seen_names = candidate_names
+                round_no = 1
     merged, added, updated = market_study.merge_generated_competitors(
         existing, generated, mode=mode, offer_lang=offer_lang)
     if mode != 'fill':
@@ -547,7 +496,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         _drop_foreign_competitor_urls(row)
         _drop_banned_competitor_listing_urls(row)
     report(70, 'التحقق من روابط المصادر واحدًا واحدًا...')
-    search_ran = _market_search_ran(res) or bool(citation_urls)
+    search_ran = aggregate['search_ran'] or bool(citation_urls)
     if search_ran:
         # A grounded run that still leaves a row with zero source URLs means the
         # name came from the model's memory — flag it for the owner's review.
@@ -578,8 +527,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     report(93, 'إعداد جدول المصادر والتحذيرات...')
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
-    notes = str(parsed.get('notes') or '').strip()
-    expansion_note = str(parsed.get('expansionNote') or parsed.get('notes') or '').strip()
+    notes = aggregate['notes']
+    expansion_note = aggregate['notes']
     if round_no:
         rounds_note = ('أُجريت جولة بحث إضافية واحدة عن مشاريع أخرى' if round_no == 1
                        else f'أُجريت {round_no} جولات بحث إضافية عن مشاريع أخرى')
@@ -619,7 +568,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         'searchNotRunCount': search_not_run,
         'missingPriceCount': missing_prices,
         'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
-        'searchExpanded': bool(parsed.get('searchExpanded')) or round_no > 0,
+        'searchExpanded': round_no > 0,
         'comparisonTypes': payload.get('comparisonTypes') or [],
         'competitorScope': payload.get('competitorScope') or {},
         'transactionBenchmarks': payload.get('transactionBenchmarks') or {},
@@ -810,7 +759,10 @@ def _run_market_summary(data, tenant_id=None, progress=None,
                 citation_urls.append(_pool_url)
     citation_urls = list(dict.fromkeys(citation_urls))
     market_study.apply_search_citations(normalized.get('sources'), citation_urls, url_key='url')
-    sources = normalized.get('sources') or []
+    # Two model rows can resolve to the same retrieved page; the register shows
+    # each source once.
+    sources = market_study.dedupe_source_rows(normalized.get('sources') or [])
+    normalized['sources'] = sources
     if search_verified:
         dead_urls = _verify_market_urls(
             row.get('url') for row in sources if isinstance(row, dict))
@@ -829,7 +781,8 @@ def _run_market_summary(data, tenant_id=None, progress=None,
             note = str(row.get('note') or '').strip()
             if marker not in note:
                 row['note'] = f'{note} — {marker}' if note else marker
-    market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
+    market_study.flag_out_of_period_sources(
+        sources, payload.get('summaryPeriodBounds') or payload.get('dataPeriodBounds'))
     return {
         'success': True,
         'searchVerified': search_verified,

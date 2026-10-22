@@ -109,6 +109,21 @@
               <button type="button" class="btn ghost" id="marketSummaryScopeAddCityBtn" data-i18n="market.summary_scope_add_city" onclick="addMarketSummaryScopeCity()">إضافة مدينة</button>
             </div>
           </div>
+          <div class="market-grid" style="margin-top:12px">
+            <div><label>فترة البيانات</label>
+              <select id="marketSummaryPeriod">
+                <option value="12m">آخر 12 شهرًا</option>
+                <option value="24m">آخر 24 شهرًا</option>
+                <option value="3y">آخر 3 سنوات</option>
+                <option value="5y">آخر 5 سنوات</option>
+                <option value="custom">فترة مخصصة</option>
+              </select>
+            </div>
+            <div id="marketSummaryCustomPeriodWrap" hidden>
+              <label>من تاريخ</label><input id="marketSummaryPeriodFrom" type="date">
+              <label style="margin-top:8px">إلى تاريخ</label><input id="marketSummaryPeriodTo" type="date">
+            </div>
+          </div>
           <div class="market-actions" style="margin-top:12px">
             <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
             <button type="button" class="btn ghost" id="marketResumeSummaryBtn" onclick="resumeMarketSummaryJob()" hidden>استكمال المهمة</button>
@@ -172,8 +187,13 @@
           persistMarketStudyFromDom();
         });
       });
-      ['marketCompetitorRadiusCustomKm', 'marketDataPeriodFrom', 'marketDataPeriodTo', 'marketDecision', 'marketDisclaimer']
+      ['marketCompetitorRadiusCustomKm', 'marketDataPeriodFrom', 'marketDataPeriodTo',
+       'marketSummaryPeriodFrom', 'marketSummaryPeriodTo', 'marketDecision', 'marketDisclaimer']
         .forEach(id => document.getElementById(id)?.addEventListener('input', persistMarketStudyFromDom));
+      document.getElementById('marketSummaryPeriod')?.addEventListener('change', () => {
+        updateMarketStudyFieldVisibility();
+        persistMarketStudyFromDom();
+      });
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
         document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });

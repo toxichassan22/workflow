@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import json
 import math
 import os
@@ -155,8 +155,8 @@ PRICE_TYPE_BY_OPERATION = {
         'يبدأ من', 'نطاق سعري', 'أخرى',
     ],
     'تشغيل فندقي': [
-        'سعر الليلة', 'متوسط سعر الغرفة ADR', 'الإيراد لكل غرفة RevPAR',
-        'متوسط الإقامة الشهرية', 'يبدأ من', 'نطاق أسعار الغرف', 'أخرى',
+        'نطاق أسعار الغرف', 'سعر الليلة', 'متوسط سعر الغرفة ADR',
+        'الإيراد لكل غرفة RevPAR', 'متوسط الإقامة الشهرية', 'يبدأ من', 'أخرى',
     ],
     'أخرى': ['قيمة واحدة', 'نطاق سعري', 'أخرى'],
 }
@@ -184,8 +184,8 @@ PRICE_TYPE_BY_OPERATION_EN = {
         'Starting From', 'Price Range', 'Other',
     ],
     'Hotel Operation': [
-        'Nightly Rate', 'Average Daily Rate (ADR)', 'RevPAR',
-        'Average Monthly Stay', 'Starting From', 'Room Price Range', 'Other',
+        'Room Price Range', 'Nightly Rate', 'Average Daily Rate (ADR)',
+        'RevPAR', 'Average Monthly Stay', 'Starting From', 'Other',
     ],
     'Other': ['Single Value', 'Price Range', 'Other'],
 }

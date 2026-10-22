@@ -61,6 +61,7 @@ FRONTEND_JS_ORDER = (
     '05-market-competitors.js',
     '05-market-competitors/01_project_data_snapshot.js',
     '05-market-competitors/02_table_ux.js',
+    '05-market-competitors/03_source_links.js',
     '05a-market-jobs.js', '05a-market-summary-chat.js',
     '06-team.js', '07-project-form/01_form_sections.js',
     '07-project-form/02_section_versions.js', '07-project-form/03_best_use.js', '07-project-form/03a_best_use_calculator.js', '07-project-form/03b_best_use_explore.js',

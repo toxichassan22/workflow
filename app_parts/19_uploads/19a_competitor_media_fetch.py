@@ -565,10 +565,11 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
         official_url = str(row.get('logo_source_url') or row.get('source_url') or '').strip()
         if official_url.strip().casefold() in dead_keys:
             official_url = ''
-        verified = bool(official_url and (
-            row.get('logo_official_verified')
-            or market_study.official_source_reliability(
-                row.get('name'), row.get('source'), official_url)))
+        # The logo must come from the project's own official source. A URL is
+        # official only after retrieval proved it (verify pass or a page that
+        # carries the whole project name); a model's claimed host, however
+        # plausible its name, is not proof.
+        verified = bool(official_url and row.get('logo_official_verified'))
         if not verified:
             for page_url in _official_citation_pages(evidence_pages, row.get('name')):
                 if page_url.casefold() in dead_keys:
@@ -734,15 +735,8 @@ def _auto_import_competitor_logos(rows, payload, data, tenant_id=None, progress=
     for row in batch:
         if not row.get('logo_file_id') and not row.get('logo_path'):
             row.setdefault('logo_import_warning', 'لم يُعثر على موقع رسمي موثق للشعار')
-    # Portal-only competitors have no official site to brand from, but their
-    # retrieved listing pages carry the property's own photo in og:image.
-    for row in rows:
-        if row.get('logo_file_id') or row.get('logo_path'):
-            continue
-        try:
-            _import_competitor_listing_photo(row, draft_id=draft_id)
-        except Exception as exc:
-            row.setdefault('logo_import_warning', str(exc))
+    # A listing's og:image is the property photo, not the company's logo. A row
+    # with no proven official source keeps an empty logo slot and its warning.
 
 
 def _store_imported_competitor_logo(row, draft_id=None):
@@ -810,108 +804,3 @@ def _store_imported_competitor_logo(row, draft_id=None):
     return row
 
 
-_LISTING_IMAGE_META_RE = re.compile(
-    r'<meta[^>]+(?:property|name)=["\'](?:og:image(?::url)?|og:image:secure_url'
-    r'|twitter:image(?::src)?)["\'][^>]*?content=["\']([^"\']+)["\']'
-    r'|<meta[^>]+content=["\']([^"\']+)["\'][^>]*?(?:property|name)=["\']'
-    r'(?:og:image(?::url)?|og:image:secure_url|twitter:image(?::src)?)["\']',
-    re.IGNORECASE)
-_LISTING_IMAGE_SKIP_TOKENS = (
-    'logo', 'brand', 'icon', 'sprite', 'favicon', 'placeholder', 'default',
-    'share', 'watermark', 'ruwaj', 'rawaj', 'rowaj', '/rwaj', 'rega',
-)
-
-
-def _download_listing_image(image_url):
-    """(content, mime, ext) — fetch a listing photo from any public HTTPS host.
-
-    Unlike _safe_download_competitor_logo there is no same-host rule: portal
-    CDNs (images.bayut.com) are intentionally different hosts — the file is
-    the competitor's own property photo, not the portal's branding."""
-    parsed = urlsplit(str(image_url or '').strip())
-    try:
-        invalid_port = parsed.port not in (None, 443)
-    except ValueError:
-        invalid_port = True
-    if (parsed.scheme.lower() != 'https' or not parsed.hostname
-            or parsed.username or invalid_port):
-        return None, None, None
-    lowered = str(image_url).casefold()
-    if any(token in lowered for token in _LISTING_IMAGE_SKIP_TOKENS):
-        return None, None, None
-    if not _public_host_addresses(parsed.hostname):
-        return None, None, None
-    pool, response, _outcome = _pinned_https_get(image_url)
-    if pool is None:
-        return None, None, None
-    try:
-        if response.status != 200:
-            return None, None, None
-        mime_type = str(response.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
-        extension = COMPETITOR_LOGO_MIMES.get(mime_type)
-        if not extension:
-            return None, None, None
-        content = bytearray()
-        for chunk in response.stream(64 * 1024):
-            if not chunk:
-                continue
-            content.extend(chunk)
-            if len(content) > COMPETITOR_LOGO_MAX_BYTES:
-                return None, None, None
-        return bytes(content), mime_type, extension
-    except Exception:
-        return None, None, None
-    finally:
-        response.release_conn()
-        pool.close()
-
-
-def _import_competitor_listing_photo(row, draft_id=None):
-    """Last-resort competitor image: the retrieved listing page's own photo.
-
-    Portal-only competitors have no official site to brand from, but their
-    retrieved listing pages carry the property's photo in og:image. Stored
-    through the same upload path and marked logo_listing_photo so it never
-    pretends to be an official logo."""
-    dead = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
-    misses = []
-    for page_url in list(dict.fromkeys(market_study.competitor_source_urls(row)))[:4]:
-        if str(page_url).strip().casefold() in dead:
-            continue
-        html, _err = _read_market_source_page(page_url)
-        if not html:
-            misses.append(f'{_normalized_web_host(page_url)}:unreadable')
-            continue
-        found_meta = False
-        for match in _LISTING_IMAGE_META_RE.finditer(html):
-            found_meta = True
-            image_url = urljoin(page_url, match.group(1) or match.group(2) or '')
-            content, mime_type, extension = _download_listing_image(image_url)
-            if not content:
-                misses.append(f'{_normalized_web_host(page_url)}:image-rejected')
-                continue
-            from werkzeug.datastructures import FileStorage
-            upload = FileStorage(
-                stream=BytesIO(content), filename='competitor-photo' + extension,
-                content_type=mime_type)
-            stored = _store_project_upload(
-                upload, 'competitor_logo', draft_id=draft_id,
-                project_id=str(row.get('id') or '') or None)
-            published = _publish_project_file_as_creative_image(stored['id'])
-            row['logo_file_id'] = stored['id']
-            row['logo_path'] = published or ('/api/project-files/' + stored['id'])
-            row['logo_url'] = image_url
-            row['logo_source_url'] = page_url
-            row['logo_listing_photo'] = True
-            row.pop('logo_import_warning', None)
-            field_sources = market_study.competitor_field_sources(row)
-            urls = field_sources.setdefault('logo_url', [])
-            if page_url not in urls:
-                urls.append(page_url)
-            row['field_sources'] = field_sources
-            return
-        if not found_meta:
-            misses.append(f'{_normalized_web_host(page_url)}:no-og-image')
-    if misses:
-        print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» no listing photo: "
-              + ', '.join(misses))

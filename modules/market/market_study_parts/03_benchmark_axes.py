@@ -129,7 +129,12 @@ def project_competitor_axes(payload):
     if 'comparisonTypes' in payload or 'comparison_types' in payload:
         selected = (payload.get('comparisonTypes')
                     if 'comparisonTypes' in payload else payload.get('comparison_types'))
-        return normalize_comparison_types(selected)
+        normalized = normalize_comparison_types(selected)
+        if normalized:
+            return normalized
+        # A legacy request with no explicit comparison picks derives its axes
+        # from the project type/components below, as it did before the field
+        # existed instead of failing with «لا توجد اختيارات مقارنة صالحة».
     axes = []
 
     def add(key, base=None, label='', name=''):

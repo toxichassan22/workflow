@@ -29,6 +29,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -147,6 +148,9 @@ class PipelineFixture:
         self.worker = _FakeWorker()
         self.agent_calls = []       # [{'task','kwargs'}]
         self.events = []            # ordered 'plan' / 'agent' markers
+        self.plan_thread = ''
+        self.scan_threads = set()
+        self.main_scan_barrier = None
         self.stored_logos = []
 
     def fake_agent(self, task, usage_ctx=None, **kwargs):
@@ -178,12 +182,17 @@ class PipelineFixture:
             return _reply({'competitors': []}, pages=[
                 ('https://aqar.fm/market/jeddah', 'سوق جدة العقاري',
                  'قراءة عامة عن مشاريع جدة السكنية')])
+        if self.main_scan_barrier is not None:
+            # Both axis scans must be in flight at the same time for this to
+            # pass; a sequential implementation times out here.
+            self.main_scan_barrier.wait()
         self.events.append('agent')
+        self.scan_threads.add(threading.current_thread().name)
         return _reply({'competitors': _MAIN_COMPETITORS, 'notes': ''}, pages=[
             ('https://sa.aqar.fm/market/jeddah-north', 'مشاريع شمال جدة',
              'قائمة مشاريع سكنية في شمال جدة')])
 
-    def fake_build_plan(self, payload, offer_lang='ar'):
+    def fake_build_plan(self, payload, offer_lang='ar', **_kwargs):
         self.events.append('build_plan')
         return [{'purpose': 'deals',
                  'url': 'https://rei.rega.gov.sa/ar/advanced-search/deals',
@@ -191,6 +200,7 @@ class PipelineFixture:
 
     def fake_run_plan(self, plan, pool=None, fetch_http=None, **kwargs):
         self.events.append('plan')
+        self.plan_thread = threading.current_thread().name
         # The deterministic pass fetches the known official page naming روافد.
         pool.add_page(_ROAFED_PAGE,
                       title='مشروع روافد الياسمين — الموقع الرسمي',
@@ -299,12 +309,13 @@ class CompetitorsPipelinePoolTests(unittest.TestCase):
             return self.application_module._execute_market_competitors(
                 data, tenant_id=None)
 
-    def test_job_budget_defaults_to_and_caps_at_30_minutes(self):
+    def test_job_budget_defaults_to_one_hour_and_caps_at_two(self):
         budget = self.application_module._market_job_time_budget
-        self.assertEqual(budget(None), 30 * 60)
+        self.assertEqual(budget(None), 60 * 60)
         self.assertEqual(budget('900'), 900)
-        self.assertEqual(budget('2400'), 30 * 60)
-        self.assertEqual(budget('invalid'), 30 * 60)
+        self.assertEqual(budget('2400'), 2400)
+        self.assertEqual(budget('999999'), 2 * 60 * 60)
+        self.assertEqual(budget('invalid'), 60 * 60)
 
     # -- phase 1: pool match ---------------------------------------------------
 
@@ -354,13 +365,28 @@ class CompetitorsPipelinePoolTests(unittest.TestCase):
 
     # -- executor wiring -------------------------------------------------------
 
-    def test_source_plan_runs_before_the_main_browse_call(self):
+    def test_source_plan_runs_beside_the_parallel_axis_scans(self):
         fx = PipelineFixture()
+        fx.main_scan_barrier = threading.Barrier(2, timeout=10)
         result = self._run(fx)
         self.assertTrue(result['success'], result)
+        # The known-sources plan still runs, but no longer blocks the scans:
+        # two comparison axes are in flight together (the barrier would time
+        # out on a sequential run).
         self.assertIn('plan', fx.events)
-        self.assertIn('agent', fx.events)
-        self.assertLess(fx.events.index('plan'), fx.events.index('agent'))
+        self.assertEqual(fx.events.count('agent'), 2, fx.events)
+        self.assertTrue(fx.plan_thread.startswith('market-source-plan'),
+                        fx.plan_thread)
+
+    def test_single_axis_still_scans_twice_in_parallel(self):
+        fx = PipelineFixture()
+        fx.main_scan_barrier = threading.Barrier(2, timeout=10)
+        result = self._run(fx, comparisonTypes=[
+            {'type': 'residential', 'operation': 'sale'}])
+        self.assertTrue(result['success'], result)
+        # One comparison axis -> the axis scan plus its portal twin, both in
+        # flight at once (the barrier fails a sequential implementation).
+        self.assertEqual(fx.events.count('agent'), 2, fx.events)
 
     def test_pool_deadline_and_session_reach_every_agent_call(self):
         fx = PipelineFixture()

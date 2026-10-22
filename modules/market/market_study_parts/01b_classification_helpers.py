@@ -309,7 +309,7 @@ def competitor_field_sources(row):
         key = _canonical_source_field(field)
         urls = _http_source_urls(value)
         if key and urls:
-            result[key] = _unique_values((result.get(key) or []) + urls)
+            result[key] = unique_source_urls((result.get(key) or []) + urls)
     return result
 
 
@@ -321,7 +321,8 @@ def competitor_source_urls(row):
         values.extend(_http_source_urls(row.get(key)))
     for urls in competitor_field_sources(row).values():
         values.extend(urls)
-    return _unique_values(values)
+    return [url for url in unique_source_urls(values)
+            if not is_search_source_url(url)]
 
 
 def _fold_choice(value):
@@ -726,6 +727,148 @@ def is_generic_source_homepage(url):
         return False
     path = (parsed.path or '').rstrip('/') or '/'
     return (path.lower() in _GENERIC_SOURCE_PATHS or path.lower() in {'/', ''}) and not parsed.query and not parsed.fragment
+
+
+# Fetch/session parameters never identify a page: signed media URLs rotate and
+# analytics parameters ride along on every share. Two references that differ
+# only in these are the same source, and the table must show it once.
+_SOURCE_TRACKING_PARAMS = {
+    's', 't', 'v', 'cb', 'utm_source', 'utm_medium', 'utm_campaign',
+    'utm_term', 'utm_content', 'utm_id', 'gclid', 'fbclid', 'msclkid',
+    'yclid', 'ref', 'referrer', 'source', 'src',
+}
+_SEARCH_PATH_TOKENS = (
+    '/search', 'searchresult', 'search-result', '/results', '/result',
+    'google.com/search', 'bing.com/search', 'duckduckgo.com/',
+    'searx', '/explore', '/discover',
+)
+
+
+def canonical_source_key(url):
+    """Identity of a source URL for deduplication (scheme/host/www/params)."""
+    text = str(url or '').strip()
+    if not text:
+        return ''
+    parsed = urlsplit(text)
+    if parsed.scheme.lower() not in ('http', 'https') or not parsed.netloc:
+        return text.casefold()
+    host = parsed.netloc.casefold()
+    if host.startswith('www.'):
+        host = host[4:]
+    path = re.sub(r'/+$', '', parsed.path or '') or '/'
+    query = urlencode(
+        [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+         if key.casefold() not in _SOURCE_TRACKING_PARAMS],
+        doseq=True)
+    return f'{host}{path}?{query}' if query else f'{host}{path}'
+
+
+def unique_source_urls(values):
+    """Deduplicate URLs by canonical identity while keeping the printed form."""
+    result = []
+    seen = set()
+    for value in values or []:
+        text = _norm(value)
+        if not text or not text.startswith(('http://', 'https://')):
+            continue
+        key = canonical_source_key(text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        result.append(text)
+    return result
+
+
+def is_search_source_url(url):
+    """True for search-result pages only — never a project's own page.
+
+    A homepage is not a search page: it stays in the evidence list so it can
+    be upgraded to the deeper retrieved page. Display code treats homepages as
+    non-specific through ``is_search_or_index_source_url``.
+    """
+    text = str(url or '').strip()
+    if not text:
+        return False
+    parsed = urlsplit(text)
+    if not parsed.netloc:
+        return False
+    host = (parsed.netloc or '').casefold().removeprefix('www.')
+    lowered = f'{host}{parsed.path or ""}'.casefold()
+    if any(token in lowered for token in _SEARCH_PATH_TOKENS):
+        return True
+    if host.endswith('booking.com'):
+        path = (parsed.path or '').casefold()
+        if path.startswith('/search'):
+            return True
+    return False
+
+
+def is_search_or_index_source_url(url):
+    """True for search/list/homepage hops — not a page that shows the project.
+
+    The model tends to include every hop it took (search page, filtered list,
+    city page, homepage) beside the final page. Only the final page is a
+    source the client can open to see the project and its price.
+    """
+    return is_search_source_url(url) or is_generic_source_homepage(url)
+
+
+def _source_depth(url):
+    path = urlsplit(str(url or '')).path or ''
+    hotel_detail = 1 if '/hotel/' in path.casefold() else 0
+    return (hotel_detail, path.strip('/').count('/'), len(path))
+
+
+def primary_competitor_source_url(row):
+    """The single final page a competitor row should point at.
+
+    Preference order: the page that proves the price, the model's stated
+    source_url, then the most specific (deepest) page. Search/index/homepage
+    hops never win, so the table shows one openable page instead of the whole
+    chain the model walked.
+    """
+    if not isinstance(row, dict):
+        return ''
+    explicit = [
+        _norm(row.get('source_url')), _norm(row.get('sourceUrl')),
+        _norm(row.get('url')),
+    ]
+    field_sources = competitor_field_sources(row)
+    price_urls = []
+    for key in ('price_value', 'price_from', 'price_to'):
+        price_urls.extend(field_sources.get(key) or [])
+    candidates = unique_source_urls(
+        price_urls + explicit + competitor_source_urls(row))
+    specific = [url for url in candidates
+                if not is_search_or_index_source_url(url)]
+    if not specific:
+        return candidates[0] if candidates else ''
+    price_specific = [url for url in unique_source_urls(price_urls)
+                      if not is_search_or_index_source_url(url)]
+    if price_specific:
+        return price_specific[0]
+    explicit_specific = [url for url in unique_source_urls(explicit)
+                         if not is_search_or_index_source_url(url)]
+    if explicit_specific:
+        return explicit_specific[0]
+    return max(specific, key=_source_depth)
+
+
+def dedupe_source_rows(rows, url_key='url'):
+    """Drop repeated summary-source rows while keeping the first row's text."""
+    result = []
+    seen = set()
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        url = _norm(row.get(url_key) or row.get('source_url') or row.get('sourceUrl'))
+        key = canonical_source_key(url) if url else ''
+        if key and key in seen:
+            continue
+        if key:
+            seen.add(key)
+        result.append(row)
+    return result
 
 
 def _source_host(url):

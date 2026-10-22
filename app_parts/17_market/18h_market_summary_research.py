@@ -194,7 +194,8 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
                        if catalog_urls else '')
     site_queries = '، '.join(f'site:{host}' for host in hosts)
     place = f'حي {district}، مدينة {city}' if district else f'مدينة {city} كاملة'
-    bounds = (payload or {}).get('dataPeriodBounds') or {}
+    bounds = ((payload or {}).get('summaryPeriodBounds')
+              or (payload or {}).get('dataPeriodBounds') or {})
     period_from = str(bounds.get('from') or '').strip() if isinstance(bounds, dict) else ''
     period_to = str(bounds.get('to') or '').strip() if isinstance(bounds, dict) else ''
     if offer_lang == 'en':

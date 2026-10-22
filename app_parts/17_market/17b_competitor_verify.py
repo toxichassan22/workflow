@@ -141,7 +141,11 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         'السعر يُقبل فقط إذا ظهر في صفحة قرأتها في هذا البحث، ورابطها يوضع في '
         'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. '
         'اكتب قيمة السعر وعملته كما وردتا في الصفحة؛ النظام يحوّل السعر إلى الريال '
-        'قبل عرضه ويحفظ عملة المصدر للتوثيق. ')
+        'قبل عرضه ويحفظ عملة المصدر للتوثيق. '
+        'إذا ظهر سعر قبل الخصم وسعر بعده، فاعتمد السعر قبل الخصم ولا تستخدم سعر العرض '
+        'أو السعر النهائي بعد الخصم. '
+        'للفنادق: إن أظهرت الصفحة أكثر من سعر ليلي فأعد أقل سعر في "from" وأعلى سعر في "to" '
+        'مع type = نطاق أسعار الغرف، ولا تحسب متوسطًا. ')
     folded_operation = market_study._fold_choice(operation)
     hotel_rule = ''
     is_hotel = any(token in folded_operation for token in ('فندقي', 'فندق', 'hotel', 'hospitality'))
@@ -178,6 +182,8 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         'التواصل الاجتماعي (إنستغرام، فيسبوك، تيك توك، إكس، يوتيوب…) — '
         'ليست دليلًا ولا مصدرًا للأسعار فلا تفتحها. '
         + hotel_rule
+        + 'ضع في official_url وروابط المصادر الصفحة النهائية التي تعرض المشروع أو الفندق فقط؛ '
+        'لا تضع صفحات البحث أو النتائج أو الصفحة الرئيسية. '
         + 'إن لم تجد أي صفحة تذكر هذا المشروع بالاسم أعد exists=false ولا تخمّن روابط.'
     )
     tokens = _competitor_name_tokens(name)
@@ -383,6 +389,21 @@ _LISTING_PRICE_PATTERNS = (
     (re.compile(r'\b([A-Za-z]{3})\s*[:=]?\s*([0-9][0-9,.\u0660-\u0669]{2,})'), 'ISO1'),
     (re.compile(r'"price"\s*:\s*"?([0-9][0-9,.]{2,})"?'), None),
 )
+# The owner wants the price before the discount. A page that shows a struck
+# original beside a promo figure must not be read as two independent prices
+# (their median would be invented), and the promo figure alone is not the
+# published rate.
+_DISCOUNT_ORIGINAL_RE = re.compile(
+    r'line-through|text-decoration\s*:\s*line-through'
+    r'|قبل\s*الخصم|السعر\s*الأصلي|original\s*price|list\s*price',
+    re.IGNORECASE)
+_STRIKE_TAG_RE = re.compile(r'<(del|s)\b[^>]*>([\s\S]{0,200}?)</\1>', re.IGNORECASE)
+_DISCOUNT_CONTEXT_RE = re.compile(
+    r'بعد\s*الخصم|سعر\s*العرض|سعر\s*الخصم|عرض\s*خاص|خصم\s*\d|تخفيض'
+    r'|discounted|discount\s*price|offer\s*price|promo\s*price|sale\s*price'
+    r'|final\s*price|deal\s*price|after\s*discount',
+    re.IGNORECASE)
+
 _LISTING_PRICE_MIN = 300.0
 # A sub-300 SAR figure is a date or a percentage, but a €25 night rate is real —
 # foreign-currency mentions pass on a much lower floor.
@@ -438,8 +459,22 @@ def _extract_listing_prices(html):
             else:
                 period = ''
             per_sqm = bool(re.search(r'متر|sqm|م²|per\s*sq', window, re.IGNORECASE))
+            # "Original" means THIS figure sits inside the struck element; a
+            # promo figure whose window merely contains the struck tag is not
+            # the original.
+            original = any(match.group(0) in tag.group(2)
+                           for tag in _STRIKE_TAG_RE.finditer(window))
+            if not original and _DISCOUNT_ORIGINAL_RE.search(window) \
+                    and not _DISCOUNT_CONTEXT_RE.search(window):
+                original = True
+            if not original and _DISCOUNT_CONTEXT_RE.search(window):
+                # The figure sits in a discount/offer price, not the published
+                # rate. It is skipped; the original price in the same page is
+                # what the row should carry.
+                continue
             found[(value, period, per_sqm, currency)] = {
-                'value': value, 'period': period, 'per_sqm': per_sqm, 'currency': currency}
+                'value': value, 'period': period, 'per_sqm': per_sqm,
+                'currency': currency, 'original': original}
     return list(found.values())
 
 
@@ -503,6 +538,11 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» no listing prices "
               f"({searched} pages searched, {unreadable} unreadable)")
         return False
+    original_mentions = [item for item in mentions if item.get('original')]
+    if original_mentions:
+        # A struck-through original is the price before the discount; the
+        # promo figure beside it never joins the pool.
+        mentions = original_mentions
     print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» listing prices: "
           f"{len(mentions)} mentions from {len({m['url'] for m in mentions})} pages")
     options = market_study.PRICE_TYPE_BY_OPERATION.get(
@@ -550,7 +590,10 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         elif operation == 'بيع':
             price_type = _option('متوسط سعر المتر' if per_sqm else 'متوسط سعر الوحدة')
         elif operation == 'تشغيل فندقي':
-            price_type = _option('متوسط سعر الغرفة ADR')
+            # A hotel page lists several room rates, not one average: the
+            # client asked for the lowest and highest nightly price, so the
+            # row is a range instead of an ADR figure derived from them.
+            price_type = _option('نطاق أسعار الغرف')
         else:
             price_type = _option('نطاق سعري')
     else:

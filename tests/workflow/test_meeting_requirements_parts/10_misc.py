@@ -783,15 +783,29 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         nightly = [item for item in prices if item['value'] == 120.0]
         self.assertEqual(nightly[0]['period'], 'ليلة')
 
+    def test_extract_listing_prices_takes_the_price_before_the_discount(self):
+        """A struck original beside a promo figure is one price, before the
+        discount — the promo number never joins the pool."""
+        module = self.application_module
+        html = ('<div><del>1,200 ريال</del> '
+                '<span class="promo">900 ريال بعد الخصم</span></div>'
+                + ('x' * 260))
+        prices = module._extract_listing_prices(html)
+        values = {item['value'] for item in prices}
+        self.assertIn(1200.0, values)
+        self.assertNotIn(900.0, values)
+        original = [item for item in prices if item['value'] == 1200.0][0]
+        self.assertTrue(original['original'])
+
     def test_fill_competitor_price_converts_foreign_currency_to_sar(self):
         """The median lives inside one currency, then converts to the (ر.س)
         cell — mixing € and SAR into one figure is a fabrication, so the EUR
         pool converts at the fixed rate and the source figure stays cached."""
         module = self.application_module
         pages = {
-            'https://www.booking.com/hotel-a':
+            'https://www.booking.com/hotel/sa/test-a.ar.html':
                 '<title>فندق تجريبي — غرفة</title> غرفة مزدوجة 120 يورو لليلة',
-            'https://www.booking.com/hotel-b':
+            'https://www.booking.com/hotel/sa/test-b.ar.html':
                 '<title>فندق تجريبي — جناح</title> جناح تنفيذي 180 يورو per night',
         }
         row = {'name': 'فندق تجريبي', 'operation_type': 'تشغيل فندقي',
@@ -803,17 +817,21 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             filled = module._fill_competitor_price_from_listings(row, list(pages))
         self.assertTrue(filled)
         self.assertEqual(row['price_currency'], 'SAR')
-        # Median €150 × 4.05 → 607.5 ر.س — the printed €150 is not lost.
-        self.assertEqual(row['price_value'], '607.5')
-        self.assertEqual(row['price_type'], 'متوسط سعر الغرفة ADR')
-        self.assertEqual(row['price_cache']['original_price_value'], '150')
+        # Two nightly rates are a range, not an ADR average: €120–€180 × 4.05
+        # → 486–729 ر.س, and the printed source figures stay cached.
+        self.assertEqual(row['price_type'], 'نطاق أسعار الغرف')
+        self.assertEqual(row['price_from'], '486')
+        self.assertEqual(row['price_to'], '729')
+        self.assertEqual(row.get('price_value', ''), '')
+        self.assertEqual(row['price_cache']['original_price_from'], '120')
+        self.assertEqual(row['price_cache']['original_price_to'], '180')
         self.assertEqual(row['price_cache']['original_currency'], 'EUR')
         self.assertIn('EUR', row['note'])
 
     def test_fill_competitor_price_prefers_sar_over_foreign_mentions(self):
         module = self.application_module
         pages = {
-            'https://www.booking.com/hotel-c':
+            'https://www.booking.com/hotel/sa/test-c.ar.html':
                 '<title>فندق — غرفة</title> غرفة 95 يورو لليلة — يعادل 400 ريال سعودي تقريبًا',
         }
         row = {'name': 'فندق', 'operation_type': 'تشغيل فندقي',
@@ -881,41 +899,12 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             with patch.object(module.requests, 'head', side_effect=dns_err):
                 self.assertFalse(module._market_url_alive(url))
 
-    def test_import_competitor_listing_photo_stores_og_image(self):
-        """A portal-only competitor with no official site gets the listing
-        page's own og:image — marked as a listing photo, never a portal logo."""
+    def test_competitor_logo_never_comes_from_a_listing_photo(self):
+        """The logo must be the project's own official mark. A listing page's
+        og:image is the property photo, so the fallback is gone entirely."""
         module = self.application_module
-        html = ('<html><head>'
-                '<meta property="og:image" content="https://images.bayut.com/thumb/prop-123.jpg">'
-                '<meta property="og:image" content="https://portal.example/logo-share.png">'
-                '</head></html>')
-        row = {'id': 'c1', 'name': 'مجمع', 'source_urls': ['https://bayut.sa/listing-1']}
-        downloaded = []
-        with patch.object(module, '_read_market_source_page',
-                          return_value=(html, '')), \
-                patch.object(module, '_download_listing_image',
-                             side_effect=lambda url: (downloaded.append(url),
-                                                      (b'PNGDATA', 'image/jpeg', '.jpg')
-                                                      if 'prop-123' in url else (None, None, None))[1]), \
-                patch.object(module, '_store_project_upload',
-                             return_value={'id': 'stored-photo-1'}), \
-                patch.object(module, '_publish_project_file_as_creative_image',
-                             return_value='/api/project-files/stored-photo-1'):
-            module._import_competitor_listing_photo(row, draft_id='d1')
-        self.assertEqual(row['logo_file_id'], 'stored-photo-1')
-        self.assertTrue(row['logo_listing_photo'])
-        self.assertEqual(row['logo_source_url'], 'https://bayut.sa/listing-1')
-        self.assertEqual(downloaded, ['https://images.bayut.com/thumb/prop-123.jpg'])
-        self.assertIn('https://bayut.sa/listing-1', row['field_sources']['logo_url'])
-
-    def test_download_listing_image_rejects_portal_brand_assets(self):
-        """logo/brand/share asset URLs must never become the competitor image."""
-        module = self.application_module
-        for url in ('https://portal.example/assets/logo.png',
-                    'https://portal.example/img/brand-mark.jpg',
-                    'https://portal.example/share-banner.webp',
-                    'http://portal.example/insecure.jpg'):
-            self.assertEqual(module._download_listing_image(url), (None, None, None))
+        self.assertFalse(hasattr(module, '_import_competitor_listing_photo'))
+        self.assertFalse(hasattr(module, '_download_listing_image'))
 
     def test_market_competitors_chunked_into_balanced_slides(self):
         """At most 4 competitors per slide, split evenly: 6 become 3+3, 9 become 3+3+3."""

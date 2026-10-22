@@ -80,6 +80,14 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
         }
         with patch.object(self.application_module, '_browse_agent_call',
                           return_value=fake_response), \
+                patch.object(self.application_module, '_run_market_source_plan',
+                             return_value=None), \
+                patch.object(self.application_module, '_new_evidence_pool',
+                             return_value=None), \
+                patch.object(self.application_module, '_verify_competitor_rows',
+                             return_value=None), \
+                patch.object(self.application_module, '_auto_import_competitor_logos',
+                             return_value=None), \
                 patch.object(self.application_module, '_verify_market_urls',
                              return_value=set()):
             generated = client.post('/api/market-study/competitors', headers=headers, json={
@@ -175,6 +183,12 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
         }
         with patch.object(self.application_module, '_browse_agent_call',
                           return_value=verified_response), \
+                patch.object(self.application_module, '_run_market_source_plan',
+                             return_value=None), \
+                patch.object(self.application_module, '_auto_import_competitor_logos',
+                             return_value=None), \
+                patch.object(self.application_module, '_verify_competitor_rows',
+                             return_value=None), \
                 patch.object(self.application_module, '_verify_market_urls',
                              return_value={'https://dead.example/gone'}):
             res = client.post('/api/market-study/competitors', headers=headers, json={
@@ -385,6 +399,12 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
         }
         with patch.object(self.application_module, '_browse_agent_call',
                           return_value=grounded), \
+                patch.object(self.application_module, '_run_market_source_plan',
+                             return_value=None), \
+                patch.object(self.application_module, '_new_evidence_pool',
+                             return_value=None), \
+                patch.object(self.application_module, '_auto_import_competitor_logos',
+                             return_value=None), \
                 patch.object(self.application_module, '_verify_market_urls',
                              return_value=set()), \
                 patch.object(self.application_module, '_public_host_addresses',
@@ -441,6 +461,8 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
 
         module = self.application_module
         with patch.object(module, '_browse_agent_call', side_effect=fake_model), \
+                patch.object(module, '_run_market_source_plan', return_value=None), \
+                patch.object(module, '_auto_import_competitor_logos', return_value=None), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_public_host_addresses', return_value=()):
             res = client.post('/api/market-study/competitors', headers=headers, json={
@@ -496,6 +518,9 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
 
         module = self.application_module
         with patch.object(module, '_browse_agent_call', side_effect=fake_model), \
+                patch.object(module, '_run_market_source_plan', return_value=None), \
+                patch.object(module, '_new_evidence_pool', return_value=None), \
+                patch.object(module, '_auto_import_competitor_logos', return_value=None), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_public_host_addresses', return_value=()):
             res = client.post('/api/market-study/competitors', headers=headers, json={

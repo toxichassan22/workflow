@@ -480,15 +480,18 @@ class ExecutorWiringTests(_MarketTestBase):
             result = module._execute_market_competitors(self._payload())
 
         self.assertTrue(result['success'], result)
-        # The known-source plan executes strictly before the first browse call.
-        self.assertEqual(order[:2], ['build_plan', 'run_plan'])
-        self.assertEqual(order[2], 'browse')
+        # The known-source plan runs beside the scans now; all three stages
+        # still execute in the same job with the same pool.
+        self.assertIn('build_plan', order)
+        self.assertIn('run_plan', order)
+        self.assertIn('browse', order)
         main_kwargs = calls[0]
         self.assertIs(main_kwargs.get('evidence_pool'), pool)
         self.assertIsInstance(main_kwargs.get('deadline'), float)
         self.assertIs(main_kwargs.get('session'), worker)
         self.assertEqual(main_kwargs.get('search_provider'), 'searxng')
-        self.assertEqual(main_kwargs.get('model'), module.GEMINI_TEXT_MODEL)
+        # The seam owns MARKET_STUDY_MODEL; a call site must not override it.
+        self.assertIsNone(main_kwargs.get('model'))
         self.assertIs(verify_kwargs.get('evidence_pool'), pool)
         self.assertIsNotNone(verify_kwargs.get('deadline'))
         self.assertIs(logo_kwargs.get('evidence_pool'), pool)
@@ -536,9 +539,10 @@ class ExecutorWiringTests(_MarketTestBase):
             result = module._execute_market_competitors(self._payload())
 
         self.assertTrue(result['success'], result)
-        # The hotel axis is deficient but every angle is covered — no
+        # A single-axis project still scans twice (the axis plus its
+        # complementary portal angle), but every angle is covered — no third
         # expansion call fires.
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)
 
     def test_expansion_stops_at_the_deadline_margin(self):
         module = self.module
@@ -564,7 +568,9 @@ class ExecutorWiringTests(_MarketTestBase):
             result = module._execute_market_competitors(self._payload())
 
         self.assertTrue(result['success'], result)
-        self.assertEqual(len(calls), 1)
+        # The single axis plus its complementary scan are the whole run; the
+        # expansion round is the part the expired deadline cancels.
+        self.assertEqual(len(calls), 2)
 
     def test_works_when_the_evidence_module_is_absent(self):
         """Pre-landing shape: no evidence module → no pool, calls behave as
@@ -671,6 +677,28 @@ class LogoPassPoolTests(_MarketTestBase):
         self.assertEqual(row.get('logo_source_url'), _OFFICIAL_PAGE['url'])
         self.assertTrue(row.get('logo_official_verified'))
         self.assertEqual(row.get('logo_file_id'), 'f-logo')
+
+    def test_claimed_source_url_without_retrieved_proof_is_not_official(self):
+        module = self.module
+        pool = evidence.EvidencePool()
+        row = {'id': 'c1', 'name': 'مجمع تجريبي',
+               'source_url': 'https://dev.example/projects/one',
+               'row_source': 'ai'}
+        stored = []
+
+        with self.app.app_context(), \
+                patch.object(module, '_browse_agent_call', return_value={
+                    'error': {'message': 'browse_agent: no evidence'}}), \
+                patch.object(module, '_store_imported_competitor_logo',
+                             side_effect=lambda item, **kw: stored.append(item)):
+            module._auto_import_competitor_logos(
+                [row], {'city': 'الرياض'}, {}, evidence_pool=pool,
+                deadline=time.time() + 300)
+
+        # The model's claimed host is not proof: no logo, no official flag.
+        self.assertFalse(row.get('logo_official_verified'))
+        self.assertEqual(stored, [])
+        self.assertTrue(row.get('logo_import_warning'))
 
     def test_batch_discovery_stops_at_the_deadline(self):
         module = self.module

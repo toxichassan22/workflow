@@ -14,6 +14,12 @@
       state.data_period = document.getElementById('marketDataPeriod')?.value || state.data_period;
       state.data_period_from = document.getElementById('marketDataPeriodFrom')?.value || '';
       state.data_period_to = document.getElementById('marketDataPeriodTo')?.value || '';
+      state.summary_period = document.getElementById('marketSummaryPeriod')?.value
+        || state.summary_period || state.data_period;
+      state.summary_period_from = document.getElementById('marketSummaryPeriodFrom')?.value
+        || state.summary_period_from || '';
+      state.summary_period_to = document.getElementById('marketSummaryPeriodTo')?.value
+        || state.summary_period_to || '';
       state.competitors = collectMarketCompetitorRows();
       const summary = {};
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
@@ -28,10 +34,9 @@
       state.decision = document.getElementById('marketDecision')?.value || '';
       state.disclaimer = document.getElementById('marketDisclaimer')?.value || state.disclaimer;
       state.summary_scope = collectMarketSummaryScope();
-      state.sources = mergeMarketSourceRows(
-        collectMarketSourceRows(),
-        buildMarketCompetitorSourceRows(state.competitors)
-      );
+      // The summary register owns the summary's sources only. A competitor's
+      // link lives in that competitor's row/slide, never here as well.
+      state.sources = mergeMarketSourceRows(collectMarketSourceRows(), []);
       state.one_block_summary = buildMarketStudyOneBlockSummary(state);
       return state;
     }
@@ -44,6 +49,9 @@
       const period = document.getElementById('marketDataPeriod')?.value;
       const periodWrap = document.getElementById('marketCustomPeriodWrap');
       if (periodWrap) periodWrap.hidden = period !== 'custom';
+      const summaryPeriod = document.getElementById('marketSummaryPeriod')?.value;
+      const summaryPeriodWrap = document.getElementById('marketSummaryCustomPeriodWrap');
+      if (summaryPeriodWrap) summaryPeriodWrap.hidden = summaryPeriod !== 'custom';
       const scopeMode = document.getElementById('marketCompetitorScopeMode')?.value || 'district';
       const radius = document.getElementById('marketCompetitorRadius')?.value || '10';
       const radiusWrap = document.getElementById('marketCompetitorRadiusWrap');
@@ -611,6 +619,86 @@
       syncProjectClassificationFields();
     }
 
+        function canonicalMarketSourceKey(url) {
+      try {
+        const parsed = new URL(String(url || '').trim(), window.location.origin);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          return String(url || '').trim().toLowerCase();
+        }
+        const tracking = new Set([
+          's', 't', 'v', 'cb', 'utm_source', 'utm_medium', 'utm_campaign',
+          'utm_term', 'utm_content', 'utm_id', 'gclid', 'fbclid', 'msclkid',
+          'yclid', 'ref', 'referrer', 'source', 'src'
+        ]);
+        const params = [...parsed.searchParams.entries()]
+          .filter(([key]) => !tracking.has(String(key || '').toLowerCase()))
+          .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+        const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+        const path = (parsed.pathname || '/').replace(/\/+$/, '') || '/';
+        const query = params.map(([key, value]) =>
+          encodeURIComponent(key) + '=' + encodeURIComponent(value)).join('&');
+        return host + path + (query ? '?' + query : '');
+      } catch (error) {
+        return String(url || '').trim().toLowerCase();
+      }
+    }
+
+    function marketSourceIsSearchOrHomepage(url) {
+      try {
+        const parsed = new URL(String(url || '').trim(), window.location.origin);
+        const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+        const path = (parsed.pathname || '/').toLowerCase();
+        if ((path === '' || path === '/') && !parsed.search) return true;
+        if (/(^|\/)(search|searchresults|search-results|results|result)(\/|$|\.)/.test(path)) return true;
+        if (host.endsWith('booking.com')
+          && (path === '/' || path.startsWith('/search')
+            || path.startsWith('/district') || path.startsWith('/city'))) return true;
+        return false;
+      } catch (error) {
+        return false;
+      }
+    }
+
+    function marketSourceUrlDepth(url) {
+      try {
+        const path = new URL(String(url || ''), window.location.origin).pathname || '';
+        return [(path.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean).length), path.length];
+      } catch (error) {
+        return [0, 0];
+      }
+    }
+
+    function competitorPrimarySourceUrl(row = {}) {
+      const explicit = [row.source_url, row.sourceUrl, row.url]
+        .map(value => String(value || '').trim())
+        .filter(value => /^https?:\/\//i.test(value));
+      const priceUrls = [];
+      Object.entries(marketFieldSources(row)).forEach(([field, urls]) => {
+        if (['price_value', 'price_from', 'price_to'].includes(field)) {
+          priceUrls.push(...(Array.isArray(urls) ? urls : []));
+        }
+      });
+      const candidates = Array.from(new Set(
+        [...priceUrls, ...explicit, ...marketSourceUrls(row)]
+          .map(value => String(value || '').trim())
+          .filter(value => /^https?:\/\//i.test(value))));
+      const specific = candidates.filter(url => !marketSourceIsSearchOrHomepage(url));
+      const priceSpecific = priceUrls
+        .map(value => String(value || '').trim())
+        .filter(value => /^https?:\/\//i.test(value) && !marketSourceIsSearchOrHomepage(value));
+      if (priceSpecific.length) return priceSpecific[0];
+      const explicitSpecific = explicit.filter(url => !marketSourceIsSearchOrHomepage(url));
+      if (explicitSpecific.length) return explicitSpecific[0];
+      if (specific.length) {
+        return specific.sort((a, b) => {
+          const [depthA, lengthA] = marketSourceUrlDepth(a);
+          const [depthB, lengthB] = marketSourceUrlDepth(b);
+          return depthB - depthA || lengthB - lengthA;
+        })[0];
+      }
+      return '';
+    }
+
     function marketValueList(value) {
       if (Array.isArray(value)) return value.reduce((items, item) => items.concat(marketValueList(item)), []);
       if (value && typeof value === 'object') {
@@ -677,19 +765,6 @@
       return MARKET_SOURCE_FIELD_LABELS[String(field || '').trim()] || String(field || '').trim();
     }
 
-    function marketSourceFields(row, url) {
-      const target = String(url || '').toLowerCase();
-      return Object.entries(marketFieldSources(row))
-        .filter(([, urls]) => urls.some(item => String(item).toLowerCase() === target))
-        .map(([field]) => marketSourceFieldLabel(field));
-    }
-
-    function marketSourceNote(row, sourceFields) {
-      const notes = [row.notes || row.note || ''];
-      if (sourceFields && sourceFields.length) notes.push('الحقول: ' + sourceFields.join('، '));
-      return notes.filter(Boolean).join(' — ');
-    }
-
     function marketSourceUrls(row = {}) {
       const values = [];
       ['source_urls', 'sourceUrls', 'urls', 'source_url', 'sourceUrl', 'url', 'sources', 'source']
@@ -709,15 +784,6 @@
       }
     }
 
-    function marketSourceLinksHtml(row = {}) {
-      return marketSourceUrls(row).map(url => {
-        const safeUrl = safeMarketUrl(url);
-        return safeUrl
-          ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(url) + '</a>'
-          : '<span>' + escapeHtml(url) + '</span>';
-      }).join('<br>');
-    }
-
     function marketOfficialSourceReliability(entityName, sourceName, url) {
       const source = String(sourceName || '').replace(/[أإآ]/g, 'ا').toLowerCase();
       let host = '';
@@ -727,47 +793,21 @@
       return host && tokens.some(token => host.includes(token)) ? 'مصدر رسمي للجهة' : '';
     }
 
-    function buildMarketCompetitorSourceRows(competitors) {
-      const rows = [];
-      (Array.isArray(competitors) ? competitors : []).forEach(competitor => {
-        const urls = marketSourceUrls(competitor);
-        urls.forEach(url => {
-          const sourceFields = marketSourceFields(competitor, url);
-          rows.push({
-            id: 'competitor-source-' + encodeURIComponent(String(competitor.id || competitor.name || '') + '|' + url),
-            competitor_id: competitor.id || '',
-            competitor_name: competitor.name || '',
-            source_kind: 'competitor',
-            source_fields: sourceFields,
-            name: competitor.source || 'مصدر المنافس',
-            url,
-            data_date: competitor.data_date || competitor.dataDate || '',
-            accessed_at: '',
-            reliability: marketOfficialSourceReliability(competitor.name, competitor.source, url),
-            note: marketSourceNote(competitor, sourceFields)
-          });
-        });
-      });
-      return rows;
-    }
-
     function mergeMarketSourceRows(existing, incoming) {
-      const existingRows = Array.isArray(existing) ? existing : [];
-      const base = existingRows.filter(row => row && row.source_kind !== 'competitor');
-      const byKey = new Map(existingRows.filter(Boolean).map(row => [[
-        row.source_kind || 'source', row.competitor_id || '', String(row.url || '').trim().toLowerCase()
-      ].join('|'), row]));
+      // One register for the summary's sources. Competitor rows saved by an
+      // older build are dropped here, so reopening a draft heals it too.
       const rows = [];
       const seen = new Set();
-      (Array.isArray(incoming) ? incoming : []).forEach(row => {
-        if (!row || !String(row.url || '').trim()) return;
-        const key = [row.source_kind || 'source', row.competitor_id || '', String(row.url).trim().toLowerCase()].join('|');
+      [...(Array.isArray(existing) ? existing : []),
+       ...(Array.isArray(incoming) ? incoming : [])].forEach(row => {
+        if (!row || typeof row !== 'object' || row.source_kind === 'competitor') return;
+        const url = String(row.url || row.source_url || row.sourceUrl || '').trim();
+        const key = url ? canonicalMarketSourceKey(url) : ('row:' + rows.length);
         if (seen.has(key)) return;
         seen.add(key);
-        const previous = byKey.get(key) || {};
-        rows.push({ ...row, ...previous, reliability: previous.reliability || row.reliability || '' });
+        rows.push(row);
       });
-      return base.concat(rows);
+      return rows;
     }
 
     function marketSelectHtml(options, selected) {
