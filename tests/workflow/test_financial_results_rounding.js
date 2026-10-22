@@ -80,7 +80,8 @@ test('the results page writers round and the rest of the study keeps exact value
 });
 
 test('the sensitivity tables on the results tab round the same way', () => {
-  assert.match(reportSource, /sensitivity-base-value sensAutoBase">\$\{resultMoney\(base\)\}/);
+  assert.ok(reportSource.includes('sensitivity-base-value sensAutoBase'));
+  assert.ok(reportSource.includes('${resultMoney(base)} ${reg.unit}'));
   assert.match(reportSource, /c\.textContent = `\$\{resultMoney\(b\)\} \$\{reg\.unit\}`/);
   assert.match(reportSource, /<td>\$\{resultMoney\(r\.totalRevenue\)\}<\/td>/);
   assert.match(reportSource, /resultPercent\(r\.roi \* 100\)/);

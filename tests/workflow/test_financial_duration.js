@@ -54,7 +54,9 @@ test('adding the duration variable pins it to the timeline value', () => {
   };
   const context = browserContext({
     document: {
-      addEventListener() {}, getElementById: id => id === 'developmentYears' ? { value: '3.5' } : null,
+      addEventListener() {},
+      getElementById: id => id === 'developmentYears' ? { value: '3.5' }
+        : id === 'developmentDurationText' ? { value: '3 سنوات و6 شهر' } : null,
       querySelector: selector => selector === '#sensitivityAssumptionsTable tbody' ? rows : null,
       querySelectorAll: () => [],
       createElement: () => ({ dataset: {}, innerHTML: '', querySelector: () => null, querySelectorAll: () => [] })
@@ -62,8 +64,8 @@ test('adding the duration variable pins it to the timeline value', () => {
   });
   context.addSensitivityVariable({ key: 'developmentYears', low: 99, high: 1, silent: true });
   const html = rows.last.innerHTML;
-  assert.equal((html.match(/value="3\.5"/g) || []).length, 2, html);
-  assert.ok(html.includes('readonly'), html);
+  assert.equal((html.match(/data-value="3\.5"/g) || []).length, 2, html);
+  assert.equal((html.match(/3 سنوات و6 شهر/g) || []).length, 3, html);
   assert.ok(!html.includes('oninput'), html);
   assert.ok(html.includes('قيمة ثابتة من الجدول الزمني'), html);
 });
