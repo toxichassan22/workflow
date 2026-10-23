@@ -1,6 +1,8 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 from numeric_precision import format_precise_number
 
+import designer_chat_colors
+
 
 # Designer agent (DESIGNER_AGENT=1): planner then runner then worker
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -606,7 +608,30 @@ def _designer_agent_turn(ctx):
         return _agent_chat_response(ctx, 'أُلغيت الخطة — لم يتغير العرض.', kind='reply')
 
     with _agent_render_session(ctx['branding'], tenant_id) as session:
-        turn, _messages, errors = _designer_agent_plan(ctx, session)
+        turn = None
+        # A color-only turn has a deterministic grammar and a deterministic
+        # target: the planner would only repeat work the worker already does.
+        # Unparseable color wording still reaches the worker's model fallback.
+        if designer_chat_colors.is_color_only_request(ctx.get('message')):
+            try:
+                color_indexes = _resolve_deterministic_table_targets(
+                    ctx['message'], ctx.get('data') or {}, slides,
+                    ctx['current_index'],
+                    ctx.get('is_all_slides_request', False))
+            except Exception:
+                color_indexes = None
+            if color_indexes:
+                turn = {
+                    'kind': 'plan',
+                    'style_brief': '',
+                    'ops': [{
+                        'op': 'edit',
+                        'select': {'ids': [slides[i]['id'] for i in color_indexes]},
+                        'instruction': ctx['message'],
+                    }],
+                }
+        if turn is None:
+            turn, _messages, errors = _designer_agent_plan(ctx, session)
         if (turn.get('kind') == 'ask'
                 and _agent_ask_streak(ctx) >= _AGENT_MAX_ASK_STREAK):
             # Two clarifying questions is the cap — a third ask becomes a

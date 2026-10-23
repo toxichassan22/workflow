@@ -144,6 +144,27 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertNotIn('agent', response.get_json()['data'])
 
+    def test_color_only_request_skips_the_planner(self):
+        slides = [slide('<p style="color:#ff0000">نص</p>')]
+        with patch.object(self.module, 'DESIGNER_AGENT', True), \
+                patch.object(self.module, '_agent_render_session', return_value=_NoRender()), \
+                patch.object(self.module, 'call_openrouter_messages',
+                             side_effect=AssertionError('planner must not run')), \
+                patch.object(self.module.designer_chat_reliability, '_auto_heal_workspace_slides',
+                             side_effect=lambda s, *a: s), \
+                patch.object(self.module.slide_engine, 'renumber_presentation_slides',
+                             side_effect=lambda s, **k: s):
+            response = self.post({
+                'message': 'غير لون النص إلى الأزرق',
+                'slidesData': slides,
+                'projectData': {'project_name': 'P'},
+                'slideIndex': 0,
+            })
+        self.assertEqual(response.status_code, 200, response.get_json())
+        body = response.get_json()['data']
+        self.assertEqual(body['action'], 'workspace_update')
+        self.assertIn('#0000ff', body['slidesData'][0]['html'])
+
     def test_reply_turn_never_touches_the_deck(self):
         slides = [slide('<p>أ</p>')]
         patches = self.agent_patches(self.module, {'kind': 'reply', 'message': 'أهلاً'})
