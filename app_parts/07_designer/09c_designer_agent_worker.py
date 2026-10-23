@@ -1,3 +1,6 @@
+import context_contracts
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Designer agent — scoped worker (chatplan section 3.6)
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -40,11 +43,21 @@ _AGENT_WORKER_SCHEMA = {
 
 
 def _agent_worker_facts(ctx, slide=None):
-    """Labeled project facts only — the raw project file stays out."""
+    """Labeled project facts only — the raw project file stays out.
+
+    The worker follows the slide's deck section: a financial-slide edit has no
+    use for the market study or the team library. An unknown or executive
+    section keeps the full brief.
+    """
     parts = []
+    section_key = ''
+    if isinstance(slide, dict):
+        section_key = str(slide.get('section_key') or slide.get('sectionKey') or '').strip()
+    fact_sections = (context_contracts.fact_section_keys((section_key,))
+                     if section_key else None)
     try:
         facts = slide_engine.build_project_facts(
-            ctx['project_data'], ctx['tenant_id'])
+            ctx['project_data'], ctx['tenant_id'], section_keys=fact_sections)
     except Exception:
         facts = ''
     if str(facts or '').strip():
