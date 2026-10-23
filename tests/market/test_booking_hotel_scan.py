@@ -95,12 +95,30 @@ class BookingHotelScanTests(unittest.TestCase):
                 self._payload(), {}, tenant_id=None)
         self.assertEqual((city, district), ('Jeddah', 'Al Andalus'))
 
-    def test_english_location_falls_back_to_the_project_text(self):
+    def test_english_location_uses_address_geocode_without_coordinates(self):
+        payload = self._payload()
+        payload.pop('location_lat', None)
+        payload.pop('location_lng', None)
         with self.app.app_context(), \
+                patch.object(self.module.maps_service, 'geocode_address',
+                             return_value={'success': True,
+                                           'lat': 21.5433, 'lng': 39.1728}), \
                 patch.object(self.module.maps_service,
-                             'reverse_geocode_location', return_value={}):
+                             'reverse_geocode_location',
+                             return_value=self._geocode()):
             city, district = self.module._english_booking_location(
-                self._payload(), {}, tenant_id=None)
+                payload, {}, tenant_id=None)
+        self.assertEqual((city, district), ('Jeddah', 'Al Andalus'))
+
+    def test_english_location_falls_back_to_the_project_text(self):
+        payload = self._payload()
+        payload.pop('location_lat', None)
+        payload.pop('location_lng', None)
+        with self.app.app_context(), \
+                patch.object(self.module.maps_service, 'geocode_address',
+                             return_value={}):
+            city, district = self.module._english_booking_location(
+                payload, {}, tenant_id=None)
         self.assertEqual((city, district), ('جدة', 'الأندلس'))
 
     def test_hotel_scan_builds_rows_from_booking_search_and_rate_block(self):

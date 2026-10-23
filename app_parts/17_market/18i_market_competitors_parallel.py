@@ -76,61 +76,92 @@ def _scan_search_limits(task_count):
     )
 
 
-def _project_coordinates(payload):
-    project_data = (payload or {}).get('projectData') or (payload or {}).get('project_data') or {}
-    if not isinstance(project_data, dict):
-        project_data = {}
-    lat = next((value for value in (
-        (payload or {}).get('location_lat'), (payload or {}).get('locationLat'),
-        project_data.get('location_lat'), project_data.get('locationLat'),
-        project_data.get('lat'), project_data.get('latitude'))
-        if value is not None and str(value).strip()), None)
-    lng = next((value for value in (
-        (payload or {}).get('location_lng'), (payload or {}).get('locationLng'),
-        project_data.get('location_lng'), project_data.get('locationLng'),
-        project_data.get('lng'), project_data.get('longitude'))
-        if value is not None and str(value).strip()), None)
-    try:
-        return float(lat), float(lng)
-    except (TypeError, ValueError):
-        return None, None
+def _project_coordinates(payload, data=None):
+    sources = []
+    for source in (payload, data):
+        if isinstance(source, dict):
+            sources.append(source)
+            for key in ('projectData', 'project_data', 'fields', 'draft_data'):
+                nested = source.get(key)
+                if isinstance(nested, dict):
+                    sources.append(nested)
+
+    def first_number(keys):
+        for source in sources:
+            for key in keys:
+                value = source.get(key)
+                if value is not None and str(value).strip():
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        continue
+        return None
+
+    return (first_number(('location_lat', 'locationLat', 'lat', 'latitude')),
+            first_number(('location_lng', 'locationLng', 'lng', 'longitude')))
 
 
 def _english_booking_location(payload, data, tenant_id=None):
     """Project district/city in English, for a Booking search query.
 
     Booking does not resolve the Arabic district free text (it redirects to
-    the homepage). The project coordinates resolve to the English district
-    through Google Geocoding, e.g. «Al Andalus, Jeddah».
+    the homepage). The project coordinates — or, when they are missing, an
+    address geocode — resolve to the English district, e.g.
+    «Al Andalus, Jeddah».
     """
     city = str((payload or {}).get('city') or '').strip()
     district = str((payload or {}).get('district') or '').strip()
     if district.startswith('حي '):
         district = district[3:].strip()
-    lat, lng = _project_coordinates(payload)
-    if lat is None or lng is None:
-        return city, district
-    try:
-        resolved = maps_service.reverse_geocode_location(
-            lat, lng, tenant_id=tenant_id, language='en',
-            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
-    except Exception as exc:
-        print(f'[MARKET STUDY] English geocode failed: {exc}')
-        return city, district
-    components = resolved.get('address_components') or []
+    usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
 
-    def component(types):
-        for item in components:
-            if set(item.get('types') or []) & set(types):
-                return str(item.get('long_name') or '').strip()
-        return ''
+    def english_from(resolved):
+        components = (resolved or {}).get('address_components') or []
 
-    english_district = component((
-        'sublocality_level_1', 'sublocality', 'neighborhood',
-        'administrative_area_level_3'))
-    english_city = component((
-        'locality', 'postal_town', 'administrative_area_level_2'))
-    return english_city or city, english_district or district
+        def component(types):
+            for item in components:
+                if set(item.get('types') or []) & set(types):
+                    return str(item.get('long_name') or '').strip()
+            return ''
+
+        return (component(('locality', 'postal_town',
+                           'administrative_area_level_2')),
+                component(('sublocality_level_1', 'sublocality',
+                           'neighborhood', 'administrative_area_level_3')))
+
+    city_en = district_en = ''
+    lat, lng = _project_coordinates(payload, data)
+    if lat is not None and lng is not None:
+        try:
+            resolved = maps_service.reverse_geocode_location(
+                lat, lng, tenant_id=tenant_id, language='en',
+                usage_ctx=usage_ctx)
+        except Exception as exc:
+            print(f'[MARKET STUDY] English geocode failed: {exc}')
+            resolved = {}
+        city_en, district_en = english_from(resolved)
+    if not city_en or not district_en:
+        address_query = ', '.join(part for part in (
+            district, city, 'السعودية') if part)
+        if address_query:
+            try:
+                geocoded = maps_service.geocode_address(
+                    address_query, tenant_id=tenant_id, usage_ctx=usage_ctx)
+            except Exception as exc:
+                print(f'[MARKET STUDY] Address geocode failed: {exc}')
+                geocoded = {}
+            if isinstance(geocoded, dict) and geocoded.get('lat') is not None:
+                try:
+                    resolved = maps_service.reverse_geocode_location(
+                        geocoded['lat'], geocoded['lng'],
+                        tenant_id=tenant_id, language='en',
+                        usage_ctx=usage_ctx)
+                except Exception:
+                    resolved = {}
+                extra_city, extra_district = english_from(resolved)
+                city_en = city_en or extra_city
+                district_en = district_en or extra_district
+    return city_en or city, district_en or district
 
 
 def _booking_scan_citation(url, title='', text=''):
@@ -178,6 +209,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     search_url = booking_search.build_search_url(
         city_en or city_ar, district_en or district_ar,
         stars=stars or None)
+    print(f'[MARKET STUDY] booking hotel search city={city_en!r} '
+          f'district={district_en!r} stars={stars!r} url={search_url}')
     if _market_deadline_hit(deadline):
         return _booking_scan_result(
             task, [], [], 'deadline_exceeded', search_ran=False)
@@ -193,11 +226,16 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
         hotels = search_data.get('hotels') or []
+        print(f'[MARKET STUDY] booking search final_url={final_url} '
+              f'cards={len(hotels)} chars={len(str(search.get("text") or ""))}')
         if not hotels:
+            query_label = ', '.join(part for part in (
+                district_en or district_ar, city_en or city_ar) if part)
             note = (
                 f'لم تُرجع صفحة نتائج Booking.com فنادق لحي '
-                f'{display_district or district_en} في {city_ar or city_en}. '
-                'لم يُستخدم أي مصدر آخر.')
+                f'{display_district or district_en} في {city_ar or city_en} '
+                f'(استعلام Booking: {query_label}، النجوم '
+                f'{stars or "غير محددة"}). لم يُستخدم أي مصدر آخر.')
             return _booking_scan_result(
                 task, [], citations, note, search_ran=True)
         benchmark = market_study.benchmark_axis_label(axis, offer_lang)
