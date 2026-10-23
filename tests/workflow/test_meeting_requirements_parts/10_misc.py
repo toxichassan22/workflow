@@ -680,9 +680,9 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         hidden = app_mod._set_slide_watermark_visible(visible, False)
         self.assertIn('data-slide-watermark', _strip_hidden_watermark_overlays(visible))
         self.assertNotIn('data-slide-watermark', _strip_hidden_watermark_overlays(hidden))
-        prepared_hidden = pptx_export._prepare_slide_html(hidden, self.tenant_a)
+        prepared_hidden = pptx_export._prepare_slide_for_measurement(hidden, None, self.tenant_a)
         self.assertNotIn('data-slide-watermark', prepared_hidden)
-        prepared_visible = pptx_export._prepare_slide_html(visible, self.tenant_a)
+        prepared_visible = pptx_export._prepare_slide_for_measurement(visible, None, self.tenant_a)
         self.assertIn('data-slide-watermark', prepared_visible)
 
     def test_presentation_sync_failure_is_reported_not_swallowed(self):

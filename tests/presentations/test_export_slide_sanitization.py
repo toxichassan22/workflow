@@ -113,8 +113,10 @@ class ExportSlideSanitizationTests(unittest.TestCase):
             'display:flex', 'display:none')
         self.assertIn('data-slide-watermark', _strip_hidden_watermark_overlays(visible))
         self.assertNotIn('data-slide-watermark', _strip_hidden_watermark_overlays(hidden))
-        self.assertIn('data-slide-watermark', pptx_export._prepare_slide_html(visible, 't'))
-        self.assertNotIn('data-slide-watermark', pptx_export._prepare_slide_html(hidden, 't'))
+        self.assertIn('data-slide-watermark',
+                      pptx_export._prepare_slide_for_measurement(visible, {}, 't'))
+        self.assertNotIn('data-slide-watermark',
+                         pptx_export._prepare_slide_for_measurement(hidden, {}, 't'))
 
     def test_discards_text_after_each_slide(self):
         html = (

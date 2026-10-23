@@ -197,9 +197,8 @@ def api_export():
 
             pptx_path = generate_pptx(slides_data, project_name, branding, tenant_output_dir, g.tenant_id)
             relative_url = f'/outputs/{g.tenant_id}/{os.path.basename(pptx_path)}'
-            # Native python-pptx build: no browser involved, and generate_pptx
-            # already refused a short file. The count travels with the response
-            # the same way the PDF engine does.
+            # Measured by Chromium, then rebuilt as native PowerPoint objects:
+            # the same layout engine that renders the PDF drives the geometry.
             pptx_count = len(slides_data)
             print(f'[EXPORT] engine=pptx-native slides={pptx_count} file={os.path.basename(pptx_path)}')
 
