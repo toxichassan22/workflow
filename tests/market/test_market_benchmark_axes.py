@@ -369,6 +369,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
                 patch.object(module, '_run_market_source_plan', return_value=None), \
                 patch.object(module, '_browse_agent_call', side_effect=fake_call), \
                 patch.object(module, '_verify_competitor_rows', return_value=None), \
+                patch.object(module, '_fill_hotel_rows_with_native_search', return_value=0), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_auto_import_competitor_logos', return_value=None):
             result = module._execute_market_competitors(payload)
@@ -418,6 +419,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
                 patch.object(module, '_run_market_source_plan', return_value=None), \
                 patch.object(module, '_browse_agent_call', side_effect=fake_call), \
                 patch.object(module, '_verify_competitor_rows', return_value=None), \
+                patch.object(module, '_fill_hotel_rows_with_native_search', return_value=0), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_auto_import_competitor_logos', return_value=None):
             result = module._execute_market_competitors(payload)

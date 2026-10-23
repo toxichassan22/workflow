@@ -492,12 +492,17 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id,
                             progress=report, evidence_pool=evidence_pool,
                             deadline=deadline, band=(52, 70))
+    report(70, 'البحث عن سعر ومساحة الفنادق من مصادر بديلة...')
+    fallback_filled = _fill_hotel_rows_with_native_search(
+        merged, payload, data, tenant_id=tenant_id, progress=report,
+        deadline=deadline, band=(70, 74))
     for row in merged:
         market_study.canonicalize_competitor_source_urls(row)
         _drop_foreign_competitor_urls(row)
         _drop_banned_competitor_listing_urls(row)
-    report(70, 'التحقق من روابط المصادر واحدًا واحدًا...')
-    search_ran = aggregate['search_ran'] or bool(citation_urls)
+    report(74, 'التحقق من روابط المصادر واحدًا واحدًا...')
+    search_ran = (aggregate['search_ran'] or bool(citation_urls)
+                  or fallback_filled > 0)
     if search_ran:
         # A grounded run that still leaves a row with zero source URLs means the
         # name came from the model's memory — flag it for the owner's review.
@@ -507,7 +512,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     if search_ran:
         dead_urls = _verify_market_urls(
             [url for row in merged for url in _competitor_claimed_urls(row)],
-            progress=report, band=(70, 74))
+            progress=report, band=(74, 78))
         for row in merged:
             _flag_dead_competitor_urls(row, dead_urls)
     else:
@@ -516,7 +521,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         for row in merged:
             if (row.get('row_source') or 'ai') == 'ai':
                 market_study.flag_unverified_competitor_sources(row)
-    report(74, 'استيراد شعارات المنافسين من مواقعها الرسمية...')
+    report(78, 'استيراد شعارات المنافسين من مواقعها الرسمية...')
     _auto_import_competitor_logos(
         merged, payload, data, tenant_id=tenant_id, progress=report,
         citation_pages=evidence_pages, evidence_pool=evidence_pool,
@@ -530,6 +535,12 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     notes = aggregate['notes']
     expansion_note = aggregate['notes']
+    if fallback_filled:
+        fallback_note = (f'{fallback_filled} منافس فندقي من مصادر بديلة '
+                         'لأن Booking محجوب')
+        notes = f'{notes} — {fallback_note}' if notes else fallback_note
+        expansion_note = (f'{expansion_note} — {fallback_note}'
+                          if expansion_note else fallback_note)
     if round_no:
         rounds_note = ('أُجريت جولة بحث إضافية واحدة عن مشاريع أخرى' if round_no == 1
                        else f'أُجريت {round_no} جولات بحث إضافية عن مشاريع أخرى')
@@ -568,6 +579,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         'noEvidenceCount': no_evidence,
         'searchNotRunCount': search_not_run,
         'missingPriceCount': missing_prices,
+        'fallbackCount': sum(1 for row in merged if row.get('fallback_source')),
         'conflictWarnings': [warning for row in merged for warning in (row.get('conflict_warnings') or [])],
         'searchExpanded': round_no > 0,
         'comparisonTypes': payload.get('comparisonTypes') or [],

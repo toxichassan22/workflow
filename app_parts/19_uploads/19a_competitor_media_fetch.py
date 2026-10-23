@@ -470,10 +470,12 @@ def _drop_banned_competitor_listing_urls(row):
         return row
     operation = row.get('operation_type')
     project_type = row.get('project_type')
+    allow_fallback = bool(row.get('fallback_source')
+                          or row.get('source_fallback'))
 
     def _keep(url):
         return not market_study.banned_competitor_listing_host(
-            url, operation, project_type)
+            url, operation, project_type, allow_fallback=allow_fallback)
 
     field_sources = market_study.competitor_field_sources(row)
     price_urls_before = [
