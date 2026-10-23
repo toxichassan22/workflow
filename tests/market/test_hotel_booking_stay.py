@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import tempfile
+import types
 import unittest
 from datetime import date
 from pathlib import Path
@@ -108,6 +109,52 @@ class BookingStayWindowTests(unittest.TestCase):
         check_in, check_out = hotel_stay.booking_stay_window()
         self.assertEqual(query['checkin'], [check_in.isoformat()])
         self.assertEqual(query['checkout'], [check_out.isoformat()])
+
+
+class ChallengeShellTests(unittest.TestCase):
+
+    class _Page:
+        def __init__(self, html, text=''):
+            self._html = html
+            self._text = text
+            self.url = HOTEL_URL
+
+        def set_extra_http_headers(self, _headers):
+            pass
+
+        def goto(self, _url, **_kwargs):
+            return types.SimpleNamespace(status=200)
+
+        def wait_for_timeout(self, _ms):
+            pass
+
+        def title(self):
+            return ''
+
+        def evaluate(self, _script):
+            return self._text
+
+        def content(self):
+            return self._html
+
+    def _open(self, html, text=''):
+        worker = browser.BrowserWorker(headless=True)
+        page = self._Page(html, text)
+        worker._ensure_page = lambda: page
+        return worker.open_url(HOTEL_URL)
+
+    def test_aws_waf_challenge_shell_is_reported_as_blocked(self):
+        result = self._open(
+            '<html><body><div id="challenge-container"></div>'
+            '<script>window.awsWafCookieDomainList = ["booking.com"]</script>'
+            '</body></html>')
+        self.assertEqual(result.get('error'), 'blocked')
+
+    def test_a_short_real_page_is_not_blocked(self):
+        result = self._open(
+            '<html><body><p>Select dates to see prices</p></body></html>',
+            'Select dates to see prices')
+        self.assertIsNone(result.get('error'))
 
 
 class CompetitorPromptStayTests(unittest.TestCase):

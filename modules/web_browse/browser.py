@@ -180,6 +180,25 @@ def _clean_text(raw):
     return text.strip()[:TEXT_CAP]
 
 
+_AWS_WAF_RE = re.compile(
+    r'challenge-container|awsWafCookieDomainList|__challenge_', re.I)
+
+
+def _challenge_shell(page):
+    """True when the document is only an AWS WAF/JS challenge shell.
+
+    Booking answers automation with a 200 page whose entire body is an empty
+    ``challenge-container`` and an AWS WAF script; the visible text is empty,
+    so the captcha wording check alone reads it as a successfully loaded page
+    and every price/room field silently stays blank.
+    """
+    try:
+        html = page.content()
+    except Exception:
+        return False
+    return bool(_AWS_WAF_RE.search(html or ''))
+
+
 def _looks_blocked(title, text):
     return len(text) < 1500 and bool(_CAPTCHA_RE.search(f'{title}\n{text[:800]}'))
 
@@ -474,7 +493,8 @@ class BrowserWorker:
         status = getattr(response, 'status', None)
         if status is not None and status >= 400:
             result['error'] = f'http_{status}'
-        elif _looks_blocked(result['title'], result['text']):
+        elif (_looks_blocked(result['title'], result['text'])
+              or (len(result['text']) < 1500 and _challenge_shell(page))):
             result['error'] = 'blocked'
         return result
 
@@ -624,7 +644,8 @@ class BrowserWorker:
         except Exception as exc:
             return self._state_error(url, _launch_reason(exc))
         state = self._state(page, str(url or ''))
-        if _looks_blocked(state['title'], state['text']):
+        if (_looks_blocked(state['title'], state['text'])
+                or (len(state['text'] or '') < 1500 and _challenge_shell(page))):
             state['error'] = 'blocked'
         return state
 
