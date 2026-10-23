@@ -22,7 +22,11 @@ import base64
 import json
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 import threading
+import time
 import urllib.request
 from contextlib import contextmanager
 from urllib.parse import parse_qs, quote_plus, unquote, urlencode, urlparse
@@ -57,6 +61,10 @@ _EXTRA_HEADERS = {
 }
 
 _BLOCKED_TYPES = {'image', 'media', 'font'}
+# Real Chrome solves Booking's AWS WAF challenge in a few seconds and reloads
+# the page; a bundled Chromium never does. Wait long enough for the real page
+# instead of marking the challenge shell as the final answer.
+_CHALLENGE_WAIT_SECONDS = 15
 _STRIP_SELECTOR = 'script,style,nav,footer,header,form,noscript,iframe'
 # SERP endpoints. Verified on this repo's dev box (2026-10): DDG's html/lite
 # endpoints return an anomaly page (HTTP 418 body) from datacenter and dev IPs
@@ -190,12 +198,14 @@ def _challenge_shell(page):
     Booking answers automation with a 200 page whose entire body is an empty
     ``challenge-container`` and an AWS WAF script; the visible text is empty,
     so the captcha wording check alone reads it as a successfully loaded page
-    and every price/room field silently stays blank.
+    and every price/room field silently stays blank. A real Chrome solves the
+    challenge in a couple of seconds and reloads; ``content()`` fails while
+    that navigation is in flight, which still means «not the real page yet».
     """
     try:
         html = page.content()
     except Exception:
-        return False
+        return True
     return bool(_AWS_WAF_RE.search(html or ''))
 
 
@@ -383,6 +393,92 @@ def _active_worker():
     return worker if worker is not None and worker.is_open else None
 
 
+def _managed_chrome_executable():
+    """The real Chrome binary the deployment wants the agent to drive.
+
+    BROWSER_EXECUTABLE_PATH is explicit; BROWSER_MANAGED_CHROME=1 falls back
+    to the well-known install locations. Playwright's own launch injects
+    automation flags that Booking's AWS WAF challenges, so the caller starts
+    this binary itself and attaches over CDP instead.
+    """
+    explicit = (os.environ.get('BROWSER_EXECUTABLE_PATH') or '').strip()
+    if explicit:
+        return explicit if os.path.isfile(explicit) else ''
+    if (os.environ.get('BROWSER_MANAGED_CHROME') or '').strip().lower() not in (
+            '1', 'true', 'yes', 'on'):
+        return ''
+    candidates = (
+        shutil.which('google-chrome'),
+        shutil.which('google-chrome-stable'),
+        shutil.which('chrome'),
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/opt/google/chrome/chrome',
+        r'C:\Program Files\Google\Chrome\Application\chrome.exe',
+        r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
+    )
+    return next((path for path in candidates if path and os.path.isfile(path)), '')
+
+
+def _stop_managed_chrome(proc, profile):
+    try:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=8)
+            except Exception:
+                proc.kill()
+                try:
+                    proc.wait(timeout=3)
+                except Exception:
+                    pass
+    finally:
+        if profile:
+            shutil.rmtree(profile, ignore_errors=True)
+
+
+def _start_managed_chrome(executable, headless=True):
+    """Launch real Chrome with its own profile and a CDP endpoint.
+
+    The default context of this browser is the one Booking's WAF accepts;
+    Playwright's browser launch and its incognito contexts are challenged.
+    """
+    profile = tempfile.mkdtemp(prefix='wf-chrome-')
+    flags = [executable]
+    if headless:
+        flags.append('--headless=new')
+    flags.extend([
+        '--remote-debugging-port=0',
+        f'--user-data-dir={profile}',
+        '--no-first-run',
+        '--no-default-browser-check',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+    ])
+    flags.extend((os.environ.get('BROWSER_LAUNCH_ARGS') or '').split())
+    flags.append('about:blank')
+    proc = subprocess.Popen(flags, stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    port_file = os.path.join(profile, 'DevToolsActivePort')
+    port = None
+    for _ in range(150):
+        if proc.poll() is not None:
+            break
+        try:
+            with open(port_file, encoding='utf-8') as handle:
+                line = handle.readline().strip()
+            port = int(line) if line else None
+        except (OSError, ValueError):
+            port = None
+        if port:
+            break
+        time.sleep(0.1)
+    if not port:
+        _stop_managed_chrome(proc, profile)
+        raise RuntimeError('managed Chrome did not expose a DevTools port')
+    return proc, profile, port
+
+
 class BrowserWorker:
     """One headless Chromium + page, bound to the thread that opened it."""
 
@@ -395,6 +491,9 @@ class BrowserWorker:
         self._browser = None
         self._context = None
         self._page = None
+        self._chrome_proc = None
+        self._chrome_profile = ''
+        self._using_cdp = False
         self.is_open = False
 
     def __enter__(self):
@@ -411,26 +510,46 @@ class BrowserWorker:
         from playwright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
         endpoint = (os.environ.get('BROWSER_WS_ENDPOINT') or '').strip()
+        executable = _managed_chrome_executable()
+        using_cdp = False
         if endpoint:
             self._browser = self._pw.chromium.connect_over_cdp(endpoint)
             print('[BROWSER] launch mode=cdp')
+            using_cdp = True
+        elif executable:
+            self._chrome_proc, self._chrome_profile, port = _start_managed_chrome(
+                executable, headless=self.headless)
+            self._browser = self._pw.chromium.connect_over_cdp(
+                f'http://127.0.0.1:{port}')
+            print(f'[BROWSER] launch mode=managed-chrome path={executable}')
+            using_cdp = True
         else:
             args = ['--disable-dev-shm-usage']
             extra = (os.environ.get('BROWSER_LAUNCH_ARGS') or '').split()
             self._browser = self._pw.chromium.launch(
                 headless=self.headless, args=args + extra)
-            print('[BROWSER] launch mode=local')
-        try:
-            self._context = self._browser.new_context(
-                user_agent=USER_AGENT, locale='ar-SA', viewport=VIEWPORT,
-                bypass_csp=False,
-                extra_http_headers=dict(_EXTRA_HEADERS))
-        except Exception:
-            # Some CDP endpoints only expose their default context.
-            self._context = (self._browser.contexts or [None])[0]
-            if self._context is None:
-                raise
-        self._context.route('**/*', self._route)
+            print('[BROWSER] launch mode=local browser=chromium')
+        self._using_cdp = using_cdp
+        if using_cdp and getattr(self._browser, 'contexts', None):
+            # The browser's default context is a real profile; a fresh
+            # incognito context is what Booking's WAF challenges.
+            self._context = self._browser.contexts[0]
+        else:
+            try:
+                self._context = self._browser.new_context(
+                    user_agent=USER_AGENT, locale='ar-SA', viewport=VIEWPORT,
+                    bypass_csp=False,
+                    extra_http_headers=dict(_EXTRA_HEADERS))
+            except Exception:
+                # Some CDP endpoints only expose their default context.
+                self._context = (self._browser.contexts or [None])[0]
+                if self._context is None:
+                    raise
+        if not using_cdp:
+            # The resource-blocking route is fine for the bundled Chromium, but
+            # it can starve a real Chrome's WAF challenge; CDP contexts keep
+            # their normal resource loading.
+            self._context.route('**/*', self._route)
         self._page = self._context.new_page()
         self.is_open = True
         return self
@@ -448,6 +567,9 @@ class BrowserWorker:
                 self._pw.stop()
         except Exception:
             pass
+        proc, profile = self._chrome_proc, self._chrome_profile
+        self._chrome_proc, self._chrome_profile = None, ''
+        _stop_managed_chrome(proc, profile)
         self._pw = None
         self.is_open = False
 
@@ -471,10 +593,11 @@ class BrowserWorker:
     def _open_url_once(self, page, url, timeout):
         """One goto+extract attempt; never raises."""
         result = _result(url)
-        try:
-            page.set_extra_http_headers(dict(_EXTRA_HEADERS))
-        except Exception:
-            pass
+        if not getattr(self, '_using_cdp', False):
+            try:
+                page.set_extra_http_headers(dict(_EXTRA_HEADERS))
+            except Exception:
+                pass
         try:
             response = page.goto(str(url), wait_until='domcontentloaded',
                                  timeout=int(timeout * 1000))
@@ -490,6 +613,31 @@ class BrowserWorker:
             result['text'] = _clean_text(page.evaluate(_EXTRACT_JS))
         except Exception:
             pass
+        if len(result['text'] or '') < 1500 and (
+                _challenge_shell(page) or not (result['text'] or '').strip()):
+            deadline = time.time() + _CHALLENGE_WAIT_SECONDS
+            previous = result['text'] or ''
+            stable = 0
+            while time.time() < deadline:
+                try:
+                    page.wait_for_timeout(1000)
+                    result['final_url'] = page.url or url
+                    result['title'] = page.title() or ''
+                    result['text'] = _clean_text(page.evaluate(_EXTRACT_JS))
+                except Exception:
+                    continue
+                if _challenge_shell(page):
+                    stable = 0
+                    continue
+                if (result['text'] or '') == previous:
+                    stable += 1
+                else:
+                    stable = 0
+                    previous = result['text'] or ''
+                # The real page may still be painting its first small shell;
+                # wait one quiet second before accepting a short result.
+                if (result['text'] or '').strip() and stable >= 1:
+                    break
         status = getattr(response, 'status', None)
         if status is not None and status >= 400:
             result['error'] = f'http_{status}'

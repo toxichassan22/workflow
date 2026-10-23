@@ -111,6 +111,44 @@ class BookingStayWindowTests(unittest.TestCase):
         self.assertEqual(query['checkout'], [check_out.isoformat()])
 
 
+class ManagedChromeTests(unittest.TestCase):
+
+    def test_explicit_chrome_path_is_used(self):
+        handle = tempfile.NamedTemporaryFile(suffix='.exe', delete=False)
+        handle.close()
+        try:
+            with patch.dict(os.environ,
+                            {'BROWSER_EXECUTABLE_PATH': handle.name}, clear=False):
+                self.assertEqual(
+                    browser._managed_chrome_executable(), handle.name)
+        finally:
+            os.unlink(handle.name)
+
+    def test_missing_explicit_path_does_not_fall_back_silently(self):
+        with patch.dict(os.environ, {
+                'BROWSER_EXECUTABLE_PATH': '/missing/chrome',
+                'BROWSER_MANAGED_CHROME': ''}, clear=False):
+            self.assertEqual(browser._managed_chrome_executable(), '')
+
+    def test_installed_chrome_is_found_only_when_enabled(self):
+        with patch.dict(os.environ, {
+                'BROWSER_EXECUTABLE_PATH': '',
+                'BROWSER_MANAGED_CHROME': ''}, clear=False):
+            self.assertEqual(browser._managed_chrome_executable(), '')
+        with patch.dict(os.environ, {
+                'BROWSER_EXECUTABLE_PATH': '',
+                'BROWSER_MANAGED_CHROME': '1'}, clear=False), \
+                patch.object(browser.shutil, 'which',
+                             side_effect=lambda name: (
+                                 'C:/Chrome/chrome.exe'
+                                 if name == 'google-chrome' else None)), \
+                patch.object(browser.os.path, 'isfile',
+                             side_effect=lambda path: (
+                                 path == 'C:/Chrome/chrome.exe')):
+            self.assertEqual(
+                browser._managed_chrome_executable(), 'C:/Chrome/chrome.exe')
+
+
 class ChallengeShellTests(unittest.TestCase):
 
     class _Page:
@@ -144,10 +182,11 @@ class ChallengeShellTests(unittest.TestCase):
         return worker.open_url(HOTEL_URL)
 
     def test_aws_waf_challenge_shell_is_reported_as_blocked(self):
-        result = self._open(
-            '<html><body><div id="challenge-container"></div>'
-            '<script>window.awsWafCookieDomainList = ["booking.com"]</script>'
-            '</body></html>')
+        with patch.object(browser, '_CHALLENGE_WAIT_SECONDS', 0):
+            result = self._open(
+                '<html><body><div id="challenge-container"></div>'
+                '<script>window.awsWafCookieDomainList = ["booking.com"]</script>'
+                '</body></html>')
         self.assertEqual(result.get('error'), 'blocked')
 
     def test_a_short_real_page_is_not_blocked(self):
