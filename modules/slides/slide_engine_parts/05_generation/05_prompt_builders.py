@@ -560,6 +560,14 @@ def _inject_location_data_timestamp(html, project_data):
     if not timestamp or timestamp in html:
         return html
     label = html_lib.escape('تم قياس زمن القيادة بتاريخ ' + timestamp)
+    slot = re.search(
+        r'(<(?P<tag>div)\b[^>]*\bdata-map-caption\b[^>]*>)[\s\S]*?(</(?P=tag)>)',
+        html, flags=re.IGNORECASE,
+    )
+    if slot:
+        # The designed map card owns a caption slot; the date belongs there,
+        # not in an absolute label that can land on the footer.
+        return html[:slot.start()] + slot.group(1) + label + slot.group(3) + html[slot.end():]
     marker = (f'<div data-location-data-timestamp style="position:absolute;bottom:40px;right:24px;z-index:20;'
               f'font-size:11px;background:#ffffff;color:#172033;padding:4px 8px;border-radius:5px;">{label}</div>')
     return re.sub(r'(</div>\s*)$', marker + r'\1', html, count=1)

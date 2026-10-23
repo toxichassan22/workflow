@@ -1,4 +1,175 @@
 
+def _map_reference_metrics(kind, rows, lang):
+    """Three facts for the strip under a map page, taken from its own rows."""
+    en = lang == OFFER_LANG_ENGLISH
+    rows = [list(row) for row in (rows or []) if row]
+    if kind == 'access':
+        names = [str(row[0]).strip() for row in rows if str(row[0] or '').strip()]
+        return [
+            ('Roads' if en else 'عدد المحاور', str(len(names)), ''),
+            ('First corridor' if en else 'المحور الأول', names[0] if names else '—', ''),
+            ('Second corridor' if en else 'المحور الثاني', names[1] if len(names) > 1 else '—', ''),
+        ], (('المحاور المرصودة: ' + '، '.join(names)) if names and not en
+            else ('Corridors: ' + ', '.join(names)) if names else '')
+
+    distance_index = 1 if kind == 'catchment' else 2
+    duration_index = 2 if kind == 'catchment' else 3
+
+    def numeric(row):
+        if len(row) <= distance_index:
+            return None
+        try:
+            return float(str(row[distance_index]).replace(',', '').strip())
+        except (TypeError, ValueError):
+            return None
+
+    valid = [row for row in rows if numeric(row) is not None]
+    nearest = min(valid, key=numeric) if valid else (rows[0] if rows else None)
+    farthest = max(valid, key=numeric) if valid else (rows[-1] if rows else None)
+
+    def metric(label, row):
+        if not row:
+            return label, '—', ''
+        name = str(row[0] or '—').strip()
+        distance = str(row[distance_index] if len(row) > distance_index else '').strip()
+        duration = str(row[duration_index] if len(row) > duration_index else '').strip()
+        parts = []
+        if distance:
+            parts.append(distance + (' km' if en else ' كم'))
+        if duration:
+            parts.append(duration + (' min' if en else ' دقيقة'))
+        return label, name, ' · '.join(parts)
+
+    if kind == 'catchment':
+        labels = ('Nearest destination', 'Farthest destination', 'Destinations') if en else (
+            'أقرب وجهة', 'أبعد وجهة', 'عدد الوجهات')
+    else:
+        labels = ('Nearest landmark', 'Farthest landmark', 'Landmarks') if en else (
+            'أقرب معلم', 'أبعد معلم', 'عدد المعالم')
+    metrics = [
+        metric(labels[0], nearest),
+        metric(labels[1], farthest),
+        (labels[2], str(len(rows)), ''),
+    ]
+    note = ('Ordered by distance from the project.' if en
+            else 'الترتيب حسب المسافة من موقع المشروع.')
+    return metrics, note
+
+
+def _build_map_reference_slide(slide, source, branding, *, map_token, kind, headers, rows,
+                               body_title, subtitle, eyebrow, table_title, map_label):
+    """A designed map page: aligned table, a 16:9 map card and a facts strip.
+
+    The old template dropped the map into a tall card with `object-fit:contain`,
+    so a 16:9 map floated in white bands and the short table left the other half
+    of the slide empty. The map card now owns the map's real aspect ratio, the
+    table and the map start on the same line, and the space below carries the
+    nearest/farthest facts the rows already contain.
+    """
+    source = source if isinstance(source, dict) else {}
+    lang = resolve_offer_lang(source)
+    en = lang == OFFER_LANG_ENGLISH
+    slide_dir = 'ltr' if en else 'rtl'
+    primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
+    accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
+    rows = [list(row) for row in (rows or [])]
+    metrics, note_text = _map_reference_metrics(kind, rows, lang)
+
+    def esc(value):
+        return html_lib.escape(str(value if value is not None else ''))
+
+    head = ''.join(
+        f'<th style="height:34px;padding:7px 8px;background:{primary};color:#fff;font-size:10.5px;'
+        f'font-weight:800;text-align:center;border-inline:1px solid rgba(255,255,255,.16);'
+        f'overflow-wrap:anywhere;">{esc(h)}</th>'
+        for h in headers)
+    if rows:
+        row_height = 44
+        if len(rows) >= 5:
+            row_height = max(34, (389 - 42 - 34) // len(rows))
+        body_rows = ''.join(
+            f'<tr style="height:{row_height}px;background:{"#ffffff" if index % 2 == 0 else "#f8fafc"};">'
+            + ''.join(
+                f'<td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;'
+                f'font-size:11px;color:#334155;line-height:1.55;vertical-align:middle;'
+                f'overflow-wrap:anywhere;">{esc(value)}</td>'
+                for value in row)
+            + '</tr>'
+            for index, row in enumerate(rows))
+    else:
+        body_rows = (
+            f'<tr><td colspan="{len(headers)}" style="padding:24px 8px;text-align:center;'
+            'font-size:12px;color:#94a3b8;">—</td></tr>')
+    table_html = (
+        f'<table data-preserve-density="1" dir="{slide_dir}" '
+        'style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+        f'<thead><tr>{head}</tr></thead><tbody>{body_rows}</tbody></table>')
+
+    table_card = (
+        f'<div style="display:flex;flex-direction:column;min-width:0;min-height:0;'
+        f'{"flex:1;" if len(rows) >= 5 else "flex:0 0 auto;"}'
+        'border:1px solid #d9e2ec;border-radius:14px;overflow:hidden;background:#fff;">'
+        f'<div style="height:42px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;'
+        f'gap:12px;padding:0 16px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">'
+        f'<div style="font-size:12px;font-weight:800;color:{primary};">{esc(table_title)}</div>'
+        f'<div style="font-size:10.5px;font-weight:700;color:#64748b;">{len(rows)}</div></div>'
+        f'<div style="flex:1;min-height:0;overflow:hidden;">{table_html}</div></div>')
+
+    note_card = ''
+    if len(rows) <= 4 and note_text:
+        note_card = (
+            '<div style="flex:1;min-height:0;border:1px solid #dbe4ee;border-radius:12px;'
+            'background:#f8fafc;padding:16px 18px;display:flex;flex-direction:column;'
+            'justify-content:center;gap:8px;">'
+            f'<div style="font-size:10.5px;font-weight:800;letter-spacing:.6px;color:{accent};">'
+            f'{esc("SITE CONTEXT" if en else "سياق الموقع")}</div>'
+            f'<div style="font-size:12.5px;line-height:1.8;color:#475569;">{esc(note_text)}</div></div>')
+
+    map_card = (
+        f'<div style="display:flex;flex-direction:column;min-width:0;border:1px solid #d9e2ec;'
+        'border-radius:14px;overflow:hidden;background:#fff;">'
+        '<div style="position:relative;width:100%;padding-top:56.25%;background:#eef2f6;">'
+        f'<img src="{map_token}" alt="" style="position:absolute;inset:0;width:100%;height:100%;'
+        'object-fit:contain;display:block;"></div>'
+        f'<div style="height:44px;flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;'
+        'gap:12px;padding:0 14px;border-top:1px solid #e2e8f0;background:#f8fafc;">'
+        '<div data-map-caption="1" style="font-size:10.5px;color:#64748b;line-height:1.45;"></div>'
+        f'<div style="font-size:10px;font-weight:700;color:#94a3b8;white-space:nowrap;">'
+        f'{esc("Google Maps" if en else "خرائط Google")}</div></div></div>')
+
+    metric_cards = ''.join(
+        '<div style="display:flex;flex-direction:column;justify-content:center;gap:5px;'
+        'min-width:0;padding:14px 16px;border:1px solid #e2e8f0;border-radius:12px;background:#fff;">'
+        f'<div style="font-size:10.5px;font-weight:700;color:#64748b;">{esc(label)}</div>'
+        f'<div style="font-size:14px;font-weight:800;color:{primary};line-height:1.4;'
+        f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{esc(value)}</div>'
+        + (f'<div style="font-size:10.5px;color:#64748b;">{esc(sub)}</div>' if sub else '')
+        + '</div>'
+        for label, value, sub in metrics)
+
+    title_block = (
+        '<div style="display:flex;align-items:flex-start;justify-content:flex-start;min-width:0;">'
+        '<div style="min-width:0;">'
+        f'<div style="font-size:10.5px;font-weight:800;letter-spacing:1.2px;color:{accent};">{esc(eyebrow)}</div>'
+        f'<div style="font-size:27px;line-height:1.3;font-weight:800;color:{primary};margin-top:4px;">'
+        f'{esc(body_title)}</div>'
+        f'<div style="font-size:12.5px;color:#64748b;margin-top:4px;line-height:1.6;">{esc(subtitle)}</div>'
+        '</div></div>')
+
+    left_column = (
+        '<div style="display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0;height:100%;">'
+        f'{table_card}{note_card}</div>')
+    columns = (map_card + left_column) if not en else (left_column + map_card)
+    return (
+        f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;'
+        'overflow:hidden;background:#ffffff;color:#172033;box-sizing:border-box;'
+        'padding:68px 40px 52px;display:flex;flex-direction:column;justify-content:space-between;">'
+        f'{title_block}'
+        f'<div style="display:grid;grid-template-columns:1.08fr 1fr;gap:24px;align-items:stretch;">'
+        f'{columns}</div>'
+        f'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;">{metric_cards}</div>'
+        '</div>')
+
 
 def _build_structured_fallback_slide(slide, project_data, branding, slide_num=None, total_slides=None):
     source = project_data if isinstance(project_data, dict) else {}
@@ -119,9 +290,14 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
             if isinstance(m_data, list) and m_data:
                 roads = m_data
             else:
-                raw_text = str(source.get('main_roads') or '').strip()
-                if raw_text:
-                    roads = [{'name': line.strip()} for line in raw_text.splitlines() if line.strip()]
+                raw_roads = source.get('main_roads')
+                if isinstance(raw_roads, list):
+                    roads = [row if isinstance(row, dict) else {'name': str(row)}
+                             for row in raw_roads]
+                else:
+                    raw_text = str(raw_roads or '').strip()
+                    if raw_text:
+                        roads = [{'name': line.strip()} for line in raw_text.splitlines() if line.strip()]
         roads = [r for r in roads if isinstance(r, dict) and str(r.get('name') or '').strip()]
         has_width = any(str(r.get('width_m') or r.get('width') or '').strip() for r in roads)
         has_type = any(str(r.get('type') or '').strip() for r in roads)
@@ -146,13 +322,16 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
                 row.append(str(r.get('distance') or r.get('distance_km') or '—').strip())
             rows.append(row)
 
-        table = _render_fallback_table(headers, rows, primary) if rows else ''
-        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
-                f'<h2 style="font-size:26px;margin:0 0 14px;color:{primary};font-weight:800;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
-                f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e2ec;background:#f8fafc;display:flex;align-items:center;justify-content:center;">'
-                f'<img src="##MAP_ACCESS##" style="width:100%;height:100%;object-fit:contain;">'
-                f'</div>'
-                f'<div style="overflow:hidden;">{table}</div></div></div>')
+        return _build_map_reference_slide(
+            slide, source, branding, map_token='##MAP_ACCESS##', kind='access',
+            headers=headers, rows=rows,
+            body_title='Roads serving the site' if lang == OFFER_LANG_ENGLISH else 'المحاور التي تخدم الموقع',
+            subtitle=('The approved main corridors from the location analysis'
+                      if lang == OFFER_LANG_ENGLISH else 'الطرق الرئيسية المعتمدة في تحليل الموقع'),
+            eyebrow='SITE ANALYSIS' if lang == OFFER_LANG_ENGLISH else 'تحليل الموقع',
+            table_title='Main roads & corridors' if lang == OFFER_LANG_ENGLISH else 'الطرق والمحاور الرئيسية',
+            map_label='Access map' if lang == OFFER_LANG_ENGLISH else 'خريطة الطرق',
+        )
     if slide_type == 'map_catchment':
         city_marks = source.get('city_landmarks_data') if isinstance(source.get('city_landmarks_data'), list) else []
         if not city_marks:
@@ -186,24 +365,33 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
             cat = first_val(r, 'category', 'type', 'classification')
             rows.append([name, dist or '—', dur or '—', cat or '—'])
 
-        table = _render_fallback_table(headers, rows, primary) if rows else ''
-        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
-                f'<h2 style="font-size:26px;margin:0 0 14px;color:{primary};font-weight:800;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
-                f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e2ec;background:#f8fafc;display:flex;align-items:center;justify-content:center;">'
-                f'<img src="##MAP_CATCHMENT##" style="width:100%;height:100%;object-fit:contain;">'
-                f'</div>'
-                f'<div style="overflow:hidden;">{table}</div></div></div>')
+        return _build_map_reference_slide(
+            slide, source, branding, map_token='##MAP_CATCHMENT##', kind='catchment',
+            headers=headers, rows=rows,
+            body_title=('Access range to key destinations'
+                        if lang == OFFER_LANG_ENGLISH else 'نطاق الوصول إلى الوجهات الرئيسية'),
+            subtitle=('Drive time and distance for each approved destination'
+                      if lang == OFFER_LANG_ENGLISH else 'زمن القيادة والمسافة لكل وجهة معتمدة'),
+            eyebrow='SITE ANALYSIS' if lang == OFFER_LANG_ENGLISH else 'تحليل الموقع',
+            table_title='Destinations & drive times' if lang == OFFER_LANG_ENGLISH else 'الوجهات وأزمنة الوصول',
+            map_label='Catchment map' if lang == OFFER_LANG_ENGLISH else 'نطاق التأثير',
+        )
     if slide_type == 'map_landmarks':
         if lang == OFFER_LANG_ENGLISH:
             headers = ['Landmark', 'Type', 'Distance (km)', 'Duration (min)']
         else:
             headers = ['المعلم', 'النوع', 'المسافة (كم)', 'المدة (دقائق)']
         rows = _nearby_landmark_table_rows(source)
-        table = _render_fallback_table(headers, rows, primary) if rows else ''
-        return (f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#fff;color:#172033;padding:68px 28px 44px;box-sizing:border-box;">'
-                f'<h2 style="font-size:26px;margin:0 0 14px;">{title}</h2><div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;height:540px;">'
-                f'<img src="##MAP_LANDMARKS##" style="width:100%;height:100%;object-fit:contain;">'
-                f'<div style="overflow:hidden;">{table}</div></div></div>')
+        return _build_map_reference_slide(
+            slide, source, branding, map_token='##MAP_LANDMARKS##', kind='landmarks',
+            headers=headers, rows=rows,
+            body_title='What surrounds the site' if lang == OFFER_LANG_ENGLISH else 'ما يحيط الموقع من معالم',
+            subtitle=('Nearby landmarks with distance and drive time'
+                      if lang == OFFER_LANG_ENGLISH else 'أقرب المعالم ومسافاتها وزمن الوصول إليها'),
+            eyebrow='SITE ANALYSIS' if lang == OFFER_LANG_ENGLISH else 'تحليل الموقع',
+            table_title='Nearby landmarks' if lang == OFFER_LANG_ENGLISH else 'المعالم القريبة',
+            map_label='Landmarks map' if lang == OFFER_LANG_ENGLISH else 'خريطة المعالم',
+        )
     if tokens:
         columns = 1 if len(tokens) == 1 else len(tokens)
         captions = (slide or {}).get('captions') or (slide or {}).get('bullets') or []

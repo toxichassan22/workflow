@@ -137,6 +137,20 @@ def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_
     if slide_type not in ('cover', 'closing', 'moodboard', 'section_divider') and not is_cover_or_closing:
         html = _repair_slide_text_contrast(html)
 
+    # Map pages and map summaries carry the measurement date. Injecting it
+    # here as well keeps the single-slide path identical to the full deck;
+    # the caption slot in a designed map card receives it in place.
+    map_summary = (
+        isinstance(content_source, str) and (
+            content_source.startswith('site_analysis')
+            or content_source == 'location_detail'
+            or (content_source.startswith('executive_content.summary')
+                and ('data-map-summary-background' in html or 'data-map-summary-card' in html))
+        )
+    )
+    if ((isinstance(slide_type, str) and slide_type.startswith('map_')) or map_summary):
+        html = _inject_location_data_timestamp(html, project_data or {})
+
     return html
 
 

@@ -152,6 +152,43 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         self.assertIn('12', html)
         self.assertNotIn('>—<', html)
 
+    def test_map_pages_use_the_designed_aligned_template(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع النخيل',
+            'location_data_fetched_at': '2026-10-22T09:13:00',
+            'main_roads': [{'name': 'طريق الملك فهد'}, {'name': 'طريق العليا'}],
+            'catchment_areas': [
+                {'name': 'مستشفى الملك فيصل', 'category': 'صحي', 'duration_minutes': 8, 'distance_km': 4.5},
+                {'name': 'جامعة الملك سعود', 'category': 'تعليمي', 'duration_minutes': 12, 'distance_km': 9.0},
+            ],
+            'nearby_landmarks_data': [
+                {'name': 'حديقة الملك عبدالله', 'category': 'ترفيهي', 'duration_minutes': 6, 'distance_km': 1.3},
+                {'name': 'مركز الملك فهد الثقافي', 'category': 'ثقافي', 'duration_minutes': 9, 'distance_km': 2.4},
+            ],
+        }
+        cases = (
+            ('map_access', 'خريطة الطرق ومحاور الوصول', 'المحاور التي تخدم الموقع'),
+            ('map_catchment', 'خريطة المنطقة ونطاق التأثير', 'نطاق الوصول إلى الوجهات الرئيسية'),
+            ('map_landmarks', 'خريطة المعالم القريبة', 'ما يحيط الموقع من معالم'),
+        )
+        for slide_type, title, body_title in cases:
+            html = engine.generate_single_slide(
+                'system', {'title': title, 'type': slide_type,
+                           'section_key': 'location'},
+                5, 12, {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+                lambda *_args, **_kwargs: self.fail(f'{slide_type} fallback must be deterministic'),
+                project_data=project)
+            # A designed page, not the old map card with `object-fit:contain`
+            # floating in white bands and a fixed 540px grid.
+            self.assertIn('padding-top:56.25%', html, slide_type)
+            self.assertIn('data-map-caption="1"', html, slide_type)
+            self.assertIn('data-preserve-density="1"', html, slide_type)
+            self.assertIn('grid-template-columns:1.08fr 1fr', html, slide_type)
+            self.assertIn(body_title, html, slide_type)
+            self.assertIn('تم قياس زمن القيادة', html, slide_type)
+            self.assertNotIn('height:540px', html, slide_type)
+
     def test_site_analysis_chunks_into_two_slides_and_uses_side_by_side_layout(self):
         engine = self.application_module.slide_engine
         project = {
