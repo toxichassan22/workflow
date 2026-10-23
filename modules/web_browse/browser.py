@@ -19,6 +19,7 @@ fallback for hosts where Chromium cannot run (the A7 viability probe decides).
 """
 
 import base64
+import glob
 import json
 import os
 import re
@@ -32,6 +33,7 @@ from contextlib import contextmanager
 from urllib.parse import parse_qs, quote_plus, unquote, urlencode, urlparse
 
 import booking_rooms
+import booking_search
 import hotel_stay
 
 DEFAULT_TIMEOUT = 20        # seconds, page goto
@@ -395,20 +397,21 @@ def _active_worker():
 
 
 def _managed_chrome_executable():
-    """The real Chrome binary the deployment wants the agent to drive.
+    """The real Chrome/Chromium binary for the direct-CDP launch.
 
-    BROWSER_EXECUTABLE_PATH is explicit; BROWSER_MANAGED_CHROME=1 falls back
-    to the well-known install locations. Playwright's own launch injects
-    automation flags that Booking's AWS WAF challenges, so the caller starts
-    this binary itself and attaches over CDP instead.
+    BROWSER_EXECUTABLE_PATH is explicit and wins; a missing explicit path is
+    not silently replaced. Otherwise a managed binary is auto-detected unless
+    BROWSER_MANAGED_CHROME=0 disables it. Google Chrome is preferred, and the
+    bundled Playwright Chromium is accepted too: launching it directly over
+    CDP is what gets Booking past the WAF, not Playwright's own launch flags.
     """
     explicit = (os.environ.get('BROWSER_EXECUTABLE_PATH') or '').strip()
     if explicit:
         return explicit if os.path.isfile(explicit) else ''
-    if (os.environ.get('BROWSER_MANAGED_CHROME') or '').strip().lower() not in (
-            '1', 'true', 'yes', 'on'):
+    if (os.environ.get('BROWSER_MANAGED_CHROME') or '').strip().lower() in (
+            '0', 'false', 'no', 'off'):
         return ''
-    candidates = (
+    candidates = [
         shutil.which('google-chrome'),
         shutil.which('google-chrome-stable'),
         shutil.which('chrome'),
@@ -417,7 +420,12 @@ def _managed_chrome_executable():
         '/opt/google/chrome/chrome',
         r'C:\Program Files\Google\Chrome\Application\chrome.exe',
         r'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
-    )
+    ]
+    for pattern in (
+            os.path.expanduser('~/.cache/ms-playwright/chromium-*/chrome-linux64/chrome'),
+            os.path.expanduser('~/.cache/ms-playwright/chromium-*/chrome-linux/chrome'),
+            os.path.expanduser('~/AppData/Local/ms-playwright/chromium-*/chrome-win*/chrome.exe')):
+        candidates.extend(sorted(glob.glob(pattern), reverse=True))
     return next((path for path in candidates if path and os.path.isfile(path)), '')
 
 
@@ -594,7 +602,9 @@ class BrowserWorker:
     def _open_url_once(self, page, url, timeout):
         """One goto+extract attempt; never raises."""
         result = _result(url)
-        is_booking = hotel_stay.is_booking_hotel_url(url)
+        is_booking_hotel = hotel_stay.is_booking_hotel_url(url)
+        is_booking_search = booking_search.is_booking_search_url(url)
+        is_booking = is_booking_hotel or is_booking_search
         if is_booking:
             error = booking_rooms.apply_user_agent(
                 page, USER_AGENT, ACCEPT_LANGUAGE)
@@ -609,8 +619,11 @@ class BrowserWorker:
             response = page.goto(str(url), wait_until='domcontentloaded',
                                  timeout=int(timeout * 1000))
             page.wait_for_timeout(SETTLE_MS)
-            if is_booking and getattr(self, '_using_cdp', False):
+            if is_booking_hotel and getattr(self, '_using_cdp', False):
                 booking_rooms.wait_for_rate_rows(
+                    page, booking_rooms.BOOKING_TABLE_TIMEOUT_MS)
+            elif is_booking_search and getattr(self, '_using_cdp', False):
+                booking_search.wait_for_property_cards(
                     page, booking_rooms.BOOKING_TABLE_TIMEOUT_MS)
         except Exception as exc:
             # Navigation failed — whatever is in the page now is leftover state
@@ -619,10 +632,14 @@ class BrowserWorker:
             return result
         # Read the room table before _EXTRACT_JS strips forms — Booking wraps
         # the availability table in a form, so extracting afterwards sees none.
-        if is_booking:
+        if is_booking_hotel:
             rate = booking_rooms.wait_and_extract(page, url)
             if rate:
                 result['booking_rate'] = rate
+        elif is_booking_search:
+            search = booking_search.extract_search_results(page)
+            if search:
+                result['booking_search'] = search
         try:
             result['final_url'] = page.url or url
             result['title'] = page.title() or ''
@@ -663,10 +680,13 @@ class BrowserWorker:
         elif (_looks_blocked(result['title'], result['text'])
               or (len(result['text']) < 1500 and _challenge_shell(page))):
             result['error'] = 'blocked'
-        if (is_booking and not result.get('error')
-                and result.get('booking_rate')):
-            result['text'] = booking_rooms.with_rate_block(
-                result['booking_rate'], result.get('text'))
+        if is_booking and not result.get('error'):
+            if result.get('booking_rate'):
+                result['text'] = booking_rooms.with_rate_block(
+                    result['booking_rate'], result.get('text'))
+            elif result.get('booking_search'):
+                result['text'] = booking_search.with_search_block(
+                    result['booking_search'], result.get('text'))
         return result
 
     def open_url(self, url, timeout=DEFAULT_TIMEOUT):

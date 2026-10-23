@@ -918,13 +918,11 @@ def _banned_listing_host_token(host, token):
     return token in host
 
 
-def banned_competitor_listing_host(url, operation='', project_type='',
-                                   allow_fallback=False):
+def banned_competitor_listing_host(url, operation='', project_type=''):
     """True when a URL is not allowed as a competitor source for this operation.
 
-    ``allow_fallback`` is set only on a hotel row whose price/area came from a
-    cited fallback page because Booking served the agent a bot page. It keeps
-    that one labelled source instead of deleting the only evidence the row has.
+    Hotel rows accept Booking.com property pages only; every other host is
+    rejected, so a fallback source can never survive the filter.
     """
     host = _source_host(url)
     if not host:
@@ -934,8 +932,6 @@ def banned_competitor_listing_host(url, operation='', project_type='',
     is_booking = any(_banned_listing_host_token(host, token)
                      for token in _HOTEL_LISTING_HOST_TOKENS)
     if hotel:
-        if allow_fallback:
-            return False
         return not (is_booking and _booking_hotel_detail_url(url))
     if is_booking:
         return True

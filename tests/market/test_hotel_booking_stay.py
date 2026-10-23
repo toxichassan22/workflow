@@ -25,6 +25,7 @@ for _path in (str(ROOT), str(_WEB_BROWSE)):
         sys.path.insert(0, _path)
 
 import agent  # noqa: E402
+import booking_rooms  # noqa: E402
 import browser  # noqa: E402
 import db  # noqa: E402
 import hotel_stay  # noqa: E402
@@ -130,14 +131,18 @@ class ManagedChromeTests(unittest.TestCase):
                 'BROWSER_MANAGED_CHROME': ''}, clear=False):
             self.assertEqual(browser._managed_chrome_executable(), '')
 
-    def test_installed_chrome_is_found_only_when_enabled(self):
+    def test_managed_chrome_disabled_returns_empty(self):
         with patch.dict(os.environ, {
                 'BROWSER_EXECUTABLE_PATH': '',
-                'BROWSER_MANAGED_CHROME': ''}, clear=False):
+                'BROWSER_MANAGED_CHROME': '0'}, clear=False), \
+                patch.object(browser.shutil, 'which', return_value='C:/Chrome/chrome.exe'), \
+                patch.object(browser.os.path, 'isfile', return_value=True):
             self.assertEqual(browser._managed_chrome_executable(), '')
+
+    def test_installed_chrome_is_found(self):
         with patch.dict(os.environ, {
                 'BROWSER_EXECUTABLE_PATH': '',
-                'BROWSER_MANAGED_CHROME': '1'}, clear=False), \
+                'BROWSER_MANAGED_CHROME': ''}, clear=False), \
                 patch.object(browser.shutil, 'which',
                              side_effect=lambda name: (
                                  'C:/Chrome/chrome.exe'
@@ -147,6 +152,16 @@ class ManagedChromeTests(unittest.TestCase):
                                  path == 'C:/Chrome/chrome.exe')):
             self.assertEqual(
                 browser._managed_chrome_executable(), 'C:/Chrome/chrome.exe')
+
+    def test_playwright_chromium_is_found_in_cache(self):
+        cache = '/tmp/chromium-1243/chrome-linux64/chrome'
+        with patch.dict(os.environ, {
+                'BROWSER_EXECUTABLE_PATH': '',
+                'BROWSER_MANAGED_CHROME': '1'}, clear=False), \
+                patch.object(browser.glob, 'glob', return_value=[cache]), \
+                patch.object(browser.os.path, 'isfile',
+                             side_effect=lambda path: path == cache):
+            self.assertEqual(browser._managed_chrome_executable(), cache)
 
 
 class ChallengeShellTests(unittest.TestCase):
@@ -239,21 +254,13 @@ class VerifiedAreaTests(unittest.TestCase):
             'operation_type': 'تشغيل فندقي',
         }
 
-    def test_cited_room_area_fills_an_empty_hotel_row(self):
+    def test_cited_room_area_is_ignored_for_a_hotel_row(self):
         row = self._hotel_row()
         with self.app.app_context():
             self.module._apply_verified_competitor_area(
                 row, {'area_sqm': '42', 'area_url': HOTEL_URL}, {HOTEL_URL})
-        self.assertEqual(row['area_sqm'], '42')
-        self.assertEqual(row['area_mode'], 'fixed')
-        self.assertIn(HOTEL_URL, row['field_sources']['area_sqm'])
-
-    def test_area_can_come_from_the_cited_price_page(self):
-        row = self._hotel_row()
-        with self.app.app_context():
-            self.module._apply_verified_competitor_area(
-                row, {'area_sqm': '38', 'price': {'url': HOTEL_URL}}, {HOTEL_URL})
-        self.assertEqual(row['area_sqm'], '38')
+        self.assertFalse(row.get('area_sqm'))
+        self.assertFalse(row.get('area_from'))
 
     def test_property_area_is_rejected_for_a_hotel(self):
         row = self._hotel_row()
@@ -293,19 +300,28 @@ class VerifiedAreaTests(unittest.TestCase):
         self.assertTrue(verified)
         self.assertEqual(row.get('verify_state'), 'verified')
 
-    def test_retrieved_page_room_sizes_become_an_area_range(self):
-        page = {
-            'url': HOTEL_URL,
-            'title': 'فندق أسيال',
-            'content': 'غرف من 32 م² إلى 48 م²',
-        }
+    def test_hotel_area_and_price_come_from_the_booking_block_only(self):
+        rate = booking_rooms.select_cheapest_rate([{
+            'block_id': '100_200_2_2_0',
+            'price_attr': '245',
+            'current_text': 'SAR 245',
+            'original_value': '350',
+            'taxes_text': '+SAR 44 taxes and fees',
+            'room_name': 'Standard Double Room',
+            'area_text': '35 m²',
+            'occupancy_text': 'Max. people: 2',
+            'row_text': 'Guests: 2 adults',
+        }])
+        rate['source_url'] = HOTEL_URL
         row = self._hotel_row()
         with self.app.app_context():
-            filled = self.module._fill_competitor_area_from_listings(
-                row, [HOTEL_URL], pages=[page])
-        self.assertTrue(filled)
-        self.assertEqual(row['area_mode'], 'range')
-        self.assertEqual((row['area_from'], row['area_to']), ('32', '48'))
+            applied = self.module._apply_booking_rate_block(
+                row, {HOTEL_URL: {
+                    'content': booking_rooms.format_rate_block(rate),
+                }}, offer_lang='ar')
+        self.assertTrue(applied)
+        self.assertEqual(row['price_value'], '350')
+        self.assertEqual(row['area_sqm'], '35')
 
     def test_expansion_hotel_prompt_stops_on_a_blocked_page(self):
         axes = market_study.project_competitor_axes({
@@ -321,7 +337,7 @@ class VerifiedAreaTests(unittest.TestCase):
         self.assertIn('تحديًا أمنيًا', tasks[0]['prompt'])
         self.assertIn('لا تُعد المحاولة', tasks[0]['prompt'])
 
-    def test_verification_prompt_asks_for_area_and_stops_when_blocked(self):
+    def test_verification_prompt_uses_booking_search_not_page_text(self):
         captured = {}
 
         def fake_call(_system, user, *_args, **_kwargs):
@@ -341,7 +357,9 @@ class VerifiedAreaTests(unittest.TestCase):
             self.module._verify_competitor_row(row, {'city': 'جدة'}, {})
         self.assertIn('area_sqm', captured['prompt'])
         self.assertIn('تحديًا أمنيًا', captured['prompt'])
-        self.assertEqual(row.get('area_sqm'), '40')
+        self.assertIn('searchresults.html', captured['prompt'])
+        self.assertIn('## BOOKING_SEARCH ##', captured['prompt'])
+        self.assertFalse(row.get('area_sqm'))
 
 
 if __name__ == '__main__':

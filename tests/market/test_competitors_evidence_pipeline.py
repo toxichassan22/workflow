@@ -215,33 +215,32 @@ class PoolVerifyPhaseTests(_MarketTestBase):
         the page printed is preserved in price_cache.original_*, never
         silently relabeled."""
         module = self.module
-        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
+        row = {'name': 'مشروع اختبار', 'operation_type': 'بيع'}
+        url = 'https://developer.example/project'
         with patch.object(market_study, '_live_fx_rates', return_value={}):
             module._apply_verified_competitor_price(
                 row,
-                {'price': {'type': 'سعر الليلة', 'value': '140',
-                           'currency': 'يورو',
-                           'url': 'https://booking.com/hotel/sa/example'}},
-                {'https://booking.com/hotel/sa/example'})
+                {'price': {'type': 'سعر الوحدة', 'value': '140',
+                           'currency': 'يورو', 'url': url}},
+                {url})
         self.assertEqual(row['price_value'], '567')   # 140 EUR × 4.05
-        self.assertEqual(row['price_type'], 'سعر الليلة')
+        self.assertEqual(row['price_type'], 'سعر الوحدة')
         self.assertEqual(row['price_currency'], 'SAR')
         self.assertEqual(row['price_cache']['original_price_value'], '140')
         self.assertEqual(row['price_cache']['original_currency'], 'EUR')
-        self.assertIn('https://booking.com/hotel/sa/example',
-                      row['field_sources']['price_value'])
+        self.assertIn(url, row['field_sources']['price_value'])
 
     def test_verify_price_fx_env_override(self):
         """FX_SAR_<CCY> overrides the built-in rate for floating currencies."""
         module = self.module
-        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
+        row = {'name': 'مشروع اختبار', 'operation_type': 'بيع'}
+        url = 'https://developer.example/project'
         with patch.dict(os.environ, {'FX_SAR_EUR': '5.0'}):
             module._apply_verified_competitor_price(
                 row,
-                {'price': {'type': 'سعر الليلة', 'value': '140',
-                           'currency': 'يورو',
-                           'url': 'https://booking.com/hotel/sa/example'}},
-                {'https://booking.com/hotel/sa/example'})
+                {'price': {'type': 'سعر الوحدة', 'value': '140',
+                           'currency': 'يورو', 'url': url}},
+                {url})
         self.assertEqual(row['price_value'], '700')
         self.assertEqual(row['price_currency'], 'SAR')
 
@@ -249,15 +248,15 @@ class PoolVerifyPhaseTests(_MarketTestBase):
         """A currency outside the built-in table still converts — the live
         ER table is what keeps «any currency to SAR» true."""
         module = self.module
-        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
+        row = {'name': 'مشروع اختبار', 'operation_type': 'بيع'}
+        url = 'https://developer.example/project'
         with patch.object(market_study, '_live_fx_rates',
                           return_value={'CHF': 4.5}):
             module._apply_verified_competitor_price(
                 row,
-                {'price': {'type': 'سعر الليلة', 'value': '400',
-                           'currency': 'CHF',
-                           'url': 'https://booking.com/hotel/sa/example'}},
-                {'https://booking.com/hotel/sa/example'})
+                {'price': {'type': 'سعر الوحدة', 'value': '400',
+                           'currency': 'CHF', 'url': url}},
+                {url})
         self.assertEqual(row['price_value'], '1800')   # 400 CHF × 4.5
         self.assertEqual(row['price_currency'], 'SAR')
         self.assertEqual(row['price_cache']['original_price_value'], '400')
@@ -267,14 +266,14 @@ class PoolVerifyPhaseTests(_MarketTestBase):
         """The (ر.س) cell can only hold riyals — a foreign figure whose rate
         is unknowable everywhere is dropped, not relabeled."""
         module = self.module
-        row = {'name': 'فندق اختبار', 'operation_type': 'تشغيل فندقي'}
+        row = {'name': 'مشروع اختبار', 'operation_type': 'بيع'}
+        url = 'https://developer.example/project'
         with patch.object(market_study, '_live_fx_rates', return_value={}):
             module._apply_verified_competitor_price(
                 row,
-                {'price': {'type': 'سعر الليلة', 'value': '400',
-                           'currency': 'XYZ',
-                           'url': 'https://booking.com/hotel/sa/example'}},
-                {'https://booking.com/hotel/sa/example'})
+                {'price': {'type': 'سعر الوحدة', 'value': '400',
+                           'currency': 'XYZ', 'url': url}},
+                {url})
         self.assertFalse(row.get('price_value'))
         self.assertFalse(row.get('price_type'))
         self.assertFalse(row.get('price_cache'))

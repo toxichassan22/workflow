@@ -24,6 +24,8 @@ def _apply_verified_competitor_area(row, parsed, citation_urls):
     """
     if not isinstance(row, dict) or not isinstance(parsed, dict):
         return
+    if _hotel_competitor_row(row):
+        return
     if (str(row.get('area_sqm') or '').strip()
             or str(row.get('area_from') or '').strip()):
         return
@@ -242,76 +244,6 @@ def _extract_room_areas(text):
     return values
 
 
-def _fill_competitor_area_from_listings(row, urls, pages=None):
-    """Derive a hotel room-size area from a retrieved page that names it.
-
-    Booking prints each room type's size only after a stay is selected, so the
-    retrieved page is the evidence. A single size is a fixed area; several room
-    sizes on the property page become an honest range. Sizes outside 5–500 m²
-    are property/land figures, never a room.
-    """
-    if not isinstance(row, dict) or not _hotel_competitor_row(row):
-        return False
-    if (str(row.get('area_sqm') or '').strip()
-            or str(row.get('area_from') or '').strip()):
-        return False
-    tokens = _competitor_name_tokens(row.get('name'))
-    if not tokens:
-        return False
-    page_content = {}
-    page_titles = {}
-    for page in pages or []:
-        if isinstance(page, dict):
-            page_url = str(page.get('url') or '').strip()
-            page_content[page_url] = str(page.get('content') or '')
-            page_titles[page_url] = str(page.get('title') or '')
-    for url in list(dict.fromkeys(urls or []))[:4]:
-        if market_study.banned_competitor_listing_host(
-                url, row.get('operation_type'), row.get('project_type')):
-            continue
-        content = page_content.get(url) or ''
-        if not content:
-            content, _err = _read_market_source_page(url)
-        if not content:
-            continue
-        title = page_titles.get(url) or market_study._html_title(content)
-        if not all(token in market_study._fold_choice(f'{title} {url}')
-                   for token in tokens):
-            continue
-        visible = re.sub(r'<[^>]+>', ' ', content)
-        areas = _extract_room_areas(visible)
-        if not areas:
-            continue
-        unique = sorted(set(areas))
-        low, high = unique[0], unique[-1]
-        if low == high:
-            row['area_mode'] = 'fixed'
-            row['area_sqm'] = format_precise_number(low, grouped=False)
-        else:
-            row['area_mode'] = 'range'
-            row['area_from'] = format_precise_number(low, grouped=False)
-            row['area_to'] = format_precise_number(high, grouped=False)
-        cache = row.get('area_cache') if isinstance(row.get('area_cache'), dict) else {}
-        cache.update({
-            'area_sqm': row.get('area_sqm', ''),
-            'area_from': row.get('area_from', ''),
-            'area_to': row.get('area_to', ''),
-        })
-        row['area_cache'] = cache
-        field_sources = market_study.competitor_field_sources(row)
-        keys = (['area_sqm'] if low == high else ['area_from', 'area_to'])
-        for key in keys:
-            urls = field_sources.setdefault(key, [])
-            if url not in urls:
-                urls.append(url)
-        row['field_sources'] = field_sources
-        if not _manual_source_locked(row):
-            row['source_urls'] = list(dict.fromkeys(
-                market_study.competitor_source_urls(row) + [url]))
-        print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» room areas: "
-              f"{unique[:6]}{'…' if len(unique) > 6 else ''} from {url}")
-        return True
-    return False
 
 
 def _fill_competitor_price_from_listings(row, urls, pages=None):
@@ -332,6 +264,8 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     its price fields empty — an empty cell is honest, a borrowed median is
     not.
     """
+    if _hotel_competitor_row(row):
+        return False
     dead = {str(item).strip().casefold() for item in (row.get('dead_source_urls') or [])}
     page_content = {}
     page_titles = {}

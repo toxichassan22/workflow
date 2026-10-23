@@ -1,6 +1,7 @@
 from numeric_precision import format_precise_number
 
 import booking_rooms
+import booking_search
 
 
 def _agent_run_accepts(agent_module, param):
@@ -118,6 +119,38 @@ def _absorb_verify_response(row, prompt_response, tokens, needed, matched_pages,
     _apply_verified_competitor_price(row, parsed, set(prompt_matched), offer_lang=offer_lang)
     _apply_verified_competitor_area(row, parsed, set(prompt_matched))
     return prompt_matched, official
+
+
+_HOTEL_VALUE_KEYS = (
+    'price_value', 'price_from', 'price_to', 'price_type', 'price_currency',
+    'price_cache', 'price_listed',
+    'area_sqm', 'area_from', 'area_to', 'area_mode', 'area_cache',
+    'fallback_source', 'fallback_source_name', 'fallback_source_urls',
+)
+_HOTEL_VALUE_SOURCE_KEYS = (
+    'price_value', 'price_from', 'price_to',
+    'area_sqm', 'area_from', 'area_to',
+)
+
+
+def _clear_ai_hotel_value_fields(row):
+    """Drop AI hotel price/area before verification.
+
+    The deterministic Booking block is the only allowed writer for an AI
+    hotel row. Clearing here prevents a discovery-model figure (or a generic
+    text/listing fill) from surviving when no Booking block is found.
+    """
+    if not isinstance(row, dict) or row.get('row_source') == 'manual':
+        return
+    folded = market_study._fold_choice(str(row.get('operation_type') or ''))
+    if not any(token in folded for token in ('فندقي', 'فندق', 'hotel', 'hospitality')):
+        return
+    for key in _HOTEL_VALUE_KEYS:
+        row.pop(key, None)
+    field_sources = market_study.competitor_field_sources(row)
+    for key in _HOTEL_VALUE_SOURCE_KEYS:
+        field_sources.pop(key, None)
+    row['field_sources'] = field_sources
 
 
 def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
@@ -305,13 +338,19 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         '"area_url": "رابط الصفحة التي وردت فيها المساحة حرفيًا أو فارغ"')
     if is_hotel:
         stars = str(row.get('hotel_stars') or '').strip()
+        search_url = booking_search.build_search_url(
+            city, query=f'{name}, {city}', stars=stars)
         hotel_rule = (
             f'تحقق من الفندق على Booking.com فقط وطابق تصنيف {stars} نجوم المختار. '
-            'اعتمد صفحة الفندق التفصيلية ذات المسار /hotel/، لا صفحات الحي أو المدينة أو نتائج البحث العامة. '
-            'إذا لم يظهر السعر أو النجوم في النتائج، افتح Booking.com بأدوات المتصفح '
-            'التفاعلية، وافحص عناصر الصفحة ثم اكتب المدينة والحي في خانة الوجهة ونفّذ '
-            'البحث بالضغط على العنصر المناسب. اقرأ السعر والتصنيف من صفحة الفندق نفسها، '
-            'ولا تخمّن السعر أو تواريخ الإقامة. '
+            f'ابدأ بصفحة نتائج Booking.com: {search_url} '
+            'اختر كرت الفندق المطابق بالاسم من نتائج البحث (## BOOKING_SEARCH ##) '
+            'وافتح صفحة الفندق التفصيلية /hotel/ واستخدم قسم ## BOOKING_RATE ## '
+            'للسعر الأصلي قبل الخصم والمساحة. '
+            'لا تستخدم SearXNG أو محركات بحث عامة أو مواقع أخرى: لا بحث باسم الفندق في Google '
+            'ولا مصادر بديلة ولا موقع الفندق أو المشغل أو أي منصة أخرى. '
+            'إذا لم تجد الفندق في نتائج Booking أو الصفحة محجوبة، أعد النتيجة بدون سعر '
+            'واذكر السبب ولا تملأ من مصدر آخر. '
+            'اقرأ السعر والتصنيف من صفحة الفندق نفسها، ولا تخمّن السعر أو تواريخ الإقامة. '
             'إذا كانت الصفحة تحديًا أمنيًا أو نسخة بوت بلا أسعار، توقف فورًا ولا تُعد المحاولة؛ '
             'أعد النتيجة بدون سعر واذكر أن الصفحة محجوبة. ')
     prompt = (
@@ -384,9 +423,6 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         _fill_competitor_price_from_listings(
             row, matched + market_study.competitor_source_urls(row),
             pages=list(matched_pages.values()))
-    _fill_competitor_area_from_listings(
-        row, matched + market_study.competitor_source_urls(row),
-        pages=list(matched_pages.values()))
     _apply_booking_rate_block(row, matched_pages, offer_lang=offer_lang)
     row['verify_state'] = 'verified'
     if not _manual_source_locked(row):
@@ -407,6 +443,8 @@ def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'
     grounded in a fetched page and a memory number never slips through. A price
     the main pass already filled is never overwritten.
     """
+    if _hotel_competitor_row(row):
+        return
     price = parsed.get('price') if isinstance(parsed, dict) else None
     if not isinstance(price, dict):
         price = parsed if isinstance(parsed, dict) else {}
@@ -538,9 +576,6 @@ def _verify_row_from_pool(row, payload, data, evidence_pool):
         _fill_competitor_price_from_listings(
             row, matched + market_study.competitor_source_urls(row),
             pages=list(matched_pages.values()))
-    _fill_competitor_area_from_listings(
-        row, matched + market_study.competitor_source_urls(row),
-        pages=list(matched_pages.values()))
     _apply_booking_rate_block(row, matched_pages, offer_lang=offer_lang)
     row['verify_state'] = 'verified'
     if not _manual_source_locked(row):
@@ -721,6 +756,8 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
                and str(row.get('name') or '').strip()]
     if not targets:
         return
+    for row in targets:
+        _clear_ai_hotel_value_fields(row)
     lo, hi = band
     done = [0]
     total = len(targets)

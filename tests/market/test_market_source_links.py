@@ -175,6 +175,8 @@ class HotelPriceRangeTests(unittest.TestCase):
         self.assertIn('سعر الليلة', prompt)
         self.assertIn('للغرفة الأساسية', prompt)
         self.assertIn('## BOOKING_RATE ##', prompt)
+        self.assertIn('## BOOKING_SEARCH ##', prompt)
+        self.assertIn('searchresults.html', prompt)
         self.assertNotIn('أقل سعر وأعلى سعر', prompt)
         self.assertIn('الصفحة النهائية', prompt)
         self.assertIn('لا تضع روابط البحث أو النتائج', prompt)

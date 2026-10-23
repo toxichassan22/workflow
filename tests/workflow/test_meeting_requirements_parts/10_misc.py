@@ -797,11 +797,8 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         original = [item for item in prices if item['value'] == 1200.0][0]
         self.assertTrue(original['original'])
 
-    def test_fill_competitor_price_converts_foreign_currency_to_sar(self):
-        """The rate pool lives inside one currency, then converts to the (ر.س)
-        cell — mixing € and SAR into one figure is a fabrication. A hotel row
-        keeps the cheapest original base-room rate, not a range/average of
-        every room category."""
+    def test_generic_hotel_listing_fill_is_disabled(self):
+        """Hotel price/area comes only from the deterministic Booking block."""
         module = self.application_module
         pages = {
             'https://www.booking.com/hotel/sa/test-a.ar.html':
@@ -816,20 +813,12 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
                 patch.object(module.market_study, '_live_fx_rates',
                              return_value={}):
             filled = module._fill_competitor_price_from_listings(row, list(pages))
-        self.assertTrue(filled)
-        self.assertEqual(row['price_currency'], 'SAR')
-        # The cheapest original rate (€120 × 4.05 → 486 ر.س) is the base-room
-        # nightly price; the suite's €180 is a different room, not a range.
-        self.assertEqual(row['price_type'], 'سعر الليلة')
-        self.assertEqual(row['price_value'], '486')
-        self.assertEqual(row.get('price_from', ''), '')
-        self.assertEqual(row.get('price_to', ''), '')
-        self.assertEqual(row['price_cache']['original_price_value'], '120')
-        self.assertEqual(row['price_cache']['original_currency'], 'EUR')
-        self.assertIn('EUR', row['note'])
-        self.assertIn('قبل الخصم', row['note'])
+        self.assertFalse(filled)
+        self.assertFalse(row.get('price_value'))
+        self.assertFalse(row.get('price_from'))
+        self.assertFalse(row.get('price_currency'))
 
-    def test_fill_competitor_price_prefers_sar_over_foreign_mentions(self):
+    def test_generic_hotel_listing_fill_does_not_use_sar_text(self):
         module = self.application_module
         pages = {
             'https://www.booking.com/hotel/sa/test-c.ar.html':
@@ -842,10 +831,8 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
                 patch.object(module.market_study, '_live_fx_rates',
                              return_value={}):
             filled = module._fill_competitor_price_from_listings(row, list(pages))
-        self.assertTrue(filled)
-        self.assertEqual(row['price_currency'], 'SAR')
-        self.assertEqual(row['price_value'], '400')
-        self.assertEqual(row['price_type'], 'سعر الليلة')
+        self.assertFalse(filled)
+        self.assertFalse(row.get('price_value'))
 
     def test_fill_competitor_price_uses_citation_content_before_fetching(self):
         """The search provider's excerpt already carries the figure for pages

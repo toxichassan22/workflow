@@ -248,11 +248,11 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
         offer internals, ids and points serialize the same way, and the old
         default-SAR read stamped them onto the row."""
         module = self.module
-        page = {'url': 'https://www.booking.com/hotel/sa/assila',
-                'title': 'فندق أصيلة جدة — الغرف والأجنحة',
-                'content': ('فندق أصيلة جدة — أجنحة فاخرة '
+        page = {'url': 'https://developer.example/assila',
+                'title': 'برج أصيلة — الأسعار',
+                'content': ('برج أصيلة — وحدات فاخرة '
                             '{"@type":"Offer","price":999,"stars":5}')}
-        row = {'name': 'فندق أصيلة', 'operation_type': 'تشغيل فندقي',
+        row = {'name': 'برج أصيلة', 'operation_type': 'بيع',
                'source_urls': [page['url']]}
         with self.app.app_context(), \
                 patch.object(module, '_read_market_source_page',
@@ -266,12 +266,12 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
         """A project-named page quoting USD converts at the fixed peg — the
         ر.س cell holds riyals, the printed dollar figure stays in the cache."""
         module = self.module
-        page = {'url': 'https://www.booking.com/hotel/sa/assila',
-                'title': 'فندق أصيلة جدة — الغرف والأجنحة',
-                'content': ('فندق أصيلة جدة — سعر الليلة '
+        page = {'url': 'https://developer.example/assila',
+                'title': 'برج أصيلة — أسعار الوحدات',
+                'content': ('برج أصيلة — سعر الوحدة '
                             '{"@type":"Offer","price":"1000",'
                             '"priceCurrency":"USD"}')}
-        row = {'name': 'فندق أصيلة', 'operation_type': 'تشغيل فندقي',
+        row = {'name': 'برج أصيلة', 'operation_type': 'بيع',
                'source_urls': [page['url']]}
         with self.app.app_context(), \
                 patch.object(module, '_read_market_source_page',
@@ -300,10 +300,10 @@ class BannedListingPortalTests(pipeline._MarketTestBase):
 
     def test_fill_competitor_price_converts_jod_to_sar(self):
         module = self.module
-        page = {'url': 'https://www.booking.com/hotel/sa/omar',
+        page = {'url': 'https://developer.example/omar',
                 'title': 'شاليه عمر — الحجز',
                 'content': 'شاليه عمر للحجز اليومي 200 دينار أردني'}
-        row = {'name': 'شاليه عمر', 'operation_type': 'تشغيل فندقي',
+        row = {'name': 'شاليه عمر', 'operation_type': 'بيع',
                'source_urls': [page['url']]}
         with self.app.app_context(), \
                 patch.object(module, '_read_market_source_page',
