@@ -130,6 +130,9 @@ def _run_open_url(session, args, trace, pages, evidence_pool=None,
     url = str(args.get('url') or '').strip()
     if not url:
         return {'error': 'empty_url'}
+    # Rewrite before the pool lookup so a page cached without a stay cannot
+    # answer a hotel open; the dated URL is also the evidence URL downstream.
+    url = hotel_stay.with_booking_stay_params(url)
     if not _source_url_allowed(url, allowed_hosts):
         trace.append({'url': url, 'title': '', 'chars': 0,
                       'error': 'outside_allowed_sources'})

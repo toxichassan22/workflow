@@ -1,0 +1,269 @@
+"""Booking.com hotel research must open a real stay, not an empty calendar.
+
+The property page hides every price and room size until a check-in/check-out
+is selected — the owner saw «Select dates to see this property's availability
+and prices» and rows with no price and no area. Every hotel lookup now opens
+the same two-week-out, two-night, one-room, two-adult, SAR window, and the
+verification pass reads the room size from the retrieved page.
+"""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from datetime import date
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+_WEB_BROWSE = ROOT / 'modules' / 'web_browse'
+for _path in (str(ROOT), str(_WEB_BROWSE)):
+    if _path not in sys.path:
+        sys.path.insert(0, _path)
+
+import agent  # noqa: E402
+import browser  # noqa: E402
+import db  # noqa: E402
+import hotel_stay  # noqa: E402
+import market_study  # noqa: E402
+
+HOTEL_URL = 'https://www.booking.com/hotel/sa/assila.ar.html'
+STAY_IN = date(2026, 1, 15)
+STAY_OUT = date(2026, 1, 17)
+
+
+class BookingStayWindowTests(unittest.TestCase):
+
+    def test_window_is_two_weeks_out_for_two_nights(self):
+        check_in, check_out = hotel_stay.booking_stay_window(date(2026, 1, 1))
+        self.assertEqual(check_in, date(2026, 1, 15))
+        self.assertEqual(check_out, date(2026, 1, 17))
+
+    def test_hotel_url_carries_the_shared_stay(self):
+        url = hotel_stay.with_booking_stay_params(HOTEL_URL, STAY_IN, STAY_OUT)
+        parsed = urlsplit(url)
+        query = parse_qs(parsed.query)
+        self.assertEqual(parsed.path, '/hotel/sa/assila.ar.html')
+        self.assertEqual(query['checkin'], ['2026-01-15'])
+        self.assertEqual(query['checkout'], ['2026-01-17'])
+        self.assertEqual(query['group_adults'], ['2'])
+        self.assertEqual(query['group_children'], ['0'])
+        self.assertEqual(query['no_rooms'], ['1'])
+        self.assertEqual(query['selected_currency'], ['SAR'])
+
+    def test_existing_stay_is_replaced_and_other_params_survive(self):
+        url = hotel_stay.with_booking_stay_params(
+            HOTEL_URL + '?checkin=2020-01-01&checkout=2020-01-02&lang=ar',
+            STAY_IN, STAY_OUT)
+        query = parse_qs(urlsplit(url).query)
+        self.assertEqual(query['checkin'], ['2026-01-15'])
+        self.assertEqual(query['checkout'], ['2026-01-17'])
+        self.assertEqual(query['lang'], ['ar'])
+
+    def test_rewrite_is_idempotent(self):
+        once = hotel_stay.with_booking_stay_params(HOTEL_URL, STAY_IN, STAY_OUT)
+        twice = hotel_stay.with_booking_stay_params(once, STAY_IN, STAY_OUT)
+        self.assertEqual(once, twice)
+
+    def test_non_property_booking_pages_are_untouched(self):
+        for url in (
+            'https://www.booking.com/city/sa/jeddah.ar.html',
+            'https://www.booking.com/district/sa/jeddah/alandalus.ar.html',
+            'https://www.booking.com/searchresults.ar.html?ss=jeddah',
+            'https://example.com/hotel/sa/assila.ar.html',
+        ):
+            self.assertEqual(hotel_stay.with_booking_stay_params(url), url)
+
+    def test_agent_pool_lookup_uses_the_dated_url(self):
+        seen = {}
+
+        class Pool:
+            def get_page(self, url):
+                seen['url'] = url
+                return {'url': url, 'title': 'Hotel', 'content': 'room'}
+
+            def page_failed(self, _url):
+                return None
+
+        agent._run_open_url(None, {'url': HOTEL_URL}, [], {},
+                            evidence_pool=Pool())
+        query = parse_qs(urlsplit(seen['url']).query)
+        self.assertIn('checkin', query)
+        self.assertIn('selected_currency', query)
+
+    def test_browser_opens_the_property_with_the_stay(self):
+        worker = browser.BrowserWorker(headless=True)
+        opened = {}
+        worker._ensure_page = lambda: object()
+
+        def fake_open(_page, url, _timeout):
+            opened['url'] = url
+            return {'url': url, 'title': 'Hotel', 'text': '', 'error': None}
+
+        worker._open_url_once = fake_open
+        worker.open_url(HOTEL_URL)
+        query = parse_qs(urlsplit(opened['url']).query)
+        check_in, check_out = hotel_stay.booking_stay_window()
+        self.assertEqual(query['checkin'], [check_in.isoformat()])
+        self.assertEqual(query['checkout'], [check_out.isoformat()])
+
+
+class CompetitorPromptStayTests(unittest.TestCase):
+
+    def _payload(self):
+        return {
+            'city': 'جدة',
+            'district': 'الروضة',
+            'competitorScope': {'mode': 'district'},
+            'comparisonTypes': [{'type': 'hotel', 'stars': '4'}],
+        }
+
+    def test_hotel_prompt_pins_the_stay_and_room_size_rules(self):
+        prompt = market_study.build_competitors_user_prompt(
+            self._payload(), [], mode='generate')
+        check_in, check_out = hotel_stay.booking_stay_window()
+        self.assertIn(check_in.isoformat(), prompt)
+        self.assertIn(check_out.isoformat(), prompt)
+        self.assertIn('group_adults=2', prompt)
+        self.assertIn('selected_currency=SAR', prompt)
+        self.assertIn('عرض الأسعار', prompt)
+        self.assertIn('مساحة الغرفة', prompt)
+
+
+class VerifiedAreaTests(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        db.DB_PATH = os.path.join(cls.temp_dir.name, 'hotel-booking-stay.db')
+        import app as application_module
+        cls.module = application_module
+        cls.app = application_module.app
+        cls.app.config.update(TESTING=True)
+        with cls.app.app_context():
+            db.init_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temp_dir.cleanup()
+
+    def _hotel_row(self):
+        return {
+            'name': 'فندق أسيال',
+            'project_type': 'فندقي',
+            'operation_type': 'تشغيل فندقي',
+        }
+
+    def test_cited_room_area_fills_an_empty_hotel_row(self):
+        row = self._hotel_row()
+        with self.app.app_context():
+            self.module._apply_verified_competitor_area(
+                row, {'area_sqm': '42', 'area_url': HOTEL_URL}, {HOTEL_URL})
+        self.assertEqual(row['area_sqm'], '42')
+        self.assertEqual(row['area_mode'], 'fixed')
+        self.assertIn(HOTEL_URL, row['field_sources']['area_sqm'])
+
+    def test_area_can_come_from_the_cited_price_page(self):
+        row = self._hotel_row()
+        with self.app.app_context():
+            self.module._apply_verified_competitor_area(
+                row, {'area_sqm': '38', 'price': {'url': HOTEL_URL}}, {HOTEL_URL})
+        self.assertEqual(row['area_sqm'], '38')
+
+    def test_property_area_is_rejected_for_a_hotel(self):
+        row = self._hotel_row()
+        with self.app.app_context():
+            self.module._apply_verified_competitor_area(
+                row, {'area_sqm': '5000', 'area_url': HOTEL_URL}, {HOTEL_URL})
+        self.assertFalse(row.get('area_sqm'))
+
+    def test_uncited_area_is_not_applied(self):
+        row = self._hotel_row()
+        with self.app.app_context():
+            self.module._apply_verified_competitor_area(
+                row, {'area_sqm': '42', 'area_url': HOTEL_URL}, set())
+        self.assertFalse(row.get('area_sqm'))
+
+    def test_non_room_areas_are_ignored(self):
+        with self.app.app_context():
+            areas = self.module._extract_room_areas(
+                'قاعة اجتماعات 300 م² وغرفة ديلوكس 40 م²')
+        self.assertEqual(areas, [40.0])
+
+    def test_pool_hotel_without_area_is_sent_to_the_browser(self):
+        page = {
+            'url': HOTEL_URL,
+            'title': 'فندق أسيال',
+            'content': 'غرفة ديلوكس — 500 ريال',
+        }
+
+        class Pool:
+            def pages_for_name(self, _tokens, _needed):
+                return [page]
+
+        row = self._hotel_row()
+        with self.app.app_context():
+            verified = self.module._verify_row_from_pool(
+                row, {'city': 'جدة'}, {}, Pool())
+        self.assertFalse(verified)
+        self.assertNotEqual(row.get('verify_state'), 'verified')
+
+    def test_retrieved_page_room_sizes_become_an_area_range(self):
+        page = {
+            'url': HOTEL_URL,
+            'title': 'فندق أسيال',
+            'content': 'غرف من 32 م² إلى 48 م²',
+        }
+        row = self._hotel_row()
+        with self.app.app_context():
+            filled = self.module._fill_competitor_area_from_listings(
+                row, [HOTEL_URL], pages=[page])
+        self.assertTrue(filled)
+        self.assertEqual(row['area_mode'], 'range')
+        self.assertEqual((row['area_from'], row['area_to']), ('32', '48'))
+
+    def test_expansion_hotel_prompt_carries_the_same_stay(self):
+        axes = market_study.project_competitor_axes({
+            'comparisonTypes': [{'type': 'hotel', 'stars': 4}],
+        })
+        with self.app.app_context():
+            tasks = self.module._expansion_scan_tasks(
+                {'city': 'جدة', 'district': 'الروضة',
+                 'competitorScope': {'mode': 'district'},
+                 'projectType': 'فندقي'},
+                axes, axes, [], offer_lang='ar')
+        self.assertEqual(len(tasks), 1)
+        check_in, check_out = hotel_stay.booking_stay_window()
+        self.assertIn(check_in.isoformat(), tasks[0]['prompt'])
+        self.assertIn(check_out.isoformat(), tasks[0]['prompt'])
+        self.assertIn('group_adults=2', tasks[0]['prompt'])
+
+    def test_verification_prompt_asks_for_the_same_stay_and_area(self):
+        captured = {}
+
+        def fake_call(_system, user, *_args, **_kwargs):
+            captured['prompt'] = user
+            return {'choices': [{'message': {
+                'content': json.dumps({'exists': True, 'official_url': HOTEL_URL}),
+                'annotations': [{'url_citation': {
+                    'url': HOTEL_URL,
+                    'title': 'فندق أسيال',
+                    'content': 'غرفة ديلوكس 40 م²',
+                }}],
+            }}]}
+
+        row = self._hotel_row()
+        with self.app.app_context(), \
+                patch.object(self.module, '_browse_agent_call', side_effect=fake_call):
+            self.module._verify_competitor_row(row, {'city': 'جدة'}, {})
+        check_in, check_out = hotel_stay.booking_stay_window()
+        self.assertIn(check_in.isoformat(), captured['prompt'])
+        self.assertIn(check_out.isoformat(), captured['prompt'])
+        self.assertIn('area_sqm', captured['prompt'])
+        self.assertEqual(row.get('area_sqm'), '40')
+
+
+if __name__ == '__main__':
+    unittest.main()

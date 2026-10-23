@@ -25,6 +25,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import hotel_stay
+
 
 _DEFAULT_MAX_STEPS = 10
 # Page text is capped twice: the model's tool result gets more room than the
@@ -622,6 +624,8 @@ def _run_inspect_page(session, args, trace, pages, evidence_pool=None,
     'needs_interaction'/'thin_content' is exactly what this tool exists for —
     those soft failures are bypassed; hard failures still short-circuit."""
     url = str(args.get('url') or current_url or '').strip()
+    if url:
+        url = hotel_stay.with_booking_stay_params(url)
     if ((allowed_hosts is not None and not url)
             or not _source_url_allowed(url, allowed_hosts)):
         trace.append({'url': url, 'title': '', 'chars': 0,

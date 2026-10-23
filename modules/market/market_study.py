@@ -16,6 +16,8 @@ import os
 import re
 import uuid
 
+import hotel_stay
+
 
 # ---------------------------------------------------------------------------
 # Types

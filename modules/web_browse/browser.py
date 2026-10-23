@@ -27,6 +27,8 @@ import urllib.request
 from contextlib import contextmanager
 from urllib.parse import parse_qs, quote_plus, unquote, urlencode, urlparse
 
+import hotel_stay
+
 DEFAULT_TIMEOUT = 20        # seconds, page goto
 SETTLE_MS = 1500            # post-domcontentloaded settle
 TEXT_CAP = 12000            # chars kept per page
@@ -483,6 +485,10 @@ class BrowserWorker:
         giving up — a host form rejecting automation does not condemn its
         sibling, and the sibling answer is pooled upstream like any page.
         """
+        stay_url = hotel_stay.with_booking_stay_params(url)
+        if stay_url != url:
+            _browser_log(f'[BROWSER] booking stay window applied: {stay_url}')
+            url = stay_url
         result = _result(url)
         try:
             page = self._ensure_page()

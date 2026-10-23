@@ -14,6 +14,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import hotel_stay
+
 
 _PARALLEL_SCAN_WORKERS = 4
 
@@ -227,6 +229,17 @@ def _expansion_scan_tasks(payload, axes, deficits, named_generated,
         hotel_source_rule = (
             'لأن هذا محور فندقي، استخدم صفحات Booking.com فقط ولا تضع روابط فنادق من أي نطاق آخر. '
             if axis.get('type') == 'hotel' else '')
+        hotel_stay_rule = ''
+        if axis.get('type') == 'hotel':
+            check_in, check_out = hotel_stay.booking_stay_window()
+            hotel_stay_rule = (
+                f'افتح كل صفحة فندق بتواريخ الإقامة من {check_in.isoformat()} إلى '
+                f'{check_out.isoformat()}، غرفة واحدة، بالغان، دون أطفال، بالعملة SAR؛ '
+                'أضف معاملات checkin وcheckout وgroup_adults=2 وgroup_children=0 '
+                'وno_rooms=1 وselected_currency=SAR إلى الرابط، واضغط «عرض الأسعار» '
+                'إن بقيت الأسعار مخفية. اقرأ مساحة الغرفة بالمتر المربع من تفاصيل الغرفة، '
+                'ولا تستخدم مساحة الفندق أو البرج أو الأرض. '
+            )
         prompt = (
             f'نُجري دراسة سوق لمشروع {ptype} في {city}'
             + (f' — {district}' if district else '')
@@ -239,6 +252,7 @@ def _expansion_scan_tasks(payload, axes, deficits, named_generated,
             + (f'قيم benchmarks المسموحة حصرًا: {axis_label_list}.\n'
                if needs_benchmarks else '')
             + hotel_source_rule
+            + hotel_stay_rule
             + 'أعد JSON فقط: {"competitors":[{"name":"","city":"انسخ المدينة من بيانات المشروع حرفيًا",'
               '"district":"","hotel_stars":"",'
               '"benchmarks":[],"operation_type":"","price_type":"","price_currency":"",'

@@ -3,6 +3,8 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
 
+import hotel_stay
+
 
 _SUMMARY_RESEARCH_GROUPS = (
     {
@@ -356,9 +358,7 @@ def _summary_research_prompt(payload, group, hosts, city, district='',
         else:
             booking_target_en = 'hotels'
             booking_target_ar = 'الفنادق'
-        today = market_study.date.today()
-        check_in = market_study.date.fromordinal(today.toordinal() + 14)
-        check_out = market_study.date.fromordinal(check_in.toordinal() + 2)
+        check_in, check_out = hotel_stay.booking_stay_window()
         if offer_lang == 'en':
             booking_price_rules = (
                 'Booking.com research is mandatory when hospitality or residential is selected, even when official '
