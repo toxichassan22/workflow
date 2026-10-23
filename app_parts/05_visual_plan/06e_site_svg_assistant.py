@@ -768,6 +768,61 @@ def _visual_plan_site_generate(data, interview):
             'assistantState': state, 'scene': workflow.get('scene')}
 
 
+def _visual_plan_site_edit_facts(packet):
+    """The compact drawing context, without the full regulation corpus."""
+    packet = packet if isinstance(packet, dict) else {}
+    contract = (packet.get('landAndRegulations')
+                if isinstance(packet.get('landAndRegulations'), dict) else {})
+    drawing = (packet.get('drawingLayout')
+               if isinstance(packet.get('drawingLayout'), dict) else {})
+    facts = {
+        'projectName': packet.get('projectName') or contract.get('projectName'),
+        'landAreaSqm': packet.get('approvedFinancialAreaSqm'),
+        'surroundingStreets': packet.get('surroundingStreets'),
+        'approvedFloorCount': packet.get('approvedFloorCount'),
+        'coverageRatio': packet.get('coverageRatio'),
+        'floorAreaRatio': packet.get('floorAreaRatio'),
+        'buildingAreaSqm': packet.get('buildingAreaSqm'),
+        'setbacks': contract.get('setbacks') or packet.get('setbacks'),
+        'directions': packet.get('directions'),
+        'components': packet.get('financialComponents') or [],
+        'approvedLabels': drawing.get('approvedLabels') or [],
+        'buildings': drawing.get('buildings') or [],
+        'openAreas': drawing.get('siteItems') or drawing.get('openAreas') or [],
+        'legend': drawing.get('architecturalColorLegend') or [],
+    }
+    return {key: value for key, value in facts.items()
+            if value not in (None, '', [], {})}
+
+
+def _visual_plan_site_infer_edit_section(instruction):
+    """Pick the most likely section for a scoped edit, or '' when ambiguous."""
+    text = str(instruction or '').casefold()
+
+    def has(*words):
+        return any(word in text for word in words)
+
+    if has('خلفية', 'background'):
+        return 'coordinates'
+    if has('جدول', 'مفتاح', 'أسطورة', 'اسطورة', 'legend', 'schedule'):
+        return 'legend'
+    if has('طريق', 'طرق', 'مدخل', 'مداخل', 'حركة', 'مواقف', 'دخول', 'خروج',
+           'road', 'entry', 'access', 'parking', 'driveway'):
+        return 'access'
+    if has('حديقة', 'حدائق', 'مسبح', 'ملعب', 'تشجير', 'أشجار', 'اشجار', 'نخيل',
+           'landscape', 'pool', 'garden', 'tree', 'playground', 'padel'):
+        return 'landscape'
+    if has('مبنى', 'مباني', 'برج', 'فندق', 'سكني', 'تجاري', 'مكون', 'مكونات',
+           'building', 'tower', 'component'):
+        return 'components'
+    if has('لون', 'ألوان', 'الوان', 'color', 'fill', 'stroke'):
+        return 'colors'
+    if has('حدود', 'إحداثيات', 'احداثيات', 'قطعة', 'أرض', 'parcel', 'boundary',
+           'coordinates', 'setback', 'ارتداد', 'مساحة'):
+        return 'coordinates'
+    return ''
+
+
 def _visual_plan_site_edit(data):
     packet, _contract, _context, signature = _visual_plan_site_packet(data)
     workflow = data.get('plansWorkflow') if isinstance(data.get('plansWorkflow'), dict) else {}
@@ -791,6 +846,14 @@ def _visual_plan_site_edit(data):
         state['pendingQuestion'] = ''
     state['turns'].append({'role': 'user', 'text': instruction})
     _visual_plan_report_site_chat_progress(0, 25)
+    checkpoints = _visual_plan_site_extract_checkpoints(svg)
+    target_section = str(data.get('targetSection') or '').strip()
+    if target_section not in _VISUAL_PLAN_SITE_SECTION_IDS:
+        target_section = _visual_plan_site_infer_edit_section(instruction)
+    section_code = checkpoints.get(target_section, '') if target_section else ''
+    if not section_code:
+        target_section = ''
+    edit_facts = _visual_plan_site_edit_facts(packet) if target_section else {}
     system_prompt = (
         'You are Google Gemini 4 Argon editing a modular architectural site plan SVG. '
         'You have two ways to respond:\n'
@@ -809,9 +872,25 @@ def _visual_plan_site_edit(data):
         'Card 2: x="830" y="820" width="690" height="150" ending safely at x=1520) with 25px inner padding and balanced column text, '
         'never shifted against card borders or canvas edge.'
     )
-    user_packet = {'projectFacts': packet, 'currentSvg': svg,
-                   'resolvedAnswers': state['answers'][-8:], 'sessionMemory': state['summary'],
-                   'recentTurns': state['turns'][-6:], 'request': instruction}
+    if target_section:
+        system_prompt += (
+            '\n\n## بيانات المشروع (مختصرة)\n'
+            + json.dumps(edit_facts, ensure_ascii=False)
+            + '\n\n## القسم الحالي: ' + target_section + '\n' + section_code
+            + '\n\n## التعليمات: عدّل القسم الحالي فقط وأعد JSON بالصيغة أعلاه.')
+        user_packet = {
+            'request': instruction,
+            'targetSection': target_section,
+            'resolvedAnswers': state['answers'][-8:],
+            'sessionMemory': state['summary'],
+            'recentTurns': state['turns'][-6:],
+        }
+    else:
+        # Ambiguous scope: keep the full edit context rather than guessing a
+        # section the user did not name.
+        user_packet = {'projectFacts': packet, 'currentSvg': svg,
+                       'resolvedAnswers': state['answers'][-8:], 'sessionMemory': state['summary'],
+                       'recentTurns': state['turns'][-6:], 'request': instruction}
     parsed, prompt_tokens = _visual_plan_site_call(
         system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
         max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS)
@@ -848,18 +927,25 @@ def _visual_plan_site_edit(data):
         return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
                 'model': VISUAL_PLAN_SITE_MODEL, 'reply': reply,
                 'assistantState': state, 'scene': workflow.get('scene')}
-    section = str(parsed.get('targetSection') or '')
+    section = str(parsed.get('targetSection') or target_section or '')
     if section not in _VISUAL_PLAN_SITE_SECTION_IDS:
         raise visual_plan_geometry.PlanGeometryError('قسم التعديل غير معروف.', 'PLANS_EDIT_INVALID')
     sanitized_sections = []
+    drawing_layout = (packet.get('drawingLayout')
+                      if isinstance(packet.get('drawingLayout'), dict) else {})
+    approved_labels = (drawing_layout.get('approvedLabels')
+                       if isinstance(drawing_layout.get('approvedLabels'), list) else [])
+    color_legend = (drawing_layout.get('architecturalColorLegend')
+                    if isinstance(drawing_layout.get('architecturalColorLegend'), list) else [])
+    legend_labels = [item.get('label') for item in color_legend
+                     if isinstance(item, dict) and item.get('label')]
+    allowed_text = (approved_labels if section == 'components' else
+                    ['PROJECT SITE PLAN', 'BUILDING SCHEDULE', 'SITE FEATURES',
+                     'Recorded street', 'Internal access', 'Road and access',
+                     'CONCEPTUAL PLAN | NOT TO SCALE'] + legend_labels
+                    if section == 'legend' else [])
     replacement = _visual_plan_site_section_fragment(
-        parsed.get('code'), section, sanitized_sections,
-        allowed_text=(packet['drawingLayout']['approvedLabels'] if section == 'components' else
-                      ['PROJECT SITE PLAN', 'BUILDING SCHEDULE', 'SITE FEATURES',
-                       'Recorded street', 'Internal access', 'Road and access',
-                       'CONCEPTUAL PLAN | NOT TO SCALE', *[item['label'] for item in
-                                                packet['drawingLayout']['architecturalColorLegend']]]
-                      if section == 'legend' else []))
+        parsed.get('code'), section, sanitized_sections, allowed_text=allowed_text)
     if section == 'legend':
         replacement = _visual_plan_site_retain_project_identity(replacement, svg)
     start, end = '<!-- LL_SECTION_START:' + section + ' -->', '<!-- LL_SECTION_END:' + section + ' -->'

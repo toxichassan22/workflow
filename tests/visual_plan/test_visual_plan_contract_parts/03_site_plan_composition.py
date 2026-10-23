@@ -305,6 +305,70 @@ class VisualPlanContractTestsPart03(VisualPlanContractBase):
         self.assertEqual(user_packet['latestClientMessage'], 'المدخل من الشارع الشرقي والمسابح في الخلف')
         self.assertEqual(res['assistantState']['turns'][0]['text'], 'المدخل من الشارع الشرقي والمسابح في الخلف')
 
+    def test_site_svg_edit_sends_only_the_target_section(self):
+        module = self.application_module
+        svg_content = (
+            '<svg viewBox="0 0 1600 1000">\n'
+            '<!-- LL_SECTION_START:coordinates --><g id="ll-section-coordinates">'
+            '<rect id="bg" width="1600" height="900"/></g><!-- LL_SECTION_END:coordinates -->\n'
+            '<!-- LL_SECTION_START:colors --><defs id="ll-section-colors"></defs>'
+            '<!-- LL_SECTION_END:colors -->\n'
+            '<!-- LL_SECTION_START:components --><g id="ll-section-components">'
+            '<rect id="comp" data-building-id="b1"/></g><!-- LL_SECTION_END:components -->\n'
+            '<!-- LL_SECTION_START:access --><g id="ll-section-access"></g>'
+            '<!-- LL_SECTION_END:access -->\n'
+            '<!-- LL_SECTION_START:landscape --><g id="ll-section-landscape">'
+            '<circle id="pool" r="5"/></g><!-- LL_SECTION_END:landscape -->\n'
+            '<!-- LL_SECTION_START:legend --><g id="ll-section-legend"></g>'
+            '<!-- LL_SECTION_END:legend -->\n'
+            '</svg>'
+        )
+        packet = {
+            'projectName': 'THE VIEW',
+            'landAndRegulations': {
+                'setbacks': '6m',
+                'secret_full_regulation': 'REGULATION_ONLY_MARKER',
+            },
+            'drawingLayout': {
+                'approvedLabels': [],
+                'buildings': [{'label': 'Hotel'}],
+                'architecturalColorLegend': [],
+            },
+        }
+        edit_data = {
+            'siteSvgCode': svg_content,
+            'message': 'غيّر لون المسبح إلى الأزرق',
+            'plansWorkflow': {
+                'siteAssistant': {
+                    'inputSignature': 'sig-123',
+                    'renderRevision': module._VISUAL_PLAN_SITE_RENDER_REVISION,
+                }
+            }
+        }
+        with patch.object(module, '_visual_plan_site_packet',
+                          return_value=(packet, {}, {}, 'sig-123')), \
+                patch.object(module, '_visual_plan_site_call',
+                             return_value=({'clear': True, 'targetSection': 'landscape',
+                                            'code': '<g id="ll-section-landscape"><circle id="pool" r="10" fill="#0000ff"/></g>',
+                                            'reply': 'تم'}, 80)) as model_call, \
+                patch.object(module, '_visual_plan_report_site_chat_progress'), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/edit.png'):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                result = module._visual_plan_site_edit(edit_data)
+
+        self.assertTrue(result['success'])
+        self.assertEqual(result['targetSection'], 'landscape')
+        system_prompt = model_call.call_args[0][0]
+        user_packet = json.loads(model_call.call_args[0][1])
+        self.assertIn('## القسم الحالي: landscape', system_prompt)
+        self.assertIn('<circle id="pool" r="5"/>', system_prompt)
+        self.assertNotIn('id="comp"', system_prompt)
+        self.assertNotIn('REGULATION_ONLY_MARKER', system_prompt)
+        self.assertNotIn('currentSvg', user_packet)
+        self.assertEqual(user_packet['targetSection'], 'landscape')
+        self.assertIn('fill="#0000ff"', result['svgCode'])
+
     def test_site_svg_edit_system_prompt_prioritizes_modular_section_and_progress(self):
         module = self.application_module
         svg_content = (

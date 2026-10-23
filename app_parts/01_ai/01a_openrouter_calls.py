@@ -1,5 +1,53 @@
 # OpenRouter chat and streaming request paths.
+import os
 import time
+
+
+def _prompt_cache_enabled(model_name):
+    try:
+        return (os.environ.get('PROMPT_CACHE_ENABLED') or '1').strip() != '0'
+    except Exception:
+        return True
+
+
+def _cached_system_content(system_prompt, model_name):
+    """Mark the stable system prefix for Anthropic via OpenRouter.
+
+    OpenAI and Gemini cache a stable prefix automatically; sending the Anthropic
+    marker to them is unnecessary and can be rejected, so it stays provider-scoped.
+    """
+    text = str(system_prompt or '')
+    if not text or not _prompt_cache_enabled(model_name):
+        return system_prompt
+    if not str(model_name or '').lower().startswith('anthropic/'):
+        return system_prompt
+    return [{'type': 'text', 'text': text, 'cache_control': {'type': 'ephemeral'}}]
+
+
+def _cache_system_messages(messages, model_name):
+    """Apply the same stable-prefix marker to a caller-built message list."""
+    if not isinstance(messages, list) or not messages:
+        return messages
+    if not _prompt_cache_enabled(model_name):
+        return messages
+    if not str(model_name or '').lower().startswith('anthropic/'):
+        return messages
+    if not isinstance(messages[0], dict) or messages[0].get('role') != 'system':
+        return messages
+    copied = [dict(message) if isinstance(message, dict) else message for message in messages]
+    first = copied[0]
+    content = first.get('content')
+    if isinstance(content, str) and content:
+        first['content'] = [{'type': 'text', 'text': content,
+                             'cache_control': {'type': 'ephemeral'}}]
+    elif isinstance(content, list) and content:
+        blocks = [dict(block) if isinstance(block, dict) else block for block in content]
+        for block in reversed(blocks):
+            if isinstance(block, dict) and block.get('type') == 'text':
+                block['cache_control'] = {'type': 'ephemeral'}
+                break
+        first['content'] = blocks
+    return copied
 
 
 def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, tool_choice=None, usage_ctx=None, _credit_recovery_attempted=False, _force_platform=False):
@@ -31,7 +79,7 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
     payload = {
         "model": model_name,
         "messages": [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": _cached_system_content(system_prompt, model_name)},
             {"role": "user", "content": user_message_content}
         ],
         "max_tokens": max_tokens
@@ -239,7 +287,7 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
     payload = {
         "model": model_name,
         "messages": [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": _cached_system_content(system_prompt, model_name)},
             {"role": "user", "content": user_message_content}
         ],
         "max_tokens": max_tokens,

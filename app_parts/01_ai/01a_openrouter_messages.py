@@ -35,7 +35,7 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
     headers = _openrouter_headers(usage_ctx, force_platform=_force_platform)
     payload = {
         "model": model_name,
-        "messages": messages if isinstance(messages, list) else [],
+        "messages": _cache_system_messages(messages, model_name),
         "max_tokens": max_tokens,
     }
     if temperature is not None:
