@@ -33,6 +33,7 @@ from contextlib import contextmanager
 from urllib.parse import parse_qs, quote_plus, unquote, urlencode, urlparse
 
 import booking_rooms
+import booking_search
 import hotel_stay
 
 DEFAULT_TIMEOUT = 20        # seconds, page goto
@@ -602,7 +603,8 @@ class BrowserWorker:
         """One goto+extract attempt; never raises."""
         result = _result(url)
         is_booking = hotel_stay.is_booking_hotel_url(url)
-        if is_booking:
+        is_booking_search = booking_search.is_booking_search_url(url)
+        if is_booking or is_booking_search:
             error = booking_rooms.apply_user_agent(
                 page, USER_AGENT, ACCEPT_LANGUAGE)
             if error:
@@ -619,6 +621,9 @@ class BrowserWorker:
             if is_booking and getattr(self, '_using_cdp', False):
                 booking_rooms.wait_for_rate_rows(
                     page, booking_rooms.BOOKING_TABLE_TIMEOUT_MS)
+            elif is_booking_search and getattr(self, '_using_cdp', False):
+                booking_search.wait_for_property_cards(
+                    page, booking_rooms.BOOKING_TABLE_TIMEOUT_MS)
         except Exception as exc:
             # Navigation failed — whatever is in the page now is leftover state
             # from the previous call, not this URL's content. Do not return it.
@@ -630,6 +635,10 @@ class BrowserWorker:
             rate = booking_rooms.wait_and_extract(page, url)
             if rate:
                 result['booking_rate'] = rate
+        elif is_booking_search:
+            search = booking_search.extract_search_results(page)
+            if search:
+                result['booking_search'] = search
         try:
             result['final_url'] = page.url or url
             result['title'] = page.title() or ''
@@ -674,6 +683,10 @@ class BrowserWorker:
                 and result.get('booking_rate')):
             result['text'] = booking_rooms.with_rate_block(
                 result['booking_rate'], result.get('text'))
+        elif (is_booking_search and not result.get('error')
+                and result.get('booking_search')):
+            result['text'] = booking_search.with_search_block(
+                result['booking_search'], result.get('text'))
         return result
 
     def open_url(self, url, timeout=DEFAULT_TIMEOUT):

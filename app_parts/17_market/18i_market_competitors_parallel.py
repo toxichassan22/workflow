@@ -10,9 +10,14 @@
 # already parallel (one thread per row); this module parallelizes the scan.
 # ---------------------------------------------------------------------------
 
+import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import booking_search
+import maps_service
+from numeric_precision import format_precise_number
 
 
 _PARALLEL_SCAN_WORKERS = 4
@@ -71,6 +76,232 @@ def _scan_search_limits(task_count):
     )
 
 
+def _project_coordinates(payload):
+    project_data = (payload or {}).get('projectData') or (payload or {}).get('project_data') or {}
+    if not isinstance(project_data, dict):
+        project_data = {}
+    lat = next((value for value in (
+        (payload or {}).get('location_lat'), (payload or {}).get('locationLat'),
+        project_data.get('location_lat'), project_data.get('locationLat'),
+        project_data.get('lat'), project_data.get('latitude'))
+        if value is not None and str(value).strip()), None)
+    lng = next((value for value in (
+        (payload or {}).get('location_lng'), (payload or {}).get('locationLng'),
+        project_data.get('location_lng'), project_data.get('locationLng'),
+        project_data.get('lng'), project_data.get('longitude'))
+        if value is not None and str(value).strip()), None)
+    try:
+        return float(lat), float(lng)
+    except (TypeError, ValueError):
+        return None, None
+
+
+def _english_booking_location(payload, data, tenant_id=None):
+    """Project district/city in English, for a Booking search query.
+
+    Booking does not resolve the Arabic district free text (it redirects to
+    the homepage). The project coordinates resolve to the English district
+    through Google Geocoding, e.g. «Al Andalus, Jeddah».
+    """
+    city = str((payload or {}).get('city') or '').strip()
+    district = str((payload or {}).get('district') or '').strip()
+    if district.startswith('حي '):
+        district = district[3:].strip()
+    lat, lng = _project_coordinates(payload)
+    if lat is None or lng is None:
+        return city, district
+    try:
+        resolved = maps_service.reverse_geocode_location(
+            lat, lng, tenant_id=tenant_id, language='en',
+            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
+    except Exception as exc:
+        print(f'[MARKET STUDY] English geocode failed: {exc}')
+        return city, district
+    components = resolved.get('address_components') or []
+
+    def component(types):
+        for item in components:
+            if set(item.get('types') or []) & set(types):
+                return str(item.get('long_name') or '').strip()
+        return ''
+
+    english_district = component((
+        'sublocality_level_1', 'sublocality', 'neighborhood',
+        'administrative_area_level_3'))
+    english_city = component((
+        'locality', 'postal_town', 'administrative_area_level_2'))
+    return english_city or city, english_district or district
+
+
+def _booking_scan_citation(url, title='', text=''):
+    return {'type': 'url_citation', 'url_citation': {
+        'url': str(url or ''),
+        'title': str(title or ''),
+        'content': str(text or '')[:8000],
+    }}
+
+
+def _booking_scan_result(task, rows, citations, note='', search_ran=False):
+    content = json.dumps(
+        {'competitors': rows, 'notes': note}, ensure_ascii=False)
+    reply = {'choices': [{'message': {
+        'content': content,
+        'annotations': citations,
+    }}]}
+    return {
+        'task': task,
+        'reply': reply,
+        'parsed': {'competitors': rows, 'notes': note},
+        'parse_error': '',
+        'provider_error': '',
+        'search_ran': bool(search_ran),
+    }
+
+
+def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
+                        deadline=None):
+    """Deterministic hotel discovery from Booking search + property pages.
+
+    No model decides which hotel page to open: the project's English district
+    (from its coordinates) is searched on Booking, the hotel cards become the
+    competitors, and each property page's ``## BOOKING_RATE ##`` block supplies
+    the original pre-discount nightly price and room area.
+    """
+    axis = task.get('axis') if isinstance(task.get('axis'), dict) else {}
+    stars = str(axis.get('stars') or '').strip()
+    city_ar = str((payload or {}).get('city') or '').strip()
+    district_ar = str((payload or {}).get('district') or '').strip()
+    display_district = (district_ar[3:].strip()
+                        if district_ar.startswith('حي ') else district_ar)
+    city_en, district_en = _english_booking_location(
+        payload, data, tenant_id=tenant_id)
+    search_url = booking_search.build_search_url(
+        city_en or city_ar, district_en or district_ar,
+        stars=stars or None)
+    if _market_deadline_hit(deadline):
+        return _booking_scan_result(
+            task, [], [], 'deadline_exceeded', search_ran=False)
+    session = _market_browser_session(search_provider='searxng')
+    rows = []
+    citations = []
+    try:
+        search = session.open_url(search_url)
+        search = search if isinstance(search, dict) else {}
+        final_url = str(search.get('final_url') or search_url)
+        citations.append(_booking_scan_citation(
+            final_url, search.get('title'), search.get('text')))
+        search_data = search.get('booking_search') \
+            if isinstance(search.get('booking_search'), dict) else {}
+        hotels = search_data.get('hotels') or []
+        if not hotels:
+            note = (
+                f'لم تُرجع صفحة نتائج Booking.com فنادق لحي '
+                f'{display_district or district_en} في {city_ar or city_en}. '
+                'لم يُستخدم أي مصدر آخر.')
+            return _booking_scan_result(
+                task, [], citations, note, search_ran=True)
+        benchmark = market_study.benchmark_axis_label(axis, offer_lang)
+        for hotel in hotels[:5]:
+            if _market_deadline_hit(deadline):
+                break
+            hotel = hotel if isinstance(hotel, dict) else {}
+            name = str(hotel.get('name') or '').strip()
+            url = str(hotel.get('url') or '').strip()
+            if not name or not url:
+                continue
+            prop = session.open_url(url)
+            prop = prop if isinstance(prop, dict) else {}
+            prop_url = str(prop.get('final_url') or url)
+            citations.append(_booking_scan_citation(
+                prop_url, prop.get('title') or name, prop.get('text')))
+            rate = prop.get('booking_rate')
+            priced = isinstance(rate, dict) and rate.get('price') is not None
+            row = {
+                'name': name,
+                'project_type': 'فندقي',
+                'operation_type': 'تشغيل فندقي',
+                'hotel_stars': stars,
+                'city': city_ar or city_en,
+                'district': district_ar or district_en,
+                'benchmarks': [benchmark] if benchmark else [],
+                'source': 'Booking.com',
+                'source_url': url,
+                'source_urls': [url],
+                'price_type': '',
+                'price_value': '',
+                'price_currency': '',
+                'area_sqm': '',
+                'area_mode': '',
+                'row_source': 'booking',
+                'verify_state': 'verified',
+                'booking_discovered': True,
+                'notes': '',
+                'field_sources': {'name': [url]},
+            }
+            if priced:
+                source_currency = str(rate.get('currency') or 'SAR').upper()
+                price = float(rate['price'])
+                if source_currency != 'SAR':
+                    fx_rate = market_study.price_fx_to_sar(source_currency)
+                    if fx_rate:
+                        price *= fx_rate
+                    else:
+                        priced = False
+                if priced:
+                    value = format_precise_number(price, grouped=False)
+                    area = rate.get('area_sqm')
+                    current = rate.get('current_price')
+                    taxes = rate.get('taxes')
+                    note = (
+                        'سعر Booking الأصلي قبل الخصم لأقل غرفة أساسية قبل الضرائب: '
+                        f'{value} ر.س'
+                        + (f' (محوّل من {source_currency})'
+                           if source_currency != 'SAR' else '')
+                        + f'؛ السعر الحالي بعد الخصم '
+                        f'{current if current is not None else "غير متوفر"} '
+                        f'والضرائب {taxes if taxes is not None else "غير متوفر"}.')
+                    row.update({
+                        'price_type': 'سعر الليلة',
+                        'price_value': value,
+                        'price_currency': 'SAR',
+                        'area_sqm': (format_precise_number(
+                            float(area), grouped=False)
+                            if area is not None else ''),
+                        'area_mode': 'fixed' if area is not None else '',
+                        'price_listed': True,
+                        'notes': note,
+                        'price_cache': {
+                            'price_value': value,
+                            'booking_current_price': current,
+                            'booking_taxes': taxes,
+                            'booking_currency': source_currency,
+                            'booking_room_name': rate.get('room_name'),
+                            'booking_source_url': url,
+                        },
+                        'field_sources': {
+                            'name': [url],
+                            'price_value': [url],
+                            'area_sqm': [url] if area is not None else [],
+                        },
+                    })
+            if not priced:
+                row['notes'] = (
+                    'صفحة الفندق على Booking.com لم تُرجع بلوك سعر/مساحة '
+                    'لهذه الإقامة؛ السعر والمساحة غير متوفرين.')
+            rows.append(row)
+        priced_count = sum(1 for row in rows if row.get('price_value'))
+        note = (
+            f'تم جلب {len(rows)} فندقًا من صفحة نتائج Booking.com لحي '
+            f'{display_district or district_en} في {city_ar or city_en}'
+            + (f' — منها {priced_count} بسعر ومساحة.' if rows else '.'))
+        return _booking_scan_result(task, rows, citations, note, search_ran=True)
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
                                 tenant_id, data, evidence_pool, deadline,
                                 system_prompt, report, band, search_budget,
@@ -81,6 +312,11 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
     shared BrowserWorker is bound to the thread that opened it, so parallel
     scans must never share one.
     """
+    axis = task.get('axis') if isinstance(task.get('axis'), dict) else {}
+    if task.get('kind') == 'axis' and str(axis.get('type') or '') == 'hotel':
+        return _booking_hotel_scan(
+            task, payload, data, tenant_id=tenant_id,
+            offer_lang=offer_lang, deadline=deadline)
     axis_payload = (payload if task.get('kind') in ('fill', 'legacy')
                     else _axis_scan_payload(payload, task.get('axis')))
     prompt = market_study.build_competitors_user_prompt(
@@ -188,7 +424,8 @@ def _competitor_scan_tasks(axes, offer_lang='ar', mode='generate'):
             'axis': axis,
             'label': 'البحث عن ' + market_study.benchmark_axis_label(axis, offer_lang),
         })
-    if len(tasks) == 1:
+    if len(tasks) == 1 and str(
+            (tasks[0].get('axis') or {}).get('type') or '') != 'hotel':
         tasks.append({
             'kind': 'portals',
             'axis': tasks[0]['axis'],
@@ -217,6 +454,8 @@ def _expansion_scan_tasks(payload, axes, deficits, named_generated,
         if (payload or {}).get('competitorScope', {}).get('mode') == 'distance' else '')
     tasks = []
     for axis in deficits:
+        if str((axis or {}).get('type') or '') == 'hotel':
+            continue
         angle = (f'{axis["search"]} داخل {scope} في {city}'
                  + (' عبر Booking.com' if axis.get('type') == 'hotel' else ''))
         if evidence_pool is not None and _pool_covers_angle(evidence_pool, angle):

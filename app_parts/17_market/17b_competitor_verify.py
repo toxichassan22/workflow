@@ -139,7 +139,7 @@ def _clear_ai_hotel_value_fields(row):
     hotel row. Clearing here prevents a discovery-model figure (or a generic
     text/listing fill) from surviving when no Booking block is found.
     """
-    if not isinstance(row, dict) or row.get('row_source') == 'manual':
+    if not isinstance(row, dict) or row.get('row_source') in ('manual', 'booking'):
         return
     folded = market_study._fold_choice(str(row.get('operation_type') or ''))
     if not any(token in folded for token in ('فندقي', 'فندق', 'hotel', 'hospitality')):
@@ -746,7 +746,8 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
     # left empty, and the per-name search is the only priced lookup they get.
     targets = [row for row in (rows or [])
                if isinstance(row, dict)
-               and str(row.get('name') or '').strip()]
+               and str(row.get('name') or '').strip()
+               and row.get('row_source') != 'booking']
     if not targets:
         return
     for row in targets:

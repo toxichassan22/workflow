@@ -327,7 +327,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
             'usage': {'prompt_tokens': 10, 'completion_tokens': 5},
         }
 
-    def test_deficient_axis_gets_its_own_search_round(self):
+    def test_hotel_axis_uses_booking_not_the_agent(self):
         module = self.application_module
         residential = [
             {'name': f'برج سكني {index}', 'project_type': 'سكني',
@@ -335,59 +335,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
              'benchmarks': ['سكني - بيع']}
             for index in range(5)
         ]
-        hotel = [{'name': 'فندق المدينة', 'project_type': 'فندقي', 'hotel_stars': 4,
-                  'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
-                  'benchmarks': ['فندقي - 4 نجوم']}]
-        calls = []
-
-        def fake_call(system_prompt, user_prompt, *args, **kwargs):
-            calls.append(user_prompt)
-            if len(calls) == 1:
-                return self._response(residential + hotel)
-            return self._response([
-                {'name': f'فندق {index}', 'project_type': 'فندقي', 'hotel_stars': 4,
-                 'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
-                 'benchmarks': ['فندقي - 4 نجوم']}
-                for index in range(5)])
-
-        payload = {
-            'projectType': 'متعدد الاستخدامات',
-            'city': 'الرياض',
-            'district': 'النرجس',
-            'competitorScope': {'mode': 'district'},
-            'comparisonTypes': [
-                {'type': 'residential', 'operation': 'sale'},
-                {'type': 'hotel', 'stars': 4}],
-            'mode': 'generate',
-            'components': [
-                {'name': 'الشقق', 'useType': 'residential', 'investmentModel': 'sale'},
-                {'name': 'الفندق', 'useType': 'hospitality', 'investmentModel': 'dailyRent'},
-            ],
-            'competitors': [],
-        }
-        with self.app.app_context(), \
-                patch.object(module, '_run_market_source_plan', return_value=None), \
-                patch.object(module, '_browse_agent_call', side_effect=fake_call), \
-                patch.object(module, '_verify_competitor_rows', return_value=None), \
-                patch.object(module, '_verify_market_urls', return_value=set()), \
-                patch.object(module, '_auto_import_competitor_logos', return_value=None):
-            result = module._execute_market_competitors(payload)
-
-        self.assertTrue(result['success'], result)
-        # First call is the main generation; the second must target the
-        # hospitality axis specifically, not another generic angle.
-        self.assertEqual(len(calls), 2)
-        self.assertIn('فنادق', calls[1])
-        self.assertIn('benchmarks', calls[1])
-        self.assertEqual(len(result['competitors']), 10)
-
-    def test_full_axes_skip_expansion(self):
-        module = self.application_module
-        rows = [
-            {'name': f'سكني {index}', 'project_type': 'سكني', 'operation_type': 'بيع',
-             'city': 'الرياض', 'district': 'النرجس', 'benchmarks': ['سكني - بيع']}
-            for index in range(5)
-        ] + [
+        hotel = [
             {'name': f'فندق {index}', 'project_type': 'فندقي', 'hotel_stars': 4,
              'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
              'benchmarks': ['فندقي - 4 نجوم']}
@@ -397,7 +345,15 @@ class BenchmarkExpansionTests(unittest.TestCase):
 
         def fake_call(system_prompt, user_prompt, *args, **kwargs):
             calls.append(user_prompt)
-            return self._response(rows)
+            return self._response(residential)
+
+        def fake_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
+                            deadline=None):
+            return {
+                'task': task, 'reply': None,
+                'parsed': {'competitors': hotel}, 'parse_error': '',
+                'provider_error': '', 'search_ran': True,
+            }
 
         payload = {
             'projectType': 'متعدد الاستخدامات',
@@ -417,15 +373,73 @@ class BenchmarkExpansionTests(unittest.TestCase):
         with self.app.app_context(), \
                 patch.object(module, '_run_market_source_plan', return_value=None), \
                 patch.object(module, '_browse_agent_call', side_effect=fake_call), \
+                patch.object(module, '_booking_hotel_scan', side_effect=fake_hotel_scan), \
                 patch.object(module, '_verify_competitor_rows', return_value=None), \
                 patch.object(module, '_verify_market_urls', return_value=set()), \
                 patch.object(module, '_auto_import_competitor_logos', return_value=None):
             result = module._execute_market_competitors(payload)
 
         self.assertTrue(result['success'], result)
-        # Two axes -> two parallel scans; every axis is already covered, so
-        # no sequential expansion call follows them.
-        self.assertEqual(len(calls), 2)
+        # Residential is the single agent search; the hotel axis is
+        # deterministic Booking discovery and adds no model call.
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(result['competitors']), 10)
+
+    def test_full_axes_skip_expansion(self):
+        module = self.application_module
+        residential = [
+            {'name': f'سكني {index}', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'الرياض', 'district': 'النرجس', 'benchmarks': ['سكني - بيع']}
+            for index in range(5)
+        ]
+        hotel = [
+            {'name': f'فندق {index}', 'project_type': 'فندقي', 'hotel_stars': 4,
+             'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
+             'benchmarks': ['فندقي - 4 نجوم']}
+            for index in range(5)
+        ]
+        calls = []
+
+        def fake_call(system_prompt, user_prompt, *args, **kwargs):
+            calls.append(user_prompt)
+            return self._response(residential)
+
+        def fake_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
+                            deadline=None):
+            return {
+                'task': task, 'reply': None,
+                'parsed': {'competitors': hotel}, 'parse_error': '',
+                'provider_error': '', 'search_ran': True,
+            }
+
+        payload = {
+            'projectType': 'متعدد الاستخدامات',
+            'city': 'الرياض',
+            'district': 'النرجس',
+            'competitorScope': {'mode': 'district'},
+            'comparisonTypes': [
+                {'type': 'residential', 'operation': 'sale'},
+                {'type': 'hotel', 'stars': 4}],
+            'mode': 'generate',
+            'components': [
+                {'name': 'الشقق', 'useType': 'residential', 'investmentModel': 'sale'},
+                {'name': 'الفندق', 'useType': 'hospitality', 'investmentModel': 'dailyRent'},
+            ],
+            'competitors': [],
+        }
+        with self.app.app_context(), \
+                patch.object(module, '_run_market_source_plan', return_value=None), \
+                patch.object(module, '_browse_agent_call', side_effect=fake_call), \
+                patch.object(module, '_booking_hotel_scan', side_effect=fake_hotel_scan), \
+                patch.object(module, '_verify_competitor_rows', return_value=None), \
+                patch.object(module, '_verify_market_urls', return_value=set()), \
+                patch.object(module, '_auto_import_competitor_logos', return_value=None):
+            result = module._execute_market_competitors(payload)
+
+        self.assertTrue(result['success'], result)
+        # One agent search (residential) plus deterministic hotel discovery;
+        # no sequential expansion call follows.
+        self.assertEqual(len(calls), 1)
         self.assertEqual(len(result['competitors']), 10)
 
     def test_distance_scope_reaches_search_and_drops_out_of_radius_rows(self):

@@ -323,7 +323,7 @@ class VerifiedAreaTests(unittest.TestCase):
         self.assertEqual(row['price_value'], '350')
         self.assertEqual(row['area_sqm'], '35')
 
-    def test_expansion_hotel_prompt_stops_on_a_blocked_page(self):
+    def test_hotel_expansion_is_deterministic_not_a_new_agent_search(self):
         axes = market_study.project_competitor_axes({
             'comparisonTypes': [{'type': 'hotel', 'stars': 4}],
         })
@@ -333,9 +333,7 @@ class VerifiedAreaTests(unittest.TestCase):
                  'competitorScope': {'mode': 'district'},
                  'projectType': 'فندقي'},
                 axes, axes, [], offer_lang='ar')
-        self.assertEqual(len(tasks), 1)
-        self.assertIn('تحديًا أمنيًا', tasks[0]['prompt'])
-        self.assertIn('لا تُعد المحاولة', tasks[0]['prompt'])
+        self.assertEqual(tasks, [])
 
     def test_verification_prompt_uses_booking_property_pages(self):
         captured = {}
