@@ -1,4 +1,7 @@
 import context_contracts
+import html as html_lib
+import json
+import re
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -35,6 +38,23 @@ _AGENT_WORKER_SCHEMA = {
                 'removed': {'type': 'array', 'items': {'type': 'string'}},
             },
             'required': ['slides'],
+            'additionalProperties': True,
+        },
+        'strict': False,
+    },
+}
+
+_AGENT_ELEMENT_SCHEMA = {
+    'type': 'json_schema',
+    'json_schema': {
+        'name': 'designer_selected_element',
+        'schema': {
+            'type': 'object',
+            'properties': {
+                'elementHtml': {'type': 'string'},
+                'summary': {'type': 'string'},
+            },
+            'required': ['elementHtml'],
             'additionalProperties': True,
         },
         'strict': False,
@@ -157,6 +177,156 @@ def _agent_worker_call(ctx, user_content, *, slide_type='content', facts='',
         return None, None, 'empty_worker_result'
     summary = (parsed.get('summary') or parsed.get('response') or '') if isinstance(parsed, dict) else ''
     return parts, str(summary), None
+
+
+_SELECTED_EDIT_FULL_SLIDE_RE = re.compile(
+    r'(?:أعد\s*تصميم|إعادة\s*تصميم|redesign|أعد\s*صياغة|rewrite|'
+    r'حسّن\s*الشكل|غيّر\s*التصميم|split|قسم\s*الشريحة|ادمج|دمج)',
+    re.IGNORECASE)
+
+
+def _agent_selected_element_matches(selected, index):
+    try:
+        return int(selected.get('slideIndex', -1)) == int(index)
+    except (TypeError, ValueError):
+        return False
+
+
+def _agent_selected_edit_needs_full_slide(instruction):
+    return bool(_SELECTED_EDIT_FULL_SLIDE_RE.search(str(instruction or '')))
+
+
+def _agent_selected_text_candidates(text):
+    raw = str(text or '').strip()
+    if not raw:
+        return []
+    candidates = [raw]
+    escaped = html_lib.escape(raw)
+    if escaped != raw:
+        candidates.append(escaped)
+    return list(dict.fromkeys(candidates))
+
+
+def _agent_selected_element_pattern(tag, text):
+    tag = str(tag or '').strip().lower()
+    if not re.fullmatch(r'[a-z][a-z0-9-]*', tag):
+        return None
+    raw = str(text or '').strip()
+    if not raw or len(raw) > 500:
+        return None
+    safe_text = re.escape(raw).replace(r'\ ', r'\s+')
+    return re.compile(
+        rf'<(?P<tag>{re.escape(tag)})\b[^>]*>(?P<inner>\s*{safe_text}\s*)</(?P=tag)>',
+        re.IGNORECASE)
+
+
+def _agent_find_selected_element(html, selected):
+    """Locate one selected element without reading the rest of the slide."""
+    html = str(html or '')
+    if not html or not isinstance(selected, dict):
+        return None
+    outer = str(selected.get('outerHTML') or '').strip()
+    if outer and html.count(outer) == 1:
+        return {'kind': 'exact', 'old': outer}
+    tag = str(selected.get('tag') or '').strip().lower()
+    for candidate in _agent_selected_text_candidates(selected.get('text')):
+        pattern = _agent_selected_element_pattern(tag, candidate)
+        if pattern is None:
+            continue
+        matches = list(pattern.finditer(html))
+        if len(matches) == 1:
+            return {'kind': 'pattern', 'pattern': pattern, 'old': matches[0].group(0)}
+    return None
+
+
+def _agent_replace_selected_element(html, selected, replacement):
+    """Replace the unique selected element and leave every other byte alone."""
+    html = str(html or '')
+    replacement = str(replacement or '').strip()
+    if not html or not replacement or not replacement.startswith('<'):
+        return None
+    if re.search(r'class=["\'][^"\']*\bslide\b', replacement, re.IGNORECASE):
+        return None
+    located = _agent_find_selected_element(html, selected)
+    if not located:
+        return None
+    if located['kind'] == 'exact':
+        return html.replace(located['old'], replacement, 1)
+    return located['pattern'].sub(lambda _match: replacement, html, count=1)
+
+
+def _agent_worker_call_element(ctx, slide, index, instruction, selected,
+                              feedback='', style_brief=''):
+    title = slide.get('title', f'شريحة {index + 1}') if isinstance(slide, dict) else f'شريحة {index + 1}'
+    slide_type = slide.get('type', 'content') if isinstance(slide, dict) else 'content'
+    facts = _agent_worker_facts(ctx, slide=slide)
+    system = _agent_worker_system(ctx, slide_type, facts, style_brief)
+    system += (
+        '\n\n## عقد التعديل الجراحي للعنصر المحدد\n'
+        'المستخدم حدد عنصراً واحداً داخل الشريحة. عدّل هذا العنصر فقط وأعد JSON فقط: '
+        '{"elementHtml":"<العنصر كاملاً بعد التعديل>","summary":"شرح عربي موجز"}.\n'
+        'لا تُعد الشريحة كاملة ولا أي عنصر آخر. حافظ على كل رقم ونص ووسم data-* '
+        'وتوكن ##...## داخل العنصر إلا إذا طلب المستخدم تغييره صراحة.'
+    )
+    element_context = {
+        'tag': selected.get('tag'),
+        'text': selected.get('text'),
+        'className': selected.get('className'),
+        'id': selected.get('id'),
+        'styles': selected.get('styles'),
+        'html': selected.get('outerHTML'),
+    }
+    user_text = (
+        f'عنوان الشريحة: {title}\n'
+        f'رقمها الحالي في العرض: {index + 1}\n'
+        f'الطلب:\n{instruction}'
+        + (f'\nملاحظة تحقق على محاولة سابقة — عالجها حرفياً: {feedback[:1600]}' if feedback else '')
+        + '\n\n## العنصر المحدد (عدّله وحده)\n'
+        + json.dumps(element_context, ensure_ascii=False)
+    )
+    response = call_openrouter_messages(
+        [{'role': 'system', 'content': system},
+         {'role': 'user', 'content': user_text}],
+        response_format=_AGENT_ELEMENT_SCHEMA,
+        model=DESIGNER_AGENT_WORKER_MODEL,
+        max_tokens=DESIGNER_EDIT_MAX_TOKENS, temperature=0.2, timeout=300,
+        usage_ctx=_agent_usage_ctx(ctx))
+    result = openrouter_response_message(response, 'DESIGNER-WORKER-ELEMENT')
+    parsed = _designer_json_response(result['content'])
+    if not isinstance(parsed, dict):
+        return None, None
+    element_html = str(parsed.get('elementHtml') or '').strip()
+    summary = str(parsed.get('summary') or '')
+    return (element_html or None), (summary or None)
+
+
+def _agent_worker_edit_selected_element(ctx, slide, index, instruction, selected,
+                                        feedback='', style_brief=''):
+    html = slide.get('html', '') if isinstance(slide, dict) else ''
+    if not _agent_find_selected_element(html, selected):
+        return None
+    element_html, summary = _agent_worker_call_element(
+        ctx, slide, index, instruction, selected, feedback, style_brief)
+    if not element_html:
+        return None
+    replaced = _agent_replace_selected_element(html, selected, element_html)
+    if not replaced or replaced == html:
+        return None
+    title = slide.get('title', f'شريحة {index + 1}') if isinstance(slide, dict) else f'شريحة {index + 1}'
+    slide_type = slide.get('type', 'content') if isinstance(slide, dict) else 'content'
+    content_source = (slide.get('content_source') or slide.get('contentSource')
+                      if isinstance(slide, dict) else None)
+    total = len(ctx.get('slides') or [])
+    try:
+        output = _agent_worker_finalize(
+            replaced, html, instruction, ctx,
+            slide_num=index + 1, title=title, total=total,
+            slide_type=slide_type, content_source=content_source,
+            removed_elements=None)
+    except Exception as exc:
+        ctx['agent_last_worker_reason'] = f'finalize_failed:{exc}'
+        return None
+    return output, summary or 'تم تحديث العنصر المحدد.'
 
 
 def _agent_worker_vision(ctx, slide_html, session):
@@ -301,6 +471,18 @@ def _agent_worker_edit_slide(ctx, slide, index, instruction, total,
             user_image_refs=ctx['user_image_refs'],
             slide_type=slide_type, total_slides=total,
             content_source=content_source)
+
+    # A selected text element has a deterministic locator; the worker can edit
+    # that element alone instead of reading the whole slide. Structural requests
+    # and an unlocatable selection keep the full-slide path.
+    selected = (ctx.get('selected_element')
+                if isinstance(ctx.get('selected_element'), dict) else None)
+    if (selected and not _agent_selected_edit_needs_full_slide(instruction)
+            and _agent_selected_element_matches(selected, index)):
+        targeted = _agent_worker_edit_selected_element(
+            ctx, slide, index, instruction, selected, feedback, style_brief)
+        if targeted is not None:
+            return targeted
 
     clean_html, base64_map = _agent_preserve_base64(html)
     vision_uri, consistency_uri, vision_note = _agent_worker_vision(ctx, html, session)

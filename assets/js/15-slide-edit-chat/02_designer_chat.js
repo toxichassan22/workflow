@@ -304,6 +304,40 @@
       }
     }
 
+    function designerSelectedElementPayload() {
+      try {
+        if (typeof getSlideEditSession !== 'function' || typeof elementAtSlidePath !== 'function') return null;
+        const index = Number(tenantChatSlideIndex) || 0;
+        const session = getSlideEditSession(index);
+        const path = session && Array.isArray(session.sel && session.sel.path) ? session.sel.path : null;
+        if (!path || !path.length) return null;
+        const card = document.getElementById('slide-card-' + index);
+        const stage = card ? card.querySelector('.tenant-slide-stage') : null;
+        const slide = stage ? stage.querySelector('.slide') : null;
+        const target = slide ? elementAtSlidePath(slide, path) : null;
+        if (!target || target === slide) return null;
+        const style = window.getComputedStyle(target);
+        return {
+          slideIndex: index,
+          path: path.slice(),
+          tag: String(target.tagName || '').toLowerCase(),
+          text: String(target.innerText || target.textContent || '').trim().slice(0, 500),
+          className: String(target.className || '').slice(0, 300),
+          id: String(target.id || '').slice(0, 120),
+          outerHTML: String(target.outerHTML || '').slice(0, 40000),
+          styles: {
+            color: style.color,
+            backgroundColor: style.backgroundColor,
+            fontSize: style.fontSize,
+            fontWeight: style.fontWeight,
+            textAlign: style.textAlign
+          }
+        };
+      } catch (error) {
+        return null;
+      }
+    }
+
     async function sendTenantDesignerChat() {
       const input = document.getElementById('tenantChatInput');
       const message = input ? input.value.trim() : '';
@@ -402,6 +436,8 @@
         attachedImages: attachedGallery.map(item => item.dataUri),
         attachedDocs: (tenantChatAttachedDocs || []).map(item => ({ name: item.name, dataUri: item.dataUri }))
       };
+      const selectedElement = designerSelectedElementPayload();
+      if (selectedElement) chatPayload.selectedElement = selectedElement;
       // Once the workspace is dirty, send the in-memory copy as the source for the next turn.
       // The server must not reload the last saved presentation and discard an earlier unsaved
       // change made in this same chat session.

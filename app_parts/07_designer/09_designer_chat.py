@@ -195,6 +195,9 @@ def api_designer_chat():
     training_context = db.get_training_context(
         g.tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data)) or ''
 
+    selected_element = (data.get('selectedElement')
+                        if isinstance(data.get('selectedElement'), dict) else None)
+
     # DESIGNER_AGENT=1: per-task planner/runner path (chatplan). The legacy
     # all-at-once planner below stays untouched for DESIGNER_AGENT=0.
     if DESIGNER_AGENT:
@@ -215,6 +218,7 @@ def api_designer_chat():
             'is_all_slides_request': is_all_slides_request,
             'slides_before': slides_before, 'job_id': job_id,
             'report_progress': report_designer_progress,
+            'selected_element': selected_element,
         })
 
     summary = [{

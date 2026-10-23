@@ -424,6 +424,15 @@ def _designer_agent_plan(ctx, session=None):
         'scope': (f"\n\n## الشريحة الظاهرة الآن: {ctx['current_index'] + 1} (موضع معاينة فقط)"
                   + ('\nالمستخدم طلب صراحة تعديل جميع الشرائح.' if ctx.get('is_all_slides_request') else '')),
     }
+    selected = (ctx.get('selected_element')
+                if isinstance(ctx.get('selected_element'), dict) else None)
+    if selected:
+        notes['scope'] += (
+            '\n\n## العنصر المحدد في المعاينة\n'
+            + json.dumps({key: selected.get(key) for key in
+                          ('slideIndex', 'tag', 'text', 'className')},
+                         ensure_ascii=False)
+            + '\nإن طلب المستخدم تعديل هذا العنصر، استهدف الشريحة الحالية (current).')
     system = _AGENT_PLANNER_RULES.format(
         outline=designer_agent_plan.outline_text(slides),
         memory=notes['memory'], history=notes['history'],
