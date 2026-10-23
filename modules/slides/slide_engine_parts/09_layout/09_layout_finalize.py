@@ -1,4 +1,6 @@
 
+import context_contracts
+
 
 def postprocess_slide(html, slide_type, slide_num=None, slide_title=None, total_slides=None,
                        tenant_id=None, branding=None, project_data=None, content_source=None):
@@ -711,24 +713,46 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_te
     ]
     total = len(slides)
 
-    # Build system prompt with tenant's design rules
+    # Build one system prompt per section, not one full-project prompt for the
+    # whole deck. A financial slide has no use for the market study or team.
     design_rules = build_design_rules(branding)
-    project_json = build_project_facts(project_data, branding.get('tenant_id'))
+    prompt_cache = {}
 
-    landmarks_matrix = _project_landmark_rows(project_data, 'nearby_landmarks_data', 'landmarks_matrix')
-    landmarks_note = ''
-    if landmarks_matrix:
-        landmarks_note = (
-            "إرشادات هامة لعرض المعالم:\n"
-            "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
-            "القائمة التالية هي المعالم المعتمدة فقط — نفس صفوف خريطة المعالم وترتيب دبابيسها. "
-            "اعرضها كلها كما هي؛ ممنوع إضافة معلم غير مدرج أو حذف مدرج أو تعديل الأرقام:\n" +
-            json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
-        )
-    timeline_note = _timeline_data_note(project_data)
-    financial_note = _financial_data_note(project_data)
+    def _system_prompt_for_slide(slide):
+        section_key = str(slide.get('section_key') or slide.get('sectionKey') or '').strip()
+        scope_keys = (section_key,) if section_key else ()
+        cache_key = section_key or '__full__'
+        cached = prompt_cache.get(cache_key)
+        if cached:
+            return cached
+        fact_sections = context_contracts.fact_section_keys(scope_keys) if scope_keys else None
+        if fact_sections:
+            project_json = build_project_facts(
+                project_data, branding.get('tenant_id'), section_keys=fact_sections)
+        else:
+            project_json = build_project_facts(project_data, branding.get('tenant_id'))
 
-    system_prompt = f"""{design_rules}
+        landmarks_matrix = _project_landmark_rows(
+            project_data, 'nearby_landmarks_data', 'landmarks_matrix')
+        landmarks_note = ''
+        if landmarks_matrix and context_contracts.note_in_scope(scope_keys, 'landmarks'):
+            landmarks_note = (
+                "إرشادات هامة لعرض المعالم:\n"
+                "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
+                "القائمة التالية هي المعالم المعتمدة فقط — نفس صفوف خريطة المعالم وترتيب دبابيسها. "
+                "اعرضها كلها كما هي؛ ممنوع إضافة معلم غير مدرج أو حذف مدرج أو تعديل الأرقام:\n" +
+                json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
+            )
+        timeline_note = (_timeline_data_note(project_data)
+                         if context_contracts.note_in_scope(scope_keys, 'timeline') else '')
+        financial_note = (_financial_data_note(project_data)
+                          if context_contracts.note_in_scope(scope_keys, 'financial') else '')
+        components_note = ''
+        if ((not financial_note or financial_note == FINANCIAL_ABSENT_NOTE)
+                and context_contracts.scope_needs_components(scope_keys)):
+            components_note = _project_components_note(project_data)
+
+        prompt = f"""{design_rules}
 
 ## بيانات المشروع
 {project_json}
@@ -740,6 +764,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_te
 {landmarks_note}
 {timeline_note}
 {financial_note}
+{components_note}
 
 ## قواعد عامة
 - كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)
@@ -750,6 +775,8 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_te
 - ممنوع base64 أو روابط صور خارجية
 - """ + NO_STREET_VIEW_RULE + """
 """
+        prompt_cache[cache_key] = prompt
+        return prompt
 
     results = [None] * total
 
@@ -758,7 +785,7 @@ def generate_all_slides(slide_plan, project_data, branding, images_info, call_te
         for i, slide in enumerate(slides):
             future = executor.submit(
                 generate_single_slide,
-                system_prompt, slide, i + 1, total, branding, call_text_fn,
+                _system_prompt_for_slide(slide), slide, i + 1, total, branding, call_text_fn,
                 project_data=project_data
             )
             future_to_idx[future] = i

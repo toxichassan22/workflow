@@ -76,6 +76,32 @@ class ContextContractTests(unittest.TestCase):
         self.assertNotIn('MARKET_MARKER', prompt)
         self.assertNotIn('TEAM_MARKER', prompt)
 
+    def test_batch_generation_scopes_each_slide_system_prompt(self):
+        prompts = []
+
+        def fake_call(system_prompt, user_message, **_kwargs):
+            prompts.append(system_prompt)
+            return {'choices': [{'message': {'content': (
+                '<div class="slide" style="width:1280px;height:720px;direction:rtl;'
+                'font-family:sans-serif;"><h1>عنوان</h1><p>نص</p></div>'
+            )}}]}
+
+        slide_engine.generate_all_slides(
+            {'slides': [
+                {'title': 'Team', 'type': 'content', 'section_key': 'team'},
+                {'title': 'Market', 'type': 'content', 'section_key': 'market'},
+            ]},
+            PROJECT,
+            {'primary_color': '#123456'},
+            {},
+            fake_call,
+        )
+
+        self.assertTrue(any('TEAM_MARKER' in prompt and 'MARKET_MARKER' not in prompt
+                            for prompt in prompts))
+        self.assertTrue(any('MARKET_MARKER' in prompt and 'TEAM_MARKER' not in prompt
+                            for prompt in prompts))
+
     def test_note_scopes_keep_financial_report_out_of_visual_sections(self):
         self.assertTrue(context_contracts.note_in_scope(('financial',), 'financial'))
         self.assertTrue(context_contracts.note_in_scope(('section-financial-calc',), 'timeline'))
