@@ -1,7 +1,5 @@
 from numeric_precision import format_precise_number
 
-import hotel_stay
-
 
 def _agent_run_accepts(agent_module, param):
     """True when ``run_browse_agent`` declares ``param`` (or ``**kwargs``).
@@ -143,7 +141,6 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         return
     offer_lang = slide_engine.resolve_offer_lang(data)
     en = offer_lang == 'en'
-    check_in, check_out = hotel_stay.booking_stay_window()
     city = str(payload.get('city') or '').strip() or 'السعودية'
     operation = str(row.get('operation_type') or '').strip() or ('Other' if en else 'أخرى')
     price_options = '، '.join(market_study.price_types_for_operation(operation, offer_lang))
@@ -184,17 +181,12 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         hotel_rule = (
             f'تحقق من الفندق على Booking.com فقط وطابق تصنيف {stars} نجوم المختار. '
             'اعتمد صفحة الفندق التفصيلية ذات المسار /hotel/، لا صفحات الحي أو المدينة أو نتائج البحث العامة. '
-            f'صفحة الفندق لا تعرض السعر ولا مساحة الغرفة قبل تحديد الإقامة، لذلك افتحها بتواريخ '
-            f'الدخول {check_in.isoformat()} والخروج {check_out.isoformat()}، غرفة واحدة، بالغان، '
-            'دون أطفال، بالعملة SAR؛ أضف معاملات checkin وcheckout وgroup_adults=2 '
-            'وgroup_children=0 وno_rooms=1 وselected_currency=SAR إلى الرابط. '
-            'إذا بقيت الأسعار مخفية فاضغط زر «عرض الأسعار»/Show prices لكل نوع غرفة. '
-            'اقرأ السعر وعدد النجوم ومساحة الغرفة بالمتر المربع من تفاصيل الغرفة أو صفحة الغرفة، '
-            'ولا تستخدم مساحة الفندق أو البرج أو الأرض. '
             'إذا لم يظهر السعر أو النجوم في النتائج، افتح Booking.com بأدوات المتصفح '
             'التفاعلية، وافحص عناصر الصفحة ثم اكتب المدينة والحي في خانة الوجهة ونفّذ '
             'البحث بالضغط على العنصر المناسب. اقرأ السعر والتصنيف من صفحة الفندق نفسها، '
-            'ولا تخمّن السعر أو تواريخ الإقامة. ')
+            'ولا تخمّن السعر أو تواريخ الإقامة. '
+            'إذا كانت الصفحة تحديًا أمنيًا أو نسخة بوت بلا أسعار، توقف فورًا ولا تُعد المحاولة؛ '
+            'أعد النتيجة بدون سعر واذكر أن الصفحة محجوبة. ')
     prompt = (
         f'ابحث في الويب عن المشروع العقاري «{name}» في مدينة {city} بالسعودية.\n'
         f'أرجع JSON فقط: {{"exists": true/false, "official_url": "{official_page_shape}", '
@@ -421,16 +413,6 @@ def _verify_row_from_pool(row, payload, data, evidence_pool):
     _fill_competitor_area_from_listings(
         row, matched + market_study.competitor_source_urls(row),
         pages=list(matched_pages.values()))
-    has_price = any(str(row.get(key) or '').strip()
-                    for key in ('price_value', 'price_from', 'price_to'))
-    has_area = (str(row.get('area_sqm') or '').strip()
-                or str(row.get('area_from') or '').strip())
-    if _hotel_competitor_row(row) and not (has_price and has_area):
-        # A stored Booking page can predate the stay or omit the room size;
-        # the browser pass opens it with dates and can read the room details.
-        # The pool evidence still counts if that pass finds nothing new.
-        row['_pool_verified_incomplete'] = True
-        return False
     row['verify_state'] = 'verified'
     if not _manual_source_locked(row):
         row['source_urls'] = list(dict.fromkeys(
@@ -589,22 +571,15 @@ def _verify_competitor_row_pooled(row, payload, data, tenant_id=None,
     for rows still without any evidence. An expired job deadline is an honest
     search_not_run — the row never silently skipped its verdict."""
     if _market_deadline_hit(deadline):
-        row.pop('_pool_verified_incomplete', None)
         row['verify_state'] = 'search_not_run'
         row['verify_provider_error'] = 'deadline_exceeded'
         return
     if evidence_pool is not None and _verify_row_deterministic(
             row, payload, data, evidence_pool, deadline):
-        row.pop('_pool_verified_incomplete', None)
         return
     _verify_competitor_row(row, payload, data, tenant_id=tenant_id,
                            evidence_pool=evidence_pool, deadline=deadline,
                            session=_verify_agent_session(), on_event=on_event)
-    if (row.pop('_pool_verified_incomplete', False)
-            and row.get('verify_state') != 'verified'):
-        # The enrichment pass failed, but the pool already matched this row —
-        # keep its verified verdict instead of downgrading it to a search miss.
-        row['verify_state'] = 'verified'
 
 
 def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,

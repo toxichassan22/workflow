@@ -206,16 +206,13 @@ class CompetitorPromptStayTests(unittest.TestCase):
             'comparisonTypes': [{'type': 'hotel', 'stars': '4'}],
         }
 
-    def test_hotel_prompt_pins_the_stay_and_room_size_rules(self):
+    def test_hotel_prompt_stops_on_a_blocked_page_and_keeps_listing_names(self):
         prompt = market_study.build_competitors_user_prompt(
             self._payload(), [], mode='generate')
-        check_in, check_out = hotel_stay.booking_stay_window()
-        self.assertIn(check_in.isoformat(), prompt)
-        self.assertIn(check_out.isoformat(), prompt)
-        self.assertIn('group_adults=2', prompt)
-        self.assertIn('selected_currency=SAR', prompt)
-        self.assertIn('عرض الأسعار', prompt)
-        self.assertIn('مساحة الغرفة', prompt)
+        self.assertIn('تحديًا أمنيًا', prompt)
+        self.assertIn('لا تُعد المحاولة', prompt)
+        self.assertIn('صفحة قوائم أو صفحة حي', prompt)
+        self.assertIn('source فارغ', prompt)
 
 
 class VerifiedAreaTests(unittest.TestCase):
@@ -278,7 +275,7 @@ class VerifiedAreaTests(unittest.TestCase):
                 'قاعة اجتماعات 300 م² وغرفة ديلوكس 40 م²')
         self.assertEqual(areas, [40.0])
 
-    def test_pool_hotel_without_area_is_sent_to_the_browser(self):
+    def test_pool_hotel_without_area_stays_verified_from_stored_evidence(self):
         page = {
             'url': HOTEL_URL,
             'title': 'فندق أسيال',
@@ -293,8 +290,8 @@ class VerifiedAreaTests(unittest.TestCase):
         with self.app.app_context():
             verified = self.module._verify_row_from_pool(
                 row, {'city': 'جدة'}, {}, Pool())
-        self.assertFalse(verified)
-        self.assertNotEqual(row.get('verify_state'), 'verified')
+        self.assertTrue(verified)
+        self.assertEqual(row.get('verify_state'), 'verified')
 
     def test_retrieved_page_room_sizes_become_an_area_range(self):
         page = {
@@ -310,7 +307,7 @@ class VerifiedAreaTests(unittest.TestCase):
         self.assertEqual(row['area_mode'], 'range')
         self.assertEqual((row['area_from'], row['area_to']), ('32', '48'))
 
-    def test_expansion_hotel_prompt_carries_the_same_stay(self):
+    def test_expansion_hotel_prompt_stops_on_a_blocked_page(self):
         axes = market_study.project_competitor_axes({
             'comparisonTypes': [{'type': 'hotel', 'stars': 4}],
         })
@@ -321,12 +318,10 @@ class VerifiedAreaTests(unittest.TestCase):
                  'projectType': 'فندقي'},
                 axes, axes, [], offer_lang='ar')
         self.assertEqual(len(tasks), 1)
-        check_in, check_out = hotel_stay.booking_stay_window()
-        self.assertIn(check_in.isoformat(), tasks[0]['prompt'])
-        self.assertIn(check_out.isoformat(), tasks[0]['prompt'])
-        self.assertIn('group_adults=2', tasks[0]['prompt'])
+        self.assertIn('تحديًا أمنيًا', tasks[0]['prompt'])
+        self.assertIn('لا تُعد المحاولة', tasks[0]['prompt'])
 
-    def test_verification_prompt_asks_for_the_same_stay_and_area(self):
+    def test_verification_prompt_asks_for_area_and_stops_when_blocked(self):
         captured = {}
 
         def fake_call(_system, user, *_args, **_kwargs):
@@ -344,10 +339,8 @@ class VerifiedAreaTests(unittest.TestCase):
         with self.app.app_context(), \
                 patch.object(self.module, '_browse_agent_call', side_effect=fake_call):
             self.module._verify_competitor_row(row, {'city': 'جدة'}, {})
-        check_in, check_out = hotel_stay.booking_stay_window()
-        self.assertIn(check_in.isoformat(), captured['prompt'])
-        self.assertIn(check_out.isoformat(), captured['prompt'])
         self.assertIn('area_sqm', captured['prompt'])
+        self.assertIn('تحديًا أمنيًا', captured['prompt'])
         self.assertEqual(row.get('area_sqm'), '40')
 
 

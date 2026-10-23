@@ -613,8 +613,11 @@ class BrowserWorker:
             result['text'] = _clean_text(page.evaluate(_EXTRACT_JS))
         except Exception:
             pass
-        if len(result['text'] or '') < 1500 and (
-                _challenge_shell(page) or not (result['text'] or '').strip()):
+        # Only a real Chrome attached over CDP can solve the WAF challenge;
+        # waiting on the bundled Chromium just burns the job's budget.
+        if (len(result['text'] or '') < 1500
+                and getattr(self, '_using_cdp', False)
+                and _challenge_shell(page)):
             deadline = time.time() + _CHALLENGE_WAIT_SECONDS
             previous = result['text'] or ''
             stable = 0
