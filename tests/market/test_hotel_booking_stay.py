@@ -337,7 +337,7 @@ class VerifiedAreaTests(unittest.TestCase):
         self.assertIn('تحديًا أمنيًا', tasks[0]['prompt'])
         self.assertIn('لا تُعد المحاولة', tasks[0]['prompt'])
 
-    def test_verification_prompt_uses_booking_search_not_page_text(self):
+    def test_verification_prompt_uses_booking_property_pages(self):
         captured = {}
 
         def fake_call(_system, user, *_args, **_kwargs):
@@ -357,8 +357,6 @@ class VerifiedAreaTests(unittest.TestCase):
             self.module._verify_competitor_row(row, {'city': 'جدة'}, {})
         self.assertIn('area_sqm', captured['prompt'])
         self.assertIn('تحديًا أمنيًا', captured['prompt'])
-        self.assertIn('searchresults.html', captured['prompt'])
-        self.assertIn('## BOOKING_SEARCH ##', captured['prompt'])
         self.assertFalse(row.get('area_sqm'))
 
 

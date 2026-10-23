@@ -13,7 +13,6 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 _WEB_BROWSE = ROOT / 'modules' / 'web_browse'
@@ -22,7 +21,6 @@ for _path in (str(ROOT), str(_WEB_BROWSE)):
         sys.path.insert(0, _path)
 
 import booking_rooms  # noqa: E402
-import booking_search  # noqa: E402
 import db  # noqa: E402
 import market_study  # noqa: E402
 
@@ -38,70 +36,6 @@ def _hotel_row(**extra):
     }
     row.update(extra)
     return row
-
-
-class BookingSearchUrlTests(unittest.TestCase):
-
-    def test_search_url_carries_city_stay_currency_and_stars(self):
-        url = booking_search.build_search_url('جدة', 'النرجس', stars=4)
-        parsed = urlsplit(url)
-        params = parse_qs(parsed.query)
-        self.assertEqual(parsed.path, '/searchresults.html')
-        self.assertEqual(params['ss'], ['النرجس, جدة'])
-        self.assertEqual(params['dest_type'], ['city'])
-        self.assertEqual(params['selected_currency'], ['SAR'])
-        self.assertEqual(params['nflt'], ['class=4'])
-        self.assertIn('checkin', params)
-        self.assertIn('checkout', params)
-
-    def test_search_url_accepts_a_hotel_name_query(self):
-        url = booking_search.build_search_url('جدة', query='WA Hotel, جدة')
-        self.assertEqual(
-            parse_qs(urlsplit(url).query)['ss'], ['WA Hotel, جدة'])
-
-    def test_search_url_detection(self):
-        self.assertTrue(booking_search.is_booking_search_url(
-            'https://www.booking.com/searchresults.html?ss=Jeddah'))
-        self.assertFalse(booking_search.is_booking_search_url(BOOKING_URL))
-        self.assertFalse(booking_search.is_booking_search_url(
-            'https://www.booking.com/district/sa/jeddah.html'))
-
-
-class BookingSearchExtractionTests(unittest.TestCase):
-
-    class _Page:
-        def __init__(self, data):
-            self._data = data
-
-        def evaluate(self, _script):
-            return self._data
-
-    def test_cards_are_extracted_and_non_booking_urls_dropped(self):
-        page = self._Page({
-            'found': True,
-            'url': 'https://www.booking.com/searchresults.html?ss=Jeddah',
-            'title': 'Booking.com: Hotels in Jeddah',
-            'hotels': [
-                {'name': 'Areen Almatar Serviced Apartments, مكان الإقامة',
-                 'url': 'https://www.booking.com/hotel/sa/fndq-ryn-lmtr.ar.html?checkin=2026-11-06',
-                 'price_text': 'SAR 484', 'review': '9.0',
-                 'location': 'Jeddah', 'text': 'Standard Twin Room'},
-                {'name': 'Other Hotel', 'url': 'https://www.agoda.com/x',
-                 'price_text': 'SAR 1', 'review': '', 'location': '', 'text': ''},
-            ],
-        })
-        data = booking_search.extract_search_results(page)
-        self.assertEqual(len(data['hotels']), 1)
-        self.assertEqual(data['hotels'][0]['name'],
-                         'Areen Almatar Serviced Apartments')
-        block = booking_search.format_search_block(data)
-        self.assertIn('## BOOKING_SEARCH ##', block)
-        self.assertIn(
-            'https://www.booking.com/hotel/sa/fndq-ryn-lmtr.ar.html', block)
-
-    def test_empty_search_returns_none(self):
-        page = self._Page({'found': False, 'hotels': []})
-        self.assertIsNone(booking_search.extract_search_results(page))
 
 
 class BookingOnlyValueTests(unittest.TestCase):
@@ -213,18 +147,18 @@ class BookingOnlyValueTests(unittest.TestCase):
         self.assertFalse((ROOT / 'app_parts' / '17_market'
                           / '17d_competitor_hotel_fallback.py').exists())
 
-    def test_hotel_prompt_points_to_booking_search(self):
+    def test_hotel_prompt_uses_agent_search_and_booking_property_pages(self):
         prompt = market_study.build_competitors_user_prompt({
             'city': 'جدة', 'district': 'النرجس', 'projectType': 'فندقي',
             'competitorScope': {'mode': 'district'},
             'comparisonTypes': [{'type': 'hotel', 'stars': 4}],
         }, [])
-        self.assertIn('searchresults.html', prompt)
-        self.assertIn('## BOOKING_SEARCH ##', prompt)
-        self.assertIn('لا تستخدم SearXNG', prompt)
-        self.assertIn('Booking.com فقط', prompt)
+        self.assertIn('SearXNG', prompt)
+        self.assertIn('/hotel/', prompt)
+        self.assertIn('Booking.com', prompt)
+        self.assertNotIn('searchresults.html', prompt)
 
-    def test_verification_prompt_points_to_booking_search(self):
+    def test_verification_prompt_uses_booking_property_pages(self):
         captured = {}
 
         def fake_call(_system, user, *_args, **_kwargs):
@@ -243,10 +177,10 @@ class BookingOnlyValueTests(unittest.TestCase):
         with self.app.app_context(), \
                 patch.object(self.module, '_browse_agent_call', side_effect=fake_call):
             self.module._verify_competitor_row(row, {'city': 'جدة'}, {})
-        self.assertIn('searchresults.html', captured['prompt'])
-        self.assertIn('## BOOKING_SEARCH ##', captured['prompt'])
         self.assertIn('WA Hotel Jeddah', captured['prompt'])
-        self.assertIn('Booking.com فقط', captured['prompt'])
+        self.assertIn('/hotel/', captured['prompt'])
+        self.assertIn('Booking.com', captured['prompt'])
+        self.assertNotIn('searchresults.html', captured['prompt'])
 
 
 if __name__ == '__main__':

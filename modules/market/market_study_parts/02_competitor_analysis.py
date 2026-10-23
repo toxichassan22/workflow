@@ -1,6 +1,3 @@
-import booking_search
-
-
 def canonical_index_source_url(url, operation=''):
     """Map a portal homepage to the dataset page that actually carries its data."""
     value = _norm(url)
@@ -544,12 +541,12 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
     )
     search_protocol = (
         'بروتوكول البحث الإلزامي:\n'
-        '1. لغير الفنادق: ابحث أولًا عبر SearXNG عن قائمة المنافسين داخل النطاق الجغرافي المحدد فقط: '
+        '1. ابحث أولًا عبر SearXNG عن قائمة المنافسين داخل النطاق الجغرافي المحدد فقط: '
         f'{scope_label}. ابحث في الأنواع المختارة فقط: {selected_scope_text}. '
         'صفحات القوائم ومقالات «أفضل المجمعات/المشاريع» ومواقع المطوّرين هي التي تسمّي المشاريع '
         'بأسمائها. اسم كل منافس يجب أن يظهر حرفيًا في صفحة مسترجعة، ورابط تلك الصفحة '
         'يوضع في source_urls للصف.\n'
-        '2. لغير الفنادق: استخدم SearXNG وحده للبحث. ثم نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي '
+        '2. استخدم SearXNG وحده للبحث. ثم نفّذ بحثًا منفصلًا لكل منافس على حدة عن سعره الفعلي '
         '(سعر البيع أو المتر أو الإيجار أو سعر الليلة أو ADR حسب نوع التشغيل) '
         'باستخدام اسم المنافس مع المدينة. أي صفحة مسترجعة تذكر المنافس بالاسم '
         'وتحمل بياناته مصدر مقبول لصفّه — للفنادق استخدم صفحة الفندق التفصيلية على '
@@ -619,31 +616,6 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'أنواع السعر المسموحة حسب نوع التشغيل:\n'
         f'{price_types}\n'
     )
-    comparison = payload.get('comparisonTypes') or payload.get('comparison_types') or []
-    has_hotel = any(
-        str((item or {}).get('type') or '').casefold() in ('hotel', 'فندقي')
-        for item in comparison if isinstance(item, dict))
-    if not has_hotel:
-        has_hotel = 'فندقي' in str(payload.get('projectType') or payload.get('project_type') or '')
-    if has_hotel:
-        stars = next(
-            (item.get('stars') for item in comparison
-             if isinstance(item, dict)
-             and str(item.get('type') or '').casefold() in ('hotel', 'فندقي')
-             and item.get('stars') not in (None, '')), None)
-        search_url = booking_search.build_search_url(
-            payload.get('city'), payload.get('district'), stars=stars)
-        search_protocol = (
-            'تعليمات خاصة بالفنادق (Booking.com فقط):\n'
-            f'ابدأ بصفحة نتائج Booking.com التالية: {search_url}\n'
-            'اختر الفنادق المطابقة للنجوم والنطاق من كروت النتائج (## BOOKING_SEARCH ##). '
-            'افتح صفحة الفندق التفصيلية /hotel/ لكل مرشح واستخدم قسم ## BOOKING_RATE ## '
-            'للسعر الأصلي قبل الخصم ومساحة الغرفة. لا تستخدم SearXNG أو محركات بحث عامة '
-            'أو مواقع أخرى في بيانات الفنادق: لا بحث باسم الفندق في Google، ولا مصادر بديلة '
-            'ولا موقع الفندق أو المشغل أو أي منصة أخرى. إذا لم تجد الفندق في نتائج Booking '
-            'اترك السعر والمساحة فارغين ولا تملأ من مصدر آخر.\n'
-            + search_protocol
-        )
     hotel_stars_shape = ('hotel star rating from 1 to 5, or blank for non-hotels'
                          if en else 'عدد النجوم من 1 إلى 5 أو فارغ لغير الفندق')
     competitor_city_shape = ('copy the project city exactly, without translation'
