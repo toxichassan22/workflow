@@ -169,6 +169,8 @@ def _tenant_active_package_id(conn, tenant_id):
 
 def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
                           prompt_tokens=0, completion_tokens=0, total_tokens=0,
+                          cached_tokens=0, reasoning_tokens=0,
+                          duration_ms=None, context_hash=None, context_chars=None,
                           cost_usd=None, generation_id=None,
                           draft_id=None, presentation_id=None,
                           cost_source=None, attempt_status=None,
@@ -204,21 +206,29 @@ def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
     now_text = _ai_usage_now_text()
     has_package_col = 'package_id' in cols
     if {'cost_source', 'attempt_status', 'reconcile_attempts', 'next_retry_at',
-        'updated_at', 'response_cost_usd', 'generation_cost_usd', 'cost_raw'} <= cols:
+        'updated_at', 'response_cost_usd', 'generation_cost_usd', 'cost_raw',
+        'cached_tokens', 'reasoning_tokens', 'duration_ms', 'context_hash',
+        'context_chars'} <= cols:
         conn.execute(
             '''INSERT INTO ai_usage_events
                (id, tenant_id, draft_id, presentation_id, flow, model, status,
                 prompt_tokens, completion_tokens, total_tokens, cost_usd, generation_id,
                 cost_source, attempt_status, reconcile_attempts, next_retry_at, updated_at,
-                response_cost_usd, generation_cost_usd, cost_raw{})
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?{})'''.format(
+                response_cost_usd, generation_cost_usd, cost_raw,
+                cached_tokens, reasoning_tokens, duration_ms, context_hash, context_chars{})
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?{})'''.format(
                 ', package_id' if has_package_col else '',
                 ', ?' if has_package_col else ''),
             (event_id, tenant_id, draft_id, presentation_id, flow or 'other', model,
              status or 'ok', int(prompt_tokens or 0), int(completion_tokens or 0),
              int(total_tokens or 0), cost_value, generation_id,
              cost_source, derived, int(reconcile_attempts or 0), next_retry_at, now_text,
-             response_cost_usd, generation_cost_usd, cost_raw)
+             response_cost_usd, generation_cost_usd, cost_raw,
+             int(cached_tokens or 0), int(reasoning_tokens or 0),
+             int(duration_ms) if duration_ms is not None else None,
+             context_hash,
+             int(context_chars) if context_chars is not None else None)
             + ((package_id,) if has_package_col else ())
         )
     else:
@@ -235,7 +245,8 @@ def record_ai_usage_event(tenant_id, model, flow='other', status='ok',
     return event_id
 
 
-def begin_ai_usage_attempt(tenant_id, model, flow='other', draft_id=None, presentation_id=None):
+def begin_ai_usage_attempt(tenant_id, model, flow='other', draft_id=None, presentation_id=None,
+                           context_hash=None, context_chars=None):
     """Create the single unified row for one real provider attempt before sending.
 
     The same row is later settled with the response, so one attempt never
@@ -244,6 +255,7 @@ def begin_ai_usage_attempt(tenant_id, model, flow='other', draft_id=None, presen
     return record_ai_usage_event(
         tenant_id, model or 'unknown', flow=flow or 'other', status='ok',
         prompt_tokens=0, completion_tokens=0, total_tokens=0,
+        context_hash=context_hash, context_chars=context_chars,
         cost_usd=None, generation_id=None,
         draft_id=draft_id, presentation_id=presentation_id,
         cost_source=None, attempt_status='in_flight',
@@ -252,6 +264,8 @@ def begin_ai_usage_attempt(tenant_id, model, flow='other', draft_id=None, presen
 
 def update_ai_usage_attempt(event_id, status=None, prompt_tokens=None,
                             completion_tokens=None, total_tokens=None,
+                            cached_tokens=None, reasoning_tokens=None,
+                            duration_ms=None, context_hash=None, context_chars=None,
                             generation_id=None, cost_usd=None, cost_source=None,
                             cost_raw=None, response_cost_usd=None,
                             generation_cost_usd=None, attempt_status=None,
@@ -270,13 +284,29 @@ def update_ai_usage_attempt(event_id, status=None, prompt_tokens=None,
         assignments.append('status = ?')
         params.append(status)
     for key, value in (('prompt_tokens', prompt_tokens), ('completion_tokens', completion_tokens),
-                       ('total_tokens', total_tokens)):
-        if value is not None:
+                       ('total_tokens', total_tokens), ('cached_tokens', cached_tokens),
+                       ('reasoning_tokens', reasoning_tokens)):
+        if value is not None and key in cols:
             try:
                 assignments.append(f'{key} = ?')
                 params.append(int(value or 0))
             except (TypeError, ValueError):
                 pass
+    if duration_ms is not None and 'duration_ms' in cols:
+        try:
+            assignments.append('duration_ms = ?')
+            params.append(int(duration_ms))
+        except (TypeError, ValueError):
+            pass
+    if context_hash is not None and 'context_hash' in cols:
+        assignments.append('context_hash = ?')
+        params.append(str(context_hash))
+    if context_chars is not None and 'context_chars' in cols:
+        try:
+            assignments.append('context_chars = ?')
+            params.append(int(context_chars))
+        except (TypeError, ValueError):
+            pass
     if generation_id is not None:
         assignments.append('generation_id = ?')
         params.append(generation_id or None)

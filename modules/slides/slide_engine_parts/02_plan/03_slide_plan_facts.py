@@ -1,5 +1,8 @@
 
 
+import context_contracts
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Slide Plan Proposal
 # ─────────────────────────────────────────────────────────────────────────────
@@ -192,15 +195,23 @@ def _plan_asset_note(images):
     return '\n\n## وسائط العرض المتوفرة وتوزيعها الإلزامي\n' + json.dumps(summary, ensure_ascii=False, indent=2)
 
 
-def build_slide_plan_prompt(project_data, branding, tenant_id=None, images=None, offer_lang=None):
+def build_slide_plan_prompt(project_data, branding, tenant_id=None, images=None, offer_lang=None,
+                            section_keys=None):
     """Build the prompt for AI to propose a slide plan.
 
     The plan decides which slides exist, so it has to see every section. Cutting the payload at
     6,000 characters meant the market study, the executive content and the team never reached the
     planner, and it could not propose slides for facts it was never shown.
+
+    ``section_keys`` is a section-mode scope (deck or project keys). The full
+    deck leaves it ``None`` so the historical brief stays byte-identical.
     """
     lang = resolve_offer_lang(project_data, offer_lang)
-    project_json = build_project_facts(project_data, tenant_id)
+    fact_sections = context_contracts.fact_section_keys(section_keys)
+    if fact_sections:
+        project_json = build_project_facts(project_data, tenant_id, section_keys=fact_sections)
+    else:
+        project_json = build_project_facts(project_data, tenant_id)
 
     min_slides, max_slides, _default_count = resolve_slide_bounds(branding)
 
@@ -234,15 +245,24 @@ def build_slide_plan_prompt(project_data, branding, tenant_id=None, images=None,
     asset_note = _plan_asset_note(images)
     if asset_note:
         prompt += asset_note
-    location_note = _location_data_note(project_data)
-    if location_note:
-        prompt += location_note
-    timeline_note = _timeline_data_note(project_data)
-    if timeline_note:
-        prompt += timeline_note
-    financial_note = _financial_data_note(project_data)
-    if financial_note:
-        prompt += financial_note
+    if context_contracts.note_in_scope(section_keys, 'location'):
+        location_note = _location_data_note(project_data)
+        if location_note:
+            prompt += location_note
+    if context_contracts.note_in_scope(section_keys, 'timeline'):
+        timeline_note = _timeline_data_note(project_data)
+        if timeline_note:
+            prompt += timeline_note
+    financial_note = ''
+    if context_contracts.note_in_scope(section_keys, 'financial'):
+        financial_note = _financial_data_note(project_data)
+        if financial_note:
+            prompt += financial_note
+    if ((not financial_note or financial_note == FINANCIAL_ABSENT_NOTE)
+            and context_contracts.scope_needs_components(section_keys)):
+        components_note = _project_components_note(project_data)
+        if components_note:
+            prompt += components_note
     return prompt
 
 

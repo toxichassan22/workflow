@@ -1,4 +1,7 @@
 
+import context_contracts
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Helper: Generate PDF with Playwright
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -682,14 +685,28 @@ def _get_images_info(images, project_data=None):
     
     return info
 
-def build_system_prompt(project_data, images_info, design_rules=None, offer_lang=None):
+
+def build_system_prompt(project_data, images_info, design_rules=None, offer_lang=None,
+                        section_keys=None):
     """Build the shared system prompt ONCE for all slides."""
     if design_rules is None:
         design_rules = build_design_rules({})
     lang = slide_engine.resolve_offer_lang(project_data, offer_lang)
-    project_json = slide_engine.build_project_facts(project_data, getattr(g, 'tenant_id', None))
-    timeline_note = slide_engine._timeline_data_note(project_data)
-    financial_note = slide_engine._financial_data_note(project_data)
+    tenant_id = getattr(g, 'tenant_id', None)
+    fact_sections = context_contracts.fact_section_keys(section_keys)
+    if fact_sections:
+        project_json = slide_engine.build_project_facts(
+            project_data, tenant_id, section_keys=fact_sections)
+    else:
+        project_json = slide_engine.build_project_facts(project_data, tenant_id)
+    timeline_note = (slide_engine._timeline_data_note(project_data)
+                     if context_contracts.note_in_scope(section_keys, 'timeline') else '')
+    financial_note = (slide_engine._financial_data_note(project_data)
+                      if context_contracts.note_in_scope(section_keys, 'financial') else '')
+    components_note = ''
+    if ((not financial_note or financial_note == slide_engine.FINANCIAL_ABSENT_NOTE)
+            and context_contracts.scope_needs_components(section_keys)):
+        components_note = slide_engine._project_components_note(project_data)
     prompt = f"""{design_rules}
 
 ## بيانات المشروع
@@ -698,7 +715,8 @@ def build_system_prompt(project_data, images_info, design_rules=None, offer_lang
 ## الصور المتوفرة
 {images_info}
 {timeline_note}
-{financial_note}"""
+{financial_note}
+{components_note}"""
     if lang == slide_engine.OFFER_LANG_ENGLISH:
         prompt += '\n\n' + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
     return prompt

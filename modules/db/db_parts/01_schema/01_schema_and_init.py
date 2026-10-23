@@ -455,6 +455,11 @@ def _create_tables(conn):
         prompt_tokens INTEGER DEFAULT 0,
         completion_tokens INTEGER DEFAULT 0,
         total_tokens INTEGER DEFAULT 0,
+        cached_tokens INTEGER DEFAULT 0,
+        reasoning_tokens INTEGER DEFAULT 0,
+        duration_ms INTEGER,
+        context_hash TEXT,
+        context_chars INTEGER,
         cost_usd REAL,
         generation_id TEXT,
         created_at TEXT DEFAULT (datetime('now')),
@@ -799,6 +804,11 @@ def _migrate_ai_usage_attempt_columns(conn):
         ('response_cost_usd', 'REAL'),
         ('generation_cost_usd', 'REAL'),
         ('cost_raw', 'TEXT'),
+        ('cached_tokens', 'INTEGER DEFAULT 0'),
+        ('reasoning_tokens', 'INTEGER DEFAULT 0'),
+        ('duration_ms', 'INTEGER'),
+        ('context_hash', 'TEXT'),
+        ('context_chars', 'INTEGER'),
     ):
         if column not in existing:
             conn.execute(f'ALTER TABLE ai_usage_events ADD COLUMN {column} {definition}')

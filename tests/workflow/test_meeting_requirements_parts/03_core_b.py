@@ -1531,4 +1531,6 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         # The batch path had its own copy of the 4,000-character cut.
         engine_source = read_module_source('slide_engine.py')
         self.assertNotIn("project_json[:4000]", engine_source)
-        self.assertEqual(engine_source.count('build_project_facts(project_data'), 3)
+        # The definition, the two whole-brief callers, and the section-scoped
+        # branch in build_slide_plan_prompt. None reintroduces a character cut.
+        self.assertEqual(engine_source.count('build_project_facts(project_data'), 4)

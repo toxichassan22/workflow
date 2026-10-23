@@ -5,6 +5,9 @@
 # draft and presentation. Token figures are copied verbatim from the provider
 # response. Dollar cost is resolved per generation id off the request path.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+import hashlib
+import time
+
 from numeric_precision import format_precise_number
 
 
@@ -59,6 +62,49 @@ def _usage_ctx_optional(flow, data=None, draft_id=None, presentation_id=None):
         tenant_id = None
     return _usage_ctx(flow, data, draft_id=draft_id, presentation_id=presentation_id,
                       tenant_id=tenant_id)
+
+
+def _context_text(value):
+    """Text-only view of a prompt part list; base64 images never enter the hash."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and item.get('text'):
+                parts.append(str(item['text']))
+        return '\n'.join(parts)
+    if isinstance(value, dict):
+        for key in ('text', 'content'):
+            if value.get(key):
+                return str(value[key])
+    return '' if value is None else str(value)
+
+
+def _messages_context_text(messages):
+    if not isinstance(messages, list):
+        return _context_text(messages)
+    return '\n'.join(_context_text(message.get('content'))
+                     for message in messages if isinstance(message, dict))
+
+
+def _with_context_metrics(usage_ctx, text):
+    """Attach prompt size/fingerprint to a metering context without mutating it."""
+    context = dict(usage_ctx or {})
+    text = str(text or '')
+    context['context_chars'] = len(text)
+    context['context_hash'] = (hashlib.sha256(text.encode('utf-8')).hexdigest()[:16]
+                               if text else '')
+    return context
+
+
+def _elapsed_ms(started):
+    try:
+        return max(0, int((time.perf_counter() - started) * 1000))
+    except Exception:
+        return None
 
 
 def _parse_openrouter_cost(value):
@@ -145,10 +191,23 @@ def _extract_openrouter_usage(data):
             except (TypeError, ValueError):
                 return 0
 
+        prompt_details = (usage.get('prompt_tokens_details')
+                          if isinstance(usage.get('prompt_tokens_details'), dict) else {})
+        completion_details = (usage.get('completion_tokens_details')
+                              if isinstance(usage.get('completion_tokens_details'), dict) else {})
         result = {
             'prompt_tokens': _num(usage.get('prompt_tokens')),
             'completion_tokens': _num(usage.get('completion_tokens')),
             'total_tokens': _num(usage.get('total_tokens')),
+            'cached_tokens': _num(
+                prompt_details.get('cached_tokens')
+                or usage.get('cached_tokens')
+                or usage.get('cache_read_input_tokens')
+                or usage.get('prompt_cache_hit_tokens')),
+            'reasoning_tokens': _num(
+                completion_details.get('reasoning_tokens')
+                or usage.get('reasoning_tokens')
+                or usage.get('thinking_tokens')),
         }
         cost, raw = _parse_openrouter_cost(usage.get('cost'))
         if cost is None:
@@ -182,16 +241,19 @@ def _begin_ai_attempt_record(usage_ctx, model):
     """Create the one row that owns a real provider attempt, before sending."""
     try:
         tenant_id, flow, draft_id, presentation_id = _resolve_ai_attempt_ctx(usage_ctx)
+        ctx = dict(usage_ctx or {})
         with app.app_context():
             return db.begin_ai_usage_attempt(
                 tenant_id, model or 'unknown', flow=flow,
-                draft_id=draft_id, presentation_id=presentation_id)
+                draft_id=draft_id, presentation_id=presentation_id,
+                context_hash=ctx.get('context_hash'),
+                context_chars=ctx.get('context_chars'))
     except Exception as exc:
         print(f"[AI-USAGE] begin attempt failed: {exc}")
         return None
 
 
-def _settle_ai_attempt_record(event_id, status, usage, generation_id):
+def _settle_ai_attempt_record(event_id, status, usage, generation_id, duration_ms=None):
     """Settle the same row created before sending. Never inserts a second row."""
     if not event_id:
         return
@@ -221,6 +283,9 @@ def _settle_ai_attempt_record(event_id, status, usage, generation_id):
                 prompt_tokens=usage.get('prompt_tokens', 0),
                 completion_tokens=usage.get('completion_tokens', 0),
                 total_tokens=usage.get('total_tokens', 0),
+                cached_tokens=usage.get('cached_tokens', 0),
+                reasoning_tokens=usage.get('reasoning_tokens', 0),
+                duration_ms=duration_ms,
                 generation_id=generation_id,
                 cost_usd=coerced, cost_source=cost_source, cost_raw=raw,
                 response_cost_usd=coerced if cost_source == 'response' else None,
@@ -240,10 +305,11 @@ def _settle_ai_attempt_record(event_id, status, usage, generation_id):
 
 
 def _record_ai_usage(usage_ctx, model, status='ok', usage=None, generation_id=None,
-                     cost_usd=None, cost_source=None):
+                     cost_usd=None, cost_source=None, duration_ms=None):
     """Persist one metered provider call. Never raises: metering must not break generation."""
     try:
         tenant_id, flow, draft_id, presentation_id = _resolve_ai_attempt_ctx(usage_ctx)
+        ctx = dict(usage_ctx or {})
         usage = dict(usage or {})
         direct_cost = cost_usd if cost_usd is not None else usage.get('cost_usd')
         direct_raw = usage.get('cost_raw')
@@ -267,6 +333,11 @@ def _record_ai_usage(usage_ctx, model, status='ok', usage=None, generation_id=No
                 prompt_tokens=usage.get('prompt_tokens', 0),
                 completion_tokens=usage.get('completion_tokens', 0),
                 total_tokens=usage.get('total_tokens', 0),
+                cached_tokens=usage.get('cached_tokens', 0),
+                reasoning_tokens=usage.get('reasoning_tokens', 0),
+                duration_ms=duration_ms,
+                context_hash=ctx.get('context_hash'),
+                context_chars=ctx.get('context_chars'),
                 cost_usd=coerced, cost_raw=direct_raw, cost_source=source,
                 response_cost_usd=coerced if source == 'response' else None,
                 generation_cost_usd=coerced if source in ('generation', 'review') else None,

@@ -1,4 +1,6 @@
 # OpenRouter chat and streaming request paths.
+import time
+
 
 def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_tokens=8000, model=None, timeout=300, reasoning_effort=None, response_format=None, provider=None, image_references=None, tools=None, plugins=None, max_tool_calls=None, tool_choice=None, usage_ctx=None, _credit_recovery_attempted=False, _force_platform=False):
     if not _force_platform:
@@ -50,6 +52,9 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
         payload["max_tool_calls"] = max_tool_calls
     if tool_choice:
         payload["tool_choice"] = tool_choice
+    usage_ctx = _with_context_metrics(
+        usage_ctx, _context_text(system_prompt) + '\n' + _context_text(user_content))
+    started = time.perf_counter()
     attempt_id = _begin_ai_attempt_record(usage_ctx, model_name)
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
@@ -57,19 +62,22 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
         text = response.text or ''
         if not text.strip():
             print(f"[OPENROUTER EMPTY BODY] status={response.status_code} model={model_name} cap={max_tokens}")
-            _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+            _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                      duration_ms=_elapsed_ms(started))
             return {"error": {"message": f"مزوّد الذكاء الاصطناعي رد بجسم فارغ (HTTP {response.status_code})"}}
         try:
             data = response.json()
         except Exception as json_err:
             print(f"[OPENROUTER UNPARSEABLE] status={response.status_code} model={model_name} json_err={json_err} body={text[:200]!r}")
-            _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+            _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                      duration_ms=_elapsed_ms(started))
             return {"error": {"message": f"استجابة المزوّد ليست JSON صالحًا (HTTP {response.status_code})"}}
         if response.status_code >= 400:
             error = data.get('error', {}) if isinstance(data, dict) else data
             print(f"[OPENROUTER HTTP ERROR] status={response.status_code} model={model_name} error={error}")
             generation_id, error_usage = _extract_openrouter_usage(data)
-            _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id)
+            _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id,
+                                      duration_ms=_elapsed_ms(started))
             fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
             if fatal is not None:
                 if (fatal.get('error_code') == 'INSUFFICIENT_CREDITS'
@@ -109,19 +117,23 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
                 return {"error": error}
             return {"error": error if isinstance(error, dict) else {"message": f"[{response.status_code}] {error}"}}
         generation_id, usage = _extract_openrouter_usage(data)
-        _settle_ai_attempt_record(attempt_id, 'ok', usage, generation_id)
+        _settle_ai_attempt_record(attempt_id, 'ok', usage, generation_id,
+                                  duration_ms=_elapsed_ms(started))
         return data
     except requests.exceptions.Timeout:
         print(f"[OPENROUTER TIMEOUT] model={model_name} cap={max_tokens} timeout={timeout}")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                  duration_ms=_elapsed_ms(started))
         return {"error": {"message": f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)"}}
     except requests.exceptions.ConnectionError as exc:
         print(f"[OPENROUTER CONNECTION] model={model_name} {exc}")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                  duration_ms=_elapsed_ms(started))
         return {"error": {"message": "انقطع الاتصال بالمزوّد قبل اكتمال الطلب"}}
     except Exception as exc:
         print(f"[OPENROUTER EXCEPTION] model={model_name} {exc}")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                  duration_ms=_elapsed_ms(started))
         return {"error": {"message": str(exc)}}
 
 
@@ -247,10 +259,14 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
         payload["tools"] = tools
     if plugins:
         payload["plugins"] = plugins
+    usage_ctx = _with_context_metrics(
+        usage_ctx, _context_text(system_prompt) + '\n' + _context_text(user_content))
+    started = time.perf_counter()
     attempt_id = _begin_ai_attempt_record(usage_ctx, model_name)
 
     def _fail(message):
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                  duration_ms=_elapsed_ms(started))
         return {"error": {"message": message}}
 
     def _delta_text(delta, *keys):
@@ -289,7 +305,8 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
             pass
         error = data.get('error', {}) if isinstance(data, dict) else data
         print(f"[OPENROUTER STREAM HTTP ERROR] status={response.status_code} model={model_name} error={error}")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                  duration_ms=_elapsed_ms(started))
         fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
         if fatal is not None:
             if (_ai_call_uses_tenant_key(usage_ctx)
@@ -334,7 +351,8 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
                 except Exception:
                     pass
                 print(f"[OPENROUTER STREAM CANCELLED] model={model_name}")
-                _settle_ai_attempt_record(attempt_id, 'ok', usage, generation_id)
+                _settle_ai_attempt_record(attempt_id, 'ok', usage, generation_id,
+                                          duration_ms=_elapsed_ms(started))
                 return run_control.cancelled_response(''.join(content_parts))
             if not line:
                 continue
@@ -396,7 +414,8 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
     if not final_text.strip() and reasoning_parts:
         final_text = ''.join(reasoning_parts)
     _, settled_usage = _extract_openrouter_usage({'id': generation_id, 'usage': usage})
-    _settle_ai_attempt_record(attempt_id, 'ok', settled_usage, generation_id)
+    _settle_ai_attempt_record(attempt_id, 'ok', settled_usage, generation_id,
+                              duration_ms=_elapsed_ms(started))
     return {"choices": [{"message": {"content": final_text}}], "usage": usage, "id": generation_id}
 
 

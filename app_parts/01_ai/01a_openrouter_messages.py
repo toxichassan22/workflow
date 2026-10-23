@@ -6,6 +6,7 @@
 # tool_calls, tool results) instead of the system+user pair that
 # call_openrouter_chat builds. Same provider plumbing: tenant key gate, usage
 # attempt record, and identical error semantics.
+import time
 
 
 def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
@@ -53,6 +54,8 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
         payload["plugins"] = plugins
     if max_tool_calls:
         payload["max_tool_calls"] = max_tool_calls
+    usage_ctx = _with_context_metrics(usage_ctx, _messages_context_text(messages))
+    started = time.perf_counter()
     attempt_id = _begin_ai_attempt_record(usage_ctx, model_name)
     try:
         response = requests.post(f"{OPENROUTER_BASE}/chat/completions", headers=headers, json=payload, timeout=timeout)
@@ -60,19 +63,22 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
         text = response.text or ''
         if not text.strip():
             print(f"[OPENROUTER EMPTY BODY] status={response.status_code} model={model_name} cap={max_tokens}")
-            _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+            _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                      duration_ms=_elapsed_ms(started))
             return {"error": {"message": f"مزوّد الذكاء الاصطناعي رد بجسم فارغ (HTTP {response.status_code})"}}
         try:
             data = response.json()
         except Exception as json_err:
             print(f"[OPENROUTER UNPARSEABLE] status={response.status_code} model={model_name} json_err={json_err} body={text[:200]!r}")
-            _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+            _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                      duration_ms=_elapsed_ms(started))
             return {"error": {"message": f"استجابة المزوّد ليست JSON صالحًا (HTTP {response.status_code})"}}
         if response.status_code >= 400:
             error = data.get('error', {}) if isinstance(data, dict) else data
             print(f"[OPENROUTER HTTP ERROR] status={response.status_code} model={model_name} error={error}")
             generation_id, error_usage = _extract_openrouter_usage(data)
-            _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id)
+            _settle_ai_attempt_record(attempt_id, 'error', error_usage, generation_id,
+                                      duration_ms=_elapsed_ms(started))
             fatal = _provider_credit_error_dict(error, response.status_code, usage_ctx)
             if fatal is not None:
                 if (_ai_call_uses_tenant_key(usage_ctx)
@@ -93,19 +99,23 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
                 return {"error": error}
             return {"error": error if isinstance(error, dict) else {"message": f"[{response.status_code}] {error}"}}
         generation_id, usage = _extract_openrouter_usage(data)
-        _settle_ai_attempt_record(attempt_id, 'ok', usage, generation_id)
+        _settle_ai_attempt_record(attempt_id, 'ok', usage, generation_id,
+                                  duration_ms=_elapsed_ms(started))
         return data
     except requests.exceptions.Timeout:
         print(f"[OPENROUTER TIMEOUT] model={model_name} cap={max_tokens} timeout={timeout}")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                  duration_ms=_elapsed_ms(started))
         return {"error": {"message": f"انتهت مهلة الاتصال بالمزوّد ({timeout} ثانية)"}}
     except requests.exceptions.ConnectionError as exc:
         print(f"[OPENROUTER CONNECTION] model={model_name} {exc}")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                  duration_ms=_elapsed_ms(started))
         return {"error": {"message": "انقطع الاتصال بالمزوّد قبل اكتمال الطلب"}}
     except Exception as exc:
         print(f"[OPENROUTER EXCEPTION] model={model_name} {exc}")
-        _settle_ai_attempt_record(attempt_id, 'error', {}, None)
+        _settle_ai_attempt_record(attempt_id, 'error', {}, None,
+                                  duration_ms=_elapsed_ms(started))
         return {"error": {"message": str(exc)}}
 
 

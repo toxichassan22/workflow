@@ -1394,6 +1394,45 @@ def _financial_data_note(project_data):
     return '\n'.join(lines)
 
 
+def _project_components_note(project_data):
+    """The component rows alone, for sections that need the program but not the report."""
+    if not isinstance(project_data, dict):
+        return ''
+    components = project_data.get('project_components_data')
+    if isinstance(components, str):
+        try:
+            components = json.loads(components)
+        except (TypeError, ValueError):
+            components = None
+    if not isinstance(components, list):
+        model = _parse_financial_dict(project_data.get('financial_study_model'))
+        dynamic_rows = model.get('dynamicRows') if isinstance(model.get('dynamicRows'), dict) else {}
+        components = (dynamic_rows.get('components')
+                      if isinstance(dynamic_rows.get('components'), list) else [])
+        if not components:
+            tables = model.get('tables') if isinstance(model.get('tables'), dict) else {}
+            components = (tables.get('componentsTable')
+                          if isinstance(tables.get('componentsTable'), list) else [])
+    if not isinstance(components, list) or not components:
+        return ''
+    clean = []
+    for row in components[:60]:
+        if not isinstance(row, dict):
+            continue
+        cleaned = {
+            key: value for key, value in row.items()
+            if key not in ('id', 'idx', 'ترتيب / حذف', 'ترتيب', 'حذف')
+            and value not in (None, '', [])
+        }
+        if cleaned:
+            clean.append(cleaned)
+    if not clean:
+        return ''
+    return ('\n\n## مكونات المشروع المعتمدة\n'
+            'هذه صفوف المكونات كما أدخلها العميل — استخدم أسماءها ومساحاتها ووحداتها كما هي:\n'
+            + json.dumps(clean, ensure_ascii=False, indent=2))
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Project facts for the prompt
 # ─────────────────────────────────────────────────────────────────────────────

@@ -232,13 +232,18 @@ def _contact_facts(project_data, tenant_id=None):
     return '### بيانات التواصل المعتمدة للخاتمة (انقل المتاح فقط كما هو)\n' + json.dumps(values, ensure_ascii=False, indent=2)
 
 
-def build_project_facts(project_data, tenant_id=None):
+def build_project_facts(project_data, tenant_id=None, section_keys=None):
     """Every collected fact, grouped by its section and labelled in Arabic.
 
     Replaces dumping the raw draft and cutting it at a character count.
+    ``section_keys`` limits the project field sections to the ones a deck
+    section actually renders. ``None`` keeps the historical full brief.
+    Unknown custom fields stay in every scope: they have no section mapping,
+    and silently dropping them is worse than carrying their bounded text.
     """
     if not isinstance(project_data, dict) or not project_data:
         return 'لا توجد بيانات مشروع.'
+    selected_sections = {str(key) for key in section_keys} if section_keys else None
     labels = _field_label_map()
     section_titles = {item['key']: item['label']
                       for item in (getattr(db, 'FIELD_SECTIONS', []) or [])}
@@ -268,6 +273,8 @@ def build_project_facts(project_data, tenant_id=None):
 
     blocks = []
     for section_key, title in section_titles.items():
+        if selected_sections is not None and section_key not in selected_sections:
+            continue
         # Same order as the form, so the brief reads the way the client filled it.
         rows = sorted(grouped.get(section_key) or [], key=lambda row: row[0])
         if rows:
@@ -276,10 +283,16 @@ def build_project_facts(project_data, tenant_id=None):
     if extra:
         blocks.append('### بيانات إضافية\n'
                       + '\n'.join(f'- {label}: {text}' for label, text in extra))
-    for note in (_team_facts(project_data, tenant_id),
-                 _market_study_facts(project_data),
-                 _executive_content_facts(project_data),
-                 _contact_facts(project_data, tenant_id)):
+    special_notes = []
+    if selected_sections is None or 'section-team' in selected_sections:
+        special_notes.append(_team_facts(project_data, tenant_id))
+    if selected_sections is None or 'section-market-study' in selected_sections:
+        special_notes.append(_market_study_facts(project_data))
+    if selected_sections is None or 'section-executive-content' in selected_sections:
+        special_notes.append(_executive_content_facts(project_data))
+    if selected_sections is None or 'contact' in selected_sections:
+        special_notes.append(_contact_facts(project_data, tenant_id))
+    for note in special_notes:
         if note:
             blocks.append(note)
     facts = '\n\n'.join(blocks) or 'لا توجد بيانات مشروع.'

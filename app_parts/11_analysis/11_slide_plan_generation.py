@@ -8,6 +8,7 @@ from slide_engine import (
     resolve_slide_bounds, build_fallback_plan, _suggest_design_style,
     _timeline_data_note, _financial_data_note,
 )
+import context_contracts
 
 
 PROJECT_SECTION_PRESENTATION_TARGETS = {
@@ -122,7 +123,9 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
             except ValueError:
                 pass
 
-    prompt = build_slide_plan_prompt(project_data, branding, tenant_id=tenant_id, images=images)
+    prompt = build_slide_plan_prompt(
+        project_data, branding, tenant_id=tenant_id, images=images,
+        section_keys=target_section_keys if section_mode else None)
     offer_lang = slide_engine.resolve_offer_lang(project_data)
     if section_mode:
         target_titles = '، '.join(slide_engine.section_title(key, offer_lang) for key in target_section_keys)
@@ -669,6 +672,17 @@ def api_generate_slide_single():
     total_slides = int(_total_slides_override) if isinstance(_total_slides_override, (int, float)) and _total_slides_override > 0 else len(slides)
     if slide_index < 0 or slide_index >= len(slides):
         return jsonify({'error': 'Invalid slide index'}), 400
+    _requested_slide = slides[slide_index] if isinstance(slides[slide_index], dict) else {}
+    scope_keys = []
+    _project_section_key = str(data.get('sectionKey') or '').strip()
+    if _project_section_key:
+        scope_keys.append(_project_section_key)
+    _slide_section_key = str(
+        _requested_slide.get('section_key') or _requested_slide.get('sectionKey') or ''
+    ).strip()
+    if _slide_section_key and _slide_section_key not in scope_keys:
+        scope_keys.append(_slide_section_key)
+    fact_sections = context_contracts.fact_section_keys(scope_keys) if scope_keys else None
     try:
         slide_num = int(data.get('_slideNum') or 0)
     except (TypeError, ValueError):
@@ -704,12 +718,18 @@ def api_generate_slide_single():
     design_rules = build_design_rules(branding)
     # Every collected fact, grouped by section. This used to be the raw draft cut at 4,000
     # characters, which silently dropped the market study, the executive content and the team.
-    project_json = slide_engine.build_project_facts(project_data, g.tenant_id)
+    # A single-slide request only receives the sections its slide renders; the
+    # full brief remains the fallback for an unknown or executive scope.
+    if fact_sections:
+        project_json = slide_engine.build_project_facts(
+            project_data, g.tenant_id, section_keys=fact_sections)
+    else:
+        project_json = slide_engine.build_project_facts(project_data, g.tenant_id)
 
     landmarks_matrix = slide_engine._project_landmark_rows(
         project_data, 'nearby_landmarks_data', 'landmarks_matrix')
     landmarks_note = ''
-    if landmarks_matrix:
+    if landmarks_matrix and context_contracts.note_in_scope(scope_keys, 'landmarks'):
         landmarks_note = (
             " إرشادات هامة لعرض المعالم:\n"
             "يجب عرض المسافة والوقت معاً لكل معلم بدون استثناء بالصيغة التاعية: (اسم المعلم - المسافة بالكم - الوقت بالدقائق)، مثل: 'ميدان السارية (1.5 كم - 5 دقائق)'.\n"
@@ -717,8 +737,14 @@ def api_generate_slide_single():
             "اعرضها كلها كما هي؛ ممنوع إضافة معلم غير مدرج أو حذف مدرج أو تعديل الأرقام:\n" +
             json.dumps(landmarks_matrix, ensure_ascii=False, indent=2)
         )
-    timeline_note = _timeline_data_note(project_data)
-    financial_note = _financial_data_note(project_data)
+    timeline_note = (_timeline_data_note(project_data)
+                     if context_contracts.note_in_scope(scope_keys, 'timeline') else '')
+    financial_note = (_financial_data_note(project_data)
+                      if context_contracts.note_in_scope(scope_keys, 'financial') else '')
+    components_note = ''
+    if ((not financial_note or financial_note == slide_engine.FINANCIAL_ABSENT_NOTE)
+            and context_contracts.scope_needs_components(scope_keys)):
+        components_note = slide_engine._project_components_note(project_data)
 
     system_prompt = f"""{design_rules}
 
@@ -732,6 +758,7 @@ def api_generate_slide_single():
 {landmarks_note}
 {timeline_note}
 {financial_note}
+{components_note}
 
 ## قواعد عامة
 - كل شريحة 1280x720px (أو حسب نسبة العرض المحددة)
