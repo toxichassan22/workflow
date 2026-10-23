@@ -31,6 +31,7 @@ import urllib.request
 from contextlib import contextmanager
 from urllib.parse import parse_qs, quote_plus, unquote, urlencode, urlparse
 
+import booking_rooms
 import hotel_stay
 
 DEFAULT_TIMEOUT = 20        # seconds, page goto
@@ -593,6 +594,12 @@ class BrowserWorker:
     def _open_url_once(self, page, url, timeout):
         """One goto+extract attempt; never raises."""
         result = _result(url)
+        is_booking = hotel_stay.is_booking_hotel_url(url)
+        if is_booking:
+            error = booking_rooms.apply_user_agent(
+                page, USER_AGENT, ACCEPT_LANGUAGE)
+            if error:
+                _browser_log(f'[BROWSER] booking UA override failed: {error}')
         if not getattr(self, '_using_cdp', False):
             try:
                 page.set_extra_http_headers(dict(_EXTRA_HEADERS))
@@ -602,11 +609,20 @@ class BrowserWorker:
             response = page.goto(str(url), wait_until='domcontentloaded',
                                  timeout=int(timeout * 1000))
             page.wait_for_timeout(SETTLE_MS)
+            if is_booking and getattr(self, '_using_cdp', False):
+                booking_rooms.wait_for_rate_rows(
+                    page, booking_rooms.BOOKING_TABLE_TIMEOUT_MS)
         except Exception as exc:
             # Navigation failed — whatever is in the page now is leftover state
             # from the previous call, not this URL's content. Do not return it.
             result['error'] = _nav_reason(exc)
             return result
+        # Read the room table before _EXTRACT_JS strips forms — Booking wraps
+        # the availability table in a form, so extracting afterwards sees none.
+        if is_booking:
+            rate = booking_rooms.wait_and_extract(page, url)
+            if rate:
+                result['booking_rate'] = rate
         try:
             result['final_url'] = page.url or url
             result['title'] = page.title() or ''
@@ -647,6 +663,10 @@ class BrowserWorker:
         elif (_looks_blocked(result['title'], result['text'])
               or (len(result['text']) < 1500 and _challenge_shell(page))):
             result['error'] = 'blocked'
+        if (is_booking and not result.get('error')
+                and result.get('booking_rate')):
+            result['text'] = booking_rooms.with_rate_block(
+                result['booking_rate'], result.get('text'))
         return result
 
     def open_url(self, url, timeout=DEFAULT_TIMEOUT):

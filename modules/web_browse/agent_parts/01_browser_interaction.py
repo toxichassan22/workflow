@@ -187,12 +187,21 @@ def _run_open_url(session, args, trace, pages, evidence_pool=None,
         _pool_mark_failed(evidence_pool, url, str(error))
         return {'url': url, 'error': str(error)}
     final_url = str(result.get('final_url') or result.get('url') or url).strip() or url
+    rate = result.get('booking_rate') if isinstance(
+        result.get('booking_rate'), dict) else None
     if not _source_url_allowed(final_url, allowed_hosts):
         trace.append({'url': final_url, 'title': title, 'chars': 0,
                       'error': 'redirected_outside_allowed_sources'})
         return {'url': url, 'error': 'redirected_outside_allowed_sources'}
     trace.append({'url': final_url, 'title': title, 'chars': len(text)})
     if final_url not in pages:
-        pages[final_url] = {'title': title, 'content': text[:_PAGE_TEXT_CITATION_CAP]}
+        page_entry = {'title': title, 'content': text[:_PAGE_TEXT_CITATION_CAP]}
+        if rate:
+            page_entry['booking_rate'] = rate
+        pages[final_url] = page_entry
     _pool_add_page(evidence_pool, url, title, text, final_url)
-    return {'url': final_url, 'title': title, 'text': text[:_PAGE_TEXT_TOOL_CAP]}
+    payload = {'url': final_url, 'title': title,
+               'text': text[:_PAGE_TEXT_TOOL_CAP]}
+    if rate:
+        payload['booking_rate'] = rate
+    return payload

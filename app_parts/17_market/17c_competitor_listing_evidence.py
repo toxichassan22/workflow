@@ -420,16 +420,19 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         currency = 'SAR'
     median = (values[len(values) // 2] if len(values) % 2
               else (values[len(values) // 2 - 1] + values[len(values) // 2]) / 2)
+    if operation == 'تشغيل فندقي':
+        # The owner compares the original pre-discount nightly rate of the
+        # cheapest base room. A range/median across room categories and
+        # breakfast/flexible plans reads ~20% high, so keep the lowest
+        # original as one nightly rate.
+        median = values[0]
     if len(values) > 1:
         if operation == 'إيجار':
             price_type = _option('متوسط إيجار المتر' if per_sqm else 'متوسط إيجار الوحدة')
         elif operation == 'بيع':
             price_type = _option('متوسط سعر المتر' if per_sqm else 'متوسط سعر الوحدة')
         elif operation == 'تشغيل فندقي':
-            # A hotel page lists several room rates, not one average: the
-            # client asked for the lowest and highest nightly price, so the
-            # row is a range instead of an ADR figure derived from them.
-            price_type = _option('نطاق أسعار الغرف')
+            price_type = _option('سعر الليلة')
         else:
             price_type = _option('نطاق سعري')
     else:
@@ -458,9 +461,12 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     row['price_listed'] = True
     row['price_currency'] = currency
     if fx_rate:
-        orig_median = (orig_values[len(orig_values) // 2] if len(orig_values) % 2
-            else (orig_values[len(orig_values) // 2 - 1]
-                  + orig_values[len(orig_values) // 2]) / 2)
+        if operation == 'تشغيل فندقي':
+            orig_median = orig_values[0]
+        else:
+            orig_median = (orig_values[len(orig_values) // 2] if len(orig_values) % 2
+                else (orig_values[len(orig_values) // 2 - 1]
+                      + orig_values[len(orig_values) // 2]) / 2)
         cache = row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {}
         cache['original_currency'] = source_currency
         if field_key == 'price_value':
@@ -479,7 +485,11 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     if not _manual_source_locked(row):
         row['source_urls'] = list(dict.fromkeys(
             market_study.competitor_source_urls(row) + used_urls))[:6]
-    if fx_rate:
+    if operation == 'تشغيل فندقي':
+        marker = ('سعر الغرفة الأساسية الأصلي قبل الخصم '
+                  + (f'محوّل من {source_currency} (≈{fx_rate:g} ر.س) ' if fx_rate else '')
+                  + 'من إعلان مسترجع — غير موثق رسميًا')
+    elif fx_rate:
         marker = (f'السعر متوسط إعلانات مسترجعة محوّل من {source_currency} '
                   f'(≈{fx_rate:g} ر.س) — غير موثق رسميًا')
     elif currency == 'SAR':

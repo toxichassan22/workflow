@@ -798,9 +798,10 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         self.assertTrue(original['original'])
 
     def test_fill_competitor_price_converts_foreign_currency_to_sar(self):
-        """The median lives inside one currency, then converts to the (ر.س)
-        cell — mixing € and SAR into one figure is a fabrication, so the EUR
-        pool converts at the fixed rate and the source figure stays cached."""
+        """The rate pool lives inside one currency, then converts to the (ر.س)
+        cell — mixing € and SAR into one figure is a fabrication. A hotel row
+        keeps the cheapest original base-room rate, not a range/average of
+        every room category."""
         module = self.application_module
         pages = {
             'https://www.booking.com/hotel/sa/test-a.ar.html':
@@ -817,16 +818,16 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             filled = module._fill_competitor_price_from_listings(row, list(pages))
         self.assertTrue(filled)
         self.assertEqual(row['price_currency'], 'SAR')
-        # Two nightly rates are a range, not an ADR average: €120–€180 × 4.05
-        # → 486–729 ر.س, and the printed source figures stay cached.
-        self.assertEqual(row['price_type'], 'نطاق أسعار الغرف')
-        self.assertEqual(row['price_from'], '486')
-        self.assertEqual(row['price_to'], '729')
-        self.assertEqual(row.get('price_value', ''), '')
-        self.assertEqual(row['price_cache']['original_price_from'], '120')
-        self.assertEqual(row['price_cache']['original_price_to'], '180')
+        # The cheapest original rate (€120 × 4.05 → 486 ر.س) is the base-room
+        # nightly price; the suite's €180 is a different room, not a range.
+        self.assertEqual(row['price_type'], 'سعر الليلة')
+        self.assertEqual(row['price_value'], '486')
+        self.assertEqual(row.get('price_from', ''), '')
+        self.assertEqual(row.get('price_to', ''), '')
+        self.assertEqual(row['price_cache']['original_price_value'], '120')
         self.assertEqual(row['price_cache']['original_currency'], 'EUR')
         self.assertIn('EUR', row['note'])
+        self.assertIn('قبل الخصم', row['note'])
 
     def test_fill_competitor_price_prefers_sar_over_foreign_mentions(self):
         module = self.application_module

@@ -166,13 +166,16 @@ class HotelPriceRangeTests(unittest.TestCase):
             market_study.PRICE_TYPE_BY_OPERATION_EN['Hotel Operation'][0],
             'Room Price Range')
 
-    def test_competitor_prompt_asks_for_hotel_range_and_pre_discount_price(self):
+    def test_competitor_prompt_uses_the_original_base_room_rate(self):
         prompt = market_study.build_competitors_user_prompt(
             {'city': 'جدة', 'district': 'النرجس', 'projectType': 'فندقي',
              'competitorScope': {'mode': 'district'},
              'comparisonTypes': [{'type': 'hotel', 'stars': 4}]}, [])
-        self.assertIn('أقل سعر وأعلى سعر', prompt)
         self.assertIn('قبل الخصم', prompt)
+        self.assertIn('سعر الليلة', prompt)
+        self.assertIn('للغرفة الأساسية', prompt)
+        self.assertIn('## BOOKING_RATE ##', prompt)
+        self.assertNotIn('أقل سعر وأعلى سعر', prompt)
         self.assertIn('الصفحة النهائية', prompt)
         self.assertIn('لا تضع روابط البحث أو النتائج', prompt)
 

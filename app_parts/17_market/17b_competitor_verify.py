@@ -1,5 +1,7 @@
 from numeric_precision import format_precise_number
 
+import booking_rooms
+
 
 def _agent_run_accepts(agent_module, param):
     """True when ``run_browse_agent`` declares ``param`` (or ``**kwargs``).
@@ -118,6 +120,121 @@ def _absorb_verify_response(row, prompt_response, tokens, needed, matched_pages,
     return prompt_matched, official
 
 
+def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
+    """Apply the deterministic Booking room block to an AI hotel row.
+
+    The block is the only source that states the cheapest base room, its
+    original pre-discount nightly price, its area and the informational
+    current price/taxes. The model's JSON and the generic listing fill can
+    pick another rate plan for the same area, so the block wins for AI rows;
+    a row the user typed is never overwritten.
+    """
+    if not isinstance(row, dict) or not isinstance(matched_pages, dict):
+        return False
+    if row.get('row_source') == 'manual':
+        return False
+    folded = market_study._fold_choice(str(row.get('operation_type') or ''))
+    if not any(token in folded for token in ('فندقي', 'فندق', 'hotel', 'hospitality')):
+        return False
+    rate = None
+    page_url = ''
+    for url, page in matched_pages.items():
+        parsed = booking_rooms.parse_rate_block(
+            str((page or {}).get('content') or ''))
+        if parsed:
+            rate = parsed
+            page_url = str(url or '')
+            break
+    if not rate or rate.get('price') is None:
+        return False
+    source_url = str(rate.get('source_url') or page_url or '').strip()
+    if 'booking.com/hotel/' not in source_url:
+        source_url = page_url or source_url
+    currency = market_study._canonical_price_currency(
+        rate.get('currency') or 'SAR') or 'SAR'
+    value = rate.get('price')
+    cache = row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {}
+    if currency != 'SAR':
+        fx_rate = market_study.price_fx_to_sar(currency)
+        if not fx_rate:
+            return False
+        cache['original_currency'] = currency
+        cache['original_price_value'] = format_precise_number(
+            float(value), grouped=False)
+        value = float(value) * fx_rate
+    row.pop('price_from', None)
+    row.pop('price_to', None)
+    row['price_value'] = format_precise_number(float(value), grouped=False)
+    options = market_study.price_types_for_operation('تشغيل فندقي', offer_lang)
+    nightly = 'Nightly Rate' if offer_lang == 'en' else 'سعر الليلة'
+    row['price_type'] = nightly if nightly in options else (
+        next((option for option in options
+              if option not in market_study.RANGE_PRICE_TYPES
+              and option not in market_study.RANGE_PRICE_TYPES_EN), options[0]))
+    row['price_currency'] = 'SAR'
+    row['price_listed'] = True
+    cache.update({
+        'price_value': row['price_value'],
+        'booking_current_price': rate.get('current_price'),
+        'booking_taxes': rate.get('taxes'),
+        'booking_current_total': rate.get('current_price_including_tax'),
+        'booking_currency': currency,
+        'booking_room_name': rate.get('room_name'),
+        'booking_rate_policy': rate.get('rate_policy'),
+        'booking_source_url': source_url,
+    })
+    row['price_cache'] = cache
+    area = rate.get('area_sqm')
+    if area is not None and 5 <= float(area) <= 500:
+        row['area_mode'] = 'fixed'
+        row['area_sqm'] = format_precise_number(float(area), grouped=False)
+        area_cache = row.get('area_cache') if isinstance(row.get('area_cache'), dict) else {}
+        area_cache['area_sqm'] = row['area_sqm']
+        row['area_cache'] = area_cache
+    field_sources = market_study.competitor_field_sources(row)
+    for key in ('price_value', 'area_sqm'):
+        urls = field_sources.setdefault(key, [])
+        if source_url and source_url not in urls:
+            urls.append(source_url)
+    row['field_sources'] = field_sources
+    if source_url and not _manual_source_locked(row):
+        row['source_urls'] = list(dict.fromkeys(
+            market_study.competitor_source_urls(row) + [source_url]))[:6]
+        if not str(row.get('source_url') or '').strip():
+            row['source_url'] = source_url
+    current = rate.get('current_price')
+    taxes = rate.get('taxes')
+    current_text = (format_precise_number(float(current), grouped=False)
+                    if current is not None else '')
+    taxes_text = (format_precise_number(float(taxes), grouped=False)
+                  if taxes is not None else '')
+    source_en = f' (converted from {currency})' if currency != 'SAR' else ''
+    source_ar = f' (محوّل من {currency})' if currency != 'SAR' else ''
+    if offer_lang == 'en':
+        note = ('Booking original pre-discount price of the cheapest base room '
+                f'before tax: {row["price_value"]} SAR{source_en}; the '
+                'discounted current price is '
+                f"{current_text + ' ' + currency if current_text else 'unavailable'} "
+                'and taxes '
+                f"{taxes_text + ' ' + currency if taxes_text else 'unavailable'}.")
+    else:
+        note = (
+            'سعر Booking الأصلي قبل الخصم لأقل غرفة أساسية قبل الضرائب: '
+            f'{row["price_value"]} ر.س{source_ar}؛ '
+            'السعر الحالي بعد الخصم '
+            f"{current_text + ' ' + currency if current_text else 'غير متوفر'} "
+            'والضرائب '
+            f"{taxes_text + ' ' + currency if taxes_text else 'غير متوفر'}.")
+    existing = str(row.get('notes') or '').strip()
+    if ('سعر Booking الأصلي قبل الخصم' not in existing
+            and 'original pre-discount price' not in existing):
+        row['notes'] = f'{existing} — {note}' if existing else note
+    row['verify_state'] = 'verified'
+    row.pop('verify_provider_error', None)
+    row.pop('no_search_evidence', None)
+    return True
+
+
 def _verify_competitor_row(row, payload, data, tenant_id=None,
                            evidence_pool=None, deadline=None, session=None,
                            on_event=None):
@@ -149,18 +266,28 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         '"from": "الحد الأدنى للنطاق", "to": "الحد الأقصى للنطاق", '
         '"currency": "عملة السعر كما وردت في الصفحة — SAR أو EUR أو USD…", '
         '"url": "رابط الصفحة التي ورد فيها السعر حرفيًا"}')
+    folded_operation = market_study._fold_choice(operation)
+    is_hotel = any(token in folded_operation for token in ('فندقي', 'فندق', 'hotel', 'hospitality'))
     price_rule = (
         'السعر يُقبل فقط إذا ظهر في صفحة قرأتها في هذا البحث، ورابطها يوضع في '
         'price.url — إن لم تجد سعرًا أعد حقول price فارغة ولا تكتب رقمًا من ذاكرتك. '
         'اكتب قيمة السعر وعملته كما وردتا في الصفحة؛ النظام يحوّل السعر إلى الريال '
         'قبل عرضه ويحفظ عملة المصدر للتوثيق. '
-        'إذا ظهر سعر قبل الخصم وسعر بعده، فاعتمد السعر قبل الخصم ولا تستخدم سعر العرض '
-        'أو السعر النهائي بعد الخصم. '
-        'للفنادق: إن أظهرت الصفحة أكثر من سعر ليلي فأعد أقل سعر في "from" وأعلى سعر في "to" '
-        'مع type = نطاق أسعار الغرف، ولا تحسب متوسطًا. ')
-    folded_operation = market_study._fold_choice(operation)
+    )
+    if is_hotel:
+        price_rule += (
+            'للفندق: اختر أقل سعر ليلي للغرفة الأساسية التي تستوعب 2 بالغين (1 room) قبل أي خصم، '
+            'واستخدم سعرها الأصلي قبل الخصم في price.value مع type = سعر الليلة. '
+            'لا تستخدم سعر الغرفة المشمول بالإفطار أو الإلغاء المجاني أو أي ميزة أخرى إذا وُجدت غرفة أساسية، '
+            'ولا تجمع أسعار الغرف أو الباقات في نطاق أو متوسط، ولا تضف الضرائب والرسوم إلى السعر. '
+            'إذا ظهر قسم ## BOOKING_RATE ## في نص الصفحة فاستخدم nightly_price_before_discount و area_sqm حرفيًا. '
+        )
+    else:
+        price_rule += (
+            'إذا ظهر سعر قبل الخصم وسعر بعده، فاعتمد السعر قبل الخصم ولا تستخدم سعر العرض '
+            'أو السعر النهائي بعد الخصم. '
+        )
     hotel_rule = ''
-    is_hotel = any(token in folded_operation for token in ('فندقي', 'فندق', 'hotel', 'hospitality'))
     source_rule = (
         'للفنادق، استخدم صفحة الفندق التفصيلية على Booking.com بمسار /hotel/ فقط؛ '
         'صفحات /district/ و/city/ ونتائج البحث العامة لا تثبت الفندق، فلا تفتحها ولا تضعها. '
@@ -260,6 +387,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     _fill_competitor_area_from_listings(
         row, matched + market_study.competitor_source_urls(row),
         pages=list(matched_pages.values()))
+    _apply_booking_rate_block(row, matched_pages, offer_lang=offer_lang)
     row['verify_state'] = 'verified'
     if not _manual_source_locked(row):
         row['source_urls'] = list(dict.fromkeys(
@@ -413,6 +541,7 @@ def _verify_row_from_pool(row, payload, data, evidence_pool):
     _fill_competitor_area_from_listings(
         row, matched + market_study.competitor_source_urls(row),
         pages=list(matched_pages.values()))
+    _apply_booking_rate_block(row, matched_pages, offer_lang=offer_lang)
     row['verify_state'] = 'verified'
     if not _manual_source_locked(row):
         row['source_urls'] = list(dict.fromkeys(
