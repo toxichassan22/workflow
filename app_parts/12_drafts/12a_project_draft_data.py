@@ -122,6 +122,7 @@ DRAFT_FIELD_SECTION_BLOBS = {
     'survey_coordinates': 'land_croquis',
     'directions_table': 'land_croquis',
     'site_analysis': 'location',
+    'location_detail': 'location',
     'timeline_table_data': 'section-timeline',
     'timeline_start_date': 'section-timeline',
     'timeline_start_year': 'section-timeline',
@@ -445,6 +446,10 @@ def _draft_section_of_key(section_map, key):
     for suffix in ('_file_ids', '_file_meta', '_file_id'):
         if key.endswith(suffix):
             return section_map.get(key[:-len(suffix)])
+    # «أخرى» text inputs are form-owned companions of a real field: the
+    # project stage's free text belongs to the project stage's section.
+    if key.endswith('_other'):
+        return section_map.get(key[:-len('_other')])
     return None
 
 

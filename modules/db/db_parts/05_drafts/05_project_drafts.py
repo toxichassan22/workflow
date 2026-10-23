@@ -712,7 +712,7 @@ def get_project_draft_state(tenant_id, draft_id):
     """
     conn = get_db()
     row = conn.execute(
-        'SELECT id, tenant_id, user_id, revision, updated_at, section_statuses '
+        'SELECT id, tenant_id, user_id, revision, updated_at, section_statuses, status '
         'FROM project_drafts WHERE id = ? AND tenant_id = ?',
         (draft_id, tenant_id)
     ).fetchone()

@@ -226,11 +226,6 @@
         const draft = resp.draft;
         setDraftDirty(false);
         setTenantDraftRevision(draft.revision);
-        // The file is followed while it stays open: a merge by somebody else
-        // shows up without a manual refresh.
-        if (typeof startDraftLiveSync === 'function') {
-          startDraftLiveSync(draft.id, tenantDraftRevision);
-        }
         const draftData = draft.draft_data || draft.draftData || {};
         const pageDrafts = draftData.pageDrafts || {};
         const sectionStatuses = draft.section_statuses || {};
@@ -310,6 +305,12 @@
         await loadTenantProjectForm(formSchemaRequest);
         hydrateTenantProjectForm(tenantProjectData);
         applySectionStatuses(sectionStatuses);
+        // The file is followed once the form is on screen: the live session
+        // binds to the real inputs and a merge by somebody else shows up
+        // without a manual refresh.
+        if (typeof startDraftLiveSync === 'function') {
+          startDraftLiveSync(draft.id, tenantDraftRevision);
+        }
         renderTenantSlides();
         setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '',
           tenantSlidesData.length);

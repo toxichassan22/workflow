@@ -20,11 +20,23 @@
       }
       draftLiveSyncId = '';
       draftLocalSavePending = false;
+      if (typeof stopLiveCollaboration === 'function') stopLiveCollaboration();
     }
 
     function startDraftLiveSync(draftId, revision) {
-      stopDraftLiveSync();
-      if (!draftId) return;
+      if (draftLiveSyncTimer) {
+        clearTimeout(draftLiveSyncTimer);
+        draftLiveSyncTimer = null;
+      }
+      draftLocalSavePending = false;
+      if (!draftId) {
+        stopDraftLiveSync();
+        return;
+      }
+      if (draftLiveSyncId && draftLiveSyncId !== draftId
+          && typeof stopLiveCollaboration === 'function') {
+        stopLiveCollaboration();
+      }
       draftLiveSyncId = draftId;
       // The baseline is set, not raised: a file opened with a lower revision
       // than the last one followed is followed from its own start.
@@ -33,6 +45,7 @@
         tenantDraftRevision = value;
         draftLiveSyncRevision = value;
       }
+      if (typeof startLiveCollaboration === 'function') startLiveCollaboration(draftId);
       scheduleDraftLiveSync();
     }
 
@@ -143,6 +156,12 @@
             tenantProjectSectionStatuses = { ...tenantProjectSectionStatuses, ...sectionStatuses };
           }
           applySectionStatuses(sectionStatuses);
+        }
+
+        // Text fields belong to the live session while it is open, so a
+        // remote save's older text must not replace what people are typing.
+        if (typeof liveApplySessionToForm === 'function') {
+          liveApplySessionToForm({ markDirty: false });
         }
 
         if (typeof renderTenantSlides === 'function') {

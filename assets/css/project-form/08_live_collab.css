@@ -1,0 +1,63 @@
+/* Live collaboration chrome: another editor's caret inside a field and the
+   presence rail that names who is working in which section. */
+
+.live-caret-overlay {
+  position: absolute;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 6;
+}
+
+.live-caret {
+  position: absolute;
+  width: 2px;
+  min-height: 1.1em;
+  border-radius: 1px;
+  transform: translateY(1px);
+}
+
+.live-caret-tag {
+  position: absolute;
+  top: -16px;
+  left: -1px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.live-field-updated {
+  transition: background-color 0.25s ease;
+  background-color: rgba(23, 200, 227, 0.08);
+}
+
+.live-presence-rail {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 9998;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #07182C;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(7, 24, 44, 0.28);
+  font-size: 12px;
+  line-height: 1.7;
+  direction: rtl;
+}
+
+.live-presence-rail strong {
+  color: #17C8E3;
+  font-weight: 700;
+}
+
+.live-presence-rail:empty {
+  display: none;
+}

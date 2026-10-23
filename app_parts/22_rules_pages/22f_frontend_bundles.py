@@ -18,6 +18,7 @@ FRONTEND_CSS_ORDER = (
     'project-form/05b_market_study_tabs.css',
     'project-form/06_visual_concept_plans.css',
     'project-form/07_section_change_history.css',
+    'project-form/08_live_collab.css',
 )
 FRONTEND_JS_ORDER = (
     '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
@@ -75,6 +76,7 @@ FRONTEND_JS_ORDER = (
     '18-landloom-ops/01_package_slider.js',
     '18-landloom-ops/02_join_requests.js', '18-landloom-ops/03_legal_content.js',
     '19-notifications.js',
+    '20-live-collab/01_live_collab.js',
 )
 
 _FRONTEND_BUNDLE_CACHE = {}

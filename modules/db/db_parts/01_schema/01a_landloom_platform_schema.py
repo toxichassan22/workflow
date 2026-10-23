@@ -327,6 +327,53 @@ def _create_landloom_tables(conn):
     conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_branches_base ON draft_branches(base_draft_id, created_at DESC)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_branches_tenant ON draft_branches(tenant_id, created_at DESC)')
 
+    # The live editing session of a project file. The state is an opaque CRDT
+    # snapshot the browser produced, and the update log carries the small
+    # deltas exchanged while people type. None of it is the draft: the project
+    # row changes only when somebody saves.
+    conn.execute('''CREATE TABLE IF NOT EXISTS draft_live_documents (
+        id TEXT PRIMARY KEY REFERENCES project_drafts(id) ON DELETE CASCADE,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        state TEXT NOT NULL DEFAULT '',
+        state_seq INTEGER NOT NULL DEFAULT 0,
+        seq INTEGER NOT NULL DEFAULT 0,
+        base_revision INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT DEFAULT (datetime('now'))
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_live_documents_tenant ON draft_live_documents(tenant_id, updated_at DESC)')
+
+    # One row per exchanged CRDT delta. seq is assigned by the server, so every
+    # client reads the same order and can ask for everything after its cursor.
+    conn.execute('''CREATE TABLE IF NOT EXISTS draft_live_updates (
+        document_id TEXT NOT NULL REFERENCES draft_live_documents(id) ON DELETE CASCADE,
+        tenant_id TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        payload TEXT NOT NULL,
+        field_key TEXT,
+        author_id TEXT,
+        author_name TEXT,
+        created_at TEXT DEFAULT (datetime('now')),
+        PRIMARY KEY (document_id, seq)
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_live_updates_doc ON draft_live_updates(document_id, seq)')
+
+    # Who is typing where right now. Rows older than the presence window are
+    # ignored by the reader and swept by the writer.
+    conn.execute('''CREATE TABLE IF NOT EXISTS draft_live_presence (
+        document_id TEXT NOT NULL REFERENCES draft_live_documents(id) ON DELETE CASCADE,
+        client_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        user_id TEXT,
+        user_name TEXT,
+        field_key TEXT,
+        section_key TEXT,
+        caret_start INTEGER,
+        caret_end INTEGER,
+        updated_at TEXT,
+        PRIMARY KEY (document_id, client_id)
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_live_presence_doc ON draft_live_presence(document_id, updated_at)')
+
 
 def _ensure_landloom_columns(conn):
     """Additive migrations on existing installs: last_login on users/tenants."""

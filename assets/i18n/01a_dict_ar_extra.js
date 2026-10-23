@@ -32,7 +32,7 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "draft_merge.keep_ours": "نسخة المشروع",
   "draft_merge.keep_mine": "نسختي",
   "draft_live.updated": "تم تحديث المسودة",
-  "draft_live.pending": "المسودة اتغيّرت — احفظ تعديلاتك وهي تتدمج",
+  "draft_live.pending": "المسودة اتغيّرت من مستخدم آخر",
   "draft_live.pending_toast": "شخص آخر عدّل المسودة — حفظك هيدمج تعديلاتك مع تعديلاته",
   "draft_versions.title": "إصدارات المشروع",
   "draft_versions.button": "الإصدارات",
