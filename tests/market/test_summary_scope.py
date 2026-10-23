@@ -269,6 +269,34 @@ class SummaryScopePayloadTests(unittest.TestCase):
                          payload['dataPeriodBounds'])
         self.assertEqual(payload['summaryPeriodLabel'], 'آخر 24 شهرًا')
 
+    def test_summary_research_depth_defaults_to_full_and_accepts_quick(self):
+        module = self.application_module
+        full = module._prepare_market_payload({}, tenant_id=None)
+        self.assertEqual(full['summaryResearchDepth'], 'full')
+        quick = module._prepare_market_payload(
+            {'summaryResearchDepth': 'quick'}, tenant_id=None)
+        self.assertEqual(quick['summaryResearchDepth'], 'quick')
+        self.assertEqual(module.summary_research_depth({'summaryResearchDepth': 'سريع'}),
+                         'quick')
+
+    def test_quick_depth_keeps_the_top_sources_per_location(self):
+        module = self.application_module
+        group = {'key': 'g1'}
+        jobs = [(group, [f'h{index}'], 'جدة', '') for index in range(10)]
+        self.assertEqual(len(module.limit_summary_research_jobs(jobs, 'full')), 10)
+        quick = module.limit_summary_research_jobs(jobs, 'quick')
+        self.assertEqual(len(quick),
+                         module.SUMMARY_RESEARCH_QUICK_HOSTS_PER_GROUP)
+        self.assertEqual(quick[0][1], ['h0'])
+
+    def test_quick_depth_caps_the_total_researcher_count(self):
+        module = self.application_module
+        jobs = [({'key': f'g{group}'}, ['h'], f'مدينة{city}', '')
+                for city in range(20) for group in range(5)]
+        quick = module.limit_summary_research_jobs(jobs, 'quick')
+        self.assertLessEqual(len(quick),
+                             module.SUMMARY_RESEARCH_QUICK_JOB_CAP)
+
 
 class SummaryScopeFrontendTests(unittest.TestCase):
 
@@ -319,6 +347,12 @@ class SummaryScopeFrontendTests(unittest.TestCase):
         self.assertIn('id="marketSummaryPeriodFrom"', text)
         self.assertIn('id="marketSummaryPeriodTo"', text)
         self.assertIn('summaryPeriod: state.summary_period', text)
+
+    def test_summary_research_depth_control_is_wired(self):
+        text = self.frontend
+        self.assertIn('id="marketSummaryResearchDepth"', text)
+        self.assertIn('summaryResearchDepth: state.summary_research_depth', text)
+        self.assertIn('summary_research_depth', text)
 
 
 if __name__ == '__main__':

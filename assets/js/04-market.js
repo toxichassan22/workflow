@@ -20,6 +20,8 @@
         || state.summary_period_from || '';
       state.summary_period_to = document.getElementById('marketSummaryPeriodTo')?.value
         || state.summary_period_to || '';
+      state.summary_research_depth = document.getElementById('marketSummaryResearchDepth')?.value
+        || state.summary_research_depth || 'full';
       state.competitors = collectMarketCompetitorRows();
       const summary = {};
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
@@ -672,6 +674,10 @@
       const explicit = [row.source_url, row.sourceUrl, row.url]
         .map(value => String(value || '').trim())
         .filter(value => /^https?:\/\//i.test(value));
+      if (row.source_url_manual || row.sourceUrlManual) {
+        // The client's own link wins; an empty one stays empty.
+        return explicit[0] || '';
+      }
       const priceUrls = [];
       Object.entries(marketFieldSources(row)).forEach(([field, urls]) => {
         if (['price_value', 'price_from', 'price_to'].includes(field)) {

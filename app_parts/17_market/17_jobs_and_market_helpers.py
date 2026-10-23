@@ -573,6 +573,9 @@ def _attach_retrieved_citations(rows, pages):
     for row in rows or []:
         if not isinstance(row, dict) or (row.get('row_source') or 'ai') != 'ai':
             continue
+        if row.get('source_url_manual') or row.get('sourceUrlManual'):
+            # The client's own link (or a deliberate deletion) is authoritative.
+            continue
         tokens = _competitor_name_tokens(row.get('name'))
         if not tokens:
             continue

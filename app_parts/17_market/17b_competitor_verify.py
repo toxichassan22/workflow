@@ -22,6 +22,17 @@ def _market_deadline_hit(deadline):
     return deadline is not None and time.time() >= deadline
 
 
+def _manual_source_locked(row):
+    """True when the client typed, replaced or cleared a row's source link.
+
+    Their choice is authoritative: verification and citation passes may still
+    record evidence in ``field_sources``, but must not put a URL back into the
+    visible source or replace the one the client entered.
+    """
+    return bool(isinstance(row, dict) and (
+        row.get('source_url_manual') or row.get('sourceUrlManual')))
+
+
 def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
                        evidence_pool=None, deadline=None, session=None,
                        **agent_kwargs):
@@ -241,10 +252,11 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
             row, matched + market_study.competitor_source_urls(row),
             pages=list(matched_pages.values()))
     row['verify_state'] = 'verified'
-    row['source_urls'] = list(dict.fromkeys(
-        market_study.competitor_source_urls(row) + matched))[:6]
-    if not str(row.get('source_url') or '').strip():
-        row['source_url'] = market_study.prefer_specific_source_url(*row['source_urls'])
+    if not _manual_source_locked(row):
+        row['source_urls'] = list(dict.fromkeys(
+            market_study.competitor_source_urls(row) + matched))[:6]
+        if not str(row.get('source_url') or '').strip():
+            row['source_url'] = market_study.prefer_specific_source_url(*row['source_urls'])
     if official and not str(row.get('logo_source_url') or '').strip():
         row['logo_source_url'] = official
         row['logo_official_verified'] = True
@@ -329,8 +341,9 @@ def _apply_verified_competitor_price(row, parsed, citation_urls, offer_lang='ar'
     if url not in urls:
         urls.append(url)
     row['field_sources'] = field_sources
-    row['source_urls'] = list(dict.fromkeys(
-        market_study.competitor_source_urls(row) + [url]))
+    if not _manual_source_locked(row):
+        row['source_urls'] = list(dict.fromkeys(
+            market_study.competitor_source_urls(row) + [url]))
 
 
 def _read_market_source_page(url, max_bytes=2 * 1024 * 1024):
@@ -640,8 +653,9 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         if url not in bucket:
             bucket.append(url)
     row['field_sources'] = field_sources
-    row['source_urls'] = list(dict.fromkeys(
-        market_study.competitor_source_urls(row) + used_urls))[:6]
+    if not _manual_source_locked(row):
+        row['source_urls'] = list(dict.fromkeys(
+            market_study.competitor_source_urls(row) + used_urls))[:6]
     if fx_rate:
         marker = (f'السعر متوسط إعلانات مسترجعة محوّل من {source_currency} '
                   f'(≈{fx_rate:g} ر.س) — غير موثق رسميًا')
@@ -711,10 +725,11 @@ def _verify_row_from_pool(row, payload, data, evidence_pool):
             row, matched + market_study.competitor_source_urls(row),
             pages=list(matched_pages.values()))
     row['verify_state'] = 'verified'
-    row['source_urls'] = list(dict.fromkeys(
-        market_study.competitor_source_urls(row) + matched))[:6]
-    if not str(row.get('source_url') or '').strip():
-        row['source_url'] = market_study.prefer_specific_source_url(*row['source_urls'])
+    if not _manual_source_locked(row):
+        row['source_urls'] = list(dict.fromkeys(
+            market_study.competitor_source_urls(row) + matched))[:6]
+        if not str(row.get('source_url') or '').strip():
+            row['source_url'] = market_study.prefer_specific_source_url(*row['source_urls'])
     if official and not str(row.get('logo_source_url') or '').strip():
         row['logo_source_url'] = official
         row['logo_official_verified'] = True

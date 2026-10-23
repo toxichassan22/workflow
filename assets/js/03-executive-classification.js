@@ -819,6 +819,7 @@
         summary_period: '12m',
         summary_period_from: '',
         summary_period_to: '',
+        summary_research_depth: 'full',
         competitors: [],
         summary,
         swot,
@@ -931,6 +932,7 @@
           || (parsed.summary_period ? '' : (parsed.data_period_from || '')),
         summary_period_to: parsed.summary_period_to
           || (parsed.summary_period ? '' : (parsed.data_period_to || '')),
+        summary_research_depth: parsed.summary_research_depth || 'full',
         summary: marketSummaryState(parsed.summary),
         one_block_summary: migratedOneBlock,
         swot: { ...base.swot, ...(parsed.swot || {}) }

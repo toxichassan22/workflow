@@ -72,6 +72,25 @@ test('price evidence page wins over a stated developer homepage', () => {
     'https://sa.aqar.fm/listing/tower-price');
 });
 
+test('a client-entered source wins, and a deleted one stays deleted', () => {
+  const sandbox = context();
+  const manual = {
+    name: 'مجمع',
+    source_url: 'https://client.example/my-project',
+    source_url_manual: true,
+    field_sources: { price_value: ['https://sa.aqar.fm/listing/price'] },
+  };
+  assert.equal(sandbox.competitorPrimarySourceUrl(manual),
+    'https://client.example/my-project');
+  const deleted = { ...manual, source_url: '' };
+  assert.equal(sandbox.competitorPrimarySourceUrl(deleted), '');
+});
+
+test('the source editor marks a client edit as manual', () => {
+  assert.match(source, /sourceUrlManual = '1'/);
+  assert.match(source, /source_url_manual: tr\.dataset\.sourceUrlManual === '1'/);
+});
+
 test('summary register drops competitor rows and canonical duplicates', () => {
   const sandbox = context();
   const rows = sandbox.mergeMarketSourceRows([

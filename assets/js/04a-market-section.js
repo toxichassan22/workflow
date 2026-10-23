@@ -110,6 +110,12 @@
             </div>
           </div>
           <div class="market-grid" style="margin-top:12px">
+            <div><label data-i18n="market.summary_depth">عمق البحث</label>
+              <select id="marketSummaryResearchDepth">
+                <option value="full" data-i18n="market.summary_depth_full">كامل</option>
+                <option value="quick" data-i18n="market.summary_depth_quick">سريع</option>
+              </select>
+            </div>
             <div><label>فترة البيانات</label>
               <select id="marketSummaryPeriod">
                 <option value="12m">آخر 12 شهرًا</option>
@@ -194,6 +200,8 @@
         updateMarketStudyFieldVisibility();
         persistMarketStudyFromDom();
       });
+      document.getElementById('marketSummaryResearchDepth')?.addEventListener(
+        'change', persistMarketStudyFromDom);
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
         document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });

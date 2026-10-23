@@ -833,6 +833,12 @@ def primary_competitor_source_url(row):
         _norm(row.get('source_url')), _norm(row.get('sourceUrl')),
         _norm(row.get('url')),
     ]
+    if row.get('source_url_manual') or row.get('sourceUrlManual'):
+        manual = next((url for url in explicit
+                       if url.startswith(('http://', 'https://'))), '')
+        # An empty manual source means the client deleted it; evidence must
+        # not fill the slot back in.
+        return manual
     field_sources = competitor_field_sources(row)
     price_urls = []
     for key in ('price_value', 'price_from', 'price_to'):

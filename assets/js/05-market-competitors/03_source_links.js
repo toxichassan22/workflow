@@ -110,6 +110,10 @@
         if (previous && previous.toLowerCase() !== next.toLowerCase()) {
           rewriteMarketCompetitorSourceUrl(tr, previous, next);
         }
+        // From here on the client owns this link: a typed URL, a replacement
+        // or a deliberate deletion must survive verification and citation
+        // upgrades.
+        tr.dataset.sourceUrlManual = '1';
         input.dataset.previousUrl = next;
         renderCompetitorSourceLinks(tr);
         persistMarketStudyFromDom();

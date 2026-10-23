@@ -603,26 +603,18 @@ def _run_market_summary_research(payload, usage_ctx, evidence_pool, deadline,
     activity_signature = _summary_research_activity_signature(payload)
     scope = market_study.normalize_summary_scope(
         payload.get('summaryScope'), payload.get('city'))
-    jobs = []
-    for city_scope in scope['cities']:
-        locations = [('', city_scope['name'])]
-        locations.extend((district, city_scope['name'])
-                         for district in city_scope['districts'])
-        for district, city in locations:
-            for group in _SUMMARY_RESEARCH_GROUPS:
-                for host in source_map.get(group['key']) or []:
-                    if scope_activities_selected and not market_study._host_in(
-                            host, allowed_activity_hosts):
-                        continue
-                    if district and host in {'gaca.gov.sa', 'geo.stats.gov.sa'}:
-                        continue
-                    jobs.append((group, [host], city, district))
+    depth = summary_research_depth(payload)
+    jobs = build_summary_research_jobs(
+        payload, source_map, scope_activities_selected,
+        allowed_activity_hosts, scope, depth=depth)
     if not jobs:
         return {'success': False, 'error': 'summary_scope_required',
                 'outcomes': [], 'citation_urls': []}
-    report(12, f'بدء {len(jobs)} مهمة بحث للمصادر بالتوازي؛ باحث مستقل لكل مصدر ونطاق')
+    report(12, f'بدء {len(jobs)} مهمة بحث للمصادر بالتوازي؛ باحث مستقل لكل مصدر ونطاق'
+           + (' — وضع سريع' if depth == 'quick' else ''))
     if callable(trace_writer):
         trace_writer({'event': 'research_started', 'researcher_count': len(jobs),
+                      'depth': depth,
                       'sources_by_group': source_map,
                       'cities': scope.get('cities') or []})
     outcomes = []

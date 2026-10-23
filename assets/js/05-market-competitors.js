@@ -323,6 +323,7 @@
       tr.dataset.rowSource = row.row_source || 'manual';
       tr.dataset.priceCurrency = row.price_currency || row.currency || 'SAR';
       tr.dataset.fieldSources = JSON.stringify(row.field_sources || row.fieldSources || {});
+      tr.dataset.sourceUrlManual = row.source_url_manual || row.sourceUrlManual ? '1' : '';
       tr.dataset.logoFileId = row.logo_file_id || row.logoFileId || '';
       tr.dataset.logoPath = row.logo_path || row.logoPath || '';
       tr.dataset.logoUrl = row.logo_url || row.logoUrl || '';
@@ -527,6 +528,7 @@
         source: read('source'),
         source_url: source_urls[0] || '',
         source_urls,
+        source_url_manual: tr.dataset.sourceUrlManual === '1',
         field_sources,
         district: tr.dataset.district || '',
         city: tr.dataset.city || '',
@@ -603,6 +605,8 @@
         summaryTo.value = next.summary_period_to
           || (next.summary_period ? '' : (next.data_period_to || ''));
       }
+      const researchDepth = document.getElementById('marketSummaryResearchDepth');
+      if (researchDepth) researchDepth.value = next.summary_research_depth || 'full';
       renderMarketCompetitors(next.competitors || []);
       if (typeof renderMarketTransactionBenchmarks === 'function') {
         renderMarketTransactionBenchmarks(next.transaction_benchmarks);
@@ -720,6 +724,7 @@
         summaryPeriod: state.summary_period,
         summaryPeriodFrom: state.summary_period_from,
         summaryPeriodTo: state.summary_period_to,
+        summaryResearchDepth: state.summary_research_depth,
         competitors: state.competitors,
         currentSummary: state.summary,
         currentSources: state.sources,

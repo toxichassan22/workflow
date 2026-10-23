@@ -95,6 +95,66 @@ class CompetitorPrimarySourceTests(unittest.TestCase):
         self.assertEqual([row['name'] for row in deduped], ['أ', 'ج'])
 
 
+class ManualSourceTests(unittest.TestCase):
+
+    def test_client_link_wins_over_price_evidence(self):
+        row = market_study.normalize_competitor_row({
+            'name': 'مجمع',
+            'source_url': 'https://client.example/my-project',
+            'source_url_manual': True,
+            'field_sources': {
+                'price_value': ['https://sa.aqar.fm/listing/price'],
+            },
+        })
+        self.assertEqual(row['source_url'], 'https://client.example/my-project')
+        self.assertEqual(row['source_urls'], ['https://client.example/my-project'])
+        self.assertTrue(row['source_url_manual'])
+
+    def test_deleted_source_stays_deleted(self):
+        row = market_study.normalize_competitor_row({
+            'name': 'مجمع',
+            'source_url': '',
+            'source_url_manual': True,
+            'field_sources': {
+                'price_value': ['https://sa.aqar.fm/listing/price'],
+            },
+        })
+        self.assertEqual(row['source_url'], '')
+        self.assertEqual(row['source_urls'], [])
+        market_study.canonicalize_competitor_source_urls(row)
+        self.assertEqual(row['source_url'], '')
+        self.assertEqual(row['source_urls'], [])
+
+    def test_citation_upgrade_does_not_replace_a_client_source(self):
+        rows = [{
+            'name': 'مجمع',
+            'source_url': 'https://client.example/my-project',
+            'source_urls': ['https://client.example/my-project'],
+            'source_url_manual': True,
+            'row_source': 'ai',
+        }]
+        market_study.apply_search_citations(
+            rows, ['https://client.example/my-project/details'])
+        self.assertEqual(rows[0]['source_url'], 'https://client.example/my-project')
+
+    def test_fill_mode_keeps_a_client_source(self):
+        existing = [{
+            'id': 'c1', 'name': 'مجمع',
+            'source_url': 'https://client.example/my-project',
+            'source_urls': ['https://client.example/my-project'],
+            'source_url_manual': True,
+            'row_source': 'ai',
+        }]
+        merged, _added, _updated = market_study.merge_generated_competitors(
+            existing,
+            [{'id': 'c1', 'name': 'مجمع',
+              'source_url': 'https://model.example/other',
+              'source_urls': ['https://model.example/other']}],
+            mode='fill')
+        self.assertEqual(merged[0]['source_url'],
+                         'https://client.example/my-project')
+
+
 class HotelPriceRangeTests(unittest.TestCase):
 
     def test_hotel_room_range_is_the_default_and_a_range_type(self):

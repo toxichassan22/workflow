@@ -432,6 +432,9 @@ def _drop_foreign_competitor_urls(row):
     """Remove same-name foreign-market pages from a Saudi competitor row."""
     if not isinstance(row, dict):
         return row
+    if row.get('source_url_manual'):
+        # The client's own link is authoritative; never delete it silently.
+        return row
     urls = market_study.competitor_source_urls(row)
     kept = [url for url in urls if not _foreign_market_host(url)]
     if len(kept) != len(urls):
@@ -461,6 +464,9 @@ def _drop_banned_competitor_listing_urls(row):
     goes back to empty rather than standing on a link the rules reject.
     """
     if not isinstance(row, dict):
+        return row
+    if row.get('source_url_manual'):
+        # A client-entered source survives the automatic portal filter.
         return row
     operation = row.get('operation_type')
     project_type = row.get('project_type')

@@ -201,11 +201,25 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
         'notes': _norm(row.get('notes') or row.get('note')),
         'verify_state': _norm(row.get('verify_state') or row.get('verifyState')),
         'verify_provider_error': _norm(row.get('verify_provider_error') or row.get('verifyProviderError')),
+        'source_url_manual': bool(
+            row.get('source_url_manual') or row.get('sourceUrlManual')),
         'row_source': _norm(row.get('row_source') or row.get('rowSource')) or fallback_source,
     }
-    primary_source = primary_competitor_source_url(result)
-    if primary_source:
-        result['source_url'] = primary_source
+    if result['source_url_manual']:
+        # The client typed, replaced or cleared this row's source. Keep exactly
+        # their choice; field evidence may still exist for auditing but never
+        # becomes the visible source again.
+        manual_source = _norm(row.get('source_url') or row.get('sourceUrl') or '')
+        if manual_source.startswith(('http://', 'https://')):
+            result['source_url'] = manual_source
+            result['source_urls'] = [manual_source]
+        else:
+            result['source_url'] = ''
+            result['source_urls'] = []
+    else:
+        primary_source = primary_competitor_source_url(result)
+        if primary_source:
+            result['source_url'] = primary_source
     if conversion_error:
         result['price_conversion_error'] = conversion_error
     return result
@@ -228,6 +242,12 @@ def canonicalize_competitor_source_urls(row):
     behind, including links merged in by the per-competitor verification.
     """
     if not isinstance(row, dict):
+        return row
+    if row.get('source_url_manual') or row.get('sourceUrlManual'):
+        # Respect the client's link exactly, including a deliberate deletion.
+        manual = _norm(row.get('source_url') or row.get('sourceUrl'))
+        row['source_url'] = manual if manual.startswith(('http://', 'https://')) else ''
+        row['source_urls'] = [row['source_url']] if row['source_url'] else []
         return row
     operation = _norm(
         row.get('operation_type') or row.get('operationType') or row.get('operation'))
@@ -260,6 +280,10 @@ def apply_search_citations(rows, citations, url_key='source_url'):
         if not isinstance(row, dict):
             continue
         if (row.get('row_source') or 'ai') != 'ai' and url_key == 'source_url':
+            continue
+        if url_key == 'source_url' and (
+                row.get('source_url_manual') or row.get('sourceUrlManual')):
+            # A client-edited source is not a model guess to upgrade.
             continue
         if url_key == 'source_url':
             operation = _norm(
@@ -410,8 +434,11 @@ def merge_generated_competitors(existing, generated, mode='generate', offer_lang
                     'field': 'area_mode', 'existing': target_area, 'incoming': incoming_area,
                     'source': incoming.get('source') or official_label, 'source_url': official_url,
                 })
+        manual_source = bool(target.get('source_url_manual'))
         for key, value in incoming.items():
             if key in protected or (has_manual_logo and key in {'logo_url', 'logo_source_url'}):
+                continue
+            if manual_source and key in {'source_url', 'source_url_manual'}:
                 continue
             if key == 'price_currency':
                 # A currency tag only travels with the price it labels — merged

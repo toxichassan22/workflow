@@ -77,6 +77,7 @@ def _prepare_market_payload(data, tenant_id=None):
     else:
         payload['summaryPeriodLabel'] = payload['dataPeriodLabel']
         payload['summaryPeriodBounds'] = payload['dataPeriodBounds']
+    payload['summaryResearchDepth'] = summary_research_depth(payload)
     mixed = payload.get('projectComponents') or payload.get('project_mixed_components') or payload.get('project_components')
     payload['projectComponents'] = mixed
     raw_scope = payload.get('competitorScope') or payload.get('competitor_scope')
