@@ -56,7 +56,47 @@ def _visual_plan_massing_system_prompt():
     )
 
 
-def _visual_plan_massing_user_prompt(prompt, base_image='', dependency_kinds=None, plan1_svg='', plan2_svg=''):
+def _visual_plan_massing_manifest(workflow):
+    """The exact approved geometry, without the two full SVG documents."""
+    scene = workflow.get('scene') if isinstance(workflow.get('scene'), dict) else None
+    if not scene:
+        return None
+    buildings = []
+    for item in scene.get('buildings') or []:
+        if not isinstance(item, dict):
+            continue
+        footprint = item.get('footprint')
+        if not isinstance(footprint, list) or len(footprint) < 3:
+            continue
+        buildings.append({
+            'id': item.get('id'),
+            'label': item.get('label') or item.get('name'),
+            'category': item.get('category'),
+            'floors': item.get('levels') or item.get('floors'),
+            'footprint': footprint,
+        })
+    if not buildings:
+        return None
+    open_areas = []
+    for item in (scene.get('openAreas') or scene.get('siteItems') or []):
+        if isinstance(item, dict) and isinstance(item.get('polygon'), list):
+            open_areas.append({
+                'label': item.get('label') or item.get('name'),
+                'featureType': item.get('featureType') or item.get('kind'),
+                'polygon': item.get('polygon'),
+            })
+    distribution = (workflow.get('distribution')
+                    if isinstance(workflow.get('distribution'), dict) else {})
+    rows = distribution.get('rows') if isinstance(distribution.get('rows'), list) else []
+    return {
+        'buildings': buildings,
+        'openAreas': open_areas,
+        'distributionRows': rows,
+    }
+
+
+def _visual_plan_massing_user_prompt(prompt, base_image='', dependency_kinds=None,
+                                     plan1_svg='', plan2_svg='', manifest=None):
     parts = [prompt]
     if base_image:
         parts.append(
@@ -68,25 +108,35 @@ def _visual_plan_massing_user_prompt(prompt, base_image='', dependency_kinds=Non
         if dep_clause:
             parts.append(dep_clause)
 
-    if plan1_svg:
+    if manifest:
         parts.append(
-            "\n--- PLAN 1 (MASTER SITE PLAN - EXACT VECTOR SVG LAYOUT) ---\n"
-            "The following is the authoritative vector SVG code of Plan 1 (Site Plan). "
-            "You MUST strictly match all building footprint shapes, coordinates, parcel boundary, "
-            "and surface parking layout. Notice that surface parking is placed along the front street frontage "
-            "next to the primary road; retain it in that exact front position and never move it to the rear:\n"
-            f"{plan1_svg}\n"
-            "--- END OF PLAN 1 SVG ---\n"
+            "\n--- PLAN 1 + PLAN 2 AUTHORITATIVE GEOMETRY MANIFEST ---\n"
+            "The JSON below carries the exact approved building footprints, floor counts, uses, "
+            "site areas and distribution rows. Extrude these coordinates and counts verbatim; "
+            "never move, add or omit a building, and keep surface parking on the front street frontage.\n"
+            f"{json.dumps(manifest, ensure_ascii=False)}\n"
+            "--- END OF GEOMETRY MANIFEST ---\n"
         )
-    if plan2_svg:
-        parts.append(
-            "\n--- PLAN 2 (VERTICAL PROGRAM DISTRIBUTION - EXACT FLOOR STACK SVG) ---\n"
-            "The following is the authoritative vector SVG code of Plan 2 (Floor Distribution). "
-            "You MUST strictly match the exact floor counts, vertical use stacking, and basement levels "
-            "established in this SVG when extruding the Plan 1 building masses:\n"
-            f"{plan2_svg}\n"
-            "--- END OF PLAN 2 SVG ---\n"
-        )
+    else:
+        if plan1_svg:
+            parts.append(
+                "\n--- PLAN 1 (MASTER SITE PLAN - EXACT VECTOR SVG LAYOUT) ---\n"
+                "The following is the authoritative vector SVG code of Plan 1 (Site Plan). "
+                "You MUST strictly match all building footprint shapes, coordinates, parcel boundary, "
+                "and surface parking layout. Notice that surface parking is placed along the front street frontage "
+                "next to the primary road; retain it in that exact front position and never move it to the rear:\n"
+                f"{plan1_svg}\n"
+                "--- END OF PLAN 1 SVG ---\n"
+            )
+        if plan2_svg:
+            parts.append(
+                "\n--- PLAN 2 (VERTICAL PROGRAM DISTRIBUTION - EXACT FLOOR STACK SVG) ---\n"
+                "The following is the authoritative vector SVG code of Plan 2 (Floor Distribution). "
+                "You MUST strictly match the exact floor counts, vertical use stacking, and basement levels "
+                "established in this SVG when extruding the Plan 1 building masses:\n"
+                f"{plan2_svg}\n"
+                "--- END OF PLAN 2 SVG ---\n"
+            )
 
     parts.append(
         '\nGenerate raw standalone SVG markup for the 3D conceptual massing diagram matching the specifications above. '
@@ -119,13 +169,14 @@ def _visual_plan_render_massing_svg(prompt, data, base_image=''):
         except Exception:
             pass
 
-    plan1_svg = _visual_plan_extract_current_slot_svg(data, 'plan_site')
-    plan2_svg = _visual_plan_extract_current_slot_svg(data, 'plan_uses')
+    manifest = _visual_plan_massing_manifest(workflow)
+    plan1_svg = '' if manifest else _visual_plan_extract_current_slot_svg(data, 'plan_site')
+    plan2_svg = '' if manifest else _visual_plan_extract_current_slot_svg(data, 'plan_uses')
 
     system_prompt = _visual_plan_massing_system_prompt()
     user_prompt = _visual_plan_massing_user_prompt(
         prompt, base_image=base_image, dependency_kinds=dependency_kinds,
-        plan1_svg=plan1_svg, plan2_svg=plan2_svg)
+        plan1_svg=plan1_svg, plan2_svg=plan2_svg, manifest=manifest)
     model = VISUAL_PLAN_MASSING_MODEL
     effort = VISUAL_PLAN_MASSING_REASONING_EFFORT
     usage_ctx = _usage_ctx('image', data)

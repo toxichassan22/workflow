@@ -95,6 +95,46 @@ class VisualPlanContractTestsPart11(VisualPlanContractBase):
         self.assertIn('PLAN 2 (VERTICAL PROGRAM DISTRIBUTION - EXACT FLOOR STACK SVG)', captured['user'])
         self.assertIn('Tower: 15 floors', captured['user'])
 
+    def test_plan_massing_uses_the_compact_geometry_manifest_when_a_scene_exists(self):
+        module = self.application_module
+        project = self.project()
+        workflow = {
+            'scene': {
+                'buildings': [{
+                    'id': 'b1', 'label': 'Hotel Tower', 'category': 'hotel', 'levels': 15,
+                    'footprint': [[100, 100], [300, 100], [300, 400], [100, 400]],
+                }],
+                'openAreas': [{
+                    'label': 'Surface Parking', 'featureType': 'parking',
+                    'polygon': [[100, 450], [300, 450], [300, 600], [100, 600]],
+                }],
+            },
+            'distribution': {
+                'approved': True,
+                'rows': [{'building': 'Hotel Tower', 'floor_range': 'G-14', 'component': 'Hotel'}],
+            },
+        }
+        data = {'projectData': project, 'plansWorkflow': workflow}
+        captured = {}
+
+        def _fake_chat_call(system, user, **_kwargs):
+            captured['user'] = user
+            fake_svg = '<svg viewBox="0 0 1600 1000"><polygon points="100,100 200,100 200,200"/></svg>'
+            return {'choices': [{'message': {'content': fake_svg}}]}
+
+        with patch.object(module, 'call_openrouter_chat', side_effect=_fake_chat_call), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/massing.svg'), \
+                patch.object(module, '_visual_concept_edit_base_image', return_value=''):
+            with self.app.test_request_context():
+                module.g.tenant_id = self.tenant_a
+                result = module._visual_plan_render_response(data, 'plan_massing')
+
+        self.assertTrue(result['success'])
+        self.assertIn('AUTHORITATIVE GEOMETRY MANIFEST', captured['user'])
+        self.assertIn('Hotel Tower', captured['user'])
+        self.assertIn('Surface Parking', captured['user'])
+        self.assertNotIn('PLAN 1 (MASTER SITE PLAN - EXACT VECTOR SVG LAYOUT)', captured['user'])
+
     def test_stage_four_workflow_error_bypasses_notes_and_scene_gates(self):
         module = self.application_module
         data = {
