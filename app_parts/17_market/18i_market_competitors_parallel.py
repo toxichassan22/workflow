@@ -321,16 +321,21 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             return _booking_scan_result(
                 task, [], citations, note, search_ran=True)
         benchmark = market_study.benchmark_axis_label(axis, offer_lang)
+        wanted = []
         for hotel in hotels[:5]:
-            if _market_deadline_hit(deadline):
-                break
             hotel = hotel if isinstance(hotel, dict) else {}
             name = str(hotel.get('name') or '').strip()
             url = str(hotel.get('url') or '').strip()
-            if not name or not url:
-                continue
-            started = time.time()
-            prop = session.open_url(url)
+            if name and url:
+                wanted.append({'name': name, 'url': url})
+        # Booking needs ~20 s per hotel (WAF + room table); loading the tabs
+        # together overlaps that wait instead of paying it five times.
+        props = session.open_urls([item['url'] for item in wanted])
+        for item, prop in zip(wanted, props):
+            if _market_deadline_hit(deadline):
+                break
+            name = item['name']
+            url = item['url']
             prop = prop if isinstance(prop, dict) else {}
             prop_url = str(prop.get('final_url') or url)
             citations.append(_booking_scan_citation(
@@ -339,7 +344,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             priced = isinstance(rate, dict) and rate.get('price') is not None
             print(f'[MARKET STUDY] booking property name={name!r} '
                   f'priced={priced} error={prop.get("error")!r} '
-                  f'elapsed={round(time.time() - started, 1)}', flush=True)
+                  f'elapsed={prop.get("elapsed")}', flush=True)
             row = {
                 'name': name,
                 'project_type': 'فندقي',

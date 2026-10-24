@@ -48,6 +48,9 @@ class _Session:
         self.urls.append(url)
         return self.replies.get(url, {})
 
+    def open_urls(self, urls, timeout=None):
+        return [self.open_url(url) for url in urls]
+
     def fetch_html(self, url, timeout=None):
         self.page_urls.append(url)
         return self.pages.get(url, {'error': 'not_found'})

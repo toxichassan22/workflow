@@ -717,6 +717,68 @@ class BrowserWorker:
             result['error'] = _nav_reason(exc)
         return result
 
+    def open_urls(self, urls, timeout=BOOKING_TIMEOUT):
+        """Open Booking property pages in parallel tabs, then read them.
+
+        Every tab starts loading at once, so the WAF and the room-table paint
+        of one hotel overlap the next one's instead of adding up. One result
+        per URL, in the input order.
+        """
+        urls = [str(url or '') for url in urls]
+        results = [_result(url) for url in urls]
+        try:
+            self._ensure_page()
+        except Exception as exc:
+            for result in results:
+                result['error'] = _launch_reason(exc)
+            return results
+        tabs = []
+        for index, url in enumerate(urls):
+            stay_url = hotel_stay.with_booking_stay_params(url)
+            results[index]['url'] = stay_url
+            try:
+                tab = self._context.new_page()
+            except Exception as exc:
+                results[index]['error'] = _nav_reason(exc)
+                continue
+            tabs.append((index, tab, stay_url))
+            error = booking_rooms.apply_user_agent(
+                tab, USER_AGENT, ACCEPT_LANGUAGE)
+            if error:
+                _browser_log(f'[BROWSER] booking UA override failed: {error}')
+            try:
+                tab.goto(stay_url, wait_until='commit',
+                         timeout=int(timeout * 1000))
+            except Exception as exc:
+                results[index]['error'] = _nav_reason(exc)
+        for index, tab, url in tabs:
+            result = results[index]
+            started = time.time()
+            try:
+                if not result.get('error'):
+                    booking_rooms.wait_for_rate_rows(
+                        tab, booking_rooms.BOOKING_TABLE_TIMEOUT_MS)
+                    rate = booking_rooms.wait_and_extract(tab, url)
+                    if rate:
+                        result['booking_rate'] = rate
+                    result['final_url'] = tab.url or url
+                    result['title'] = tab.title() or ''
+                    result['text'] = _clean_text(tab.evaluate(_EXTRACT_JS))
+                    if rate:
+                        result['text'] = booking_rooms.with_rate_block(
+                            rate, result.get('text'))
+                else:
+                    result['final_url'] = tab.url or url
+            except Exception as exc:
+                result['error'] = result.get('error') or _nav_reason(exc)
+            finally:
+                result['elapsed'] = round(time.time() - started, 1)
+                try:
+                    tab.close()
+                except Exception:
+                    pass
+        return results
+
     def open_url(self, url, timeout=DEFAULT_TIMEOUT):
         """Load `url` and extract readable text; never raises.
 
