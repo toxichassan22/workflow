@@ -16,7 +16,7 @@ through Booking's own neighbourhood filter (``nflt=di=<id>``) instead.
 """
 
 from datetime import date
-from urllib.parse import parse_qsl, urlencode, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit
 import re
 
 import booking_rooms
@@ -157,6 +157,18 @@ def search_error_code(final_url):
         if key.startswith('errorc_'):
             return key[len('errorc_'):]
     return ''
+
+
+def search_has_district(final_url, district_id):
+    """True when the loaded search page still carries the district filter.
+
+    A challenge redirect or a canonical rewrite drops ``nflt``, and the page
+    then shows the whole city — the rows must not be presented as the
+    district's hotels.
+    """
+    if district_id in (None, ''):
+        return False
+    return f'di={district_id}' in unquote(str(final_url or ''))
 
 
 _FACETS_JS = """() => Array.from(

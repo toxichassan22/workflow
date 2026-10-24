@@ -75,6 +75,7 @@ class BookingHotelScanTests(unittest.TestCase):
 
     def setUp(self):
         booking_destination._RESOLVED.clear()
+        booking_destination.CONTENT_PAGE_RETRY_DELAY = 0
 
     def _payload(self):
         return {
@@ -176,6 +177,57 @@ class BookingHotelScanTests(unittest.TestCase):
                          'searchstring_not_found')
         self.assertEqual(
             booking_search.search_error_code('https://www.booking.com/x'), '')
+
+    def test_district_filter_is_read_back_from_the_final_url(self):
+        filtered = ('https://www.booking.com/searchresults.html?ss=Jeddah'
+                    '&nflt=class%3D5%3Bdi%3D5654')
+        self.assertTrue(booking_search.search_has_district(filtered, '5654'))
+        self.assertFalse(booking_search.search_has_district(filtered, '5656'))
+        self.assertFalse(booking_search.search_has_district(
+            'https://www.booking.com/index.ar.html', '5654'))
+
+    def test_district_page_that_lost_the_filter_is_not_the_district(self):
+        booking_destination._RESOLVED.clear()
+        city_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108')
+        district_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+        session = _Session({
+            city_url: {
+                'final_url': city_url,
+                'title': 'Booking.com search',
+                'text': '',
+                'booking_districts': [{'id': '5654', 'label': 'الأندلس 2'}],
+                'booking_search': {'hotels': [
+                    {'name': 'City Hotel', 'url': PROPERTY_URL},
+                ]},
+            },
+            district_url: {
+                'final_url': city_url,
+                'title': 'Booking.com search',
+                'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'Elsewhere ' + str(index),
+                     'url': PROPERTY_URL} for index in range(25)
+                ]},
+            },
+            PROPERTY_URL: {'final_url': PROPERTY_URL, 'title': 'City Hotel',
+                           'text': ''},
+        }, pages={COUNTRY_PAGE: {'html': COUNTRY_HTML},
+                  CITY_PAGE: {'html': CITY_HTML}})
+        with self.app.app_context(), \
+                patch.object(self.module.maps_service,
+                             'reverse_geocode_location',
+                             return_value=self._geocode()), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session):
+            result = self.module._booking_hotel_scan(
+                self._task(), self._payload(), {}, tenant_id=None,
+                offer_lang='ar', deadline=None)
+        rows = result['parsed']['competitors']
+        self.assertEqual(rows, [])
+        self.assertIn('تعذّر فتح نتائج فلتر حي', result['parsed']['notes'])
+        self.assertNotIn('City Hotel', result['parsed']['notes'])
 
     def test_hotel_scan_builds_rows_from_booking_search_and_rate_block(self):
         search_url = self._search_url()

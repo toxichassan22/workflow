@@ -37,6 +37,7 @@ import booking_search
 import hotel_stay
 
 DEFAULT_TIMEOUT = 20        # seconds, page goto
+BOOKING_TIMEOUT = 45        # Booking solves its WAF before DOMContentLoaded
 SETTLE_MS = 1500            # post-domcontentloaded settle
 TEXT_CAP = 12000            # chars kept per page
 MAX_RESULTS = 8
@@ -727,6 +728,11 @@ class BrowserWorker:
         if stay_url != url:
             _browser_log(f'[BROWSER] booking stay window applied: {stay_url}')
             url = stay_url
+        if (hotel_stay.is_booking_hotel_url(url)
+                or booking_search.is_booking_search_url(url)):
+            # Booking's WAF runs before the document is complete; the default
+            # window cut real property pages off mid-challenge.
+            timeout = max(int(timeout or 0), BOOKING_TIMEOUT)
         result = _result(url)
         try:
             page = self._ensure_page()

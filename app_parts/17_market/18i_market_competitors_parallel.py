@@ -200,13 +200,18 @@ def _booking_scan_result(task, rows, citations, note='', search_ran=False):
     }
 
 
-def _booking_empty_note(search, *, destination, matched_district, filter_error,
-                        district_label, city_label, stars):
+def _booking_empty_note(search, *, destination, matched_district,
+                        district_label, city_label, stars,
+                        filter_error=''):
     """Why a Booking scan produced no hotels, naming the actual cause."""
     search = search if isinstance(search, dict) else {}
     where = (f'لحي {district_label} في {city_label}' if district_label
              else f'في {city_label}')
     stars_part = f' (النجوم {stars})' if stars else ''
+    if filter_error:
+        return (f'تعذّر فتح نتائج فلتر حي {district_label} على Booking '
+                f'({filter_error})، فلم تُقرأ فنادق الحي{stars_part}. '
+                f'لم يُستخدم أي مصدر آخر.')
     error_code = booking_search.search_error_code(search.get('final_url'))
     if error_code:
         return (f'رفض Booking البحث النصّي ({error_code}) فلم تُفتح صفحة نتائج '
@@ -220,10 +225,6 @@ def _booking_empty_note(search, *, destination, matched_district, filter_error,
     if matched_district:
         return (f'لا توجد فنادق {stars_part or "مطابقة"} لحي {district_label} '
                 f'في {city_label} على Booking.com. لم يُستخدم أي مصدر آخر.')
-    if filter_error:
-        return (f'تعذّر فتح نتائج فلتر الحي على Booking ({filter_error}) '
-                f'ولم تُرجع صفحة نتائج المدينة فنادق {where}{stars_part}. '
-                f'لم يُستخدم أي مصدر آخر.')
     return (f'لم تُرجع صفحة نتائج Booking.com فنادق {where}{stars_part} '
             f'دون فلتر حي (الحي غير معروض ضمن أحياء Booking لهذه المدينة). '
             f'لم يُستخدم أي مصدر آخر.')
@@ -273,7 +274,6 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             final_url, search.get('title'), search.get('text')))
         matched = booking_search.match_district_facet(
             search.get('booking_districts') or [], district_ar, district_en)
-        filter_error = ''
         if matched:
             filtered_url = booking_search.build_search_url(
                 city_en or city_ar, stars=stars or None, dest_id=dest_id,
@@ -282,22 +282,31 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             filtered = filtered if isinstance(filtered, dict) else {}
             filtered_hotels = ((filtered.get('booking_search') or {})
                                .get('hotels') or [])
+            filtered_final = str(filtered.get('final_url') or filtered_url)
+            filter_applied = booking_search.search_has_district(
+                filtered_final, matched.get('id'))
             print(f'[MARKET STUDY] booking district filter '
                   f'id={matched.get("id")!r} '
                   f'label={booking_search.facet_label(matched)!r} '
                   f'cards={len(filtered_hotels)} '
-                  f'error={filtered.get("error")!r}', flush=True)
-            if not filtered.get('error'):
+                  f'error={filtered.get("error")!r} '
+                  f'final={filtered_final[:200]}', flush=True)
+            if not filtered.get('error') and filter_applied:
                 search = filtered
-                filtered_final = str(filtered.get('final_url') or filtered_url)
                 citations.append(_booking_scan_citation(
                     filtered_final, filtered.get('title'),
                     filtered.get('text')))
             else:
-                # The district filter never opened: the rows below would be
-                # city-wide, so the notes must not claim the district.
-                filter_error = str(filtered.get('error') or 'failed')
-                matched = None
+                # Never widen silently: city-wide rows are not this district's
+                # hotels, and opening them costs a WAF wait each.
+                note = _booking_empty_note(
+                    filtered, destination=destination, matched_district=None,
+                    filter_error=str(
+                        filtered.get('error') or 'filter_not_applied'),
+                    district_label=display_district or district_en,
+                    city_label=city_ar or city_en, stars=stars)
+                return _booking_scan_result(
+                    task, [], citations, note, search_ran=True)
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
         hotels = search_data.get('hotels') or []
@@ -307,7 +316,6 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         if not hotels:
             note = _booking_empty_note(
                 search, destination=destination, matched_district=matched,
-                filter_error=filter_error,
                 district_label=display_district or district_en,
                 city_label=city_ar or city_en, stars=stars)
             return _booking_scan_result(
@@ -408,8 +416,6 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         priced_count = sum(1 for row in rows if row.get('price_value'))
         scope = (f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
                  if matched else
-                 f' (تعذّر فتح نتائج فلتر الحي ({filter_error})؛ بحث على مستوى المدينة)'
-                 if filter_error else
                  ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)')
         note = (
             f'تم جلب {len(rows)} فندقًا من صفحة نتائج Booking.com لحي '
