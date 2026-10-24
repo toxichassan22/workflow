@@ -264,19 +264,23 @@ def _base_rows(rows, adults=2):
     return normalized, eligible, base_rows
 
 
-def room_ranges(rows, adults=2):
+def room_ranges(rows):
     """Cheapest-to-priciest room price and smallest-to-largest room area.
 
     The competitor table shows a room-price range, so both ends come from
-    **every** room row on the page for the requested occupancy — not from the
-    base rooms only. A row after a room header may omit its area, so the
-    area is borrowed from another row of the same room.
+    **every** room on the page — suites and family rooms included, whatever
+    occupancy their rate is sold for (owner decision 2026-10-24), so the range
+    matches the room table a client sees. A row after a room header may omit
+    its area, so the area is borrowed from another row of the same room.
     """
-    _, eligible, _ = _base_rows(rows, adults=adults)
-    if not eligible:
+    normalized = [normalize_rate_row(row) for row in rows or []
+                  if isinstance(row, dict)]
+    priced = [row for row in normalized
+              if row.get('price') is not None and row['price'] > 0]
+    if not priced:
         return {}
     areas_by_room = {}
-    for row in eligible:
+    for row in normalized:
         if row.get('area_sqm'):
             areas_by_room.setdefault(
                 row.get('room_id') or row.get('block_id') or '',
@@ -284,25 +288,21 @@ def room_ranges(rows, adults=2):
     prices = []
     areas = []
     rooms = set()
-    for row in eligible:
+    for row in priced:
         room_key = row.get('room_id') or row.get('block_id') or ''
         rooms.add(room_key)
-        price = (row['original_price'] if row.get('original_price')
-                 else row.get('price'))
-        if price:
-            prices.append(price)
+        prices.append(row['original_price'] if row.get('original_price')
+                      else row['price'])
         area = row.get('area_sqm') or areas_by_room.get(room_key)
         if area:
             areas.append(area)
-    if not prices:
-        return {}
     return {
         'price_from': min(prices),
         'price_to': max(prices),
         'area_from': min(areas) if areas else None,
         'area_to': max(areas) if areas else None,
         'room_count': len(rooms),
-        'currency': eligible[0].get('currency') or SELECTED_CURRENCY,
+        'currency': priced[0].get('currency') or SELECTED_CURRENCY,
     }
 
 
@@ -401,7 +401,7 @@ def extract_booking_rate(page, url='', adults=2):
     rate = select_cheapest_rate(data.get('rows') or [], adults=adults)
     if not rate:
         return None
-    rate.update(room_ranges(data.get('rows') or [], adults=adults))
+    rate.update(room_ranges(data.get('rows') or []))
     try:
         final_url = page.url or url
     except Exception:

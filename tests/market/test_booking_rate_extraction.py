@@ -122,6 +122,17 @@ class BookingRateSelectionTests(unittest.TestCase):
         self.assertEqual(ranges['area_to'], 42.0)
         self.assertEqual(ranges['room_count'], 2)
 
+    def test_ranges_include_rooms_sold_for_other_occupancies(self):
+        rows = [
+            _row('100_200_2_2_0', 245, 350, area='35 m²', room='Standard'),
+            _row('106_206_4_0_0', 1000, 1200, area='90 m²',
+                 room='Family Suite', row_text='Guests: 4 adults'),
+        ]
+        ranges = booking_rooms.room_ranges(rows)
+        self.assertEqual(ranges['price_to'], 1200.0)
+        self.assertEqual(ranges['area_to'], 90.0)
+        self.assertEqual(ranges['room_count'], 2)
+
     def test_range_area_is_borrowed_from_the_same_room(self):
         rows = [
             _row('100_200_2_2_0', 245, 350, area='35 m²', room='Standard'),
