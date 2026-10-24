@@ -369,38 +369,65 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             }
             if priced:
                 source_currency = str(rate.get('currency') or 'SAR').upper()
-                price = float(rate['price'])
+                fx_rate = 1.0
                 if source_currency != 'SAR':
                     fx_rate = market_study.price_fx_to_sar(source_currency)
-                    if fx_rate:
-                        price *= fx_rate
-                    else:
+                    if not fx_rate:
                         priced = False
                 if priced:
-                    value = format_precise_number(price, grouped=False)
-                    area = rate.get('area_sqm')
+                    def _money(value):
+                        if value is None:
+                            return ''
+                        return format_precise_number(
+                            float(value) * fx_rate, grouped=False)
+
+                    def _range(low, high):
+                        low, high = _money(low), _money(high)
+                        if low and high and low != high:
+                            return f'من {low} إلى {high}'
+                        return low or high
+
+                    price_from = rate.get('price_from') or rate.get('price')
+                    price_to = rate.get('price_to') or price_from
+                    area_from = rate.get('area_from')
+                    area_to = rate.get('area_to')
+                    if area_from is None and area_to is None:
+                        area_from = rate.get('area_sqm')
+                        area_to = area_from
                     current = rate.get('current_price')
                     taxes = rate.get('taxes')
                     note = (
-                        'سعر Booking الأصلي قبل الخصم لأقل غرفة أساسية قبل الضرائب: '
-                        f'{value} ر.س'
+                        'نطاق أسعار الغرف على Booking قبل الخصم وقبل الضرائب: '
+                        f'{_range(price_from, price_to)} ر.س'
                         + (f' (محوّل من {source_currency})'
                            if source_currency != 'SAR' else '')
-                        + f'؛ السعر الحالي بعد الخصم '
+                        + (f'؛ المساحات {_range(area_from, area_to)} م²'
+                           if area_from is not None else '')
+                        + f'؛ أقل سعر حالي بعد الخصم '
                         f'{current if current is not None else "غير متوفر"} '
                         f'والضرائب {taxes if taxes is not None else "غير متوفر"}.')
                     row.update({
-                        'price_type': 'سعر الليلة',
-                        'price_value': value,
+                        'price_type': 'نطاق أسعار الغرف',
+                        'price_value': '',
+                        'price_from': _money(price_from),
+                        'price_to': _money(price_to),
                         'price_currency': 'SAR',
-                        'area_sqm': (format_precise_number(
-                            float(area), grouped=False)
-                            if area is not None else ''),
-                        'area_mode': 'fixed' if area is not None else '',
+                        'area_sqm': '',
+                        'area_mode': ('range' if area_from is not None
+                                      else ''),
+                        'area_from': (_money(area_from)
+                                      if area_from is not None else ''),
+                        'area_to': (_money(area_to)
+                                    if area_to is not None else ''),
                         'price_listed': True,
                         'notes': note,
                         'price_cache': {
-                            'price_value': value,
+                            'price_from': _money(price_from),
+                            'price_to': _money(price_to),
+                            'area_from': (_money(area_from)
+                                          if area_from is not None else ''),
+                            'area_to': (_money(area_to)
+                                        if area_to is not None else ''),
                             'booking_current_price': current,
                             'booking_taxes': taxes,
                             'booking_currency': source_currency,
@@ -409,8 +436,10 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                         },
                         'field_sources': {
                             'name': [url],
-                            'price_value': [url],
-                            'area_sqm': [url] if area is not None else [],
+                            'price_from': [url],
+                            'price_to': [url],
+                            'area_from': [url] if area_from is not None else [],
+                            'area_to': [url] if area_to is not None else [],
                         },
                     })
             if not priced:
@@ -418,7 +447,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     'صفحة الفندق على Booking.com لم تُرجع بلوك سعر/مساحة '
                     'لهذه الإقامة؛ السعر والمساحة غير متوفرين.')
             rows.append(row)
-        priced_count = sum(1 for row in rows if row.get('price_value'))
+        priced_count = sum(
+            1 for row in rows if row.get('price_from') or row.get('price_to'))
         scope = (f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
                  if matched else
                  ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)')

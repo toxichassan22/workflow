@@ -237,14 +237,8 @@ def _fill_room_metadata(rows, selected):
     return selected
 
 
-def select_cheapest_rate(rows, adults=2):
-    """Base room's original pre-discount nightly price for ``adults``.
-
-    The current price identifies the cheapest base rate; a room-only rate wins
-    over a breakfast-included sibling for the same room. The figure returned in
-    ``price`` is that base rate's original price before Booking's discount —
-    the owner's comparison basis — and taxes stay informational.
-    """
+def _base_rows(rows, adults=2):
+    """One base (room-only, cheapest) row per room type for the occupancy."""
     normalized = [normalize_rate_row(row) for row in rows or []
                   if isinstance(row, dict)]
     eligible = []
@@ -255,8 +249,6 @@ def select_cheapest_rate(rows, adults=2):
             if row['adults'] != adults:
                 continue
         eligible.append(row)
-    if not eligible:
-        return None
     by_room = {}
     for row in eligible:
         by_room.setdefault(row.get('room_id') or row.get('block_id') or '', []).append(row)
@@ -269,6 +261,43 @@ def select_cheapest_rate(rows, adults=2):
             row['price'], row.get('index') if row.get('index') is not None else 0)))
     base_rows.sort(key=lambda row: (
         row['price'], row.get('index') if row.get('index') is not None else 0))
+    return normalized, eligible, base_rows
+
+
+def room_ranges(rows, adults=2):
+    """Cheapest-to-priciest base room and smallest-to-largest room area.
+
+    The competitor table shows a room-price range, so the page's own rows
+    supply both ends: one base rate per room type (room-only wins over its
+    breakfast sibling), original pre-discount prices, in the page currency.
+    """
+    _, _, base_rows = _base_rows(rows, adults=adults)
+    if not base_rows:
+        return {}
+    prices = [row['original_price'] if row.get('original_price')
+              else row['price'] for row in base_rows]
+    areas = [row['area_sqm'] for row in base_rows if row.get('area_sqm')]
+    return {
+        'price_from': min(prices),
+        'price_to': max(prices),
+        'area_from': min(areas) if areas else None,
+        'area_to': max(areas) if areas else None,
+        'room_count': len(base_rows),
+        'currency': base_rows[0].get('currency') or SELECTED_CURRENCY,
+    }
+
+
+def select_cheapest_rate(rows, adults=2):
+    """Base room's original pre-discount nightly price for ``adults``.
+
+    The current price identifies the cheapest base rate; a room-only rate wins
+    over a breakfast-included sibling for the same room. The figure returned in
+    ``price`` is that base rate's original price before Booking's discount —
+    the owner's comparison basis — and taxes stay informational.
+    """
+    normalized, eligible, base_rows = _base_rows(rows, adults=adults)
+    if not eligible or not base_rows:
+        return None
     selected = _fill_room_metadata(eligible, dict(base_rows[0]))
     current_price = selected['price']
     original_price = selected.get('original_price')
@@ -353,6 +382,7 @@ def extract_booking_rate(page, url='', adults=2):
     rate = select_cheapest_rate(data.get('rows') or [], adults=adults)
     if not rate:
         return None
+    rate.update(room_ranges(data.get('rows') or [], adults=adults))
     try:
         final_url = page.url or url
     except Exception:
@@ -385,11 +415,24 @@ def format_rate_block(rate):
         + ('' if current_total is None else f'{current_total:g}'),
         'tax_included: ' + ('true' if rate.get('tax_included') else 'false'),
         'rate_policy: ' + str(rate.get('rate_policy') or ''),
+        'price_range_before_discount: '
+        + _range_text(rate.get('price_from'), rate.get('price_to')),
+        'area_range_sqm: '
+        + _range_text(rate.get('area_from'), rate.get('area_to')),
+        'room_type_count: ' + str(rate.get('room_count') or ''),
         'price_basis: original pre-discount nightly price of the cheapest base room, '
         'before taxes; the discounted current price is informational',
         BOOKING_RATE_END,
     ]
     return '\n'.join(lines)
+
+
+def _range_text(low, high):
+    if low is None and high is None:
+        return ''
+    if low is None or high is None or low == high:
+        return f'{low if low is not None else high:g}'
+    return f'{low:g} - {high:g}'
 
 
 _BLOCK_RE = re.compile(
@@ -418,6 +461,9 @@ def parse_rate_block(text):
     taxes = parse_number(data.get('taxes_and_fees_current_rate'))
     total = parse_number(data.get('current_total_including_tax'))
     adults = parse_number(data.get('adults'))
+    price_from, price_to = _parse_range(data.get('price_range_before_discount'))
+    area_from, area_to = _parse_range(data.get('area_range_sqm'))
+    rooms = parse_number(data.get('room_type_count'))
     return {
         'price': price,
         'current_price': current,
@@ -431,7 +477,22 @@ def parse_rate_block(text):
         'room_name': data.get('room_name') or '',
         'rate_policy': data.get('rate_policy') or '',
         'source_url': data.get('source_url') or '',
+        'price_from': price_from,
+        'price_to': price_to,
+        'area_from': area_from,
+        'area_to': area_to,
+        'room_count': int(rooms) if rooms is not None else None,
     }
+
+
+def _parse_range(value):
+    text = str(value or '')
+    if not text:
+        return None, None
+    parts = re.split(r'\s*-\s*', text)
+    low = parse_number(parts[0])
+    high = parse_number(parts[1]) if len(parts) > 1 else low
+    return low, high
 
 
 def with_rate_block(rate, text=''):

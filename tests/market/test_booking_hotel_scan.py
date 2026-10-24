@@ -268,15 +268,62 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(row['name'], 'Eden Residence')
-        self.assertEqual(row['price_value'], '680')
+        self.assertEqual(row['price_from'], '680')
+        self.assertEqual(row['price_to'], '680')
+        self.assertEqual(row['price_value'], '')
         self.assertEqual(row['price_currency'], 'SAR')
-        self.assertEqual(row['price_type'], 'سعر الليلة')
-        self.assertEqual(row['area_sqm'], '59')
+        self.assertEqual(row['price_type'], 'نطاق أسعار الغرف')
+        self.assertEqual(row['area_mode'], 'range')
+        self.assertEqual(row['area_from'], '59')
+        self.assertEqual(row['area_to'], '59')
         self.assertEqual(row['hotel_stars'], '4')
         self.assertEqual(row['source_url'], PROPERTY_URL)
         self.assertEqual(row['source_urls'], [PROPERTY_URL])
         self.assertEqual(row['row_source'], 'booking')
         self.assertIn('قبل الخصم', row['notes'])
+
+    def test_hotel_row_carries_the_room_price_and_area_range(self):
+        search_url = self._search_url()
+        session = _Session({
+            search_url: {
+                'final_url': search_url,
+                'title': 'Booking.com: Search results',
+                'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'Eden Residence', 'url': PROPERTY_URL},
+                ]},
+            },
+            PROPERTY_URL: {
+                'final_url': PROPERTY_URL,
+                'title': 'Eden Residence',
+                'text': '',
+                'booking_rate': {
+                    'price': 680.0, 'current_price': 476.0,
+                    'currency': 'SAR', 'taxes': 85.0,
+                    'price_from': 680.0, 'price_to': 1200.0,
+                    'area_from': 59.0, 'area_to': 90.0,
+                    'room_count': 3, 'room_name': 'One-Bedroom Apartment',
+                },
+            },
+        })
+        with self.app.app_context(), \
+                patch.object(self.module.maps_service,
+                             'reverse_geocode_location',
+                             return_value=self._geocode()), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session):
+            result = self.module._booking_hotel_scan(
+                self._task(), self._payload(), {}, tenant_id=None,
+                offer_lang='ar', deadline=None)
+        row = result['parsed']['competitors'][0]
+        self.assertEqual(row['price_type'], 'نطاق أسعار الغرف')
+        self.assertEqual(row['price_from'], '680')
+        self.assertEqual(row['price_to'], '1200')
+        self.assertEqual(row['area_mode'], 'range')
+        self.assertEqual(row['area_from'], '59')
+        self.assertEqual(row['area_to'], '90')
+        self.assertIn('من 680 إلى 1200', row['notes'])
+        self.assertIn('من 59 إلى 90', row['notes'])
         self.assertTrue(result['search_ran'])
         self.assertIn(self._search_url(), session.urls)
         self.assertIn(PROPERTY_URL, session.urls)
@@ -325,7 +372,7 @@ class BookingHotelScanTests(unittest.TestCase):
                 offer_lang='ar', deadline=None)
         rows = result['parsed']['competitors']
         self.assertEqual(len(rows), 2)
-        unpriced = next(row for row in rows if not row.get('price_value'))
+        unpriced = next(row for row in rows if not row.get('price_from'))
         self.assertEqual(unpriced['name'], 'Garden City')
         self.assertEqual(unpriced['source_url'], second_url)
         self.assertEqual(unpriced['source_urls'], [second_url])

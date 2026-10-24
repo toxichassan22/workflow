@@ -95,6 +95,35 @@ class BookingRateSelectionTests(unittest.TestCase):
         self.assertEqual(rate['area_sqm'], 35.0)
         self.assertEqual(rate['room_name'], 'غرفة مزدوجة')
 
+    def test_room_ranges_span_every_base_room(self):
+        rows = [
+            _row('100_200_2_2_0', 245, 350, area='35 m²', room='Standard'),
+            _row('101_201_2_2_0', 400, 500, area='42 m²', room='Suite'),
+        ]
+        ranges = booking_rooms.room_ranges(rows)
+        self.assertEqual(ranges['price_from'], 350.0)
+        self.assertEqual(ranges['price_to'], 500.0)
+        self.assertEqual(ranges['area_from'], 35.0)
+        self.assertEqual(ranges['area_to'], 42.0)
+        self.assertEqual(ranges['room_count'], 2)
+        self.assertEqual(ranges['currency'], 'SAR')
+
+    def test_block_round_trips_the_price_and_area_ranges(self):
+        rows = [
+            _row('100_200_2_2_0', 245, 350, area='35 m²', room='Standard'),
+            _row('101_201_2_2_0', 400, 500, area='42 m²', room='Suite'),
+        ]
+        rate = booking_rooms.select_cheapest_rate(rows)
+        rate.update(booking_rooms.room_ranges(rows))
+        block = booking_rooms.format_rate_block(rate)
+        self.assertIn('price_range_before_discount: 350 - 500', block)
+        self.assertIn('area_range_sqm: 35 - 42', block)
+        parsed = booking_rooms.parse_rate_block(block)
+        self.assertEqual((parsed['price_from'], parsed['price_to']),
+                         (350.0, 500.0))
+        self.assertEqual((parsed['area_from'], parsed['area_to']),
+                         (35.0, 42.0))
+
     def test_no_table_rows_returns_none(self):
         self.assertIsNone(booking_rooms.select_cheapest_rate([]))
 
