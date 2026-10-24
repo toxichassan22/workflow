@@ -15,6 +15,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+import booking_destination
 import booking_search
 import maps_service
 from numeric_precision import format_precise_number
@@ -102,12 +103,13 @@ def _project_coordinates(payload, data=None):
 
 
 def _english_booking_location(payload, data, tenant_id=None):
-    """Project district/city in English, for a Booking search query.
+    """Project district/city/country in English, for a Booking search.
 
-    Booking does not resolve the Arabic district free text (it redirects to
-    the homepage). The project coordinates — or, when they are missing, an
-    address geocode — resolve to the English district, e.g.
-    «Al Andalus, Jeddah».
+    Booking does not resolve a free-text district (it redirects to the
+    homepage and the search has to run on a destination id), so the project
+    coordinates — or, when they are missing, an address geocode — resolve to
+    the English city, district and country code. The country code is what
+    locates Booking's city page.
     """
     city = str((payload or {}).get('city') or '').strip()
     district = str((payload or {}).get('district') or '').strip()
@@ -124,12 +126,20 @@ def _english_booking_location(payload, data, tenant_id=None):
                     return str(item.get('long_name') or '').strip()
             return ''
 
+        country = ''
+        for item in components:
+            if 'country' in (item.get('types') or []):
+                country = str(item.get('short_name')
+                               or item.get('long_name') or '').strip()
+                break
+
         return (component(('locality', 'postal_town',
                            'administrative_area_level_2')),
                 component(('sublocality_level_1', 'sublocality',
-                           'neighborhood', 'administrative_area_level_3')))
+                           'neighborhood', 'administrative_area_level_3')),
+                country)
 
-    city_en = district_en = ''
+    city_en = district_en = country_code = ''
     lat, lng = _project_coordinates(payload, data)
     if lat is not None and lng is not None:
         try:
@@ -139,7 +149,7 @@ def _english_booking_location(payload, data, tenant_id=None):
         except Exception as exc:
             print(f'[MARKET STUDY] English geocode failed: {exc}')
             resolved = {}
-        city_en, district_en = english_from(resolved)
+        city_en, district_en, country_code = english_from(resolved)
     if not city_en or not district_en:
         address_query = ', '.join(part for part in (
             district, city, 'السعودية') if part)
@@ -158,10 +168,11 @@ def _english_booking_location(payload, data, tenant_id=None):
                         usage_ctx=usage_ctx)
                 except Exception:
                     resolved = {}
-                extra_city, extra_district = english_from(resolved)
+                extra_city, extra_district, extra_country = english_from(resolved)
                 city_en = city_en or extra_city
                 district_en = district_en or extra_district
-    return city_en or city, district_en or district
+                country_code = country_code or extra_country
+    return city_en or city, district_en or district, country_code
 
 
 def _booking_scan_citation(url, title='', text=''):
@@ -189,12 +200,39 @@ def _booking_scan_result(task, rows, citations, note='', search_ran=False):
     }
 
 
+def _booking_empty_note(search, *, destination, matched_district,
+                        district_label, city_label, stars):
+    """Why a Booking scan produced no hotels, naming the actual cause."""
+    search = search if isinstance(search, dict) else {}
+    where = (f'لحي {district_label} في {city_label}' if district_label
+             else f'في {city_label}')
+    stars_part = f' (النجوم {stars})' if stars else ''
+    error_code = booking_search.search_error_code(search.get('final_url'))
+    if error_code:
+        return (f'رفض Booking البحث النصّي ({error_code}) فلم تُفتح صفحة نتائج '
+                f'{where}{stars_part}. لم يُستخدم أي مصدر آخر.')
+    if search.get('error'):
+        return (f'تعذّر فتح صفحة نتائج Booking.com {where}{stars_part} '
+                f'({search.get("error")}). لم يُستخدم أي مصدر آخر.')
+    if not (destination or {}).get('dest_id'):
+        return (f'تعذّر تحديد وجهة المدينة على Booking، فلم تُرجع صفحة النتائج '
+                f'فنادق {where}{stars_part}. لم يُستخدم أي مصدر آخر.')
+    if matched_district:
+        return (f'لا توجد فنادق {stars_part or "مطابقة"} لحي {district_label} '
+                f'في {city_label} على Booking.com. لم يُستخدم أي مصدر آخر.')
+    return (f'لم تُرجع صفحة نتائج Booking.com فنادق {where}{stars_part} '
+            f'دون فلتر حي (الحي غير معروض ضمن أحياء Booking لهذه المدينة). '
+            f'لم يُستخدم أي مصدر آخر.')
+
+
 def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                         deadline=None):
     """Deterministic hotel discovery from Booking search + property pages.
 
-    No model decides which hotel page to open: the project's English district
-    (from its coordinates) is searched on Booking, the hotel cards become the
+    No model decides which hotel page to open: the project city is resolved to
+    Booking's own destination id (a free-text search is refused), the city's
+    hotels are filtered by Booking's neighbourhood filter for the project
+    district and the selected star class, the hotel cards become the
     competitors, and each property page's ``## BOOKING_RATE ##`` block supplies
     the original pre-discount nightly price and room area.
     """
@@ -204,13 +242,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     district_ar = str((payload or {}).get('district') or '').strip()
     display_district = (district_ar[3:].strip()
                         if district_ar.startswith('حي ') else district_ar)
-    city_en, district_en = _english_booking_location(
+    city_en, district_en, country_code = _english_booking_location(
         payload, data, tenant_id=tenant_id)
-    search_url = booking_search.build_search_url(
-        city_en or city_ar, district_en or district_ar,
-        stars=stars or None)
-    print(f'[MARKET STUDY] booking hotel search city={city_en!r} '
-          f'district={district_en!r} stars={stars!r} url={search_url}')
     if _market_deadline_hit(deadline):
         return _booking_scan_result(
             task, [], [], 'deadline_exceeded', search_ran=False)
@@ -218,24 +251,57 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     rows = []
     citations = []
     try:
+        destination = booking_destination.resolve_city_destination(
+            session, country_code, city_en or city_ar, city_ar)
+        dest_id = str(destination.get('dest_id') or '')
+        dest_type = str(destination.get('dest_type') or 'city')
+        search_url = booking_search.build_search_url(
+            city_en or city_ar, stars=stars or None,
+            dest_id=dest_id, dest_type=dest_type)
+        print(f'[MARKET STUDY] booking hotel search city={city_en!r} '
+              f'district={district_en!r} stars={stars!r} dest_id={dest_id!r} '
+              f'url={search_url}', flush=True)
         search = session.open_url(search_url)
         search = search if isinstance(search, dict) else {}
         final_url = str(search.get('final_url') or search_url)
         citations.append(_booking_scan_citation(
             final_url, search.get('title'), search.get('text')))
+        matched = booking_search.match_district_facet(
+            search.get('booking_districts') or [], district_ar, district_en)
+        if matched:
+            filtered_url = booking_search.build_search_url(
+                city_en or city_ar, stars=stars or None, dest_id=dest_id,
+                dest_type=dest_type, district_id=matched.get('id'))
+            filtered = session.open_url(filtered_url)
+            filtered = filtered if isinstance(filtered, dict) else {}
+            filtered_hotels = ((filtered.get('booking_search') or {})
+                               .get('hotels') or [])
+            print(f'[MARKET STUDY] booking district filter '
+                  f'id={matched.get("id")!r} '
+                  f'label={booking_search.facet_label(matched)!r} '
+                  f'cards={len(filtered_hotels)} '
+                  f'error={filtered.get("error")!r}', flush=True)
+            if not filtered.get('error'):
+                search = filtered
+                filtered_final = str(filtered.get('final_url') or filtered_url)
+                citations.append(_booking_scan_citation(
+                    filtered_final, filtered.get('title'),
+                    filtered.get('text')))
+            else:
+                # The district filter never opened: the rows below would be
+                # city-wide, so the notes must not claim the district.
+                matched = None
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
         hotels = search_data.get('hotels') or []
-        print(f'[MARKET STUDY] booking search final_url={final_url} '
-              f'cards={len(hotels)} chars={len(str(search.get("text") or ""))}')
+        print(f'[MARKET STUDY] booking search final_url={search.get("final_url")} '
+              f'cards={len(hotels)} '
+              f'chars={len(str(search.get("text") or ""))}', flush=True)
         if not hotels:
-            query_label = ', '.join(part for part in (
-                district_en or district_ar, city_en or city_ar) if part)
-            note = (
-                f'لم تُرجع صفحة نتائج Booking.com فنادق لحي '
-                f'{display_district or district_en} في {city_ar or city_en} '
-                f'(استعلام Booking: {query_label}، النجوم '
-                f'{stars or "غير محددة"}). لم يُستخدم أي مصدر آخر.')
+            note = _booking_empty_note(
+                search, destination=destination, matched_district=matched,
+                district_label=display_district or district_en,
+                city_label=city_ar or city_en, stars=stars)
             return _booking_scan_result(
                 task, [], citations, note, search_ran=True)
         benchmark = market_study.benchmark_axis_label(axis, offer_lang)
@@ -328,9 +394,12 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     'لهذه الإقامة؛ السعر والمساحة غير متوفرين.')
             rows.append(row)
         priced_count = sum(1 for row in rows if row.get('price_value'))
+        scope = (f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
+                 if matched else
+                 ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)')
         note = (
             f'تم جلب {len(rows)} فندقًا من صفحة نتائج Booking.com لحي '
-            f'{display_district or district_en} في {city_ar or city_en}'
+            f'{display_district or district_en} في {city_ar or city_en}{scope}'
             + (f' — منها {priced_count} بسعر ومساحة.' if rows else '.'))
         return _booking_scan_result(task, rows, citations, note, search_ran=True)
     finally:

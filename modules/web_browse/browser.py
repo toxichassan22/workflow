@@ -636,6 +636,9 @@ class BrowserWorker:
             if rate:
                 result['booking_rate'] = rate
         elif is_booking_search:
+            districts = booking_search.extract_district_facets(page)
+            if districts:
+                result['booking_districts'] = districts
             search = booking_search.extract_search_results(page)
             if search:
                 result['booking_search'] = search
@@ -687,6 +690,30 @@ class BrowserWorker:
                 and result.get('booking_search')):
             result['text'] = booking_search.with_search_block(
                 result['booking_search'], result.get('text'))
+        return result
+
+    def fetch_html(self, url, timeout=DEFAULT_TIMEOUT):
+        """Navigate and return the page's raw HTML (links included).
+
+        Booking's destination resolution needs the hrefs on a content page,
+        which the readable-text extraction strips. Never raises.
+        """
+        result = {'url': str(url or ''), 'final_url': '', 'html': '',
+                  'status': None, 'error': ''}
+        try:
+            page = self._ensure_page()
+        except Exception as exc:
+            result['error'] = _launch_reason(exc)
+            return result
+        try:
+            response = page.goto(str(url), wait_until='domcontentloaded',
+                                 timeout=int(timeout * 1000))
+            page.wait_for_timeout(SETTLE_MS)
+            result['status'] = getattr(response, 'status', None)
+            result['final_url'] = page.url or str(url)
+            result['html'] = page.content() or ''
+        except Exception as exc:
+            result['error'] = _nav_reason(exc)
         return result
 
     def open_url(self, url, timeout=DEFAULT_TIMEOUT):

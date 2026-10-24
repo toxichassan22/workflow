@@ -11,6 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import parse_qsl, urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 _WEB_BROWSE = ROOT / 'modules' / 'web_browse'
@@ -18,21 +19,38 @@ for _path in (str(ROOT), str(_WEB_BROWSE)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
+import booking_destination  # noqa: E402
 import booking_search  # noqa: E402
 import db  # noqa: E402
 
 PROPERTY_URL = ('https://www.booking.com/hotel/sa/eden.html'
                 '?checkin=2026-11-07&checkout=2026-11-09')
+COUNTRY_PAGE = booking_destination.country_page_url('sa', 'en-us')
+CITY_PAGE = 'https://www.booking.com/city/sa/jiddah.html?aid=304142'
+COUNTRY_HTML = ('<html><body><a href="/city/sa/riyadh.html">Riyadh</a>'
+                '<a href="/city/sa/jiddah.html?aid=304142">Jeddah</a>'
+                '</body></html>')
+CITY_HTML = ('<html><body><form>'
+             '<input type="hidden" name="ss" value="Jeddah">'
+             '<input type="hidden" name="dest_id" value="-3096108">'
+             '<input type="hidden" name="dest_type" value="city">'
+             '</form></body></html>')
 
 
 class _Session:
-    def __init__(self, replies):
+    def __init__(self, replies, pages=None):
         self.replies = replies
+        self.pages = pages or {}
         self.urls = []
+        self.page_urls = []
 
     def open_url(self, url):
         self.urls.append(url)
         return self.replies.get(url, {})
+
+    def fetch_html(self, url, timeout=None):
+        self.page_urls.append(url)
+        return self.pages.get(url, {'error': 'not_found'})
 
     def close(self):
         pass
@@ -54,6 +72,9 @@ class BookingHotelScanTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.temp_dir.cleanup()
+
+    def setUp(self):
+        booking_destination._RESOLVED.clear()
 
     def _payload(self):
         return {
@@ -79,21 +100,23 @@ class BookingHotelScanTests(unittest.TestCase):
                 {'long_name': 'Al Andalus', 'types': [
                     'political', 'sublocality', 'sublocality_level_1']},
                 {'long_name': 'Jeddah', 'types': ['locality', 'political']},
+                {'long_name': 'Saudi Arabia', 'short_name': 'SA',
+                 'types': ['country', 'political']},
             ],
         }
 
     def _search_url(self):
-        return booking_search.build_search_url(
-            'Jeddah', 'Al Andalus', stars='4')
+        return booking_search.build_search_url('Jeddah', stars='4')
 
     def test_english_location_uses_coordinates(self):
         with self.app.app_context(), \
                 patch.object(self.module.maps_service,
                              'reverse_geocode_location',
                              return_value=self._geocode()):
-            city, district = self.module._english_booking_location(
+            city, district, country = self.module._english_booking_location(
                 self._payload(), {}, tenant_id=None)
-        self.assertEqual((city, district), ('Jeddah', 'Al Andalus'))
+        self.assertEqual((city, district, country),
+                         ('Jeddah', 'Al Andalus', 'SA'))
 
     def test_english_location_uses_address_geocode_without_coordinates(self):
         payload = self._payload()
@@ -106,9 +129,10 @@ class BookingHotelScanTests(unittest.TestCase):
                 patch.object(self.module.maps_service,
                              'reverse_geocode_location',
                              return_value=self._geocode()):
-            city, district = self.module._english_booking_location(
+            city, district, country = self.module._english_booking_location(
                 payload, {}, tenant_id=None)
-        self.assertEqual((city, district), ('Jeddah', 'Al Andalus'))
+        self.assertEqual((city, district, country),
+                         ('Jeddah', 'Al Andalus', 'SA'))
 
     def test_english_location_falls_back_to_the_project_text(self):
         payload = self._payload()
@@ -117,9 +141,41 @@ class BookingHotelScanTests(unittest.TestCase):
         with self.app.app_context(), \
                 patch.object(self.module.maps_service, 'geocode_address',
                              return_value={}):
-            city, district = self.module._english_booking_location(
+            city, district, country = self.module._english_booking_location(
                 payload, {}, tenant_id=None)
-        self.assertEqual((city, district), ('جدة', 'الأندلس'))
+        self.assertEqual((city, district, country), ('جدة', 'الأندلس', ''))
+
+    def test_search_url_carries_dest_id_and_the_district_filter(self):
+        url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+        params = dict(parse_qsl(urlsplit(url).query))
+        self.assertEqual(params['ss'], 'Jeddah')
+        self.assertEqual(params['dest_id'], '-3096108')
+        self.assertEqual(params['dest_type'], 'city')
+        self.assertEqual(params['nflt'], 'class=4;di=5654')
+
+    def test_district_facet_matches_the_arabic_project_district(self):
+        facets = [{'id': '5656', 'label': 'الشاطئ 9'},
+                  {'id': '5654', 'label': 'الأندلس 3'}]
+        matched = booking_search.match_district_facet(
+            facets, 'حي الأندلس', 'Al Andalus District')
+        self.assertEqual(matched['id'], '5654')
+        self.assertEqual(booking_search.facet_label(matched), 'الأندلس')
+
+    def test_district_facet_matches_the_english_district(self):
+        facets = [{'id': '5653', 'label': 'Al Hamra 2'},
+                  {'id': '5654', 'label': 'Al Andalus 3'}]
+        matched = booking_search.match_district_facet(
+            facets, '', 'Al Andalus District')
+        self.assertEqual(matched['id'], '5654')
+
+    def test_booking_search_refusal_code_is_read_from_the_final_url(self):
+        final_url = ('https://www.booking.com/index.ar.html?label=gen173'
+                     '&errorc_searchstring_not_found=ss')
+        self.assertEqual(booking_search.search_error_code(final_url),
+                         'searchstring_not_found')
+        self.assertEqual(
+            booking_search.search_error_code('https://www.booking.com/x'), '')
 
     def test_hotel_scan_builds_rows_from_booking_search_and_rate_block(self):
         search_url = self._search_url()
@@ -240,8 +296,87 @@ class BookingHotelScanTests(unittest.TestCase):
                 self._task(), self._payload(), {}, tenant_id=None,
                 offer_lang='ar', deadline=None)
         self.assertEqual(result['parsed']['competitors'], [])
-        self.assertIn('Booking.com', result['parsed']['notes'])
+        self.assertIn('تعذّر تحديد وجهة المدينة', result['parsed']['notes'])
         self.assertTrue(result['search_ran'])
+
+    def test_hotel_scan_searches_by_dest_id_and_filters_the_district(self):
+        booking_destination._RESOLVED.clear()
+        city_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108')
+        district_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+        session = _Session({
+            city_url: {
+                'final_url': city_url,
+                'title': 'Booking.com search',
+                'text': '',
+                'booking_districts': [
+                    {'id': '5656', 'label': 'الشاطئ 9'},
+                    {'id': '5654', 'label': 'الأندلس 3'},
+                ],
+                'booking_search': {'hotels': [
+                    {'name': 'City Hotel', 'url': PROPERTY_URL},
+                ]},
+            },
+            district_url: {
+                'final_url': district_url,
+                'title': 'Booking.com search',
+                'text': '',
+                'booking_districts': [],
+                'booking_search': {'hotels': [
+                    {'name': 'Eden Residence', 'url': PROPERTY_URL},
+                ]},
+            },
+            PROPERTY_URL: {
+                'final_url': PROPERTY_URL,
+                'title': 'Eden Residence',
+                'text': '',
+                'booking_rate': {
+                    'price': 680.0, 'currency': 'SAR', 'area_sqm': 59.0,
+                    'current_price': 476.0, 'taxes': 85.0,
+                    'room_name': 'One-Bedroom Apartment',
+                },
+            },
+        }, pages={COUNTRY_PAGE: {'html': COUNTRY_HTML},
+                  CITY_PAGE: {'html': CITY_HTML}})
+        with self.app.app_context(), \
+                patch.object(self.module.maps_service,
+                             'reverse_geocode_location',
+                             return_value=self._geocode()), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session):
+            result = self.module._booking_hotel_scan(
+                self._task(), self._payload(), {}, tenant_id=None,
+                offer_lang='ar', deadline=None)
+        rows = result['parsed']['competitors']
+        self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
+        self.assertIn(city_url, session.urls)
+        self.assertIn(district_url, session.urls)
+        params = dict(parse_qsl(urlsplit(district_url).query))
+        self.assertIn('di=5654', params['nflt'])
+        self.assertIn('فلتر حي', result['parsed']['notes'])
+
+    def test_hotel_scan_names_booking_search_only_refusal(self):
+        booking_destination._RESOLVED.clear()
+        search_url = self._search_url()
+        bounced = ('https://www.booking.com/index.ar.html?label=gen173'
+                   '&errorc_searchstring_not_found=ss')
+        session = _Session({
+            search_url: {'final_url': bounced, 'title': 'Booking.com',
+                         'text': 'صفحة رئيسية'},
+        })
+        with self.app.app_context(), \
+                patch.object(self.module.maps_service,
+                             'reverse_geocode_location',
+                             return_value=self._geocode()), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session):
+            result = self.module._booking_hotel_scan(
+                self._task(), self._payload(), {}, tenant_id=None,
+                offer_lang='ar', deadline=None)
+        self.assertEqual(result['parsed']['competitors'], [])
+        self.assertIn('searchstring_not_found', result['parsed']['notes'])
+        self.assertIn('رفض Booking', result['parsed']['notes'])
 
     def test_hotel_axis_skips_the_agent_and_the_portal_twin(self):
         axes = self.module.market_study.project_competitor_axes({

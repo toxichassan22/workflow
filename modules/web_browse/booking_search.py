@@ -8,10 +8,15 @@ and reads the property cards directly, so hotel discovery is Booking-only.
 The cards are used for discovery (name, property URL, location, review). The
 nightly price still comes from the property page's deterministic
 ``## BOOKING_RATE ##`` block — the search page's current price is context only.
+
+A search URL must carry the destination id: a free-text ``ss`` (a district
+name, or any search from the staging host) is answered with a redirect to the
+homepage and ``errorc_searchstring_not_found=ss``, so a district is applied
+through Booking's own neighbourhood filter (``nflt=di=<id>``) instead.
 """
 
 from datetime import date
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit
 import re
 
 import booking_rooms
@@ -22,8 +27,11 @@ BOOKING_SEARCH_END = '## END_BOOKING_SEARCH ##'
 BOOKING_CARD_SELECTOR = '[data-testid="property-card"]'
 BOOKING_SEARCH_MAX_HOTELS = 25
 BOOKING_BLOCK_MAX_HOTELS = 15
+SEARCH_STRING_REFUSED = 'errorc_searchstring_not_found'
 _CARD_NAME_SUFFIX_RE = re.compile(
     r',?\s*(?:Property|مكان الإقامة)\s*$', re.IGNORECASE)
+_DIACRITICS_RE = re.compile(r'[\u064b-\u0652\u0670\u0640]')
+
 
 
 def is_booking_search_url(url):
@@ -40,21 +48,28 @@ def is_booking_search_url(url):
     return parsed.path.lower().startswith('/searchresults')
 
 
-def build_search_url(city, district='', query='', check_in=None, check_out=None,
-                     adults=2, children=0, rooms=1, currency='SAR', stars=None):
-    """Booking search-results URL for a city/district or a specific hotel name.
+def build_search_url(city, query='', check_in=None, check_out=None,
+                     adults=2, children=0, rooms=1, currency='SAR', stars=None,
+                     dest_id='', dest_type='city', district_id=''):
+    """Booking search-results URL for a city, a destination id and filters.
 
-    ``query`` overrides the free-text ``ss`` value (e.g. ``"WA Hotel, Jeddah"``
-    for verification). Dates come from the shared stay window when omitted.
+    ``ss`` is the city text only. A free-text ``ss`` naming a district is
+    refused by Booking with ``errorc_searchstring_not_found=ss`` (measured
+    2026-10-24), and the same refusal hits every free-text search from the
+    staging host, so the resolved ``dest_id`` is what actually runs the search.
+    The district is applied as Booking's own neighbourhood filter
+    (``nflt=class=N;di=<id>``), never as text.
+
+    ``query`` overrides the free-text ``ss`` (a property-name verification
+    search). Dates come from the shared stay window when omitted.
     """
     if not query:
-        query = f'{district}, {city}' if district else str(city or '')
+        query = str(city or '')
     default_in, default_out = hotel_stay.booking_stay_window()
     check_in = check_in if isinstance(check_in, date) else default_in
     check_out = check_out if isinstance(check_out, date) else default_out
     params = {
         'ss': str(query or ''),
-        'dest_type': 'city',
         'checkin': check_in.isoformat(),
         'checkout': check_out.isoformat(),
         'group_adults': str(adults),
@@ -62,9 +77,117 @@ def build_search_url(city, district='', query='', check_in=None, check_out=None,
         'no_rooms': str(rooms),
         'selected_currency': str(currency or 'SAR'),
     }
+    if dest_id not in (None, ''):
+        params['dest_id'] = str(dest_id)
+        params['dest_type'] = str(dest_type or 'city')
+    filters = []
     if stars not in (None, ''):
-        params['nflt'] = f'class={stars}'
+        filters.append(f'class={stars}')
+    if district_id not in (None, ''):
+        filters.append(f'di={district_id}')
+    if filters:
+        params['nflt'] = ';'.join(filters)
     return 'https://www.booking.com/searchresults.html?' + urlencode(params)
+
+
+def normalize_label(value):
+    """Fold a Booking label or a project name for comparison.
+
+    Arabic districts reach the app from the client (`حي الأندلس`) and from
+    Booking's own filter panel (`الأندلس`), so hamza forms, ta-marbuta,
+    diacritics and punctuation are folded before they are compared.
+    """
+    text = str(value or '').strip().casefold()
+    text = _DIACRITICS_RE.sub('', text)
+    for source, target in (('أ', 'ا'), ('إ', 'ا'), ('آ', 'ا'), ('ٱ', 'ا'),
+                           ('ى', 'ي'), ('ة', 'ه'), ('ؤ', 'و'), ('ئ', 'ي')):
+        text = text.replace(source, target)
+    text = re.sub(r'[^\w\s]', ' ', text)
+    return ' '.join(text.split())
+
+
+def _district_name_variants(name):
+    """The name without the words that only describe it (`حي …`, `… District`)."""
+    normalized = normalize_label(name)
+    if not normalized:
+        return []
+    variants = {normalized}
+    tokens = normalized.split()
+    while tokens and tokens[0] in ('حي', 'حيي'):
+        tokens = tokens[1:]
+        variants.add(' '.join(tokens))
+    while tokens and tokens[-1] in ('district', 'neighbourhood',
+                                    'neighborhood', 'area'):
+        tokens = tokens[:-1]
+        variants.add(' '.join(tokens))
+    return [variant for variant in variants if len(variant) >= 3]
+
+
+def match_district_facet(facets, *names):
+    """The Booking neighbourhood facet matching one of the given names."""
+    wanted = []
+    for name in names:
+        wanted.extend(_district_name_variants(name))
+    if not wanted or not facets:
+        return None
+    for name in sorted(set(wanted), key=len, reverse=True):
+        for facet in facets:
+            label = normalize_label(facet_label(facet))
+            if not label:
+                continue
+            if (label == name or label.startswith(name)
+                    or name.startswith(label) or name in label):
+                return facet
+    return None
+
+
+def facet_label(facet):
+    """A facet's label without Booking's trailing property count."""
+    return re.sub(r'\s*\d+\s*$', '',
+                  str((facet or {}).get('label') or '')).strip()
+
+
+def search_error_code(final_url):
+    """Booking's own refusal code from a redirected search page, if any."""
+    try:
+        query = dict(parse_qsl(urlsplit(str(final_url or '')).query))
+    except ValueError:
+        return ''
+    for key in query:
+        if key.startswith('errorc_'):
+            return key[len('errorc_'):]
+    return ''
+
+
+_FACETS_JS = """() => Array.from(
+  document.querySelectorAll('[data-filters-item^="di:"]'))
+  .slice(0, 60)
+  .map(el => ({
+    raw: el.getAttribute('data-filters-item') || '',
+    label: ((el.innerText || el.textContent || '').replace(/\\s+/g, ' ').trim())
+  }))"""
+
+_FACET_ID_RE = re.compile(r'di[=:](\d+)')
+
+
+def extract_district_facets(page):
+    """Booking's neighbourhood filters (id + label) from a search page."""
+    try:
+        raw = page.evaluate(_FACETS_JS)
+    except Exception:
+        return []
+    facets = []
+    seen = set()
+    for item in raw or []:
+        if not isinstance(item, dict):
+            continue
+        match = _FACET_ID_RE.search(str(item.get('raw') or ''))
+        label = str(item.get('label') or '').strip()
+        if not match or not label or match.group(1) in seen:
+            continue
+        seen.add(match.group(1))
+        facets.append({'id': match.group(1), 'label': label})
+    return facets
 
 
 def wait_for_property_cards(page, timeout_ms=None):
