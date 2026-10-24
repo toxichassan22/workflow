@@ -108,6 +108,31 @@ class BookingRateSelectionTests(unittest.TestCase):
         self.assertEqual(ranges['room_count'], 2)
         self.assertEqual(ranges['currency'], 'SAR')
 
+    def test_ranges_cover_every_room_row_not_only_base_rooms(self):
+        rows = [
+            _row('100_200_2_2_0', 245, 350, area='35 m²', room='Standard'),
+            _row('101_201_2_2_0', 400, 500, area='42 m²', room='Suite'),
+            _row('101_202_2_2_0', 450, 560, area='42 m²', room='Suite',
+                 row_text='Guests: 2 adults Very good breakfast included'),
+        ]
+        ranges = booking_rooms.room_ranges(rows)
+        self.assertEqual(ranges['price_from'], 350.0)
+        self.assertEqual(ranges['price_to'], 560.0)
+        self.assertEqual(ranges['area_from'], 35.0)
+        self.assertEqual(ranges['area_to'], 42.0)
+        self.assertEqual(ranges['room_count'], 2)
+
+    def test_range_area_is_borrowed_from_the_same_room(self):
+        rows = [
+            _row('100_200_2_2_0', 245, 350, area='35 m²', room='Standard'),
+            _row('100_201_2_2_0', 301, 430, area='', room='',
+                 row_text='Guests: 2 adults breakfast included'),
+        ]
+        ranges = booking_rooms.room_ranges(rows)
+        self.assertEqual((ranges['area_from'], ranges['area_to']),
+                         (35.0, 35.0))
+        self.assertEqual(ranges['price_to'], 430.0)
+
     def test_block_round_trips_the_price_and_area_ranges(self):
         rows = [
             _row('100_200_2_2_0', 245, 350, area='35 m²', room='Standard'),

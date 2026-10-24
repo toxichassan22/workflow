@@ -265,25 +265,44 @@ def _base_rows(rows, adults=2):
 
 
 def room_ranges(rows, adults=2):
-    """Cheapest-to-priciest base room and smallest-to-largest room area.
+    """Cheapest-to-priciest room price and smallest-to-largest room area.
 
-    The competitor table shows a room-price range, so the page's own rows
-    supply both ends: one base rate per room type (room-only wins over its
-    breakfast sibling), original pre-discount prices, in the page currency.
+    The competitor table shows a room-price range, so both ends come from
+    **every** room row on the page for the requested occupancy — not from the
+    base rooms only. A row after a room header may omit its area, so the
+    area is borrowed from another row of the same room.
     """
-    _, _, base_rows = _base_rows(rows, adults=adults)
-    if not base_rows:
+    _, eligible, _ = _base_rows(rows, adults=adults)
+    if not eligible:
         return {}
-    prices = [row['original_price'] if row.get('original_price')
-              else row['price'] for row in base_rows]
-    areas = [row['area_sqm'] for row in base_rows if row.get('area_sqm')]
+    areas_by_room = {}
+    for row in eligible:
+        if row.get('area_sqm'):
+            areas_by_room.setdefault(
+                row.get('room_id') or row.get('block_id') or '',
+                row['area_sqm'])
+    prices = []
+    areas = []
+    rooms = set()
+    for row in eligible:
+        room_key = row.get('room_id') or row.get('block_id') or ''
+        rooms.add(room_key)
+        price = (row['original_price'] if row.get('original_price')
+                 else row.get('price'))
+        if price:
+            prices.append(price)
+        area = row.get('area_sqm') or areas_by_room.get(room_key)
+        if area:
+            areas.append(area)
+    if not prices:
+        return {}
     return {
         'price_from': min(prices),
         'price_to': max(prices),
         'area_from': min(areas) if areas else None,
         'area_to': max(areas) if areas else None,
-        'room_count': len(base_rows),
-        'currency': base_rows[0].get('currency') or SELECTED_CURRENCY,
+        'room_count': len(rooms),
+        'currency': eligible[0].get('currency') or SELECTED_CURRENCY,
     }
 
 
