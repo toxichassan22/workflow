@@ -98,6 +98,27 @@ class BookingRateSelectionTests(unittest.TestCase):
     def test_no_table_rows_returns_none(self):
         self.assertIsNone(booking_rooms.select_cheapest_rate([]))
 
+    def test_local_currency_original_is_restated_in_the_page_currency(self):
+        row = {
+            'block_id': '100_200_2_2_0',
+            'price_attr': '535',
+            'current_text': '7,883 EGP',
+            'original_value': '9273.64126820872',
+            'original_text': '9,274 EGP',
+            'taxes_text': '+1,636 EGP taxes and fees',
+            'taxes_raw': '1636',
+            'room_name': 'Deluxe Queen Room',
+            'area_text': '32 m²',
+            'occupancy_text': 'Max. people: 2',
+            'row_text': 'Guests: 2 adults',
+        }
+        rate = booking_rooms.select_cheapest_rate([row])
+        self.assertEqual(rate['currency'], 'SAR')
+        self.assertEqual(rate['current_price'], 535.0)
+        self.assertAlmostEqual(rate['price'], 629.5, delta=0.6)
+        self.assertAlmostEqual(rate['taxes'], 111.0, places=1)
+        self.assertEqual(rate['current_price_including_tax'], 646.0)
+
 
 class BookingRoomTableWiringTests(unittest.TestCase):
 

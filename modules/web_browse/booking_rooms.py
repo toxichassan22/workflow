@@ -27,6 +27,9 @@ import re
 BOOKING_RATE_START = '## BOOKING_RATE ##'
 BOOKING_RATE_END = '## END_BOOKING_RATE ##'
 BOOKING_TABLE_ROW_SELECTOR = '#hprt-table tr[data-block-id]'
+# The currency every Booking page is opened with (hotel_stay.STAY_PARAMS);
+# data-hotel-rounded-price is rendered in it regardless of the locale display.
+SELECTED_CURRENCY = 'SAR'
 
 
 def _table_timeout_ms():
@@ -152,19 +155,40 @@ def _block_occupancy(block_id):
 
 
 def normalize_rate_row(raw):
-    """Turn one DOM row into the fields the selector and block need."""
+    """Turn one DOM row into the fields the selector and block need.
+
+    ``data-hotel-rounded-price`` is in the requested currency, while the
+    visible original/taxes figure and ``data-strikethrough-value`` render in
+    the browser's local currency (measured: 535 SAR beside 7,883 EGP on the
+    same row). Mixing them labelled a local-currency amount as SAR, and the
+    market pipeline then converted it with a guessed FX rate — a 629 SAR room
+    reached the table as 760. The row's own two current figures give the
+    exact ratio, so the original and the taxes are expressed in the same
+    currency as the price without any external rate.
+    """
     raw = raw if isinstance(raw, dict) else {}
     block_id = str(raw.get('block_id') or '')
     parts = block_id.split('_')
-    price = parse_number(raw.get('price_attr'))
-    if price is None:
-        price = parse_number(raw.get('current_text'))
-    currency = (parse_currency(raw.get('current_text'))
-                or parse_currency(raw.get('price_attr')) or '')
-    original_price = parse_number(raw.get('original_value'))
+    price_attr = parse_number(raw.get('price_attr'))
+    visible_current = parse_number(raw.get('current_text'))
+    price = price_attr if price_attr is not None else visible_current
+    currency = SELECTED_CURRENCY if price_attr is not None and str(
+        raw.get('price_attr') or '').strip() else ''
+    if not currency:
+        currency = (parse_currency(raw.get('current_text'))
+                    or parse_currency(raw.get('price_attr')) or '')
+    scale = 1.0
+    if price_attr and visible_current and price_attr > 0 and visible_current > 0:
+        scale = price_attr / visible_current
+    original_price = parse_number(raw.get('original_text'))
     if original_price is None:
-        original_price = parse_number(raw.get('original_text'))
+        original_price = parse_number(raw.get('original_value'))
     taxes, tax_included = _parse_taxes(raw)
+    if abs(scale - 1.0) > 0.001:
+        if original_price:
+            original_price = round(original_price * scale, 1)
+        if taxes:
+            taxes = round(taxes * scale, 1)
     row_text = str(raw.get('row_text') or '')
     occupancy_text = str(raw.get('occupancy_text') or '')
     adults = _block_occupancy(block_id)
