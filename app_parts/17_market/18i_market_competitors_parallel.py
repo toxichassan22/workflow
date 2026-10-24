@@ -200,7 +200,7 @@ def _booking_scan_result(task, rows, citations, note='', search_ran=False):
     }
 
 
-def _booking_empty_note(search, *, destination, matched_district,
+def _booking_empty_note(search, *, destination, matched_district, filter_error,
                         district_label, city_label, stars):
     """Why a Booking scan produced no hotels, naming the actual cause."""
     search = search if isinstance(search, dict) else {}
@@ -220,6 +220,10 @@ def _booking_empty_note(search, *, destination, matched_district,
     if matched_district:
         return (f'لا توجد فنادق {stars_part or "مطابقة"} لحي {district_label} '
                 f'في {city_label} على Booking.com. لم يُستخدم أي مصدر آخر.')
+    if filter_error:
+        return (f'تعذّر فتح نتائج فلتر الحي على Booking ({filter_error}) '
+                f'ولم تُرجع صفحة نتائج المدينة فنادق {where}{stars_part}. '
+                f'لم يُستخدم أي مصدر آخر.')
     return (f'لم تُرجع صفحة نتائج Booking.com فنادق {where}{stars_part} '
             f'دون فلتر حي (الحي غير معروض ضمن أحياء Booking لهذه المدينة). '
             f'لم يُستخدم أي مصدر آخر.')
@@ -269,6 +273,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             final_url, search.get('title'), search.get('text')))
         matched = booking_search.match_district_facet(
             search.get('booking_districts') or [], district_ar, district_en)
+        filter_error = ''
         if matched:
             filtered_url = booking_search.build_search_url(
                 city_en or city_ar, stars=stars or None, dest_id=dest_id,
@@ -291,6 +296,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             else:
                 # The district filter never opened: the rows below would be
                 # city-wide, so the notes must not claim the district.
+                filter_error = str(filtered.get('error') or 'failed')
                 matched = None
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
@@ -301,6 +307,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         if not hotels:
             note = _booking_empty_note(
                 search, destination=destination, matched_district=matched,
+                filter_error=filter_error,
                 district_label=display_district or district_en,
                 city_label=city_ar or city_en, stars=stars)
             return _booking_scan_result(
@@ -314,6 +321,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             url = str(hotel.get('url') or '').strip()
             if not name or not url:
                 continue
+            started = time.time()
             prop = session.open_url(url)
             prop = prop if isinstance(prop, dict) else {}
             prop_url = str(prop.get('final_url') or url)
@@ -321,6 +329,9 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 prop_url, prop.get('title') or name, prop.get('text')))
             rate = prop.get('booking_rate')
             priced = isinstance(rate, dict) and rate.get('price') is not None
+            print(f'[MARKET STUDY] booking property name={name!r} '
+                  f'priced={priced} error={prop.get("error")!r} '
+                  f'elapsed={round(time.time() - started, 1)}', flush=True)
             row = {
                 'name': name,
                 'project_type': 'فندقي',
@@ -397,6 +408,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         priced_count = sum(1 for row in rows if row.get('price_value'))
         scope = (f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
                  if matched else
+                 f' (تعذّر فتح نتائج فلتر الحي ({filter_error})؛ بحث على مستوى المدينة)'
+                 if filter_error else
                  ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)')
         note = (
             f'تم جلب {len(rows)} فندقًا من صفحة نتائج Booking.com لحي '

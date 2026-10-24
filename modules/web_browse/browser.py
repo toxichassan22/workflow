@@ -739,6 +739,14 @@ class BrowserWorker:
             if fallback and fallback != url:
                 _browser_log(f'[BROWSER] http_403, retrying sibling host: {fallback}')
                 result = self._open_url_once(page, fallback, timeout)
+        elif (result.get('error') == 'timeout'
+              and (hotel_stay.is_booking_hotel_url(url)
+                   or booking_search.is_booking_search_url(url))):
+            # The competitor job opens several browsers at once; a heavy
+            # Booking page can miss one navigation window without being a
+            # real failure, and a lost page would drop its hotels.
+            _browser_log(f'[BROWSER] booking timeout, retrying once: {url}')
+            result = self._open_url_once(page, url, timeout)
         return result
 
     def web_search(self, query, max_results=MAX_RESULTS):
