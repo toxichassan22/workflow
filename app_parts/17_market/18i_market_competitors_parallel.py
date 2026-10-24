@@ -259,7 +259,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             city_en or city_ar, stars=stars or None,
             dest_id=dest_id, dest_type=dest_type)
         print(f'[MARKET STUDY] booking hotel search city={city_en!r} '
-              f'district={district_en!r} stars={stars!r} dest_id={dest_id!r} '
+              f'district={district_en!r} country={country_code!r} '
+              f'stars={stars!r} dest_id={dest_id!r} '
               f'url={search_url}', flush=True)
         search = session.open_url(search_url)
         search = search if isinstance(search, dict) else {}

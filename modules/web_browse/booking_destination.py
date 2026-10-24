@@ -14,6 +14,7 @@ from Booking's neighbourhood filter (see ``booking_search``).
 
 import re
 import threading
+import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlsplit
 
@@ -22,6 +23,9 @@ import booking_search
 COUNTRY_PAGE_URL = 'https://www.booking.com/country/{country}.html?lang={lang}'
 COUNTRY_LANGS = ('en-us', 'ar')
 BOOKING_ORIGIN = 'https://www.booking.com'
+CONTENT_PAGE_TIMEOUT = 45
+CONTENT_PAGE_ATTEMPTS = 2
+CONTENT_PAGE_RETRY_DELAY = 1.5
 _CITY_PATH_RE = re.compile(r'^/city/([a-z]{2})/[a-z0-9\-]+\.html$', re.I)
 _DEST_INPUT_RE = re.compile(
     r'name=["\']dest_id["\'][^>]*value=["\'](-?\d+)["\']', re.I)
@@ -117,6 +121,19 @@ def parse_destination(html):
     return {'dest_id': match.group(1), 'dest_type': dest_type}
 
 
+def _fetch(session, url):
+    """Fetch a Booking content page, retrying once: they are heavy and the
+    competitor job opens several browsers at the same time."""
+    page = {}
+    for attempt in range(max(1, CONTENT_PAGE_ATTEMPTS)):
+        page = session.fetch_html(url, timeout=CONTENT_PAGE_TIMEOUT)
+        if isinstance(page, dict) and page.get('html') and not page.get('error'):
+            return page
+        if attempt + 1 < CONTENT_PAGE_ATTEMPTS:
+            time.sleep(CONTENT_PAGE_RETRY_DELAY)
+    return page if isinstance(page, dict) else {}
+
+
 def resolve_city_destination(session, country_code, *names):
     """Resolve a city to Booking's ``dest_id`` through its content pages.
 
@@ -127,6 +144,8 @@ def resolve_city_destination(session, country_code, *names):
     country = normalize_country_code(country_code)
     wanted = [str(name or '').strip() for name in names if str(name or '').strip()]
     if not country or not wanted:
+        print(f'[BOOKING DEST] cannot resolve country={country_code!r} '
+              f'names={wanted!r}', flush=True)
         return {}
     key = (country, tuple(booking_search.normalize_label(name) for name in wanted))
     with _LOCK:
@@ -134,17 +153,23 @@ def resolve_city_destination(session, country_code, *names):
     if cached:
         return dict(cached)
     for lang in COUNTRY_LANGS:
-        page = session.fetch_html(country_page_url(country, lang))
-        if not isinstance(page, dict) or page.get('error') or not page.get('html'):
+        country_url = country_page_url(country, lang)
+        page = _fetch(session, country_url)
+        if not page.get('html') or page.get('error'):
+            print(f'[BOOKING DEST] country page failed lang={lang} '
+                  f'error={page.get("error")!r}', flush=True)
             continue
         city_url = pick_city_link(page.get('html') or '', *wanted)
         if not city_url:
+            print(f'[BOOKING DEST] no city link for {wanted!r} on {country_url}',
+                  flush=True)
             continue
-        city_page = session.fetch_html(city_url)
-        if not isinstance(city_page, dict) or city_page.get('error'):
-            continue
-        destination = parse_destination(city_page.get('html') or '')
+        city_page = _fetch(session, city_url)
+        destination = (parse_destination(city_page.get('html') or '')
+                       if not city_page.get('error') else {})
         if not destination.get('dest_id'):
+            print(f'[BOOKING DEST] no dest_id on {city_url} '
+                  f'error={city_page.get("error")!r}', flush=True)
             continue
         resolved = dict(destination, city_url=city_url, country=country)
         with _LOCK:

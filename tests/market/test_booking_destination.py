@@ -46,6 +46,7 @@ class BookingDestinationTests(unittest.TestCase):
 
     def setUp(self):
         booking_destination._RESOLVED.clear()
+        booking_destination.CONTENT_PAGE_RETRY_DELAY = 0
 
     def test_resolves_the_city_dest_id_through_the_country_page(self):
         session = _FakeSession({COUNTRY_PAGE: {'html': COUNTRY_HTML},
