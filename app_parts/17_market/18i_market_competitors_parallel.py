@@ -319,9 +319,22 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             print(f'[MARKET STUDY] booking district filter id={district_id!r} '
                   f'label={booking_search.facet_label(matched or {})!r} '
                   f'cards={len(filtered_hotels)} '
+                  f'applied={applied} '
                   f'error={filtered.get("error")!r} '
-                  f'final={filtered_final[:200]}', flush=True)
+                  f'final={filtered_final[:320]}', flush=True)
             return filtered, filtered_final, applied
+
+        def _district_card_search():
+            """The city cards whose own Booking address names the district."""
+            cards = booking_search.filter_hotels_by_district(
+                (search.get('booking_search') or {}).get('hotels') or [],
+                district_ar, district_en)
+            if not cards:
+                return None
+            narrowed = dict(search)
+            narrowed['booking_search'] = dict(
+                search.get('booking_search') or {}, hotels=cards)
+            return narrowed
 
         def _use_filtered(district_id):
             nonlocal matched
@@ -338,6 +351,12 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     filtered.get('error') or 'filter_not_applied'),
                 district_label=display_district or district_en,
                 city_label=city_ar or city_en, stars=stars)
+            # Booking dropped the neighbourhood filter (or the page failed):
+            # fall back to its own address line before reporting nothing.
+            narrowed = _district_card_search()
+            if narrowed is not None:
+                matched = {'id': '', 'label': display_district or district_ar}
+                return narrowed, ''
             return None, note
 
         if matched:
