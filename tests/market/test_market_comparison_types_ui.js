@@ -55,6 +55,23 @@ test('three filled types block adding a fourth', () => {
   assert.equal(guard.hasBlank, false);
 });
 
+test('each mode shows exactly its own action button', () => {
+  const ctx = context();
+  const buttons = {
+    marketCompetitorsMode: { value: 'manual' },
+    marketGenerateCompetitorsBtn: { hidden: false },
+    marketFillCompetitorsBtn: { hidden: false },
+  };
+  ctx.document.getElementById = id => buttons[id] || null;
+  ctx.applyMarketCompetitorsMode(false);
+  assert.equal(buttons.marketGenerateCompetitorsBtn.hidden, true);
+  assert.equal(buttons.marketFillCompetitorsBtn.hidden, false);
+  buttons.marketCompetitorsMode.value = 'generate';
+  ctx.applyMarketCompetitorsMode(false);
+  assert.equal(buttons.marketGenerateCompetitorsBtn.hidden, false);
+  assert.equal(buttons.marketFillCompetitorsBtn.hidden, true);
+});
+
 test('a named row without a type blocks the manual fill', () => {
   const ctx = context();
   const missing = ctx.marketRowsMissingType([

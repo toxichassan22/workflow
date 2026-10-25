@@ -354,7 +354,11 @@
     function applyMarketCompetitorsMode(persist = true) {
       const mode = document.getElementById('marketCompetitorsMode')?.value || 'generate';
       const generateBtn = document.getElementById('marketGenerateCompetitorsBtn');
+      const fillBtn = document.getElementById('marketFillCompetitorsBtn');
+      // Two buttons per mode, one shared: generate builds rows, manual
+      // completes the rows the client typed; «إضافة منافس» stays in both.
       if (generateBtn) generateBtn.hidden = mode === 'manual';
+      if (fillBtn) fillBtn.hidden = mode !== 'manual';
       if (persist && typeof persistMarketStudyFromDom === 'function') {
         try {
           persistMarketStudyFromDom();
