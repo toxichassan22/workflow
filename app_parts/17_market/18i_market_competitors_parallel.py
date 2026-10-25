@@ -338,20 +338,24 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
 
         def _use_filtered(district_id):
             nonlocal matched
-            filtered = {}
-            filtered_final = ''
-            applied = False
             for attempt in range(2):
                 filtered, filtered_final, applied = _apply_district(district_id)
-                if not filtered.get('error') and applied:
+                hotels = ((filtered.get('booking_search') or {})
+                          .get('hotels') or [])
+                kept = booking_search.filter_hotels_by_district(
+                    hotels, district_ar, district_en)
+                if not filtered.get('error') and applied and kept:
                     matched = dict(matched or {}, id=str(district_id))
+                    narrowed = dict(filtered)
+                    narrowed['booking_search'] = dict(
+                        filtered.get('booking_search') or {}, hotels=kept)
                     citations.append(_booking_scan_citation(
                         filtered_final, filtered.get('title'),
                         filtered.get('text')))
-                    return filtered, ''
+                    return narrowed, ''
                 if attempt == 0:
-                    # A challenge/canonical rewrite can drop nflt on one load;
-                    # the same URL usually keeps it on the next.
+                    # A challenge load can keep the URL but serve unfiltered
+                    # results; the second load normally honours the district.
                     print('[MARKET STUDY] booking district filter not applied, '
                           'retrying once', flush=True)
             note = _booking_empty_note(
@@ -368,13 +372,13 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 return narrowed, ''
             return None, note
 
-        if matched:
+        if matched and scope_mode == 'district':
             filtered_result, note = _use_filtered(matched.get('id'))
             if note:
                 return _booking_scan_result(
                     task, [], citations, note, search_ran=True)
             search = filtered_result
-        elif scope:
+        elif scope and scope_mode == 'district':
             # A class-filtered page lists only the districts that have hotels
             # of that class, so a 4-star page can omit the project's district
             # even though Booking still filters by it. The district id is

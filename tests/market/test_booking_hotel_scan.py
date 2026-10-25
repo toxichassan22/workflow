@@ -436,7 +436,9 @@ class BookingHotelScanTests(unittest.TestCase):
                 'text': '',
                 'booking_districts': [],
                 'booking_search': {'hotels': [
-                    {'name': 'Eden Residence', 'url': PROPERTY_URL},
+                    {'name': 'Eden Residence', 'url': PROPERTY_URL,
+                     'location': 'الأندلس, جدة',
+                     'text': 'فندق في الأندلس، جدة'},
                 ]},
             },
             PROPERTY_URL: {
@@ -585,7 +587,9 @@ class BookingHotelScanTests(unittest.TestCase):
             district_url: {
                 'final_url': district_url, 'title': 'Booking', 'text': '',
                 'booking_search': {'hotels': [
-                    {'name': 'Eden Residence', 'url': PROPERTY_URL}]},
+                    {'name': 'Eden Residence', 'url': PROPERTY_URL,
+                     'location': 'الأندلس, جدة',
+                     'text': 'فندق في الأندلس، جدة'}]},
             },
             PROPERTY_URL: {
                 'final_url': PROPERTY_URL, 'title': 'Eden Residence',
@@ -657,7 +661,9 @@ class BookingHotelScanTests(unittest.TestCase):
                      {'name': 'Elsewhere', 'url': PROPERTY_URL}]}},
                 {'final_url': district_url, 'title': 'Booking', 'text': '',
                  'booking_search': {'hotels': [
-                     {'name': 'Eden Residence', 'url': PROPERTY_URL}]}},
+                     {'name': 'Eden Residence', 'url': PROPERTY_URL,
+                      'location': 'الأندلس, جدة',
+                      'text': 'فندق في الأندلس، جدة'}]}},
             ],
             PROPERTY_URL: {
                 'final_url': PROPERTY_URL, 'title': 'Eden Residence',
