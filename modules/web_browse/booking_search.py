@@ -171,6 +171,31 @@ def search_has_district(final_url, district_id):
     return f'di={district_id}' in unquote(str(final_url or ''))
 
 
+def hotel_in_district(hotel, *names):
+    """True when Booking's own card text names the district.
+
+    The neighbourhood facet only lists the ten largest districts, so a class
+    page can hide the project's district even though the cards carry its name
+    in the address line («الأندلس, جدة»).
+    """
+    if not isinstance(hotel, dict):
+        return False
+    text = normalize_label(f"{hotel.get('location') or ''} "
+                           f"{hotel.get('text') or ''}")
+    if not text:
+        return False
+    for name in names:
+        for variant in _district_name_variants(name):
+            if variant and variant in text:
+                return True
+    return False
+
+
+def filter_hotels_by_district(hotels, *names):
+    return [hotel for hotel in (hotels or [])
+            if hotel_in_district(hotel, *names)]
+
+
 _FACETS_JS = """() => Array.from(
   document.querySelectorAll('[data-filters-item^="di:"]'))
   .slice(0, 60)

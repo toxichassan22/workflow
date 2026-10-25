@@ -376,12 +376,26 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     return _booking_scan_result(
                         task, [], citations, note, search_ran=True)
                 search = filtered_result
-            elif scope_mode == 'district':
-                note = (f'لم يُعرض حي {display_district or district_en} كفلتر '
-                        f'على Booking.com لهذه المدينة، ولم يُوسَّع البحث إلى '
-                        f'المدينة. لم يُستخدم أي مصدر آخر.')
-                return _booking_scan_result(
-                    task, [], citations, note, search_ran=True)
+            else:
+                # Booking only lists the ten largest districts as facets. When
+                # the project's district is hidden, keep the city cards whose
+                # own address line names it — still the district, never the
+                # whole city.
+                district_cards = booking_search.filter_hotels_by_district(
+                    (search.get('booking_search') or {}).get('hotels') or [],
+                    district_ar, district_en)
+                if district_cards:
+                    search = dict(search)
+                    search['booking_search'] = dict(
+                        search.get('booking_search') or {},
+                        hotels=district_cards)
+                    matched = {'id': '', 'label': display_district or district_ar}
+                elif scope_mode == 'district':
+                    note = (f'لم يُعرض حي {display_district or district_en} '
+                            f'كفلتر على Booking.com لهذه المدينة، ولم يُوسَّع '
+                            f'البحث إلى المدينة. لم يُستخدم أي مصدر آخر.')
+                    return _booking_scan_result(
+                        task, [], citations, note, search_ran=True)
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
         hotels = search_data.get('hotels') or []
@@ -548,9 +562,13 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 task, [], citations, note, search_ran=True)
         priced_count = sum(
             1 for row in rows if row.get('price_from') or row.get('price_to'))
-        scope_text = (f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
-                      if matched else
-                      ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)')
+        if matched and matched.get('id'):
+            scope_text = f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
+        elif matched:
+            scope_text = (f' (فلتر حي {booking_search.facet_label(matched)} '
+                          f'من عنوان Booking)')
+        else:
+            scope_text = ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)'
         if scope_mode == 'distance' and radius_km:
             scope_text = f' (داخل نطاق {radius_km:g} كم من موقع المشروع)'
         note = (
