@@ -320,7 +320,7 @@
         return !optionType || optionType === type || !occupiedTypes.includes(optionType);
       }).join('');
       const operationOptions = [
-        ['sale', 'بيعي'], ['rent', 'تأجيري']
+        ['sale', 'بيعي / تمليكي'], ['rent', 'إيجاري']
       ].map(([value, label]) =>
         '<label><input type="checkbox" data-comparison-field="operation" value="' + value + '"' +
         (operations.includes(value) ? ' checked' : '') + '><span>' + label + '</span></label>'
@@ -335,6 +335,22 @@
         '<div data-comparison-stars' + (type === 'hotel' ? '' : ' hidden') + '><label>تصنيف الفندق</label><div class="market-comparison-multi-options">' + starOptions + '</div></div>' +
         '<button type="button" class="btn ghost small" data-remove-comparison-type>حذف</button>' +
         '</div>';
+    }
+
+    function marketComparisonAddGuard(rows) {
+      // A blank row is a slot the client is filling, not a third type: counting
+      // it disabled «إضافة نوع مقارنة» after two real types.
+      const filled = rows.filter(row => row.type);
+      return { filled: filled.length, hasBlank: rows.length > filled.length };
+    }
+
+    function refreshMarketComparisonAddButton() {
+      const host = document.getElementById('marketComparisonTypes');
+      const addButton = document.getElementById('marketAddComparisonTypeBtn');
+      if (!host || !addButton) return;
+      const rows = Array.from(host.querySelectorAll('[data-comparison-row]')).map(row =>
+        ({ type: row.querySelector('[data-comparison-field="type"]')?.value || '' }));
+      addButton.disabled = marketComparisonAddGuard(rows).filled >= 3;
     }
 
     function renderMarketComparisonTypes(items) {
@@ -352,8 +368,7 @@
           else syncMarketComparisonTypeOptions();
         });
       });
-      const addButton = document.getElementById('marketAddComparisonTypeBtn');
-      if (addButton) addButton.disabled = occupiedTypes.length >= 3 || rows.some(row => !row.type);
+      refreshMarketComparisonAddButton();
       refreshDynamicI18n(host);
     }
 
@@ -389,16 +404,31 @@
           option.disabled = occupiedElsewhere;
         });
       });
-      const addButton = document.getElementById('marketAddComparisonTypeBtn');
-      if (addButton) addButton.disabled = selectedTypes.length >= 3 || rows.some(row => !row.type);
+      refreshMarketComparisonAddButton();
     }
 
     function addMarketComparisonType() {
+      const host = document.getElementById('marketComparisonTypes');
       const rows = normalizeMarketComparisonRows(readMarketComparisonRows());
-      if (rows.length >= 3 || rows.some(row => !row.type)) return;
+      const guard = marketComparisonAddGuard(rows);
+      if (guard.filled >= 3) return;
+      if (guard.hasBlank) {
+        // The blank row is the one to fill; adding another would just stack
+        // empty slots and look like a dead button.
+        const blank = Array.from(
+          (host || document).querySelectorAll('[data-comparison-row]'))
+          .find(row => !(row.querySelector('[data-comparison-field="type"]')?.value || ''));
+        blank?.scrollIntoView({ block: 'nearest' });
+        blank?.querySelector('[data-comparison-field="type"]')?.focus();
+        return;
+      }
       rows.push({ type: '', operation: '', stars: '' });
       renderMarketComparisonTypes(rows);
-      persistMarketStudyFromDom();
+      try {
+        persistMarketStudyFromDom();
+      } catch (error) {
+        console.error('market comparison persist failed', error);
+      }
     }
 
     function renderMarketTransactionBenchmarks(data) {
