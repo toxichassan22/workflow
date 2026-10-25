@@ -361,7 +361,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     # the agent scans: same city, same district promise, real price/area
     # ranges. It owns its browser thread and never blocks the scans.
     aqar_handle = _start_aqar_projects_scan(
-        payload, axes, report=locked_report, deadline=deadline)
+        payload, axes, report=locked_report, deadline=deadline,
+        offer_lang=offer_lang)
     source_thread = _start_source_plan_async(
         payload, offer_lang=offer_lang, evidence_pool=evidence_pool,
         deadline=deadline, report=locked_report, session=session)
@@ -559,21 +560,32 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     notes = aggregate['notes']
     if aqar_rows:
-        aqar_note = f'قُرئت {len(aqar_rows)} مشاريع مسماة من عقار.'
+        aqar_note = (f'Read {len(aqar_rows)} named projects from aqar.'
+                     if offer_lang == 'en' else
+                     f'قُرئت {len(aqar_rows)} مشاريع مسماة من عقار.')
         notes = f'{notes} — {aqar_note}' if notes else aqar_note
     elif aqar_handle:
         aqar_holder = aqar_handle.get('holder') or {}
         aqar_result = aqar_holder.get('result') or {}
         aqar_error = aqar_holder.get('error') or aqar_result.get('error') or ''
         if aqar_error:
-            aqar_note = f'تعذر قراءة مشاريع عقار: {aqar_error}'
+            aqar_note = (f'Could not read aqar projects: {aqar_error}'
+                         if offer_lang == 'en' else
+                         f'تعذر قراءة مشاريع عقار: {aqar_error}')
         elif not aqar_result.get('cards'):
-            aqar_note = 'لم تُعد صفحة مشاريع عقار أي مشروع لهذه المدينة.'
+            aqar_note = ('The aqar projects page returned no projects for this city.'
+                         if offer_lang == 'en' else
+                         'لم تُعد صفحة مشاريع عقار أي مشروع لهذه المدينة.')
         elif not aqar_result.get('matched'):
             scope_mode = (payload.get('competitorScope') or {}).get('mode')
-            aqar_note = ('لم تُطابق مشاريع عقار المحاور المختارة'
-                         + (' داخل الحي المحدد.' if scope_mode == 'district'
-                            else '.'))
+            if offer_lang == 'en':
+                aqar_note = ('No aqar projects matched the selected axes'
+                             + (' inside the selected district.'
+                                if scope_mode == 'district' else '.'))
+            else:
+                aqar_note = ('لم تُطابق مشاريع عقار المحاور المختارة'
+                             + (' داخل الحي المحدد.' if scope_mode == 'district'
+                                else '.'))
         else:
             aqar_note = ''
         if aqar_note:

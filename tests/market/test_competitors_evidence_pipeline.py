@@ -847,7 +847,9 @@ class AqarProjectsWiringTests(_MarketTestBase):
         self.assertEqual([item.get('name') for item in result['competitors']],
                          ['أبياتنا هيلز'])
         self.assertEqual(result['competitors'][0].get('row_source'), 'aqar')
-        self.assertIn('عقار', result.get('notes') or '')
+        # This synthetic payload detects as an English offer, so the note
+        # follows the offer language while the row keeps its canonicals.
+        self.assertIn('aqar', result.get('notes') or '')
 
     def test_aqar_rows_skip_the_per_row_agent_verification(self):
         module = self.module

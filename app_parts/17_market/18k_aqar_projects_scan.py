@@ -25,7 +25,8 @@ def _aqar_pairs(axes):
     return pairs
 
 
-def _start_aqar_projects_scan(payload, axes, report=None, deadline=None):
+def _start_aqar_projects_scan(payload, axes, report=None, deadline=None,
+                              offer_lang='ar'):
     """Read the city's named projects from aqar beside the agent scans.
 
     The directory page is a bot-walled SPA; the thread owns its browser and
@@ -50,7 +51,7 @@ def _start_aqar_projects_scan(payload, axes, report=None, deadline=None):
                     session, city, district=district, pairs=pairs,
                     limit=_AQAR_PROJECT_LIMIT,
                     budget_seconds=_AQAR_SCAN_BUDGET_SECONDS,
-                    progress=report)
+                    progress=report, offer_lang=offer_lang)
                 holder['result'] = result if isinstance(result, dict) else {}
                 holder['rows'] = list(holder['result'].get('rows') or [])
         except Exception as exc:

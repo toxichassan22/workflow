@@ -131,6 +131,13 @@ class AqarScanTests(unittest.TestCase):
         self.assertEqual(len(result['rows']), 2)
         self.assertEqual(len(session.opened), 2)
 
+    def test_an_english_offer_gets_an_english_row_note(self):
+        result = aqar_projects.scan(
+            _Session(), 'جدة', pairs=[('سكني', 'بيع')], limit=1,
+            offer_lang='en')
+        self.assertIn('project page on aqar', result['rows'][0]['notes'])
+        self.assertNotIn('صفحة المشروع', result['rows'][0]['notes'])
+
 
 if __name__ == '__main__':
     unittest.main()

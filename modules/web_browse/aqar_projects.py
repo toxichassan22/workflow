@@ -210,7 +210,7 @@ def _district_key(value):
         str(value or '').replace('حي ', '', 1))
 
 
-def project_row(card, detail):
+def project_row(card, detail, offer_lang='ar'):
     price_from = detail.get('price_from')
     price_to = detail.get('price_to')
     if price_from is None:
@@ -219,11 +219,18 @@ def project_row(card, detail):
     area_from = detail.get('area_from')
     area_to = detail.get('area_to')
     url = card.get('url') or ''
-    notes = 'نطاق الأسعار والمساحات من صفحة المشروع على عقار'
-    if price_from is None:
-        notes += '؛ لم تُظهر الصفحة نطاقًا سعريًا'
-    if area_from is None:
-        notes += '؛ لم تُظهر الصفحة مساحات الوحدات'
+    if offer_lang == 'en':
+        notes = 'Price and unit-area ranges from the project page on aqar'
+        if price_from is None:
+            notes += '; the page showed no price range'
+        if area_from is None:
+            notes += '; the page showed no unit areas'
+    else:
+        notes = 'نطاق الأسعار والمساحات من صفحة المشروع على عقار'
+        if price_from is None:
+            notes += '؛ لم تُظهر الصفحة نطاقًا سعريًا'
+        if area_from is None:
+            notes += '؛ لم تُظهر الصفحة مساحات الوحدات'
     flags = card.get('flags') or []
     return {
         'name': card.get('name') or '',
@@ -259,7 +266,7 @@ def project_row(card, detail):
 
 
 def scan(session, city, district='', pairs=(), limit=12,
-         budget_seconds=90, progress=None):
+         budget_seconds=90, progress=None, offer_lang='ar'):
     """Read the city's projects and complete up to ``limit`` of them.
 
     ``pairs`` are the requested (project_type, operation) Arabic pairs;
@@ -290,7 +297,7 @@ def scan(session, city, district='', pairs=(), limit=12,
             break
         detail_page = session.open_url(card['url'])
         detail = parse_detail((detail_page or {}).get('text') or '')
-        row = project_row(card, detail)
+        row = project_row(card, detail, offer_lang=offer_lang)
         if district:
             # The row must carry the client's own district text so the
             # downstream scope filter (exact folded match) accepts it.
