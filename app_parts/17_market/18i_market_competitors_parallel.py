@@ -410,6 +410,15 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                         hotels=district_cards)
                     matched = {'id': '', 'label': display_district or district_ar}
                 elif scope_mode == 'district':
+                    city_cards = ((search.get('booking_search') or {})
+                                  .get('hotels') or [])
+                    print(f'[MARKET STUDY] booking district unavailable '
+                          f'id={district_id!r} city_cards={len(city_cards)} '
+                          f'names={[district_ar, district_en]!r} '
+                          f'sample={[(card.get("location"),
+                                     (card.get("text") or "")[:60])
+                                    for card in city_cards[:3]]!r}',
+                          flush=True)
                     note = (f'لم يُعرض حي {display_district or district_en} '
                             f'كفلتر على Booking.com لهذه المدينة، ولم يُوسَّع '
                             f'البحث إلى المدينة. لم يُستخدم أي مصدر آخر.')
