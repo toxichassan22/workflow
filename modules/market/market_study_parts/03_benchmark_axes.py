@@ -324,6 +324,11 @@ def _competitor_distance_from_coordinates(row, scope):
     return round(6371.0 * 2 * math.asin(math.sqrt(min(1.0, haversine))), 2)
 
 
+def competitor_distance_km(row, scope):
+    """Straight-line distance in km when the row and the site both carry coordinates."""
+    return _competitor_distance_from_coordinates(row, scope)
+
+
 def competitor_matches_location_scope(row, scope, city='', district=''):
     """Enforce the selected distance, city or exact neighborhood."""
     if not isinstance(row, dict):
@@ -351,8 +356,16 @@ def competitor_matches_location_scope(row, scope, city='', district=''):
 def filter_and_cap_competitors(rows, axes, limit_per_axis=5, offer_lang='ar',
                                scope=None, city='', district=''):
     """Drop rows outside explicit selections and cap each selected group."""
-    if not axes or not any(axis.get('explicit') for axis in axes):
-        return [row for row in (rows or []) if isinstance(row, dict)]
+    rows = [row for row in (rows or []) if isinstance(row, dict)]
+    explicit = bool(axes) and any(axis.get('explicit') for axis in axes)
+    if not explicit:
+        # A distance scope is a promise to the client: rows outside the radius
+        # never reach the table, with or without a comparison selection.
+        scope = scope if isinstance(scope, dict) else {}
+        if scope.get('mode') != 'distance':
+            return rows
+        return [row for row in rows
+                if competitor_matches_location_scope(row, scope, city, district)]
     counts = {axis['key']: 0 for axis in axes}
     accepted = []
     seen_names = set()

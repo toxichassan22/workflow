@@ -485,5 +485,17 @@ class BenchmarkExpansionTests(unittest.TestCase):
                              for row in result['competitors']))
 
 
+    def test_distance_scope_filters_even_without_a_comparison_selection(self):
+        rows = [
+            {'name': 'قريب', 'lat': 21.545, 'lng': 39.174},
+            {'name': 'بعيد', 'lat': 21.60, 'lng': 39.20},
+        ]
+        scope = {'mode': 'distance', 'radius_km': 2,
+                 'origin_lat': 21.5433, 'origin_lng': 39.1728}
+        result = market_study.filter_and_cap_competitors(
+            rows, [], scope=scope, city='جدة', district='الأندلس')
+        self.assertEqual([row['name'] for row in result], ['قريب'])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -70,6 +70,29 @@ _BLOCKED_TYPES = {'image', 'media', 'font'}
 # instead of marking the challenge shell as the final answer.
 _CHALLENGE_WAIT_SECONDS = 15
 _STRIP_SELECTOR = 'script,style,nav,footer,header,form,noscript,iframe'
+# Booking pins the property on its map through this attribute; it is the only
+# coordinate source a competitor distance filter can trust.
+_COORDS_JS = """() => {
+  const el = document.querySelector('[data-atlas-latlng]');
+  return el ? (el.getAttribute('data-atlas-latlng') || '') : '';
+}"""
+
+
+def _booking_coords(page):
+    try:
+        raw = str(page.evaluate(_COORDS_JS) or '').strip()
+    except Exception:
+        return {}
+    parts = [part.strip() for part in raw.split(',')]
+    if len(parts) != 2:
+        return {}
+    try:
+        lat, lng = float(parts[0]), float(parts[1])
+    except (TypeError, ValueError):
+        return {}
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return {}
+    return {'lat': lat, 'lng': lng}
 # SERP endpoints. Verified on this repo's dev box (2026-10): DDG's html/lite
 # endpoints return an anomaly page (HTTP 418 body) from datacenter and dev IPs
 # alike — a dead first provider that burned the goto timeout ahead of every
@@ -636,6 +659,9 @@ class BrowserWorker:
             rate = booking_rooms.wait_and_extract(page, url)
             if rate:
                 result['booking_rate'] = rate
+            coords = _booking_coords(page)
+            if coords:
+                result['booking_coords'] = coords
         elif is_booking_search:
             districts = booking_search.extract_district_facets(page)
             if districts:
@@ -761,6 +787,9 @@ class BrowserWorker:
                     rate = booking_rooms.wait_and_extract(tab, url)
                     if rate:
                         result['booking_rate'] = rate
+                    coords = _booking_coords(tab)
+                    if coords:
+                        result['booking_coords'] = coords
                     result['final_url'] = tab.url or url
                     result['title'] = tab.title() or ''
                     result['text'] = _clean_text(tab.evaluate(_EXTRACT_JS))

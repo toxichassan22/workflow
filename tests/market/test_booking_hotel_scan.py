@@ -486,6 +486,77 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertIn('searchstring_not_found', result['parsed']['notes'])
         self.assertIn('رفض Booking', result['parsed']['notes'])
 
+    def _scan(self, payload, session):
+        with self.app.app_context(), \
+                patch.object(self.module.maps_service,
+                             'reverse_geocode_location',
+                             return_value=self._geocode()), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session):
+            return self.module._booking_hotel_scan(
+                self._task(), payload, {}, tenant_id=None,
+                offer_lang='ar', deadline=None)
+
+    def test_distance_scope_drops_a_hotel_outside_the_radius(self):
+        payload = self._payload()
+        payload['competitorScope'] = {
+            'mode': 'distance', 'radius_km': 1,
+            'origin_lat': 21.5433, 'origin_lng': 39.1728}
+        search_url = self._search_url()
+        session = _Session({
+            search_url: {
+                'final_url': search_url, 'title': 'Booking', 'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'Far Hotel', 'url': PROPERTY_URL}]},
+            },
+            PROPERTY_URL: {
+                'final_url': PROPERTY_URL, 'title': 'Far Hotel', 'text': '',
+                'booking_coords': {'lat': 21.60, 'lng': 39.20},
+            },
+        })
+        result = self._scan(payload, session)
+        self.assertEqual(result['parsed']['competitors'], [])
+        self.assertIn('لا توجد فنادق داخل نطاق 1 كم', result['parsed']['notes'])
+        self.assertNotIn('City', result['parsed']['notes'])
+
+    def test_distance_scope_keeps_a_hotel_inside_the_radius(self):
+        payload = self._payload()
+        payload['competitorScope'] = {
+            'mode': 'distance', 'radius_km': 5,
+            'origin_lat': 21.5433, 'origin_lng': 39.1728}
+        search_url = self._search_url()
+        session = _Session({
+            search_url: {
+                'final_url': search_url, 'title': 'Booking', 'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'Near Hotel', 'url': PROPERTY_URL}]},
+            },
+            PROPERTY_URL: {
+                'final_url': PROPERTY_URL, 'title': 'Near Hotel', 'text': '',
+                'booking_coords': {'lat': 21.5450, 'lng': 39.1740},
+            },
+        })
+        result = self._scan(payload, session)
+        rows = result['parsed']['competitors']
+        self.assertEqual([row['name'] for row in rows], ['Near Hotel'])
+        self.assertLessEqual(rows[0]['distance_km'], 5)
+        self.assertIn('داخل نطاق 5 كم', result['parsed']['notes'])
+
+    def test_district_scope_does_not_widen_when_booking_has_no_facet(self):
+        payload = self._payload()
+        payload['competitorScope'] = {'mode': 'district'}
+        search_url = self._search_url()
+        session = _Session({
+            search_url: {
+                'final_url': search_url, 'title': 'Booking', 'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'City Hotel', 'url': PROPERTY_URL}]},
+            },
+        })
+        result = self._scan(payload, session)
+        self.assertEqual(result['parsed']['competitors'], [])
+        self.assertIn('لم يُوسَّع البحث', result['parsed']['notes'])
+
     def test_hotel_axis_skips_the_agent_and_the_portal_twin(self):
         axes = self.module.market_study.project_competitor_axes({
             'comparisonTypes': [{'type': 'hotel', 'stars': 4}],

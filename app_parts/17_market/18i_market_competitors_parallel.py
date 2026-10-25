@@ -248,6 +248,16 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     district_ar = str((payload or {}).get('district') or '').strip()
     display_district = (district_ar[3:].strip()
                         if district_ar.startswith('حي ') else district_ar)
+    scope = ((payload or {}).get('competitorScope')
+             or (payload or {}).get('competitor_scope'))
+    scope = scope if isinstance(scope, dict) else {}
+    scope_mode = (scope.get('mode')
+                  if scope.get('mode') in ('district', 'city', 'distance')
+                  else 'district')
+    try:
+        radius_km = float(scope.get('radius_km') or scope.get('radiusKm') or 0)
+    except (TypeError, ValueError):
+        radius_km = 0.0
     city_en, district_en, country_code = _english_booking_location(
         payload, data, tenant_id=tenant_id)
     if _market_deadline_hit(deadline):
@@ -311,6 +321,14 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     city_label=city_ar or city_en, stars=stars)
                 return _booking_scan_result(
                     task, [], citations, note, search_ran=True)
+        if not matched and scope_mode == 'district' and scope:
+            # The client asked for this district. Searching the whole city
+            # instead is a silent widening the owner rejects outright.
+            note = (f'لم يُعرض حي {display_district or district_en} كفلتر على '
+                    f'Booking.com لهذه المدينة، ولم يُوسَّع البحث إلى المدينة. '
+                    f'لم يُستخدم أي مصدر آخر.')
+            return _booking_scan_result(
+                task, [], citations, note, search_ran=True)
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
         hotels = search_data.get('hotels') or []
@@ -325,6 +343,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             return _booking_scan_result(
                 task, [], citations, note, search_ran=True)
         benchmark = market_study.benchmark_axis_label(axis, offer_lang)
+        skipped_outside = skipped_unverified = 0
         wanted = []
         for hotel in hotels[:5]:
             hotel = hotel if isinstance(hotel, dict) else {}
@@ -450,15 +469,40 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 row['notes'] = (
                     'صفحة الفندق على Booking.com لم تُرجع بلوك سعر/مساحة '
                     'لهذه الإقامة؛ السعر والمساحة غير متوفرين.')
+            coords = prop.get('booking_coords')
+            coords = coords if isinstance(coords, dict) else {}
+            if coords:
+                row['lat'] = coords.get('lat')
+                row['lng'] = coords.get('lng')
+            if scope_mode == 'distance':
+                distance = market_study.competitor_distance_km(row, scope)
+                if distance is None:
+                    skipped_unverified += 1
+                    continue
+                if radius_km and distance > radius_km:
+                    skipped_outside += 1
+                    continue
+                row['distance_km'] = distance
             rows.append(row)
+        if not rows and scope_mode == 'distance' and (skipped_outside
+                                                     or skipped_unverified):
+            note = (f'لا توجد فنادق داخل نطاق {radius_km:g} كم من موقع المشروع '
+                    f'(استُبعد {skipped_outside} خارج النطاق'
+                    + (f' و{skipped_unverified} بلا إحداثيات موثقة'
+                       if skipped_unverified else '')
+                    + '). لم يُوسَّع النطاق ولم يُستخدم أي مصدر آخر.')
+            return _booking_scan_result(
+                task, [], citations, note, search_ran=True)
         priced_count = sum(
             1 for row in rows if row.get('price_from') or row.get('price_to'))
-        scope = (f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
-                 if matched else
-                 ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)')
+        scope_text = (f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
+                      if matched else
+                      ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)')
+        if scope_mode == 'distance' and radius_km:
+            scope_text = f' (داخل نطاق {radius_km:g} كم من موقع المشروع)'
         note = (
             f'تم جلب {len(rows)} فندقًا من صفحة نتائج Booking.com لحي '
-            f'{display_district or district_en} في {city_ar or city_en}{scope}'
+            f'{display_district or district_en} في {city_ar or city_en}{scope_text}'
             + (f' — منها {priced_count} بسعر ومساحة.' if rows else '.'))
         return _booking_scan_result(task, rows, citations, note, search_ran=True)
     finally:
