@@ -8,6 +8,7 @@ whose title matches the row's name, open its ``/hotel/`` page, read the
 rate block, and write the room ranges onto the row.
 """
 
+import threading
 import time
 
 import booking_destination
@@ -155,6 +156,24 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
           f'targets={len(targets)}', flush=True)
     if not targets:
         return 0
+    budget = float(budget_seconds or NAME_FILL_BUDGET_SECONDS)
+    result = {'filled': 0}
+
+    def _worker():
+        # The browser is thread-bound; a session opened elsewhere fails with
+        # «cannot switch to a different thread». The fill owns its thread and
+        # its browser, and the join bounds it.
+        result['filled'] = _fill_rows(targets, payload, data, tenant_id,
+                                      cache_path, budget)
+
+    thread = threading.Thread(target=_worker, name='booking-name-fill',
+                              daemon=True)
+    thread.start()
+    thread.join(timeout=budget + 30)
+    return result['filled']
+
+
+def _fill_rows(targets, payload, data, tenant_id, cache_path, budget):
     city_ar = str((payload or {}).get('city') or '').strip()
     try:
         city_en, _district_en, country = _english_booking_location(
@@ -165,7 +184,7 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
     if session is None:
         return 0
     filled = 0
-    deadline = time.time() + float(budget_seconds or NAME_FILL_BUDGET_SECONDS)
+    deadline = time.time() + float(budget or NAME_FILL_BUDGET_SECONDS)
     try:
         destination = booking_destination.resolve_city_destination(
             session, country, city_en or city_ar, city_ar,
