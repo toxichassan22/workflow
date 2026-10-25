@@ -172,21 +172,21 @@ def search_has_district(final_url, district_id):
 
 
 def hotel_in_district(hotel, *names):
-    """True when Booking's own card text names the district.
+    """True when Booking's own card address names the district.
 
-    The neighbourhood facet only lists the ten largest districts, so a class
-    page can hide the project's district even though the cards carry its name
-    in the address line («الأندلس, جدة»).
+    The card text also mentions neighbouring districts («2.8 كم من
+    الأندلس»), so only the address line counts — the neighbourhood facet also
+    lists just the ten largest districts, so a class page can hide the
+    project's district even though every card carries its address.
     """
     if not isinstance(hotel, dict):
         return False
-    text = normalize_label(f"{hotel.get('location') or ''} "
-                           f"{hotel.get('text') or ''}")
-    if not text:
+    address = normalize_label(hotel.get('location'))
+    if not address:
         return False
     for name in names:
         for variant in _district_name_variants(name):
-            if variant and variant in text:
+            if variant and variant in address:
                 return True
     return False
 
@@ -241,6 +241,17 @@ def wait_for_property_cards(page, timeout_ms=None):
 _SEARCH_JS = """() => {
   const txt = (el) => el ? ((el.innerText || el.textContent || '')
       .replace(/\\s+/g, ' ').trim()) : '';
+  const MAP_LINK_RE = /اعرض على الخارطة|Show on map/gi;
+  const addressLine = (card) => {
+    let found = '';
+    card.querySelectorAll('span').forEach((el) => {
+      if (found) return;
+      const text = txt(el);
+      const stripped = text.replace(MAP_LINK_RE, '').trim();
+      if (stripped && stripped !== text && stripped.length <= 40) found = stripped;
+    });
+    return found;
+  };
   const cards = Array.from(document.querySelectorAll('[data-testid="property-card"]'));
   return {
     found: cards.length > 0,
@@ -257,7 +268,7 @@ _SEARCH_JS = """() => {
         url: link ? link.href : '',
         price_text: txt(card.querySelector('[data-testid="price-and-discounted-price"]')),
         review: txt(card.querySelector('[data-testid="review-score"]')),
-        location: txt(card.querySelector('[data-testid="address"]')),
+        location: addressLine(card),
         text: txt(card).slice(0, 600),
       };
     })

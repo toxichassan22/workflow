@@ -676,6 +676,12 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
         self.assertEqual(session.urls.count(district_url), 2)
 
+    def test_card_distance_mention_is_not_an_address(self):
+        self.assertFalse(booking_search.hotel_in_district(
+            {'location': '', 'text': '2.8 كلم من الأندلس'}, 'حي الأندلس'))
+        self.assertTrue(booking_search.hotel_in_district(
+            {'location': 'الأندلس, جدة', 'text': ''}, 'حي الأندلس'))
+
     def test_scan_budget_caps_a_far_job_deadline(self):
         far = time.time() + 3600
         capped = self.module._scan_deadline(far)
