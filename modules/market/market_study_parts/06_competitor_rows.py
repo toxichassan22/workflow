@@ -381,6 +381,16 @@ def merge_generated_competitors(existing, generated, mode='generate', offer_lang
             incoming = normalize_competitor_row(raw, offer_lang=offer_lang)
             if incoming:
                 replaced.append(incoming)
+        # A regeneration must not throw away rows the client added by hand;
+        # the two modes share one table and the client keeps control of it.
+        generated_names = {
+            _norm(row.get('name')).casefold()
+            for row in replaced if row.get('name')}
+        for row in current:
+            name_key = _norm(row.get('name')).casefold()
+            if name_key and name_key in generated_names:
+                continue
+            replaced.append(row)
         return replaced, len(replaced), 0
     by_id = {str(row.get('id')): index for index, row in enumerate(current)}
     by_name = {_norm(row.get('name')).casefold(): index for index, row in enumerate(current)}

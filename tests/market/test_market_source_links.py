@@ -154,6 +154,17 @@ class ManualSourceTests(unittest.TestCase):
         self.assertEqual(merged[0]['source_url'],
                          'https://client.example/my-project')
 
+    def test_generate_mode_keeps_the_rows_the_client_added(self):
+        existing = [{'id': 'm1', 'name': 'منافس يدوي', 'row_source': 'manual',
+                     'project_type': 'فندقي', 'price_value': '500'}]
+        merged, _added, _updated = market_study.merge_generated_competitors(
+            existing,
+            [{'id': 'g1', 'name': 'منافس مولّد', 'project_type': 'فندقي'}],
+            mode='generate')
+        names = [row.get('name') for row in merged]
+        self.assertIn('منافس مولّد', names)
+        self.assertIn('منافس يدوي', names)
+
 
 class HotelPriceRangeTests(unittest.TestCase):
 
