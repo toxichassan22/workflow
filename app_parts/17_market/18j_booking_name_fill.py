@@ -21,7 +21,14 @@ NAME_FILL_BUDGET_SECONDS = 150
 def _is_hotel_row(row):
     folded = str((row or {}).get('operation_type')
                  or (row or {}).get('project_type') or '').casefold()
-    return any(token in folded for token in _HOTEL_TOKENS)
+    if any(token in folded for token in _HOTEL_TOKENS):
+        return True
+    if str((row or {}).get('hotel_stars')
+           or (row or {}).get('stars') or '').strip():
+        return True
+    return str((row or {}).get('price_type') or '').strip() in (
+        'سعر الليلة', 'نطاق أسعار الغرف', 'متوسط سعر الغرفة ADR',
+        'الإيراد لكل غرفة RevPAR')
 
 
 def _needs_booking_fill(row):
@@ -101,6 +108,8 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
                                   cache_path='', budget_seconds=None):
     """Give every named hotel row its Booking price, area and source."""
     targets = [row for row in (rows or []) if _needs_booking_fill(row)]
+    print(f'[MARKET STUDY] booking name fill scan rows={len(rows or [])} '
+          f'targets={len(targets)}', flush=True)
     if not targets:
         return 0
     city_ar = str((payload or {}).get('city') or '').strip()
