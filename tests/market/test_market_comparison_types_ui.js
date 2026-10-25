@@ -59,17 +59,17 @@ test('each mode shows exactly its own action button', () => {
   const ctx = context();
   const buttons = {
     marketCompetitorsMode: { value: 'manual' },
-    marketGenerateCompetitorsBtn: { hidden: false },
-    marketFillCompetitorsBtn: { hidden: false },
+    marketGenerateCompetitorsBtn: { style: {} },
+    marketFillCompetitorsBtn: { style: {} },
   };
   ctx.document.getElementById = id => buttons[id] || null;
   ctx.applyMarketCompetitorsMode(false);
-  assert.equal(buttons.marketGenerateCompetitorsBtn.hidden, true);
-  assert.equal(buttons.marketFillCompetitorsBtn.hidden, false);
+  assert.equal(buttons.marketGenerateCompetitorsBtn.style.display, 'none');
+  assert.equal(buttons.marketFillCompetitorsBtn.style.display, '');
   buttons.marketCompetitorsMode.value = 'generate';
   ctx.applyMarketCompetitorsMode(false);
-  assert.equal(buttons.marketGenerateCompetitorsBtn.hidden, false);
-  assert.equal(buttons.marketFillCompetitorsBtn.hidden, true);
+  assert.equal(buttons.marketGenerateCompetitorsBtn.style.display, '');
+  assert.equal(buttons.marketFillCompetitorsBtn.style.display, 'none');
 });
 
 test('a named row without a type blocks the manual fill', () => {
