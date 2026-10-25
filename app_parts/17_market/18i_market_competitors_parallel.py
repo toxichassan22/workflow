@@ -338,13 +338,22 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
 
         def _use_filtered(district_id):
             nonlocal matched
-            filtered, filtered_final, applied = _apply_district(district_id)
-            if not filtered.get('error') and applied:
-                matched = dict(matched or {}, id=str(district_id))
-                citations.append(_booking_scan_citation(
-                    filtered_final, filtered.get('title'),
-                    filtered.get('text')))
-                return filtered, ''
+            filtered = {}
+            filtered_final = ''
+            applied = False
+            for attempt in range(2):
+                filtered, filtered_final, applied = _apply_district(district_id)
+                if not filtered.get('error') and applied:
+                    matched = dict(matched or {}, id=str(district_id))
+                    citations.append(_booking_scan_citation(
+                        filtered_final, filtered.get('title'),
+                        filtered.get('text')))
+                    return filtered, ''
+                if attempt == 0:
+                    # A challenge/canonical rewrite can drop nflt on one load;
+                    # the same URL usually keeps it on the next.
+                    print('[MARKET STUDY] booking district filter not applied, '
+                          'retrying once', flush=True)
             note = _booking_empty_note(
                 filtered, destination=destination, matched_district=None,
                 filter_error=str(
