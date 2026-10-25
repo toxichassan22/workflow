@@ -8,6 +8,7 @@ original pre-discount price and room area. No model chooses a hotel page.
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -556,6 +557,59 @@ class BookingHotelScanTests(unittest.TestCase):
         result = self._scan(payload, session)
         self.assertEqual(result['parsed']['competitors'], [])
         self.assertIn('لم يُوسَّع البحث', result['parsed']['notes'])
+
+    def test_class_page_without_the_facet_reads_it_from_the_city_page(self):
+        payload = self._payload()
+        payload['competitorScope'] = {'mode': 'district'}
+        class_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108')
+        wide_url = booking_search.build_search_url(
+            'Jeddah', dest_id='-3096108')
+        district_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+        session = _Session({
+            class_url: {
+                'final_url': class_url, 'title': 'Booking', 'text': '',
+                'booking_districts': [{'id': '5656', 'label': 'الشاطئ 14'}],
+                'booking_search': {'hotels': [
+                    {'name': 'Elsewhere', 'url': PROPERTY_URL}]},
+            },
+            wide_url: {
+                'final_url': wide_url, 'title': 'Booking', 'text': '',
+                'booking_districts': [{'id': '5654', 'label': 'الأندلس 2'}],
+                'booking_search': {'hotels': []},
+            },
+            district_url: {
+                'final_url': district_url, 'title': 'Booking', 'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'Eden Residence', 'url': PROPERTY_URL}]},
+            },
+            PROPERTY_URL: {
+                'final_url': PROPERTY_URL, 'title': 'Eden Residence',
+                'text': '',
+            },
+        }, pages={COUNTRY_PAGE: {'html': COUNTRY_HTML},
+                  CITY_PAGE: {'html': CITY_HTML}})
+        result = self._scan(payload, session)
+        rows = result['parsed']['competitors']
+        self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
+        self.assertIn(district_url, session.urls)
+        cache = os.path.join(self.module.UPLOADS_DIR,
+                             booking_destination.CACHE_FILE_NAME)
+        self.assertEqual(
+            booking_destination.cached_district_id(
+                cache, 'SA', 'Jeddah', 'الأندلس'), '5654')
+
+    def test_scan_budget_caps_a_far_job_deadline(self):
+        far = time.time() + 3600
+        capped = self.module._scan_deadline(far)
+        self.assertLessEqual(
+            capped, time.time() + self.module._MARKET_SCAN_BUDGET_SECONDS + 1)
+        near = time.time() + 30
+        self.assertLessEqual(self.module._scan_deadline(near), near + 0.01)
+        self.assertGreater(
+            self.module._scan_deadline(None),
+            time.time() + self.module._MARKET_SCAN_BUDGET_SECONDS - 5)
 
     def test_hotel_axis_skips_the_agent_and_the_portal_twin(self):
         axes = self.module.market_study.project_competitor_axes({

@@ -61,6 +61,16 @@ class BookingDestinationTests(unittest.TestCase):
     def tearDown(self):
         self.temp_dir.cleanup()
 
+    def test_district_id_is_remembered_and_read_back(self):
+        booking_destination.remember_district_id(
+            self.cache_path, 'SA', 'Jeddah', 'الأندلس', '5654')
+        self.assertEqual(
+            booking_destination.cached_district_id(
+                self.cache_path, 'sa', 'jeddah', 'الأندلس'), '5654')
+        self.assertEqual(
+            booking_destination.cached_district_id(
+                self.cache_path, 'SA', 'jeddah', 'الشاطئ'), '')
+
     def test_resolved_city_is_reused_from_the_disk_cache(self):
         first = _FakeSession({COUNTRY_PAGE: {'html': COUNTRY_HTML},
                               CITY_PAGE: {'html': CITY_HTML}})

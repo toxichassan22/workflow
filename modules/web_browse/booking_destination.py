@@ -168,13 +168,32 @@ def _cache_write(cache_path, payload):
 
 def _cache_lookup(cache_path, key):
     entry = _cache_read(cache_path).get(key)
-    if not isinstance(entry, dict) or not entry.get('dest_id'):
+    if not isinstance(entry, dict):
         return {}
     saved_at = entry.get('saved_at')
     if isinstance(saved_at, (int, float)) and (
             time.time() - saved_at > CACHE_TTL_SECONDS):
         return {}
     return entry
+
+
+def district_cache_key(country_code, city, district):
+    return '|'.join(('district', normalize_country_code(country_code),
+                     booking_search.normalize_label(city),
+                     booking_search.normalize_label(district)))
+
+
+def cached_district_id(cache_path, country_code, city, district):
+    """Booking's neighbourhood id for this city district, from the disk cache."""
+    entry = _cache_lookup(
+        cache_path, district_cache_key(country_code, city, district))
+    return str(entry.get('district_id') or '')
+
+
+def remember_district_id(cache_path, country_code, city, district, district_id):
+    _cache_store(cache_path,
+                 district_cache_key(country_code, city, district),
+                 {'district_id': str(district_id)})
 
 
 def _cache_store(cache_path, key, value):

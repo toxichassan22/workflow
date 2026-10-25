@@ -23,6 +23,21 @@ from numeric_precision import format_precise_number
 
 
 _PARALLEL_SCAN_WORKERS = 4
+# One competitor phase must finish inside the client's five-minute budget; a
+# scan that keeps searching past it is cost with no result.
+_MARKET_SCAN_BUDGET_SECONDS = float(
+    os.environ.get('MARKET_SCAN_BUDGET_SECONDS') or 240)
+
+
+def _scan_deadline(deadline):
+    """The job deadline, capped by the competitor phase's own budget."""
+    latest = time.time() + _MARKET_SCAN_BUDGET_SECONDS
+    try:
+        if deadline is not None:
+            return min(float(deadline), latest)
+    except (TypeError, ValueError):
+        pass
+    return latest
 
 
 def _locked_report(report):
@@ -73,8 +88,8 @@ def _scan_search_limits(task_count):
     total_steps = max(10, int(_COMPETITORS_MAX_STEPS))
     per_task = max(1, task_count)
     return (
-        max(4, total_searches // per_task),
-        max(8, total_steps // per_task),
+        max(3, total_searches // per_task),
+        max(5, total_steps // per_task),
     )
 
 
@@ -267,11 +282,12 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     rows = []
     citations = []
     try:
+        cache_path = (os.path.join(
+            UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
+            if UPLOADS_DIR else '')
         destination = booking_destination.resolve_city_destination(
             session, country_code, city_en or city_ar, city_ar,
-            cache_path=(os.path.join(
-                UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
-                if UPLOADS_DIR else ''))
+            cache_path=cache_path)
         dest_id = str(destination.get('dest_id') or '')
         dest_type = str(destination.get('dest_type') or 'city')
         search_url = booking_search.build_search_url(
@@ -288,47 +304,84 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             final_url, search.get('title'), search.get('text')))
         matched = booking_search.match_district_facet(
             search.get('booking_districts') or [], district_ar, district_en)
-        if matched:
+
+        def _apply_district(district_id):
             filtered_url = booking_search.build_search_url(
                 city_en or city_ar, stars=stars or None, dest_id=dest_id,
-                dest_type=dest_type, district_id=matched.get('id'))
+                dest_type=dest_type, district_id=district_id)
             filtered = session.open_url(filtered_url)
             filtered = filtered if isinstance(filtered, dict) else {}
             filtered_hotels = ((filtered.get('booking_search') or {})
                                .get('hotels') or [])
             filtered_final = str(filtered.get('final_url') or filtered_url)
-            filter_applied = booking_search.search_has_district(
-                filtered_final, matched.get('id'))
-            print(f'[MARKET STUDY] booking district filter '
-                  f'id={matched.get("id")!r} '
-                  f'label={booking_search.facet_label(matched)!r} '
+            applied = booking_search.search_has_district(
+                filtered_final, district_id)
+            print(f'[MARKET STUDY] booking district filter id={district_id!r} '
+                  f'label={booking_search.facet_label(matched or {})!r} '
                   f'cards={len(filtered_hotels)} '
                   f'error={filtered.get("error")!r} '
                   f'final={filtered_final[:200]}', flush=True)
-            if not filtered.get('error') and filter_applied:
-                search = filtered
+            return filtered, filtered_final, applied
+
+        def _use_filtered(district_id):
+            nonlocal matched
+            filtered, filtered_final, applied = _apply_district(district_id)
+            if not filtered.get('error') and applied:
+                matched = dict(matched or {}, id=str(district_id))
                 citations.append(_booking_scan_citation(
                     filtered_final, filtered.get('title'),
                     filtered.get('text')))
-            else:
-                # Never widen silently: city-wide rows are not this district's
-                # hotels, and opening them costs a WAF wait each.
-                note = _booking_empty_note(
-                    filtered, destination=destination, matched_district=None,
-                    filter_error=str(
-                        filtered.get('error') or 'filter_not_applied'),
-                    district_label=display_district or district_en,
-                    city_label=city_ar or city_en, stars=stars)
+                return filtered, ''
+            note = _booking_empty_note(
+                filtered, destination=destination, matched_district=None,
+                filter_error=str(
+                    filtered.get('error') or 'filter_not_applied'),
+                district_label=display_district or district_en,
+                city_label=city_ar or city_en, stars=stars)
+            return None, note
+
+        if matched:
+            filtered_result, note = _use_filtered(matched.get('id'))
+            if note:
                 return _booking_scan_result(
                     task, [], citations, note, search_ran=True)
-        if not matched and scope_mode == 'district' and scope:
-            # The client asked for this district. Searching the whole city
-            # instead is a silent widening the owner rejects outright.
-            note = (f'لم يُعرض حي {display_district or district_en} كفلتر على '
-                    f'Booking.com لهذه المدينة، ولم يُوسَّع البحث إلى المدينة. '
-                    f'لم يُستخدم أي مصدر آخر.')
-            return _booking_scan_result(
-                task, [], citations, note, search_ran=True)
+            search = filtered_result
+        elif scope:
+            # A class-filtered page lists only the districts that have hotels
+            # of that class, so a 4-star page can omit the project's district
+            # even though Booking still filters by it. The district id is
+            # city-scoped: read it once from the unfiltered city page, cache
+            # it, and keep the scope exactly as the client set it.
+            district_key_city = city_en or city_ar
+            district_id = booking_destination.cached_district_id(
+                cache_path, country_code, district_key_city,
+                display_district or district_ar)
+            if not district_id:
+                wide_url = booking_search.build_search_url(
+                    city_en or city_ar, dest_id=dest_id, dest_type=dest_type)
+                wide = session.open_url(wide_url)
+                wide = wide if isinstance(wide, dict) else {}
+                wide_match = booking_search.match_district_facet(
+                    wide.get('booking_districts') or [], district_ar,
+                    district_en)
+                if wide_match:
+                    district_id = str(wide_match.get('id') or '')
+                    matched = wide_match
+                    booking_destination.remember_district_id(
+                        cache_path, country_code, district_key_city,
+                        display_district or district_ar, district_id)
+            if district_id:
+                filtered_result, note = _use_filtered(district_id)
+                if note:
+                    return _booking_scan_result(
+                        task, [], citations, note, search_ran=True)
+                search = filtered_result
+            elif scope_mode == 'district':
+                note = (f'لم يُعرض حي {display_district or district_en} كفلتر '
+                        f'على Booking.com لهذه المدينة، ولم يُوسَّع البحث إلى '
+                        f'المدينة. لم يُستخدم أي مصدر آخر.')
+                return _booking_scan_result(
+                    task, [], citations, note, search_ran=True)
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
         hotels = search_data.get('hotels') or []
@@ -523,6 +576,7 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
     scans must never share one.
     """
     axis = task.get('axis') if isinstance(task.get('axis'), dict) else {}
+    deadline = _scan_deadline(deadline)
     if task.get('kind') == 'axis' and str(axis.get('type') or '') == 'hotel':
         return _booking_hotel_scan(
             task, payload, data, tenant_id=tenant_id,
@@ -760,7 +814,7 @@ def _run_parallel_expansions(tasks, payload, existing, mode, offer_lang,
         return []
     report = _locked_report(report)
     search_budget = max(3, int(_COMPETITORS_SEARCH_BUDGET) // max(1, len(tasks) + 2))
-    max_steps = max(8, int(_COMPETITORS_MAX_STEPS) // max(1, len(tasks) + 1))
+    max_steps = max(5, int(_COMPETITORS_MAX_STEPS) // max(1, len(tasks) + 1))
     workers = min(_PARALLEL_SCAN_WORKERS, len(tasks)) or 1
     results = [None] * len(tasks)
     done = [0]
