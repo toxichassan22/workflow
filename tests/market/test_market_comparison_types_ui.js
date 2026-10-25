@@ -55,6 +55,17 @@ test('three filled types block adding a fourth', () => {
   assert.equal(guard.hasBlank, false);
 });
 
+test('a named row without a type blocks the manual fill', () => {
+  const ctx = context();
+  const missing = ctx.marketRowsMissingType([
+    { name: 'فندق أ', type: 'فندقي' },
+    { name: 'مشروع ب', type: '' },
+    { name: '', type: '' },
+  ]);
+  assert.equal(missing.length, 1);
+  assert.equal(missing[0].name, 'مشروع ب');
+});
+
 test('residential sale and rent stay on one row with both operations', () => {
   const ctx = context();
   const rows = ctx.normalizeMarketComparisonRows([

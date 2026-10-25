@@ -170,6 +170,24 @@
       const generateBtn = document.getElementById('marketGenerateCompetitorsBtn');
       const fillBtn = document.getElementById('marketFillCompetitorsBtn');
       const note = document.getElementById('marketCompetitorsNote');
+      if (mode === 'fill') {
+        const rows = Array.from(
+          document.querySelectorAll('#marketCompetitorsTable tbody tr'))
+          .map(tr => ({
+            name: String(tr.querySelector('[data-field="name"]')?.value || '').trim(),
+            type: String(tr.querySelector('[data-field="project_type"]')?.value || '').trim(),
+            select: tr.querySelector('[data-field="project_type"]'),
+          }));
+        const missing = marketRowsMissingType(rows)[0];
+        if (missing) {
+          // A manual row without a type cannot be routed to its source.
+          if (note) {
+            note.textContent = 'حدّد نوع كل منافس (فندقي / سكني / تجاري) قبل إكمال البيانات.';
+          }
+          missing.select?.focus();
+          return;
+        }
+      }
       if (generateBtn) generateBtn.disabled = true;
       if (fillBtn) fillBtn.disabled = true;
       showLoader(

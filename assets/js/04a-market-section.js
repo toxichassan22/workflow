@@ -337,8 +337,16 @@
         '</div>';
     }
 
-    function marketComparisonAddGuard(rows) {
-      // A blank row is a slot the client is filling, not a third type: counting
+    // The two competitor modes are explicit: generate builds rows from the
+    // comparison selection, while a manual row states its own type so the
+    // fill step knows which source to read (Booking for hotels).
+    function marketRowsMissingType(rows) {
+      return (Array.isArray(rows) ? rows : [])
+        .filter(row => String((row || {}).name || '').trim()
+          && !String((row || {}).type || '').trim());
+    }
+
+    function marketComparisonAddGuard(rows) {      // A blank row is a slot the client is filling, not a third type: counting
       // it disabled «إضافة نوع مقارنة» after two real types.
       const filled = rows.filter(row => row.type);
       return { filled: filled.length, hasBlank: rows.length > filled.length };
