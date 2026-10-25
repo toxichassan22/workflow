@@ -229,7 +229,14 @@ DEPLOY_STEP="restart"
 echo "===== 7. Start/restart staging application server ====="
 # 9>&-: the lock fd is inheritable — anything the restart chain spawns (the
 # daemon above all) must not carry it or the lock outlives this deploy.
-run_deploy_step restart startup bash "$APP_DIR/start_server-staging.sh" --force 9>&-
+# The every-minute watchdog can hold the startup lock at the same moment
+# (observed: «another staging server startup is already running»), so one
+# retry after it releases the lock keeps a healthy deploy from failing.
+run_deploy_step restart startup bash "$APP_DIR/start_server-staging.sh" --force 9>&- || {
+  echo "restart collided with the startup lock; retrying once"
+  sleep 6
+  run_deploy_step restart startup bash "$APP_DIR/start_server-staging.sh" --force 9>&-
+}
 
 if [ -n "$local_commit" ]; then
   printf '{"commit":"%s","deployed_at":"%s","source":"github-staging"}\n' \
