@@ -69,6 +69,8 @@ class BookingHotelScanTests(unittest.TestCase):
         cls.module = application_module
         cls.app = application_module.app
         cls.app.config.update(TESTING=True)
+        cls.module.UPLOADS_DIR = os.path.join(cls.temp_dir.name, 'uploads')
+        os.makedirs(cls.module.UPLOADS_DIR, exist_ok=True)
         with cls.app.app_context():
             db.init_db()
 
@@ -79,6 +81,10 @@ class BookingHotelScanTests(unittest.TestCase):
     def setUp(self):
         booking_destination._RESOLVED.clear()
         booking_destination.CONTENT_PAGE_RETRY_DELAY = 0
+        cache = os.path.join(self.module.UPLOADS_DIR,
+                             booking_destination.CACHE_FILE_NAME)
+        if os.path.isfile(cache):
+            os.remove(cache)
 
     def _payload(self):
         return {

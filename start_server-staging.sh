@@ -111,6 +111,14 @@ write_deployment_marker() {
 # Scoped process match: only this staging venv's gunicorn, never production's.
 STAGING_GUNICORN_MATCH="$APP_DIR/venv/bin/gunicorn"
 
+# A browser whose owning worker died keeps its profile and its processes
+# forever (measured: 278 chrome processes, the oldest 1.5 days old, held ~1 GB
+# and starved the next scan). Only parentless Chromium is touched — a running
+# job's browser always has its worker as parent.
+for chrome_pattern in 'chrome-linux64/chrome' 'chrome_crashpad'; do
+  pkill -P 1 -f "$chrome_pattern" 2>/dev/null || true
+done
+
 # Already healthy on the live staging port? (bypassed if --force is passed)
 if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null | grep -q '"deployed_commit"'; then
   log "OK: staging gunicorn already healthy on port $PORT"

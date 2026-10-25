@@ -11,6 +11,7 @@
 # ---------------------------------------------------------------------------
 
 import json
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -257,7 +258,10 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     citations = []
     try:
         destination = booking_destination.resolve_city_destination(
-            session, country_code, city_en or city_ar, city_ar)
+            session, country_code, city_en or city_ar, city_ar,
+            cache_path=(os.path.join(
+                UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
+                if UPLOADS_DIR else ''))
         dest_id = str(destination.get('dest_id') or '')
         dest_type = str(destination.get('dest_type') or 'city')
         search_url = booking_search.build_search_url(

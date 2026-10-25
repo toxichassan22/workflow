@@ -6,6 +6,8 @@ resolution chain and its failure modes.
 """
 
 import sys
+import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -34,12 +36,18 @@ ARABIC_COUNTRY_HTML = ('<html><body>'
 
 class _FakeSession:
     def __init__(self, pages):
-        self.pages = pages
+        self.pages = {
+            url: (value if isinstance(value, list) else [value])
+            for url, value in (pages or {}).items()
+        }
         self.urls = []
 
     def fetch_html(self, url, timeout=None):
         self.urls.append(url)
-        return self.pages.get(url, {'error': 'not_found'})
+        replies = self.pages.get(url)
+        if not replies:
+            return {'error': 'not_found'}
+        return replies.pop(0) if len(replies) > 1 else replies[0]
 
 
 class BookingDestinationTests(unittest.TestCase):
@@ -47,6 +55,46 @@ class BookingDestinationTests(unittest.TestCase):
     def setUp(self):
         booking_destination._RESOLVED.clear()
         booking_destination.CONTENT_PAGE_RETRY_DELAY = 0
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.cache_path = str(Path(self.temp_dir.name) / 'destinations.json')
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def test_resolved_city_is_reused_from_the_disk_cache(self):
+        first = _FakeSession({COUNTRY_PAGE: {'html': COUNTRY_HTML},
+                              CITY_PAGE: {'html': CITY_HTML}})
+        booking_destination.resolve_city_destination(
+            first, 'SA', 'Jeddah', cache_path=self.cache_path)
+        booking_destination._RESOLVED.clear()
+        second = _FakeSession({})
+        result = booking_destination.resolve_city_destination(
+            second, 'SA', 'Jeddah', cache_path=self.cache_path)
+        self.assertEqual(result['dest_id'], '-3096108')
+        self.assertEqual(second.urls, [])
+
+    def test_stale_cache_entry_is_ignored(self):
+        booking_destination._cache_write(self.cache_path, {'sa|jeddah': {
+            'dest_id': '-111', 'dest_type': 'city',
+            'saved_at': int(time.time()) - booking_destination.CACHE_TTL_SECONDS - 10,
+        }})
+        session = _FakeSession({COUNTRY_PAGE: {'html': COUNTRY_HTML},
+                                CITY_PAGE: {'html': CITY_HTML}})
+        result = booking_destination.resolve_city_destination(
+            session, 'SA', 'Jeddah', cache_path=self.cache_path)
+        self.assertEqual(result['dest_id'], '-3096108')
+        self.assertTrue(session.urls)
+
+    def test_country_page_without_links_is_fetched_again(self):
+        session = _FakeSession({
+            COUNTRY_PAGE: [{'html': '<html>still loading</html>'},
+                           {'html': COUNTRY_HTML}],
+            CITY_PAGE: {'html': CITY_HTML},
+        })
+        result = booking_destination.resolve_city_destination(
+            session, 'SA', 'Jeddah')
+        self.assertEqual(result['dest_id'], '-3096108')
+        self.assertEqual(session.urls.count(COUNTRY_PAGE), 2)
 
     def test_resolves_the_city_dest_id_through_the_country_page(self):
         session = _FakeSession({COUNTRY_PAGE: {'html': COUNTRY_HTML},
@@ -72,7 +120,7 @@ class BookingDestinationTests(unittest.TestCase):
                 {'html': ARABIC_COUNTRY_HTML},
             CITY_PAGE.replace('?aid=304142', ''): {'html': CITY_HTML},
         })
-        session.pages[COUNTRY_PAGE] = {'error': 'not_found'}
+        session.pages[COUNTRY_PAGE] = [{'error': 'not_found'}]
         result = booking_destination.resolve_city_destination(
             session, 'sa', 'Jeddah', 'جدة')
         self.assertEqual(result['dest_id'], '-3096108')
