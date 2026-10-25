@@ -324,6 +324,20 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
             competitor_scope['origin_lng'] = origin_lng
     payload['competitorScope'] = competitor_scope
     offer_lang = slide_engine.resolve_offer_lang(data)
+    existing = data.get('competitors') if isinstance(data.get('competitors'), list) else []
+    mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
+    if mode == 'fill':
+        # Completion is a per-name lookup over the table's own rows. It must
+        # never ride the district discovery pipeline — that run's failure used
+        # to abort the whole fill before a single row was completed.
+        return _run_market_competitors_fill(
+            data, payload, existing, offer_lang=offer_lang,
+            tenant_id=tenant_id, deadline=deadline, report=report)
     axes = market_study.project_competitor_axes(payload)
     if not axes:
         return {
@@ -333,13 +347,6 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         }
     payload['transactionBenchmarks'] = market_study.build_transaction_price_benchmarks(
         payload, axes)
-    existing = data.get('competitors') if isinstance(data.get('competitors'), list) else []
-    mode = 'fill' if str(data.get('mode') or '').strip() == 'fill' else 'generate'
-    if tenant_id is None:
-        try:
-            tenant_id = getattr(g, 'tenant_id', None)
-        except Exception:
-            tenant_id = None
     system_prompt = market_study.build_consultant_system_prompt(offer_lang)
     training_context = (db.get_training_context(tenant_id, surface='content', offer_lang=offer_lang)
                         if tenant_id else '')
@@ -470,12 +477,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     # its Booking price here; the browse agent cannot open Booking reliably.
     if not current_app.config.get('TESTING'):
         try:
-            cache_path = (os.path.join(
-                UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
-                if UPLOADS_DIR else '')
             _fill_hotel_rows_from_booking(
-                merged, payload, data, tenant_id=tenant_id,
-                cache_path=cache_path)
+                merged, payload, data, tenant_id=tenant_id)
         except Exception as exc:
             print(f'[MARKET STUDY] hotel name fill skipped: {exc}', flush=True)
     if mode != 'fill':

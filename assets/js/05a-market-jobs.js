@@ -231,17 +231,18 @@
         }
         const state = getMarketStudyState();
         state.competitors = res.competitors || state.competitors;
-        state.transaction_benchmarks = res.transactionBenchmarks || null;
+        state.transaction_benchmarks = res.transactionBenchmarks || state.transaction_benchmarks || null;
         applyMarketStudyState(state);
         persistMarketStudyFromDom();
         const extra = res.expansionNote || res.notes || '';
         const conflictCount = Array.isArray(res.conflictWarnings) ? res.conflictWarnings.length : 0;
         const onlyNoEvidenceVerifyFailure = marketCompetitorOnlyNoEvidenceVerifyFailure(res);
         const showPartialStatus = Boolean(res.partial) && !onlyNoEvidenceVerifyFailure;
+        const filledCount = Number(res.filledCount ?? res.updated ?? 0);
         const doneNote = resumed
           ? WFT('market.job_done_count', 'اكتمل تحديث المنافسين — {n} في الجدول', { n: (res.competitors || []).length })
           : (mode === 'fill'
-            ? WFT('market.fill_done', 'أُكملت بيانات {n} منافس', { n: res.updated || 0 })
+            ? WFT('market.fill_done', 'أُكملت بيانات {n} منافس', { n: filledCount })
             : WFT('market.table_replaced', 'تم استبدال الجدول بـ {n} منافس', { n: (res.competitors || []).length }));
         if (note) {
           note.textContent = doneNote +

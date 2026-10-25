@@ -601,3 +601,26 @@ test('a chat job that outlives the budget posts a still-running turn', async () 
   assert.notEqual(last.error, true);
   assert.doesNotMatch(last.content, /أعد|حاول|لاحق/);
 });
+
+test('fill mode reports the rows it completed and keeps the benchmarks', async () => {
+  const { context, inputs } = fixture();
+  const state = context.getMarketStudyState();
+  state.transaction_benchmarks = { residential: { sale: '4,500' } };
+  context.setMarketStudyState(state);
+  context.nextApi = () => ({
+    success: true,
+    status: 'completed',
+    competitors: [{ name: 'WA Hotel', project_type: 'فندقي' }],
+    sources: [],
+    filledCount: 3,
+    updated: 1,
+    partial: false,
+    searchVerified: true,
+    missingPriceCount: 0
+  });
+  await context.runMarketCompetitorsJob('fill');
+  assert.equal(inputs.marketCompetitorsNote.textContent,
+    'أُكملت بيانات 3 منافس');
+  assert.deepEqual(context.getMarketStudyState().transaction_benchmarks,
+    { residential: { sale: '4,500' } });
+});
