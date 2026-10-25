@@ -735,6 +735,15 @@ class BrowserWorker:
         except Exception as exc:
             result['error'] = _launch_reason(exc)
             return result
+        if getattr(self, '_using_cdp', False):
+            # The managed browser runs headless; the portals (aqar, bayut,
+            # wasalt) answer its HeadlessChrome UA with a block page even
+            # when open_url would pass. The override belongs on every
+            # navigation, not just the readable-text path.
+            error = booking_rooms.apply_user_agent(
+                page, USER_AGENT, ACCEPT_LANGUAGE)
+            if error:
+                _browser_log(f'[BROWSER] UA override failed: {error}')
         try:
             response = page.goto(str(url), wait_until='domcontentloaded',
                                  timeout=int(timeout * 1000))

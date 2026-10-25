@@ -947,43 +947,6 @@ def _run_parallel_expansions(tasks, payload, existing, mode, offer_lang,
     return [item for item in results if isinstance(item, dict)]
 
 
-def _start_source_plan_async(payload, offer_lang, evidence_pool, deadline,
-                             report, session=None, market_wide=False):
-    """Run the known-sources plan beside the scans instead of before them.
-
-    It keeps the job's shared browser (the scans own their own), so the plan
-    still reaches the pages a plain HTTP read cannot and the job closes that
-    session once, after every stage.
-    """
-    if evidence_pool is None:
-        return None
-
-    def _worker():
-        try:
-            with _worker_app_context():
-                kwargs = dict(
-                    offer_lang=offer_lang,
-                    evidence_pool=evidence_pool,
-                    session=session,
-                    deadline=deadline,
-                    report=report)
-                if market_wide:
-                    kwargs['market_wide'] = True
-                _run_market_source_plan(payload, **kwargs)
-        except Exception as exc:
-            print(f'[MARKET STUDY] parallel source plan failed: {exc}')
-
-    thread = threading.Thread(target=_worker, name='market-source-plan', daemon=True)
-    thread.start()
-    return thread
-
-
-def _await_source_plan(thread, timeout=None):
-    if thread is None:
-        return
-    thread.join(timeout=timeout)
-
-
 def _aggregate_scan_results(results):
     """Combine parallel replies: rows, citations source, note and errors."""
     usable = [item for item in results or []

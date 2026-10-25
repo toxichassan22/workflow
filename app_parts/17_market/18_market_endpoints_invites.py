@@ -357,6 +357,11 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     # the scans on its own browser thread; its pages still land in the shared
     # pool before verification and the logo pass read it.
     locked_report = _locked_report(report)
+    # The named-project directory on aqar is a deterministic source beside
+    # the agent scans: same city, same district promise, real price/area
+    # ranges. It owns its browser thread and never blocks the scans.
+    aqar_handle = _start_aqar_projects_scan(
+        payload, axes, report=locked_report, deadline=deadline)
     source_thread = _start_source_plan_async(
         payload, offer_lang=offer_lang, evidence_pool=evidence_pool,
         deadline=deadline, report=locked_report, session=session)
@@ -368,9 +373,10 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         payload, existing, mode, offer_lang, tenant_id, data,
         evidence_pool, deadline, system_prompt, report, band=(22, 40))
     _await_source_plan(source_thread)
+    aqar_rows = _await_aqar_projects_scan(aqar_handle, timeout=60)
     aggregate = _aggregate_scan_results(scan_results)
     provider_error = aggregate['provider_error']
-    if not aggregate['usable']:
+    if not aggregate['usable'] and not aqar_rows:
         fatal = next((fatal for fatal in (
             _ai_fatal_error_dict(item.get('reply') or {})
             for item in scan_results) if fatal is not None), None)
@@ -409,8 +415,16 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     for result in scan_results:
         if result.get('reply'):
             _collect_citations(result['reply'])
+    # The aqar projects are already sourced; the agent's duplicates would
+    # only spend a verification slot. Sourced rows go first so the per-axis
+    # cap keeps them.
+    aqar_names = {market_study._fold_choice(row.get('name'))
+                  for row in aqar_rows if row.get('name')}
+    combined_rows = list(aqar_rows) + [
+        row for row in aggregate['competitors']
+        if market_study._fold_choice(row.get('name')) not in aqar_names]
     generated = market_study.filter_and_cap_competitors(
-        aggregate['competitors'], axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
+        combined_rows, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
         offer_lang=offer_lang, scope=payload.get('competitorScope'),
         city=payload.get('city'), district=payload.get('district'))
     named_generated = [row for row in generated
@@ -544,6 +558,26 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     notes = aggregate['notes']
+    if aqar_rows:
+        aqar_note = f'قُرئت {len(aqar_rows)} مشاريع مسماة من عقار.'
+        notes = f'{notes} — {aqar_note}' if notes else aqar_note
+    elif aqar_handle:
+        aqar_holder = aqar_handle.get('holder') or {}
+        aqar_result = aqar_holder.get('result') or {}
+        aqar_error = aqar_holder.get('error') or aqar_result.get('error') or ''
+        if aqar_error:
+            aqar_note = f'تعذر قراءة مشاريع عقار: {aqar_error}'
+        elif not aqar_result.get('cards'):
+            aqar_note = 'لم تُعد صفحة مشاريع عقار أي مشروع لهذه المدينة.'
+        elif not aqar_result.get('matched'):
+            scope_mode = (payload.get('competitorScope') or {}).get('mode')
+            aqar_note = ('لم تُطابق مشاريع عقار المحاور المختارة'
+                         + (' داخل الحي المحدد.' if scope_mode == 'district'
+                            else '.'))
+        else:
+            aqar_note = ''
+        if aqar_note:
+            notes = f'{notes} — {aqar_note}' if notes else aqar_note
     expansion_note = aggregate['notes']
     if round_no:
         rounds_note = ('أُجريت جولة بحث إضافية واحدة عن مشاريع أخرى' if round_no == 1

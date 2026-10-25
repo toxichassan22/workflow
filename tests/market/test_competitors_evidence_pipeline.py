@@ -791,6 +791,84 @@ class VerifyProgressBandTests(_MarketTestBase):
         self.assertIn('تعذّر', progress[2][1])
 
 
+class AqarProjectsWiringTests(_MarketTestBase):
+    """Named projects from aqar are a source beside the agent scans."""
+
+    def _aqar_row(self):
+        url = ('https://sa.aqar.fm/المشاريع-العقارية/'
+               'شركة-ابياتنا-التطويرية-255/أبياتنا-هيلز-790')
+        return {
+            'name': 'أبياتنا هيلز', 'project_type': 'سكني',
+            'operation_type': 'بيع', 'price_type': 'نطاق سعري',
+            'price_from': '366905', 'price_to': '812400',
+            'price_currency': 'SAR', 'area_mode': 'range',
+            'area_from': '178', 'area_to': '220',
+            'district': 'النرجس', 'city': 'الرياض',
+            'source': 'عقار', 'source_url': url, 'source_urls': [url],
+            'row_source': 'aqar', 'verify_state': 'verified',
+            'field_sources': {'name': [url], 'price_from': [url],
+                              'price_to': [url], 'area_from': [url],
+                              'area_to': [url]},
+        }
+
+    def test_aqar_rows_keep_the_job_alive_when_the_agent_scan_is_unusable(self):
+        module = self.module
+        row = self._aqar_row()
+        calls = {'scan': 0, 'verify': 0}
+
+        def fake_scan(*_args, **_kwargs):
+            calls['scan'] += 1
+            return []
+
+        with self.app.app_context(), \
+                patch.object(module, '_start_aqar_projects_scan',
+                             return_value={'thread': None,
+                                           'holder': {'rows': [row]},
+                                           'district': 'النرجس'}), \
+                patch.object(module, '_await_aqar_projects_scan',
+                             return_value=[row]), \
+                patch.object(module, '_start_source_plan_async',
+                             return_value=None), \
+                patch.object(module, '_run_scan_tasks', side_effect=fake_scan), \
+                patch.object(module, '_verify_competitor_rows'), \
+                patch.object(module, '_verify_market_urls',
+                             return_value=set()), \
+                patch.object(module, '_auto_import_competitor_logos'):
+            result = module._run_market_competitors({
+                'city': 'الرياض',
+                'district': 'النرجس',
+                'competitorScope': {'mode': 'district', 'radius': '10'},
+                'comparisonTypes': [{'type': 'residential',
+                                     'operation': 'sale'}],
+                'mode': 'generate',
+            })
+        self.assertTrue(result['success'], result)
+        self.assertEqual(calls['scan'], 1)
+        self.assertEqual([item.get('name') for item in result['competitors']],
+                         ['أبياتنا هيلز'])
+        self.assertEqual(result['competitors'][0].get('row_source'), 'aqar')
+        self.assertIn('عقار', result.get('notes') or '')
+
+    def test_aqar_rows_skip_the_per_row_agent_verification(self):
+        module = self.module
+        seen = []
+        with self.app.app_context(), \
+                patch.object(module, '_verify_competitor_row_pooled',
+                             side_effect=lambda row, *_a, **_k:
+                             seen.append(row.get('name'))), \
+                patch.object(module, '_verify_row_from_pool',
+                             return_value=False), \
+                patch.object(module, '_close_verify_thread_browser'):
+            module._verify_competitor_rows(
+                [{'name': 'مشروع عقار', 'project_type': 'سكني',
+                  'row_source': 'aqar'},
+                 {'name': 'برج سكني', 'project_type': 'سكني',
+                  'row_source': 'ai'}],
+                {'city': 'الرياض'}, {}, tenant_id=None,
+                evidence_pool=None, deadline=None)
+        self.assertEqual(seen, ['برج سكني'])
+
+
 from tests.market.test_competitors_evidence_pipeline_parts.banned_listing_portal import BannedListingPortalTests
 from tests.market.test_competitors_evidence_pipeline_parts.parallelism import ParallelismTests
 

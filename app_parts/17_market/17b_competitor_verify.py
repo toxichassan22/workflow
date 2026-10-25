@@ -747,7 +747,10 @@ def _verify_competitor_rows(rows, payload, data, tenant_id=None, progress=None,
     targets = [row for row in (rows or [])
                if isinstance(row, dict)
                and str(row.get('name') or '').strip()
-               and row.get('row_source') != 'booking']
+               # Deterministic sources already carry their page — Booking for
+               # hotels, the project page for aqar rows; an agent round would
+               # only re-read what is already sourced.
+               and row.get('row_source') not in ('booking', 'aqar')]
     if not targets:
         return
     for row in targets:
