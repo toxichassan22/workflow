@@ -466,6 +466,18 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                 round_no = 1
     merged, added, updated = market_study.merge_generated_competitors(
         existing, generated, mode=mode, offer_lang=offer_lang)
+    # A named hotel row (typed by the client or left by an older AI pass) gets
+    # its Booking price here; the browse agent cannot open Booking reliably.
+    if not current_app.config.get('TESTING'):
+        try:
+            cache_path = (os.path.join(
+                UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
+                if UPLOADS_DIR else '')
+            _fill_hotel_rows_from_booking(
+                merged, payload, data, tenant_id=tenant_id,
+                cache_path=cache_path)
+        except Exception as exc:
+            print(f'[MARKET STUDY] hotel name fill skipped: {exc}', flush=True)
     if mode != 'fill':
         merged = market_study.filter_and_cap_competitors(
             merged, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,

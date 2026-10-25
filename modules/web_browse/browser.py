@@ -628,11 +628,14 @@ class BrowserWorker:
         result = _result(url)
         is_booking = hotel_stay.is_booking_hotel_url(url)
         is_booking_search = booking_search.is_booking_search_url(url)
-        if is_booking or is_booking_search:
+        if getattr(self, '_using_cdp', False):
+            # The managed browser runs headless; without a desktop UA every
+            # protected site (Booking and the property portals alike) answers
+            # «HeadlessChrome» with a challenge or a 403.
             error = booking_rooms.apply_user_agent(
                 page, USER_AGENT, ACCEPT_LANGUAGE)
             if error:
-                _browser_log(f'[BROWSER] booking UA override failed: {error}')
+                _browser_log(f'[BROWSER] UA override failed: {error}')
         if not getattr(self, '_using_cdp', False):
             try:
                 page.set_extra_http_headers(dict(_EXTRA_HEADERS))
