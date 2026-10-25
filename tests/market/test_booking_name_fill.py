@@ -98,7 +98,9 @@ class BookingNameFillTests(unittest.TestCase):
         session = _Session({
             city_url: {'final_url': city_url,
                        'booking_search': {'hotels': []}},
-            hotel_url: {'final_url': hotel_url, 'booking_rate': {
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'WA Hotel Jeddah, Jeddah – Booking.com',
+                        'booking_rate': {
                 'price': 629.0, 'currency': 'SAR',
                 'price_from': 629.0, 'price_to': 1100.0,
                 'area_from': 32.0, 'area_to': 63.0}},

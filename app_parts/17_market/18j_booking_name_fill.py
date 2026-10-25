@@ -104,25 +104,47 @@ def _apply_rate(row, rate, url):
     })
 
 
-def _find_booking_url(session, name, city=''):
-    """Find a property's Booking /hotel/ page by name through the search layer."""
+def _booking_hotel_candidates(session, name, city=''):
+    """Candidate Booking /hotel/ URLs for a name, from one search."""
     query = f'site:booking.com/hotel {name} {city}'.strip()
     try:
-        hits = session.web_search(query, max_results=6) or []
+        hits = session.web_search(query, max_results=8) or []
     except Exception:
-        return ''
-    wanted = booking_search.normalize_label(name)
-    if len(wanted) < 4:
-        return ''
+        return []
+    urls = []
     for hit in hits:
         hit = hit if isinstance(hit, dict) else {}
         url = str(hit.get('url') or '')
-        if 'booking.com/hotel/' not in url:
-            continue
-        label = booking_search.normalize_label(hit.get('title'))
-        if label and (wanted in label or label in wanted):
-            return url
-    return ''
+        if 'booking.com/hotel/' in url and url not in urls:
+            urls.append(url)
+    return urls[:3]
+
+
+def _title_matches(title, name):
+    label = booking_search.normalize_label(title)
+    wanted = booking_search.normalize_label(name)
+    if not label or len(wanted) < 4:
+        return False
+    if wanted in label or label in wanted:
+        return True
+    token = next((part for part in wanted.split() if len(part) >= 4), '')
+    return bool(token and token in label)
+
+
+def _fill_from_candidate_pages(session, row, city_ar):
+    """Open the searched Booking pages and accept the one whose own title
+    carries the hotel name; the search snippet title is unreliable."""
+    for candidate in _booking_hotel_candidates(
+            session, row.get('name'), city_ar):
+        prop = session.open_url(candidate)
+        prop = prop if isinstance(prop, dict) else {}
+        rate = prop.get('booking_rate')
+        title = str(prop.get('title') or (rate or {}).get('page_title') or '')
+        if (isinstance(rate, dict) and rate.get('price') is not None
+                and _title_matches(title, row.get('name'))):
+            _apply_rate(row, rate, candidate)
+            return True
+    return False
 
 
 def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
@@ -159,16 +181,17 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
             if time.time() > deadline:
                 break
             card = _card_for_name(cards, row.get('name'))
-            url = str((card or {}).get('url') or '')
-            if not url:
+            if not card:
                 # Booking ignores the free text once a destination id is set,
-                # so a name outside the city's top cards is looked up through
-                # the search layer and its /hotel/ page opened directly.
-                url = _find_booking_url(session, row.get('name'), city_ar)
-            if not url:
-                row['notes'] = ('لم يُعثر على هذا الفندق في Booking '
-                                'للمدينة؛ لم تُضف أسعار أو مساحات.')
+                # so a name outside the city's top cards is found through one
+                # search, then verified on the page's own title.
+                if _fill_from_candidate_pages(session, row, city_ar):
+                    filled += 1
+                else:
+                    row['notes'] = ('لم يُعثر على هذا الفندق في Booking؛ '
+                                    'لم تُضف أسعار أو مساحات.')
                 continue
+            url = str(card.get('url') or '')
             prop = session.open_url(url)
             rate = (prop or {}).get('booking_rate')
             if not isinstance(rate, dict) or rate.get('price') is None:
