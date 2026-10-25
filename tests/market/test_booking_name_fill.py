@@ -17,13 +17,19 @@ import db  # noqa: E402
 
 
 class _Session:
-    def __init__(self, replies):
+    def __init__(self, replies, search_hits=None):
         self.replies = replies
         self.urls = []
+        self.search_hits = search_hits or []
+        self.queries = []
 
     def open_url(self, url):
         self.urls.append(url)
         return self.replies.get(url, {})
+
+    def web_search(self, query, max_results=8):
+        self.queries.append(query)
+        return self.search_hits
 
     def close(self):
         pass
@@ -84,6 +90,37 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(row['price_type'], 'نطاق أسعار الغرف')
         self.assertEqual(row['source_url'], hotel_url)
         self.assertEqual(row['row_source'], 'booking')
+
+    def test_a_name_outside_the_city_cards_is_found_by_search(self):
+        city_url = self.module.booking_search.build_search_url(
+            'Jeddah', dest_id='-3096108')
+        hotel_url = 'https://www.booking.com/hotel/sa/wa-jeddah.html'
+        session = _Session({
+            city_url: {'final_url': city_url,
+                       'booking_search': {'hotels': []}},
+            hotel_url: {'final_url': hotel_url, 'booking_rate': {
+                'price': 629.0, 'currency': 'SAR',
+                'price_from': 629.0, 'price_to': 1100.0,
+                'area_from': 32.0, 'area_to': 63.0}},
+        }, search_hits=[{'title': 'WA Hotel Jeddah, Jeddah – Booking.com',
+                         'url': hotel_url}])
+        row = {'name': 'WA Hotel', 'project_type': 'فندقي'}
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session), \
+                patch.object(self.module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'SA')), \
+                patch.object(
+                    self.module.booking_destination,
+                    'resolve_city_destination',
+                    return_value={'dest_id': '-3096108',
+                                  'dest_type': 'city'}):
+            filled = self.module._fill_hotel_rows_from_booking(
+                [row], {'city': 'جدة'}, {}, tenant_id=None)
+        self.assertEqual(filled, 1)
+        self.assertEqual(row['source_url'], hotel_url)
+        self.assertTrue(session.queries)
+        self.assertIn('site:booking.com/hotel', session.queries[0])
 
     def test_a_name_that_is_not_in_booking_stays_explicitly_unfilled(self):
         city_url = self.module.booking_search.build_search_url(
