@@ -722,6 +722,56 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
         self.assertIn(dest_url, session.urls)
 
+    def test_district_id_is_probed_from_the_five_star_page_when_hidden(self):
+        payload = self._payload()
+        payload['competitorScope'] = {'mode': 'district'}
+        class_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108')
+        wide_url = booking_search.build_search_url(
+            'Jeddah', dest_id='-3096108')
+        probe_url = booking_search.build_search_url(
+            'Jeddah', stars='5', dest_id='-3096108')
+        district_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+        session = _Session({
+            class_url: {
+                'final_url': class_url, 'title': 'Booking', 'text': '',
+                'booking_districts': [{'id': '5656', 'label': 'الشاطئ 14'}],
+                'booking_search': {'hotels': []},
+            },
+            wide_url: {
+                'final_url': wide_url, 'title': 'Booking', 'text': '',
+                'booking_districts': [{'id': '5656', 'label': 'الشاطئ 73'}],
+                'booking_search': {'hotels': []},
+            },
+            probe_url: {
+                'final_url': probe_url, 'title': 'Booking', 'text': '',
+                'booking_districts': [{'id': '5654', 'label': 'الأندلس 3'}],
+                'booking_search': {'hotels': []},
+            },
+            district_url: {
+                'final_url': district_url, 'title': 'Booking', 'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'Eden Residence', 'url': PROPERTY_URL,
+                     'location': 'الأندلس, جدة',
+                     'text': 'فندق في الأندلس، جدة'}]},
+            },
+            PROPERTY_URL: {
+                'final_url': PROPERTY_URL, 'title': 'Eden Residence',
+                'text': '',
+            },
+        }, pages={COUNTRY_PAGE: {'html': COUNTRY_HTML},
+                  CITY_PAGE: {'html': CITY_HTML}})
+        result = self._scan(payload, session)
+        rows = result['parsed']['competitors']
+        self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
+        self.assertIn(probe_url, session.urls)
+        cache = os.path.join(self.module.UPLOADS_DIR,
+                             booking_destination.CACHE_FILE_NAME)
+        self.assertEqual(
+            booking_destination.cached_district_id(
+                cache, 'SA', 'Jeddah', 'الأندلس'), '5654')
+
     def test_scan_budget_caps_a_far_job_deadline(self):
         far = time.time() + 3600
         capped = self.module._scan_deadline(far)

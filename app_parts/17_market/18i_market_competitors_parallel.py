@@ -386,6 +386,10 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             return None, note
 
         if matched and scope_mode == 'district':
+            if matched.get('id'):
+                booking_destination.remember_district_id(
+                    cache_path, country_code, city_en or city_ar,
+                    display_district or district_ar, matched.get('id'))
             filtered_result, note = _use_filtered(matched.get('id'))
             if note:
                 return _booking_scan_result(
@@ -412,6 +416,24 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 if wide_match:
                     district_id = str(wide_match.get('id') or '')
                     matched = wide_match
+                    booking_destination.remember_district_id(
+                        cache_path, country_code, district_key_city,
+                        display_district or district_ar, district_id)
+            if not district_id and str(stars or '') != '5':
+                # The facet list is derived from the current results, so a
+                # 4-star page can hide the district that the 5-star page
+                # lists. Read the id once from that page and cache it; the
+                # district id is city-scoped, not class-scoped.
+                probe = session.open_url(booking_search.build_search_url(
+                    city_en or city_ar, stars='5', dest_id=dest_id,
+                    dest_type=dest_type))
+                probe = probe if isinstance(probe, dict) else {}
+                probe_match = booking_search.match_district_facet(
+                    probe.get('booking_districts') or [], district_ar,
+                    district_en)
+                if probe_match:
+                    district_id = str(probe_match.get('id') or '')
+                    matched = probe_match
                     booking_destination.remember_district_id(
                         cache_path, country_code, district_key_city,
                         display_district or district_ar, district_id)
