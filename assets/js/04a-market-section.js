@@ -74,6 +74,13 @@
         <div class="market-block">
           <h4>اختيارات المقارنة</h4>
           <div id="marketComparisonTypes" class="market-comparison-types"></div>
+          <div class="market-competitors-mode">
+            <label for="marketCompetitorsMode">طريقة الإدخال</label>
+            <select id="marketCompetitorsMode" onchange="applyMarketCompetitorsMode()">
+              <option value="generate">توليد آلي</option>
+              <option value="manual">إدخال يدوي</option>
+            </select>
+          </div>
           <div class="market-actions" style="margin-top:8px">
             <button type="button" class="btn ghost" id="marketAddComparisonTypeBtn" onclick="addMarketComparisonType()">إضافة نوع مقارنة</button>
           </div>
@@ -216,6 +223,13 @@
         }
         persistMarketStudyFromDom();
       });
+      const savedMode = (typeof getMarketStudyState === 'function'
+        ? (getMarketStudyState() || {}).competitor_mode : '') || 'generate';
+      const modeSelect = document.getElementById('marketCompetitorsMode');
+      if (modeSelect) modeSelect.value = savedMode;
+      if (typeof applyMarketCompetitorsMode === 'function') {
+        applyMarketCompetitorsMode(false);
+      }
       refreshDynamicI18n(div);
       if (typeof mountMarketSummaryChat === 'function') mountMarketSummaryChat(div);
       if (typeof restoreMarketSummaryResumeAction === 'function') {
@@ -335,6 +349,19 @@
         '<div data-comparison-stars' + (type === 'hotel' ? '' : ' hidden') + '><label>تصنيف الفندق</label><div class="market-comparison-multi-options">' + starOptions + '</div></div>' +
         '<button type="button" class="btn ghost small" data-remove-comparison-type>حذف</button>' +
         '</div>';
+    }
+
+    function applyMarketCompetitorsMode(persist = true) {
+      const mode = document.getElementById('marketCompetitorsMode')?.value || 'generate';
+      const generateBtn = document.getElementById('marketGenerateCompetitorsBtn');
+      if (generateBtn) generateBtn.hidden = mode === 'manual';
+      if (persist && typeof persistMarketStudyFromDom === 'function') {
+        try {
+          persistMarketStudyFromDom();
+        } catch (error) {
+          console.error('market competitors mode persist failed', error);
+        }
+      }
     }
 
     // The two competitor modes are explicit: generate builds rows from the

@@ -34,6 +34,8 @@
       });
       state.swot = swot;
       state.decision = document.getElementById('marketDecision')?.value || '';
+      state.competitor_mode = document.getElementById('marketCompetitorsMode')?.value
+        || state.competitor_mode || 'generate';
       state.disclaimer = document.getElementById('marketDisclaimer')?.value || state.disclaimer;
       state.summary_scope = collectMarketSummaryScope();
       // The summary register owns the summary's sources only. A competitor's
