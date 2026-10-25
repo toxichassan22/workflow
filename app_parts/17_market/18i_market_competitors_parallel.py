@@ -305,18 +305,30 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         matched = booking_search.match_district_facet(
             search.get('booking_districts') or [], district_ar, district_en)
 
-        def _apply_district(district_id):
-            filtered_url = booking_search.build_search_url(
-                city_en or city_ar, stars=stars or None, dest_id=dest_id,
-                dest_type=dest_type, district_id=district_id)
+        def _apply_district(district_id, as_destination=False):
+            if as_destination:
+                # Booking serves the district itself as a destination; that
+                # page is narrower than the city and honours the class filter
+                # even when the nflt neighbourhood filter is ignored.
+                filtered_url = booking_search.build_search_url(
+                    city_en or city_ar, stars=stars or None,
+                    dest_id=district_id, dest_type='district')
+            else:
+                filtered_url = booking_search.build_search_url(
+                    city_en or city_ar, stars=stars or None, dest_id=dest_id,
+                    dest_type=dest_type, district_id=district_id)
             filtered = session.open_url(filtered_url)
             filtered = filtered if isinstance(filtered, dict) else {}
             filtered_hotels = ((filtered.get('booking_search') or {})
                                .get('hotels') or [])
             filtered_final = str(filtered.get('final_url') or filtered_url)
-            applied = booking_search.search_has_district(
-                filtered_final, district_id)
+            if as_destination:
+                applied = f'dest_id={district_id}' in filtered_final
+            else:
+                applied = booking_search.search_has_district(
+                    filtered_final, district_id)
             print(f'[MARKET STUDY] booking district filter id={district_id!r} '
+                  f'as_destination={as_destination} '
                   f'label={booking_search.facet_label(matched or {})!r} '
                   f'cards={len(filtered_hotels)} '
                   f'applied={applied} '
@@ -338,8 +350,12 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
 
         def _use_filtered(district_id):
             nonlocal matched
-            for attempt in range(2):
-                filtered, filtered_final, applied = _apply_district(district_id)
+            attempts = ((False, 'neighbourhood filter'),
+                        (False, 'neighbourhood filter retry'),
+                        (True, 'district destination'))
+            for as_destination, label in attempts:
+                filtered, filtered_final, applied = _apply_district(
+                    district_id, as_destination)
                 hotels = ((filtered.get('booking_search') or {})
                           .get('hotels') or [])
                 kept = booking_search.filter_hotels_by_district(
@@ -353,11 +369,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                         filtered_final, filtered.get('title'),
                         filtered.get('text')))
                     return narrowed, ''
-                if attempt == 0:
-                    # A challenge load can keep the URL but serve unfiltered
-                    # results; the second load normally honours the district.
-                    print('[MARKET STUDY] booking district filter not applied, '
-                          'retrying once', flush=True)
+                print(f'[MARKET STUDY] booking district attempt '
+                      f'({label}) kept={len(kept)}', flush=True)
             note = _booking_empty_note(
                 filtered, destination=destination, matched_district=None,
                 filter_error=str(

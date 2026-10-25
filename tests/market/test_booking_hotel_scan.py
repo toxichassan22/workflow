@@ -682,6 +682,46 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertTrue(booking_search.hotel_in_district(
             {'location': 'الأندلس, جدة', 'text': ''}, 'حي الأندلس'))
 
+    def test_district_is_served_as_a_destination_when_the_filter_fails(self):
+        payload = self._payload()
+        payload['competitorScope'] = {'mode': 'district'}
+        class_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108')
+        district_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+        dest_url = booking_search.build_search_url(
+            'Jeddah', stars='4', dest_id='5654', dest_type='district')
+        unfiltered = {
+            'final_url': class_url, 'title': 'Booking', 'text': '',
+            'booking_search': {'hotels': [
+                {'name': 'Elsewhere', 'url': PROPERTY_URL,
+                 'location': 'الشاطئ, جدة', 'text': 'الشاطئ, جدة'}]},
+        }
+        session = _Session({
+            class_url: {
+                'final_url': class_url, 'title': 'Booking', 'text': '',
+                'booking_districts': [{'id': '5654', 'label': 'الأندلس 2'}],
+                'booking_search': {'hotels': []},
+            },
+            district_url: [unfiltered, unfiltered],
+            dest_url: {
+                'final_url': dest_url, 'title': 'Booking', 'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'Eden Residence', 'url': PROPERTY_URL,
+                     'location': 'الأندلس, جدة',
+                     'text': 'فندق في الأندلس، جدة'}]},
+            },
+            PROPERTY_URL: {
+                'final_url': PROPERTY_URL, 'title': 'Eden Residence',
+                'text': '',
+            },
+        }, pages={COUNTRY_PAGE: {'html': COUNTRY_HTML},
+                  CITY_PAGE: {'html': CITY_HTML}})
+        result = self._scan(payload, session)
+        rows = result['parsed']['competitors']
+        self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
+        self.assertIn(dest_url, session.urls)
+
     def test_scan_budget_caps_a_far_job_deadline(self):
         far = time.time() + 3600
         capped = self.module._scan_deadline(far)
