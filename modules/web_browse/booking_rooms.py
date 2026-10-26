@@ -158,17 +158,25 @@ _STARS_JS = """() => {
   const text = (el) => el ? ((el.innerText || el.textContent || '')
       .replace(/\\s+/g, ' ').trim()) : '';
   const out = [];
-  document.querySelectorAll('[data-testid="rating-stars"]').forEach((el) => {
+  document.querySelectorAll('[data-testid="rating-stars"], '
+      + '[data-testid="rating-squares"]').forEach((el) => {
     out.push(el.getAttribute('aria-label') || '');
     out.push(el.getAttribute('class') || '');
     out.push(text(el));
+  });
+  // The class badge has moved between containers across releases, but the
+  // sentence it announces is the same one, so every labelled element that
+  // names a count out of five contributes its label.
+  document.querySelectorAll('[aria-label]').forEach((el) => {
+    const label = el.getAttribute('aria-label') || '';
+    if (/من\\s*أصل|out of/i.test(label)) out.push(label);
   });
   const header = document.querySelector('h2.pp-header__title')
     || document.querySelector('[data-testid="property-name"]')
     || document.querySelector('h1');
   out.push(text(header));
   out.push(document.title || '');
-  return out.join(' | ').slice(0, 1500);
+  return out.join(' | ').slice(0, 2500);
 }"""
 
 # Every pattern needs the word that makes the digit a star class, so a review
