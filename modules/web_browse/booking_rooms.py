@@ -54,6 +54,9 @@ def _table_timeout_ms():
 
 
 BOOKING_TABLE_TIMEOUT_MS = _table_timeout_ms()
+# A re-read after a failed one only needs the table to come back, not the
+# whole first-paint window the navigation already waited out.
+_REREAD_TABLE_TIMEOUT_MS = 2500
 
 BOOKING_RATE_JS = """() => {
   const table = document.querySelector('#hprt-table');
@@ -521,15 +524,28 @@ def wait_for_rate_rows(page, timeout_ms=None):
 
 
 def wait_and_extract(page, url='', adults=2, retries=5, delay_ms=1000):
-    """Extract the rate, retrying while the rows/prices are still painting."""
-    for _ in range(max(1, int(retries or 1))):
+    """Extract the rate, retrying while the rows/prices are still painting.
+
+    Two failures look alike and want opposite answers. A tab that died has no
+    further attempt coming — nothing brings a closed page back, and the
+    caller can only reopen its URL. A live page whose read lost its JS
+    context (Booking reloads itself to clear the WAF, and the retry sleep
+    fails on the document that is going away) is exactly the state another
+    look is for; ending the read there is how one transient error used to
+    cost a hotel its price.
+    """
+    attempts = max(1, int(retries or 1))
+    for attempt in range(attempts):
         rate = extract_booking_rate(page, url, adults=adults)
         if rate:
             return rate
+        if _page_closed(page) or attempt + 1 >= attempts:
+            break
         try:
             page.wait_for_timeout(delay_ms)
+            wait_for_rate_rows(page, _REREAD_TABLE_TIMEOUT_MS)
         except Exception:
-            break
+            continue
     return None
 
 
@@ -593,6 +609,39 @@ def _page_state_report(page):
         return ''
 
 
+def _page_closed(page):
+    """True only when the page itself says it is closed; unknown is alive."""
+    is_closed = getattr(page, 'is_closed', None)
+    if not callable(is_closed):
+        return False
+    try:
+        return bool(is_closed())
+    except Exception:
+        return False
+
+
+def _read_failure_state(page):
+    """``state=tab_closed`` when the failed read lost its page, else ''.
+
+    A tab that died under the read and a page that simply has no rates print
+    the same «read_failed», and they need opposite answers — the first is
+    answered by reopening the URL on a fresh page, the second is not a read
+    problem at all. Without this the log cannot tell the two apart.
+    """
+    return ' state=tab_closed' if _page_closed(page) else ''
+
+
+def _read_failure_detail(exc):
+    """The exception's own words, capped — a class name is not a diagnosis.
+
+    ``error=Error`` hides every cause Playwright reports (a destroyed
+    execution context, a detached frame, a protocol error), so the miss line
+    carries the message itself.
+    """
+    text = ' '.join(str(exc or '').split())[:120]
+    return f' msg={text!r}' if text else ''
+
+
 def extract_booking_rate(page, url='', adults=2):
     """Read the DOM of an already-loaded Booking property page."""
     target = str(url or '')[:120]
@@ -600,7 +649,9 @@ def extract_booking_rate(page, url='', adults=2):
         data = page.evaluate(BOOKING_RATE_JS)
     except Exception as exc:
         print(f'[BOOKING RATE MISS] url={target!r} '
-              f'reason=read_failed error={type(exc).__name__}', flush=True)
+              f'reason=read_failed error={type(exc).__name__}'
+              f'{_read_failure_state(page)}'
+              f'{_read_failure_detail(exc)}', flush=True)
         return None
     if not isinstance(data, dict) or not data.get('found'):
         print(f'[BOOKING RATE MISS] url={target!r} reason=no_table '

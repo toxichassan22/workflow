@@ -470,13 +470,88 @@ def _stop_managed_chrome(proc, profile):
             shutil.rmtree(profile, ignore_errors=True)
 
 
+_CHROME_PROFILE_PREFIX = 'wf-chrome-'
+# A profile younger than this is never swept: the browser that owns it may
+# still be starting up, and its process is not yet visible in /proc.
+_NEW_PROFILE_GRACE_SECONDS = 600
+
+
+def _live_chrome_profiles():
+    """Managed-Chrome profile dirs a running process points at.
+
+    None when this host cannot say (no /proc) — callers must then leave every
+    profile alone rather than guess.
+    """
+    if not os.path.isdir('/proc'):
+        return None
+    live = set()
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f'/proc/{entry}/cmdline', 'rb') as handle:
+                raw = handle.read().decode('utf-8', 'replace')
+        except OSError:
+            continue
+        for part in raw.split('\x00'):
+            if part.startswith('--user-data-dir='):
+                live.add(os.path.abspath(part.split('=', 1)[1].strip()))
+    return live
+
+
+def _sweep_stale_chrome_profiles(base_dir=None, now=None):
+    """Remove managed-Chrome profiles no live process owns.
+
+    A profile is left behind whenever the app goes down with a browser open —
+    every deploy, every job killed at its deadline — and `/tmp` on a shared
+    host is small: a few hundred of them fill it, after which a new Chrome
+    cannot write its profile, its tab dies, and Booking looks like it
+    answered nothing (TargetClosedError on the read, with RAM and CPU idle
+    and nothing in dmesg). Cleaning up before a launch keeps that from
+    becoming the next mystery.
+    """
+    live = _live_chrome_profiles()
+    if live is None:
+        return 0
+    base = base_dir or tempfile.gettempdir()
+    moment = time.time() if now is None else now
+    removed = 0
+    for path in glob.glob(os.path.join(base, _CHROME_PROFILE_PREFIX + '*')):
+        try:
+            if moment - os.path.getmtime(path) < _NEW_PROFILE_GRACE_SECONDS:
+                continue
+        except OSError:
+            continue
+        if os.path.abspath(path) in live:
+            continue
+        shutil.rmtree(path, ignore_errors=True)
+        removed += 1
+    if removed:
+        _browser_log(f'[BROWSER] swept {removed} stale chrome profiles')
+    return removed
+
+
+def _free_space_mb(path):
+    try:
+        return int(shutil.disk_usage(path).free / (1024 * 1024))
+    except OSError:
+        return None
+
+
 def _start_managed_chrome(executable, headless=True):
     """Launch real Chrome with its own profile and a CDP endpoint.
 
     The default context of this browser is the one Booking's WAF accepts;
     Playwright's browser launch and its incognito contexts are challenged.
     """
-    profile = tempfile.mkdtemp(prefix='wf-chrome-')
+    _sweep_stale_chrome_profiles()
+    profile = tempfile.mkdtemp(prefix=_CHROME_PROFILE_PREFIX)
+    free_mb = _free_space_mb(profile)
+    if free_mb is not None and free_mb < 300:
+        # A browser that cannot write its profile dies mid-read, and the miss
+        # it leaves behind names Booking instead of the disk.
+        _browser_log(f'[BROWSER] low disk space at {tempfile.gettempdir()}: '
+                     f'{free_mb} MB free')
     flags = [executable]
     if headless:
         flags.append('--headless=new')
@@ -617,8 +692,23 @@ class BrowserWorker:
             pass
 
     def _ensure_page(self):
+        """The worker's own page, alive.
+
+        A page that died does not condemn the browser. ``open_urls`` reads
+        its tabs from this same context, so tearing the browser down to
+        replace one dead page closes those tabs mid-read — the hotel whose
+        tab it was then loses its price without anything being wrong with
+        Booking. Only a browser that cannot produce another page is replaced.
+        """
         if self._page is not None and not self._page.is_closed():
             return self._page
+        if self.is_open and self._context is not None:
+            try:
+                self._page = self._context.new_page()
+                return self._page
+            except Exception as exc:
+                _browser_log(
+                    f'[BROWSER] page reopen failed: {_nav_reason(exc)}')
         self.close()
         self.start()
         return self._page
@@ -686,7 +776,7 @@ class BrowserWorker:
             deadline = time.time() + _CHALLENGE_WAIT_SECONDS
             previous = result['text'] or ''
             stable = 0
-            while time.time() < deadline:
+            while time.time() < deadline and not page.is_closed():
                 try:
                     page.wait_for_timeout(1000)
                     result['final_url'] = page.url or url
@@ -712,6 +802,13 @@ class BrowserWorker:
         elif (_looks_blocked(result['title'], result['text'])
               or (len(result['text']) < 1500 and _challenge_shell(page))):
             result['error'] = 'blocked'
+        if page.is_closed():
+            # The tab died mid-read — a browser reclaiming memory or a crashed
+            # renderer, not Booking; a dead page also looks «blocked» to the
+            # check above. Every read here belongs to a page that no longer
+            # exists, so name that instead of recording a blocked or empty
+            # page for the hotel.
+            result['error'] = 'target_closed'
         if (is_booking and not result.get('error')
                 and result.get('booking_rate')):
             result['text'] = booking_rooms.with_rate_block(
@@ -843,6 +940,19 @@ class BrowserWorker:
             result['error'] = _launch_reason(exc)
             return result
         result = self._open_url_once(page, url, timeout)
+        if result.get('error') == 'target_closed':
+            # The tab died under the read: the hotel's price is missing
+            # because the reader is, not because Booking has nothing. One
+            # reopen on a fresh page is what keeps the row from being written
+            # off as «no availability».
+            _browser_log(f'[BROWSER] page closed mid-read, reopening: {url}')
+            self._page = None
+            try:
+                page = self._ensure_page()
+            except Exception as exc:
+                result['error'] = _launch_reason(exc)
+                return result
+            result = self._open_url_once(page, url, timeout)
         if result.get('error') == 'http_403':
             fallback = _apex_www_fallback(url)
             if fallback and fallback != url:

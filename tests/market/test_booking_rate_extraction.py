@@ -229,6 +229,76 @@ class BookingRateSelectionTests(unittest.TestCase):
         self.assertIn('reason=no_table', printed)
         self.assertIn('unavailable', printed)
 
+    def test_a_closed_tab_is_named_and_never_reread(self):
+        # A tab that dies under the read and a page that has no rates print
+        # the same «read_failed». Only the first can be answered, and only by
+        # reopening the URL — re-reading the dead page just spends the stage's
+        # window, so the miss has to say which one it was.
+        class _Page:
+            def __init__(self):
+                self.reads = 0
+
+            def evaluate(self, _script):
+                self.reads += 1
+                raise RuntimeError(
+                    'Target page, context or browser has been closed')
+
+            def is_closed(self):
+                return True
+
+            def wait_for_timeout(self, _ms):
+                pass
+
+            def wait_for_selector(self, *_args, **_kwargs):
+                return None
+
+        page = _Page()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            rate = booking_rooms.wait_and_extract(
+                page, 'https://www.booking.com/hotel/sa/x.html')
+        self.assertIsNone(rate)
+        self.assertEqual(page.reads, 1)
+        printed = buffer.getvalue()
+        self.assertIn('state=tab_closed', printed)
+        self.assertIn('has been closed', printed)
+
+    def test_a_destroyed_context_is_reread_instead_of_abandoned(self):
+        # Booking reloads its own page to clear a WAF challenge, so the read
+        # in flight loses the JS context it ran in — and the retry sleep fails
+        # on that same document. That is what another look is for: ending the
+        # read there cost the hotel its price after a single attempt.
+        class _Page:
+            def __init__(self):
+                self.reads = 0
+
+            def is_closed(self):
+                return False
+
+            def evaluate(self, script):
+                if 'hprt-table' not in (script or ''):
+                    return ''
+                self.reads += 1
+                if self.reads == 1:
+                    raise RuntimeError('Execution context was destroyed')
+                return {'found': True, 'rows': [_row('1', 578, 680)],
+                        'title': 'فندق تجريبي'}
+
+            def wait_for_timeout(self, _ms):
+                raise RuntimeError('Execution context was destroyed')
+
+            def wait_for_selector(self, *_args, **_kwargs):
+                return None
+
+        page = _Page()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            rate = booking_rooms.wait_and_extract(
+                page, 'https://www.booking.com/hotel/sa/x.html')
+        self.assertEqual(page.reads, 2)
+        self.assertIsNotNone(rate)
+        self.assertEqual(rate['price'], 680.0)
+
     def test_the_room_table_price_is_kept_as_the_site_supplies_it(self):
         row = {
             'block_id': '1559334001_438176898_2_2_0',

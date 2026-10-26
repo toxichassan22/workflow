@@ -16,7 +16,10 @@ Run like every other suite::
     python -m unittest tests.web_browse.test_browser_contract
 """
 
+import os
 import sys
+import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -497,6 +500,88 @@ class Http403FallbackTests(unittest.TestCase):
     def test_request_headers_look_like_a_real_tab(self):
         self.assertIn('Accept', browser._EXTRA_HEADERS)
         self.assertIn('Sec-Fetch-Site', browser._EXTRA_HEADERS)
+
+
+class DeadTabRecoveryTests(unittest.TestCase):
+    """A tab that dies mid-read is replaced, not written off.
+
+    Chrome reclaims renderers under load and the tab is simply gone; the read
+    in flight raises, and the hotel used to be recorded as one with no
+    availability. ``_open_url_once`` names that state and ``open_url``
+    answers it by reopening the same URL on a fresh page.
+    """
+
+    def test_a_dead_page_is_replaced_and_the_url_reopened(self):
+        class _Page:
+            pass
+
+        first, second = _Page(), _Page()
+        served = []
+
+        def ensure():
+            served.append(len(served))
+            return second if served[-1] else first
+
+        opened = []
+
+        def fake_open(page, url, _timeout):
+            opened.append(page)
+            if len(opened) == 1:
+                return {'url': url, 'error': 'target_closed'}
+            return {'url': url, 'error': None, 'text': 'ok'}
+
+        worker = browser.BrowserWorker(headless=True)
+        worker._ensure_page = ensure
+        worker._open_url_once = fake_open
+        result = worker.open_url('https://sa.aqar.fm/property/deep')
+        self.assertEqual(len(opened), 2)
+        self.assertIs(opened[0], first)
+        self.assertIs(opened[1], second)
+        self.assertIsNone(result.get('error'))
+
+
+class StaleProfileSweepTests(unittest.TestCase):
+    """The managed-Chrome profiles /tmp is asked to hold.
+
+    A profile stays behind whenever the app goes down with a browser open —
+    every deploy, every job killed at its deadline. On a host whose /tmp is a
+    few gigabytes, a couple of hundred of them fill it, and the next browser
+    dies writing its own profile: the read comes back as «Booking has no
+    price» while RAM, CPU and dmesg all look idle. Only the profiles no
+    running process points at may be removed.
+    """
+
+    def _profile(self, base, name, age_seconds):
+        path = os.path.join(base, name)
+        os.makedirs(path)
+        stamp = time.time() - age_seconds
+        os.utime(path, (stamp, stamp))
+        return path
+
+    def test_dead_profiles_are_swept_and_living_ones_kept(self):
+        with tempfile.TemporaryDirectory() as base:
+            dead = self._profile(base, 'wf-chrome-dead', 3600)
+            alive = self._profile(base, 'wf-chrome-alive', 3600)
+            fresh = self._profile(base, 'wf-chrome-fresh', 5)
+            with mock.patch.object(browser, '_live_chrome_profiles',
+                                   lambda: {alive}), \
+                    mock.patch.object(browser, '_browser_log'):
+                removed = browser._sweep_stale_chrome_profiles(base_dir=base)
+            self.assertEqual(removed, 1)
+            self.assertFalse(os.path.exists(dead))
+            self.assertTrue(os.path.exists(alive))
+            self.assertTrue(os.path.exists(fresh))
+
+    def test_a_host_that_cannot_list_processes_sweeps_nothing(self):
+        # Without /proc a profile cannot be told from a running one's, and a
+        # guess would kill a browser mid-job.
+        with tempfile.TemporaryDirectory() as base:
+            old = self._profile(base, 'wf-chrome-old', 3600)
+            with mock.patch.object(browser, '_live_chrome_profiles',
+                                   lambda: None):
+                self.assertEqual(
+                    browser._sweep_stale_chrome_profiles(base_dir=base), 0)
+            self.assertTrue(os.path.exists(old))
 
 
 class WebSearchContractTests(unittest.TestCase):

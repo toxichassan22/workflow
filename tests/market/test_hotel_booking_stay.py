@@ -190,6 +190,9 @@ class ChallengeShellTests(unittest.TestCase):
         def content(self):
             return self._html
 
+        def is_closed(self):
+            return False
+
     def _open(self, html, text=''):
         worker = browser.BrowserWorker(headless=True)
         page = self._Page(html, text)
