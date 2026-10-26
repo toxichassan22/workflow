@@ -624,3 +624,25 @@ test('fill mode reports the rows it completed and keeps the benchmarks', async (
   assert.deepEqual(context.getMarketStudyState().transaction_benchmarks,
     { residential: { sale: '4,500' } });
 });
+
+test('fill mode reports a truthful partial count', async () => {
+  const { context, inputs } = fixture();
+  context.nextApi = () => ({
+    success: true,
+    status: 'completed',
+    competitors: [{ name: 'WA Hotel', project_type: 'فندقي' }],
+    sources: [],
+    filledCount: 2,
+    updated: 2,
+    attemptedCount: 9,
+    unfilledCount: 7,
+    partial: true,
+    searchVerified: true,
+    missingPriceCount: 7
+  });
+  await context.runMarketCompetitorsJob('fill');
+  assert.match(inputs.marketCompetitorsNote.textContent,
+    /أُكملت بيانات 2 منافس/);
+  assert.match(inputs.marketCompetitorsNote.textContent,
+    /7 منافس بلا سعر موثق/);
+});

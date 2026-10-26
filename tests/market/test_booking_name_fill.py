@@ -42,6 +42,16 @@ class _Session:
         pass
 
 
+class _CatalogSession(_Session):
+    def __init__(self, replies, catalog_html='', search_hits=None):
+        super().__init__(replies, search_hits=search_hits)
+        self.catalog_html = catalog_html
+
+    def fetch_html(self, url, timeout=None):
+        self.urls.append(url)
+        return {'html': self.catalog_html, 'final_url': url}
+
+
 class BookingNameFillTests(unittest.TestCase):
 
     @classmethod
@@ -120,7 +130,8 @@ class BookingNameFillTests(unittest.TestCase):
 
     def test_a_name_that_is_not_in_booking_stays_explicitly_unfilled(self):
         session = _Session({})
-        row = {'name': 'فندق غير موجود', 'operation_type': 'تشغيل فندقي'}
+        row = {'name': 'فندق غير موجود', 'operation_type': 'تشغيل فندقي',
+               'notes': ''}
         with self.app.app_context(), \
                 patch.object(self.module, '_market_browser_session',
                              return_value=session), \
@@ -215,6 +226,113 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(row['classification'], 'مباشر')
         name_url = self.module.booking_search.build_search_url('WA Hotel')
         self.assertNotIn(name_url, session.urls)
+
+    def test_catalogue_finds_a_hotel_outside_the_city_cards(self):
+        hotel_url = ('https://www.booking.com/hotel/sa/'
+                     'assila-a-luxury-collection-hotel-jeddah.html')
+        catalog_html = (
+            '<html><body>'
+            '<a href="/hotel/sa/assila-a-luxury-collection-hotel-jeddah.ar.html">'
+            'Assila, a Luxury Collection Hotel, Jeddah</a>'
+            '</body></html>')
+        session = _CatalogSession({
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'Assila, a Luxury Collection Hotel, Jeddah',
+                        'booking_rate': {
+                            'price': 2500.0, 'currency': 'SAR',
+                            'price_from': 2500.0, 'price_to': 9000.0,
+                            'area_from': 47.0, 'area_to': 230.0}},
+        }, catalog_html=catalog_html)
+        row = {'name': 'Assila, a Luxury Collection Hotel, Jeddah',
+               'project_type': 'فندقي', 'notes': ''}
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session), \
+                patch.object(self.module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'SA')), \
+                patch.object(
+                    self.module.booking_destination,
+                    'resolve_city_destination',
+                    return_value={'dest_id': '-3096108',
+                                  'city_url':
+                                  'https://www.booking.com/city/sa/jeddah.html',
+                                  'dest_type': 'city'}):
+            filled = self.module._fill_hotel_rows_from_booking(
+                [row], {'city': 'جدة'}, {}, tenant_id=None)
+        self.assertEqual(filled, 1)
+        self.assertEqual(row['price_from'], '2500')
+        self.assertEqual(row['source_url'], hotel_url)
+        self.assertFalse(any('/searchresults.html' in url
+                             for url in session.urls))
+
+    def test_catalogue_aliases_match_an_arabic_name_without_a_hint(self):
+        hotel_url = ('https://www.booking.com/hotel/sa/'
+                     'best-western-plus-jeddah.html')
+        catalog_html = (
+            '<html><body>'
+            '<a href="/hotel/sa/best-western-plus-jeddah.ar.html">'
+            'فندق بيست ويسترن بلس جده طريق المدينه</a>'
+            '<a href="/hotel/sa/best-western-plus-jeddah.html">'
+            'Best Western Plus Jeddah Hotel Madinah Road</a>'
+            '</body></html>')
+        session = _CatalogSession({
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'Best Western Plus Jeddah Hotel Madinah Road',
+                        'booking_rate': {
+                            'price': 1045.0, 'currency': 'SAR',
+                            'price_from': 1045.0, 'price_to': 2470.0,
+                            'area_from': 30.0, 'area_to': 70.0}},
+        }, catalog_html=catalog_html)
+        row = {'name': 'فندق بيست ويسترن بلس طريق المدينه',
+               'project_type': 'فندقي', 'notes': ''}
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session), \
+                patch.object(self.module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'SA')), \
+                patch.object(
+                    self.module.booking_destination,
+                    'resolve_city_destination',
+                    return_value={'dest_id': '-3096108',
+                                  'city_url':
+                                  'https://www.booking.com/city/sa/jeddah.html',
+                                  'dest_type': 'city'}):
+            filled = self.module._fill_hotel_rows_from_booking(
+                [row], {'city': 'جدة'}, {}, tenant_id=None)
+        self.assertEqual(filled, 1)
+        self.assertEqual(row['price_from'], '1045')
+        self.assertEqual(row['source_url'], hotel_url)
+
+    def test_an_incomplete_catalogue_is_retried_before_filling(self):
+        module = self.module
+        one_url = 'https://www.booking.com/hotel/sa/one.html'
+        two_url = 'https://www.booking.com/hotel/sa/two.html'
+        first = []
+        second = [
+            {'name': 'One Hotel', 'url': one_url},
+            {'name': 'Two Hotel', 'url': two_url},
+        ]
+        seen = {}
+        rows = [
+            {'name': 'One Hotel', 'project_type': 'فندقي'},
+            {'name': 'Two Hotel', 'project_type': 'فندقي'},
+        ]
+
+        def fake_fill(items, *_args, **kwargs):
+            seen['catalog'] = kwargs.get('catalog')
+            return 0
+
+        with self.app.app_context(), \
+                patch.object(module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'SA')), \
+                patch.object(module, '_build_booking_catalog',
+                             side_effect=[first, second]) as build, \
+                patch.object(module, '_fill_rows', new=fake_fill):
+            filled = module._fill_hotel_rows_from_booking(
+                rows, {'city': 'جدة'}, {}, tenant_id=None)
+        self.assertEqual(filled, 0)
+        self.assertEqual(build.call_count, 2)
+        self.assertEqual(len(seen['catalog']), 2)
 
     def test_booking_fill_carries_stars_status_and_classification(self):
         row = {'name': 'فندق اختبار', 'project_type': 'فندقي'}
@@ -445,6 +563,44 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertFalse(result['partial'])
         self.assertEqual(result['competitors'][0]['price_from'], '629')
         self.assertEqual(result['competitors'][0]['source_url'], booking_url)
+
+    def test_fill_mode_counts_only_rows_with_real_price_or_area(self):
+        module = self.module
+        rows = [{'name': f'فندق {number}', 'project_type': 'فندقي',
+                 'notes': ''} for number in range(3)]
+
+        def fake_fill(items, *_args, **_kwargs):
+            for item in items:
+                item['notes'] = 'لم يُعثر على هذا الفندق في Booking.'
+            items[0].update({
+                'price_from': '100',
+                'source_url': 'https://www.booking.com/hotel/sa/one.html',
+            })
+            items[1]['source_url'] = 'https://example.com/no-price'
+            return 1
+
+        self.app.config['TESTING'] = False
+        try:
+            with self.app.app_context(), \
+                    patch.object(module, '_fill_hotel_rows_from_booking',
+                                 new=fake_fill):
+                result = module._run_market_competitors({
+                    'mode': 'fill',
+                    'competitors': rows,
+                    'comparisonTypes': [{'type': 'hotel', 'stars': '4'}],
+                    'competitorScope': {'mode': 'district', 'radius': '10'},
+                    'city': 'جدة',
+                    'district': 'الأندلس',
+                    'projectType': 'فندقي',
+                })
+        finally:
+            self.app.config['TESTING'] = True
+        self.assertEqual(result['filledCount'], 1)
+        self.assertEqual(result['attemptedCount'], 3)
+        self.assertEqual(result['unfilledCount'], 2)
+        self.assertEqual(result['missingPriceCount'], 2)
+        self.assertEqual(result['updated'], 1)
+        self.assertIn('1 من 3', result['notes'])
 
     def test_fill_mode_leaves_a_complete_row_alone(self):
         module = self.module

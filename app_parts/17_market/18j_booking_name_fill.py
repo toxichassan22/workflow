@@ -16,12 +16,14 @@ import threading
 import time
 import unicodedata
 
+import booking_catalog
 import booking_destination
 import booking_search
 from numeric_precision import format_precise_number
 
 _HOTEL_TOKENS = ('فندق', 'فندقي', 'hotel', 'hospitality', 'تشغيل')
 NAME_FILL_BUDGET_SECONDS = 300
+CATALOG_BUDGET_SECONDS = 120
 # The completion phase has its own wall-clock limit: a per-name lookup must
 # never grow into the district job's hour-long verification tail.
 FILL_PHASE_BUDGET_SECONDS = 330
@@ -258,6 +260,11 @@ def _name_variants(row, hints=None):
     return variants
 
 
+def _set_note_if_empty(row, note):
+    if isinstance(row, dict) and not str(row.get('notes') or '').strip():
+        row['notes'] = note
+
+
 def _page_identity(title, url, variants, city_terms=''):
     """True when the opened booking page is one of this row's name variants."""
     return any(_title_matches(title, variant, city_terms)
@@ -417,6 +424,53 @@ def _fill_from_candidate_pages(session, row, city_ar, city_terms='',
     return False
 
 
+def _build_booking_catalog(payload, data, tenant_id, city_ar, city_en,
+                           country, budget_seconds, deadline=None):
+    """Read Booking's city and category pages into one name catalogue."""
+    if not country or not (city_en or city_ar):
+        return []
+    session = _market_browser_session()
+    if session is None:
+        return []
+    if deadline is None:
+        deadline = time.time() + min(
+            float(CATALOG_BUDGET_SECONDS),
+            max(30.0, float(budget_seconds or NAME_FILL_BUDGET_SECONDS) * 0.4))
+    try:
+        cache_path = (os.path.join(
+            UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
+            if UPLOADS_DIR else '')
+        destination = booking_destination.resolve_city_destination(
+            session, country, city_en or city_ar, city_ar,
+            cache_path=cache_path)
+        city_url = str((destination or {}).get('city_url') or '')
+        if not city_url:
+            print('[MARKET STUDY] booking catalogue skipped: no city_url',
+                  flush=True)
+            return []
+        return booking_catalog.fetch_city_catalog(
+            session, city_url, deadline=deadline,
+            log=lambda message: print(f'[MARKET STUDY] {message}', flush=True))
+    except Exception as exc:
+        print(f'[MARKET STUDY] booking catalogue skipped: {exc}', flush=True)
+        return []
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
+def _targets_missing_from_catalog(targets, hints, catalog, city_terms):
+    missing = []
+    for row in targets or []:
+        variants = _name_variants(row, hints)
+        if not any(_card_for_name(catalog, variant, city_terms)
+                   for variant in variants):
+            missing.append(row)
+    return missing
+
+
 def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
                                   budget_seconds=None,
                                   progress=None, band=(12, 48)):
@@ -434,6 +488,31 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
             print(f'[MARKET STUDY] booking name resolver skipped: {exc}',
                   flush=True)
     budget = float(budget_seconds or NAME_FILL_BUDGET_SECONDS)
+    started = time.time()
+    city_ar = str((payload or {}).get('city') or '').strip()
+    try:
+        city_en, _district_en, country = _english_booking_location(
+            payload, data, tenant_id=tenant_id)
+    except Exception:
+        city_en, country = '', ''
+    city_terms = ' '.join(part for part in (city_ar, city_en) if part)
+    catalog_deadline = time.time() + min(
+        float(CATALOG_BUDGET_SECONDS),
+        max(30.0, budget * 0.4))
+    catalog = _build_booking_catalog(
+        payload, data, tenant_id, city_ar, city_en, country, budget,
+        deadline=catalog_deadline)
+    missing = _targets_missing_from_catalog(
+        targets, hints, catalog, city_terms)
+    if (len(missing) >= 2 or not catalog) and time.time() < catalog_deadline:
+        print(f'[MARKET STUDY] booking catalogue retry missing='
+              f'{len(missing)} '
+              f'names={[row.get("name") for row in missing]!r}', flush=True)
+        extra = _build_booking_catalog(
+            payload, data, tenant_id, city_ar, city_en, country, budget,
+            deadline=catalog_deadline)
+        catalog = booking_catalog.merge_entries(catalog, extra)
+    remaining = max(30.0, budget - (time.time() - started))
     result = {'filled': 0}
     timed_out = threading.Event()
 
@@ -447,31 +526,30 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
         # The browser is thread-bound; a session opened elsewhere fails with
         # «cannot switch to a different thread». The fill owns its thread and
         # its browser, and the join bounds it.
-        result['filled'] = _fill_rows(targets, payload, data, tenant_id,
-                                      budget, progress=_report, band=band,
-                                      hints=hints)
+        result['filled'] = _fill_rows(
+            targets, payload, data, tenant_id, remaining,
+            progress=_report, band=band, hints=hints, catalog=catalog,
+            city_ar=city_ar, city_en=city_en, country=country,
+            city_terms=city_terms)
 
     thread = threading.Thread(target=_worker, name='booking-name-fill',
                               daemon=True)
     thread.start()
-    thread.join(timeout=budget + 30)
+    thread.join(timeout=remaining + 30)
     if thread.is_alive():
         timed_out.set()
+    print(f'[MARKET STUDY] booking fill result filled={result["filled"]} '
+          f'targets={len(targets)} catalogue={len(catalog)}', flush=True)
     return result['filled']
 
 
 def _fill_rows(targets, payload, data, tenant_id, budget,
-               progress=None, band=(12, 48), hints=None):
-    city_ar = str((payload or {}).get('city') or '').strip()
+               progress=None, band=(12, 48), hints=None, catalog=None,
+               city_ar='', city_en='', country='', city_terms=''):
     report = progress if callable(progress) else (lambda *_args: None)
     lo, hi = band if isinstance(band, (tuple, list)) and len(band) == 2 else (12, 48)
     total = max(1, len(targets))
-    try:
-        city_en, _district_en, country = _english_booking_location(
-            payload, data, tenant_id=tenant_id)
-    except Exception:
-        city_en, country = '', ''
-    city_terms = ' '.join(part for part in (city_ar, city_en) if part)
+    catalog = list(catalog or [])
     target_stars = _target_hotel_stars(payload)
     deadline = time.time() + float(budget or NAME_FILL_BUDGET_SECONDS)
     filled = [0]
@@ -482,28 +560,31 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
         session = _market_browser_session()
         if session is None:
             return
-        # One city-results page per worker: the cards are the fast path for
-        # names Booking's free-text search refuses or ranks differently.
-        city_cards = []
-        try:
-            cache_path = (os.path.join(
-                UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
-                if UPLOADS_DIR else '')
-            destination = booking_destination.resolve_city_destination(
-                session, country, city_en or city_ar, city_ar,
-                cache_path=cache_path)
-            dest_id = str(destination.get('dest_id') or '')
-            if dest_id:
-                search = session.open_url(booking_search.build_search_url(
-                    city_en or city_ar, dest_id=dest_id,
-                    dest_type=str(destination.get('dest_type') or 'city')))
-                city_cards = (
-                    (search or {}).get('booking_search') or {}).get('hotels') or []
-                print(f'[MARKET STUDY] booking city cards={len(city_cards)}',
+        # The shared catalogue is built once per fill. The city page is only
+        # fetched here when the catalogue could not be built.
+        catalog_cards = list(catalog)
+        catalog_source = 'catalogue' if catalog_cards else 'city cards'
+        if not catalog_cards:
+            try:
+                cache_path = (os.path.join(
+                    UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
+                    if UPLOADS_DIR else '')
+                destination = booking_destination.resolve_city_destination(
+                    session, country, city_en or city_ar, city_ar,
+                    cache_path=cache_path)
+                dest_id = str(destination.get('dest_id') or '')
+                if dest_id:
+                    search = session.open_url(booking_search.build_search_url(
+                        city_en or city_ar, dest_id=dest_id,
+                        dest_type=str(destination.get('dest_type') or 'city')))
+                    catalog_cards = (
+                        (search or {}).get('booking_search') or {}
+                    ).get('hotels') or []
+                    print(f'[MARKET STUDY] booking city cards='
+                          f'{len(catalog_cards)}', flush=True)
+            except Exception as exc:
+                print(f'[MARKET STUDY] booking city cards skipped: {exc}',
                       flush=True)
-        except Exception as exc:
-            print(f'[MARKET STUDY] booking city cards skipped: {exc}',
-                  flush=True)
         try:
             while True:
                 try:
@@ -517,14 +598,17 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                 variants = _name_variants(row, hints)
                 card = None
                 for variant in variants:
-                    card = _card_for_name(city_cards, variant, city_terms)
+                    card = _card_for_name(catalog_cards, variant, city_terms)
                     if card:
-                        print(f'[MARKET STUDY] booking city card match '
+                        print(f'[MARKET STUDY] booking {catalog_source} match '
                               f'name={variant!r} '
                               f'url={str(card.get("url") or "")[:120]!r}',
                               flush=True)
                         break
                 if not card:
+                    print(f'[MARKET STUDY] booking catalogue miss '
+                          f'name={row.get("name")!r} '
+                          f'variants={variants!r}', flush=True)
                     for variant in variants:
                         card = _card_from_name_search(session, variant,
                                                       city_terms)
@@ -538,7 +622,7 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                         with lock:
                             filled[0] += 1
                     else:
-                        row.setdefault('notes', (
+                        _set_note_if_empty(row, (
                             'لم يُعثر على هذا الفندق في Booking؛ '
                             'لم تُضف أسعار أو مساحات.'))
                 else:
@@ -546,7 +630,12 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                     rate = (prop or {}).get('booking_rate')
                     title = str((prop or {}).get('title') or
                                 (rate or {}).get('page_title') or '')
-                    if not _page_identity(title, url, variants, city_terms):
+                    identity_variants = list(variants)
+                    card_name = str((card or {}).get('name') or '').strip()
+                    if card_name and card_name not in identity_variants:
+                        identity_variants.append(card_name)
+                    if not _page_identity(title, url, identity_variants,
+                                          city_terms):
                         print(f'[MARKET STUDY] booking page identity rejected '
                               f'name={row.get("name")!r} url={url[:120]!r} '
                               f'title={title[:80]!r}', flush=True)
@@ -556,7 +645,7 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                             with lock:
                                 filled[0] += 1
                         else:
-                            row.setdefault('notes', (
+                            _set_note_if_empty(row, (
                                 'صفحة Booking المفتوحة لا تطابق اسم الفندق؛ '
                                 'لم تُكتب بيانات.'))
                     elif (isinstance(rate, dict)
@@ -609,10 +698,10 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
 
 
 def _filled_row_signature(row):
-    """The cells a completion pass fills — used to count changed rows."""
+    """Price/area cells only: notes and URL cleanup are not completions."""
     return tuple(str((row or {}).get(key) or '').strip() for key in (
         'price_value', 'price_from', 'price_to',
-        'area_sqm', 'area_from', 'area_to', 'source_url'))
+        'area_sqm', 'area_from', 'area_to'))
 
 
 def _run_market_competitors_fill(data, payload, existing, offer_lang='ar',
@@ -647,14 +736,15 @@ def _run_market_competitors_fill(data, payload, existing, offer_lang='ar',
     other_targets = [row for row in targets
                      if not _is_hotel_row(row) and _needs_name_fill(row)]
     attempted = len(hotel_targets) + len(other_targets)
+    hotel_filled = 0
     if hotel_targets and not current_app.config.get('TESTING'):
         try:
-            _fill_hotel_rows_from_booking(
+            hotel_filled = _fill_hotel_rows_from_booking(
                 merged, payload, data, tenant_id=tenant_id,
                 budget_seconds=min(
                     NAME_FILL_BUDGET_SECONDS,
                     max(30, int(fill_deadline - time.time()))),
-                progress=report, band=(12, 48))
+                progress=report, band=(12, 48)) or 0
         except Exception as exc:
             print(f'[MARKET STUDY] hotel name fill skipped: {exc}', flush=True)
     if other_targets:
@@ -666,8 +756,13 @@ def _run_market_competitors_fill(data, payload, existing, offer_lang='ar',
         market_study.canonicalize_competitor_source_urls(row)
         _drop_foreign_competitor_urls(row)
         _drop_banned_competitor_listing_urls(row)
-    changed = sum(1 for row in targets
-                  if _filled_row_signature(row) != before.get(id(row)))
+    changed = sum(
+        1 for row in targets
+        if _filled_row_signature(row)
+        and _filled_row_signature(row) != before.get(id(row)))
+    changed = min(changed, attempted)
+    print(f'[MARKET STUDY] fill completed rows={changed} '
+          f'attempted={attempted} hotel_report={hotel_filled}', flush=True)
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(
         sources, payload.get('dataPeriodBounds'))
@@ -690,6 +785,8 @@ def _run_market_competitors_fill(data, payload, existing, offer_lang='ar',
         'added': 0,
         'updated': changed,
         'filledCount': changed,
+        'attemptedCount': attempted,
+        'unfilledCount': max(0, attempted - changed),
         'searchVerified': not provider_error,
         'searchStats': None,
         'partial': bool(provider_error) or missing_prices > 0,
