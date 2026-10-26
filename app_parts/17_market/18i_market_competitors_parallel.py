@@ -259,7 +259,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     hotels are filtered by Booking's neighbourhood filter for the project
     district and the selected star class, the hotel cards become the
     competitors, and each property page's ``## BOOKING_RATE ##`` block supplies
-    the original pre-discount nightly price and room area.
+    the original pre-discount stay price and room area.
     """
     axis = task.get('axis') if isinstance(task.get('axis'), dict) else {}
     stars = str(axis.get('stars') or '').strip()
@@ -569,13 +569,13 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     current = rate.get('current_price')
                     taxes = rate.get('taxes')
                     note = (
-                        'نطاق أسعار الغرف لليلة على Booking قبل الخصم وقبل الضرائب: '
+                        'نطاق أسعار الغرف مقابل ليلتين على Booking قبل الخصم وقبل الضرائب: '
                         f'{_range(price_from, price_to)} ر.س'
                         + (f' (محوّل من {source_currency})'
                            if source_currency != 'SAR' else '')
                         + (f'؛ المساحات {_range(area_from, area_to)} م²'
                            if area_from is not None else '')
-                        + f'؛ أقل سعر حالي لليلة بعد الخصم '
+                        + f'؛ أقل سعر حالي مقابل ليلتين بعد الخصم '
                         f'{current if current is not None else "غير متوفر"} '
                         f'والضرائب {taxes if taxes is not None else "غير متوفر"}.')
                     row.update({

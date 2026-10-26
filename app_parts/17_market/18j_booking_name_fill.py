@@ -321,11 +321,11 @@ def _apply_rate(row, rate, url, target_stars=()):
     target = {str(item) for item in (target_stars or ()) if str(item).strip()}
     effective_stars = str(row.get('hotel_stars') or stars_value or '').strip()
     note = (
-        'نطاق أسعار الغرف لليلة على Booking قبل الخصم وقبل الضرائب: '
+        'نطاق أسعار الغرف مقابل ليلتين على Booking قبل الخصم وقبل الضرائب: '
         f'{_money(price_from)} – {_money(price_to)} ر.س'
         + (f'؛ المساحات {_money(area_from)} – {_money(area_to)} م²'
            if area_from is not None else '')
-        + (f'؛ أقل سعر حالي لليلة بعد الخصم {current}'
+        + (f'؛ أقل سعر حالي مقابل ليلتين بعد الخصم {current}'
            if current is not None else '')
         + (f'؛ التصنيف {stars_value} نجوم' if stars_value
            else '؛ لا يعرض Booking تصنيف نجوم لهذا الفندق'))

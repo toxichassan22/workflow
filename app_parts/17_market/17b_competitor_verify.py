@@ -155,9 +155,9 @@ def _clear_ai_hotel_value_fields(row):
 def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
     """Apply the deterministic Booking room block to an AI hotel row.
 
-    The block is the only source that states the cheapest base room, its
-    original pre-discount nightly price, its area and the informational
-    current price/taxes. The model's JSON and the generic listing fill can
+    The block is the only source that states the room-price range for the
+    stay, its area and the informational current price/taxes. The model's JSON
+    and the generic listing fill can
     pick another rate plan for the same area, so the block wins for AI rows;
     a row the user typed is never overwritten.
     """
@@ -185,6 +185,8 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
     currency = market_study._canonical_price_currency(
         rate.get('currency') or 'SAR') or 'SAR'
     value = rate.get('price')
+    price_from = rate.get('price_from') or value
+    price_to = rate.get('price_to') or price_from
     cache = row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {}
     if currency != 'SAR':
         fx_rate = market_study.price_fx_to_sar(currency)
@@ -193,20 +195,27 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
         cache['original_currency'] = currency
         cache['original_price_value'] = format_precise_number(
             float(value), grouped=False)
-        value = float(value) * fx_rate
-    row.pop('price_from', None)
-    row.pop('price_to', None)
-    row['price_value'] = format_precise_number(float(value), grouped=False)
+        cache['original_price_from'] = format_precise_number(
+            float(price_from), grouped=False)
+        cache['original_price_to'] = format_precise_number(
+            float(price_to), grouped=False)
+        price_from = float(price_from) * fx_rate
+        price_to = float(price_to) * fx_rate
+    row.pop('price_value', None)
+    row['price_from'] = format_precise_number(float(price_from), grouped=False)
+    row['price_to'] = format_precise_number(float(price_to), grouped=False)
     options = market_study.price_types_for_operation('تشغيل فندقي', offer_lang)
-    nightly = 'Nightly Rate' if offer_lang == 'en' else 'سعر الليلة'
-    row['price_type'] = nightly if nightly in options else (
-        next((option for option in options
-              if option not in market_study.RANGE_PRICE_TYPES
-              and option not in market_study.RANGE_PRICE_TYPES_EN), options[0]))
+    range_type = next(
+        (option for option in options
+         if option in market_study.RANGE_PRICE_TYPES
+         or option in market_study.RANGE_PRICE_TYPES_EN),
+        options[0])
+    row['price_type'] = range_type
     row['price_currency'] = 'SAR'
     row['price_listed'] = True
     cache.update({
-        'price_value': row['price_value'],
+        'price_from': row['price_from'],
+        'price_to': row['price_to'],
         'booking_current_price': rate.get('current_price'),
         'booking_taxes': rate.get('taxes'),
         'booking_current_total': rate.get('current_price_including_tax'),
@@ -224,7 +233,7 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
         area_cache['area_sqm'] = row['area_sqm']
         row['area_cache'] = area_cache
     field_sources = market_study.competitor_field_sources(row)
-    for key in ('price_value', 'area_sqm'):
+    for key in ('price_from', 'price_to', 'area_sqm'):
         urls = field_sources.setdefault(key, [])
         if source_url and source_url not in urls:
             urls.append(source_url)
@@ -242,17 +251,19 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
                   if taxes is not None else '')
     source_en = f' (converted from {currency})' if currency != 'SAR' else ''
     source_ar = f' (محوّل من {currency})' if currency != 'SAR' else ''
+    price_text = (row['price_from'] if row['price_from'] == row['price_to']
+                  else f"{row['price_from']} - {row['price_to']}")
     if offer_lang == 'en':
-        note = ('Booking original pre-discount price of the cheapest base room '
-                f'before tax: {row["price_value"]} SAR{source_en}; the '
-                'discounted current price is '
+        note = ('Booking original pre-discount room-price range for two nights '
+                f'before tax: {price_text} SAR{source_en}; the discounted '
+                'current price is '
                 f"{current_text + ' ' + currency if current_text else 'unavailable'} "
                 'and taxes '
                 f"{taxes_text + ' ' + currency if taxes_text else 'unavailable'}.")
     else:
         note = (
-            'سعر Booking الأصلي قبل الخصم لأقل غرفة أساسية قبل الضرائب: '
-            f'{row["price_value"]} ر.س{source_ar}؛ '
+            'نطاق أسعار الغرف مقابل ليلتين على Booking قبل الخصم وقبل الضرائب: '
+            f'{price_text} ر.س{source_ar}؛ '
             'السعر الحالي بعد الخصم '
             f"{current_text + ' ' + currency if current_text else 'غير متوفر'} "
             'والضرائب '
@@ -312,7 +323,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
             'واستخدم سعرها الأصلي قبل الخصم في price.value مع type = سعر الليلة. '
             'لا تستخدم سعر الغرفة المشمول بالإفطار أو الإلغاء المجاني أو أي ميزة أخرى إذا وُجدت غرفة أساسية، '
             'ولا تجمع أسعار الغرف أو الباقات في نطاق أو متوسط، ولا تضف الضرائب والرسوم إلى السعر. '
-            'إذا ظهر قسم ## BOOKING_RATE ## في نص الصفحة فاستخدم nightly_price_before_discount و area_sqm حرفيًا. '
+            'إذا ظهر قسم ## BOOKING_RATE ## في نص الصفحة فاستخدم price_before_discount و area_sqm حرفيًا. '
         )
     else:
         price_rule += (
