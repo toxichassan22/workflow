@@ -47,11 +47,62 @@ def _market_project_facts(data, tenant_id=None):
     return facts
 
 
+def _market_draft_data(data, tenant_id=None):
+    """The stored project blob for a market job that arrived without one."""
+    draft_id = str((data or {}).get('draftId')
+                   or (data or {}).get('draft_id') or '').strip()
+    if not draft_id:
+        return {}
+    if tenant_id is None:
+        try:
+            tenant_id = getattr(g, 'tenant_id', None)
+        except Exception:
+            tenant_id = None
+    if not tenant_id:
+        return {}
+    try:
+        draft = db.get_project_draft_by_id(tenant_id, draft_id) or {}
+    except Exception as exc:
+        print(f'[MARKET] draft location lookup failed: {exc}', flush=True)
+        return {}
+    stored = draft.get('draft_data')
+    return stored if isinstance(stored, dict) else {}
+
+
 def _prepare_market_payload(data, tenant_id=None):
     payload = dict(data or {})
     project_data = payload.get('projectData') or payload.get('project_data')
-    if isinstance(project_data, dict) and not payload.get('city'):
-        payload['city'] = project_data.get('city') or project_data.get('City') or ''
+    project_data = project_data if isinstance(project_data, dict) else {}
+    location_keys = (
+        'city', 'district', 'location_lat', 'location_lng',
+        'location_address', 'locationLat', 'locationLng', 'locationAddress',
+    )
+    if not any(payload.get(key) for key in location_keys):
+        draft_data = _market_draft_data(data, tenant_id)
+        if draft_data:
+            for key in location_keys:
+                if not payload.get(key) and draft_data.get(key):
+                    payload[key] = draft_data[key]
+            if any(payload.get(key) for key in location_keys):
+                print(
+                    '[MARKET STUDY] location backfilled from draft '
+                    f'city={payload.get("city")!r} '
+                    f'district={payload.get("district")!r} '
+                    f'lat={payload.get("location_lat")!r} '
+                    f'lng={payload.get("location_lng")!r}',
+                    flush=True)
+    if not payload.get('city'):
+        payload['city'] = (project_data.get('city')
+                           or project_data.get('City') or '')
+    if not payload.get('district'):
+        payload['district'] = (project_data.get('district')
+                              or project_data.get('District') or '')
+    if not payload.get('location_lat'):
+        payload['location_lat'] = (project_data.get('location_lat')
+                                  or project_data.get('locationLat') or '')
+    if not payload.get('location_lng'):
+        payload['location_lng'] = (project_data.get('location_lng')
+                                  or project_data.get('locationLng') or '')
     payload['dataPeriodLabel'] = _market_period_label(payload)
     payload['dataPeriodBounds'] = market_study.data_period_bounds(
         payload.get('dataPeriod') or payload.get('data_period'),

@@ -352,6 +352,40 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(row['price_to'], '900')
         self.assertIn('5 نجوم', row['notes'])
 
+    def test_market_payload_backfills_project_location_from_the_draft(self):
+        draft = {'draft_data': {
+            'city': 'جدة', 'district': 'الأندلس',
+            'location_lat': '21.544974', 'location_lng': '39.174685',
+        }}
+        with self.app.app_context(), \
+                patch.object(self.module.db, 'get_project_draft_by_id',
+                             return_value=draft), \
+                patch.object(self.module, '_market_project_facts',
+                             return_value=''):
+            payload = self.module._prepare_market_payload({
+                'draftId': 'draft-1',
+                'city': '', 'district': '',
+                'projectData': {},
+            }, tenant_id='tenant-1')
+        self.assertEqual(payload['city'], 'جدة')
+        self.assertEqual(payload['district'], 'الأندلس')
+        self.assertEqual(payload['location_lat'], '21.544974')
+        self.assertEqual(payload['location_lng'], '39.174685')
+
+    def test_fill_skips_booking_when_the_project_has_no_location(self):
+        session = _Session({})
+        rows = [{'name': 'Adagio Jeddah City Center', 'project_type': 'فندقي',
+                 'notes': ''}]
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session), \
+                patch.object(self.module, '_english_booking_location',
+                             return_value=('', '', '')):
+            filled = self.module._fill_hotel_rows_from_booking(
+                rows, {'city': ''}, {}, tenant_id=None)
+        self.assertEqual(filled, 0)
+        self.assertIn('موقع المشروع', rows[0]['notes'])
+
     def test_booking_fill_says_when_booking_has_no_star_rating(self):
         row = {'name': 'فندق بلا تصنيف', 'project_type': 'فندقي'}
         rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 900.0,

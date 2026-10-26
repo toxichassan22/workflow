@@ -497,6 +497,15 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
     except Exception:
         city_en, country = '', ''
     city_terms = ' '.join(part for part in (city_ar, city_en) if part)
+    if not country or not (city_ar or city_en):
+        missing_location = (
+            'موقع المشروع (المدينة أو الإحداثيات) غير محدد؛ '
+            'لم يُشغّل البحث في Booking.')
+        for row in targets:
+            _set_note_if_empty(row, missing_location)
+        print('[MARKET STUDY] booking fill skipped: project location missing',
+              flush=True)
+        return 0
     catalog_deadline = time.time() + min(
         float(CATALOG_BUDGET_SECONDS),
         max(30.0, budget * 0.4))

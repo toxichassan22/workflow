@@ -188,6 +188,10 @@ def _english_booking_location(payload, data, tenant_id=None):
                 city_en = city_en or extra_city
                 district_en = district_en or extra_district
                 country_code = country_code or extra_country
+    print(f'[MARKET STUDY] booking location city={city!r} '
+          f'district={district!r} lat={lat!r} lng={lng!r} -> '
+          f'city_en={city_en!r} district_en={district_en!r} '
+          f'country={country_code!r}', flush=True)
     return city_en or city, district_en or district, country_code
 
 
