@@ -445,6 +445,34 @@ def wait_and_extract(page, url='', adults=2, retries=5, delay_ms=1000):
     return None
 
 
+def _print_rate_audit(rate, rows, url=''):
+    """One audit line per property page, naming the DOM field behind each figure.
+
+    A wrong table price has to be traceable to the field it came from: the
+    chosen row's own raw texts (rounded-price attribute, visible current,
+    visible original, taxes) sit beside the values this module applied.
+    """
+    block = str((rate or {}).get('block_id') or '')
+    raw = next((row for row in rows or []
+                if isinstance(row, dict)
+                and str(row.get('block_id') or '') == block), {})
+    parts = [
+        '[BOOKING RATE] url=' + str(url or rate.get('source_url') or '')[:120],
+        'rows=' + str(len(rows or [])),
+        'chosen_room=' + repr(str(raw.get('room_name') or '')[:40]),
+        'attr=' + repr(str(raw.get('price_attr') or '')),
+        'current_text=' + repr(str(raw.get('current_text') or '')[:40]),
+        'original_text=' + repr(str(raw.get('original_text') or '')[:40]),
+        'original_value=' + repr(str(raw.get('original_value') or '')[:40]),
+        'taxes_text=' + repr(str(raw.get('taxes_text') or '')[:40]),
+        'applied=' + str(rate.get('price_from')) + '-' + str(rate.get('price_to')),
+        'price=' + str(rate.get('price')),
+        'current=' + str(rate.get('current_price')),
+        'taxes=' + str(rate.get('taxes')),
+    ]
+    print(' '.join(parts), flush=True)
+
+
 def extract_booking_rate(page, url='', adults=2):
     """Read the DOM of an already-loaded Booking property page."""
     try:
@@ -453,10 +481,11 @@ def extract_booking_rate(page, url='', adults=2):
         return None
     if not isinstance(data, dict) or not data.get('found'):
         return None
-    rate = select_cheapest_rate(data.get('rows') or [], adults=adults)
+    rows = data.get('rows') or []
+    rate = select_cheapest_rate(rows, adults=adults)
     if not rate:
         return None
-    rate.update(room_ranges(data.get('rows') or []))
+    rate.update(room_ranges(rows))
     try:
         final_url = page.url or url
     except Exception:
@@ -468,6 +497,7 @@ def extract_booking_rate(page, url='', adults=2):
     stars = extract_hotel_stars(page)
     if stars:
         rate['hotel_stars'] = stars
+    _print_rate_audit(rate, rows, rate.get('source_url'))
     return rate
 
 
