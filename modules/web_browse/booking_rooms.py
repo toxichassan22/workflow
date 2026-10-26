@@ -471,6 +471,16 @@ def _print_rate_audit(rate, rows, url=''):
         'taxes=' + str(rate.get('taxes')),
     ]
     print(' '.join(parts), flush=True)
+    for index, row in enumerate(rows or []):
+        if not isinstance(row, dict):
+            continue
+        print('[BOOKING RATE ROW] n=' + str(index)
+              + ' room=' + repr(str(row.get('room_name') or '')[:36])
+              + ' attr=' + repr(str(row.get('price_attr') or ''))
+              + ' current=' + repr(str(row.get('current_text') or '')[:24])
+              + ' original=' + repr(str(row.get('original_text') or '')[:24])
+              + ' taxes=' + repr(str(row.get('taxes_text') or '')[:28]),
+              flush=True)
 
 
 def extract_booking_rate(page, url='', adults=2):
