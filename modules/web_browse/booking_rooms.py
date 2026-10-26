@@ -158,25 +158,39 @@ _STARS_JS = """() => {
   const text = (el) => el ? ((el.innerText || el.textContent || '')
       .replace(/\\s+/g, ' ').trim()) : '';
   const out = [];
+  const push = (value) => { if (value) out.push(value); };
+  // The property's own badge first: when Booking renders it, it is the answer.
   document.querySelectorAll('[data-testid="rating-stars"], '
       + '[data-testid="rating-squares"]').forEach((el) => {
-    out.push(el.getAttribute('aria-label') || '');
-    out.push(el.getAttribute('class') || '');
-    out.push(text(el));
+    push(el.getAttribute('aria-label') || '');
+    push(el.getAttribute('class') || '');
+    push(text(el));
   });
-  // The class badge has moved between containers across releases, but the
-  // sentence it announces is the same one, so every labelled element that
-  // names a count out of five contributes its label.
-  document.querySelectorAll('[aria-label]').forEach((el) => {
-    const label = el.getAttribute('aria-label') || '';
-    if (/من\\s*أصل|out of/i.test(label)) out.push(label);
-  });
-  const header = document.querySelector('h2.pp-header__title')
+  // Then only the header block that carries the property name. A class badge
+  // elsewhere on the page — a related-property card, a promo, a review widget
+  // — is not this property's class, and reading one put five stars on a
+  // one-star hotel.
+  let node = document.querySelector('h2.pp-header__title')
     || document.querySelector('[data-testid="property-name"]')
     || document.querySelector('h1');
-  out.push(text(header));
-  out.push(document.title || '');
-  return out.join(' | ').slice(0, 2500);
+  for (let depth = 0; node && depth < 4; depth += 1) {
+    node.querySelectorAll('[data-testid*="rating"], [class*="rating"], '
+        + '[aria-label]').forEach((el) => {
+      const label = el.getAttribute('aria-label') || '';
+      const title = el.getAttribute('title') || '';
+      const cls = el.getAttribute('class') || '';
+      if (/من\\s*أصل|out of/i.test(label)
+          || /نجم|stars?/i.test(label + ' ' + title + ' ' + cls)) {
+        push(label);
+        push(title);
+        push(cls);
+      }
+    });
+    push(text(node).slice(0, 200));
+    node = node.parentElement;
+  }
+  push(document.title || '');
+  return out.join(' | ').slice(0, 2000);
 }"""
 
 # Every pattern needs the word that makes the digit a star class, so a review
@@ -192,10 +206,13 @@ _STAR_PATTERNS = (
 def _read_stars(page):
     """(stars, raw) — the property's own star class and the text that says so.
 
-    The header rating is the usual source, but Booking drops the stars widget
-    on some property pages while the header still names the class («فندق 4
-    نجوم»), so the header and page title are read beside it. The raw text rides
-    out with a zero so a missing class can be told from a missed read.
+    The badge is read first, then the header block that carries the property
+    name, then the page title — Booking drops the badge on some pages while the
+    header still names the class («فندق 4 نجوم»). Only that header is searched:
+    a class badge elsewhere on the page belongs to another property, and one
+    read from a related-property card put five stars on a one-star hotel. The
+    raw text rides out with a zero so a missing class can be told from a missed
+    read.
     """
     try:
         raw = page.evaluate(_STARS_JS)
