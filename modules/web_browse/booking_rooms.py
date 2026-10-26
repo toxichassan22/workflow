@@ -7,11 +7,13 @@ area, which is why the same stay could be reported ~20% above the price the
 owner compares against.
 
 The owner's comparison basis is the **original pre-discount room price** for
-the stay, with taxes and fees excluded: Booking prints the room line as a
-pre-discount price beside a separate taxes-and-fees line, and the table carries
-the pre-discount figure alone. The discounted current price and the taxes line
-stay in the block as informational values. This module reads the live DOM
-instead of asking a model:
+the stay, pre-tax. Booking prints a taxes line beside the room price; in the
+Saudi view that line is charged on top of the printed figure, while a session
+outside Saudi Arabia is served prices with the property's taxes already folded
+in (the line reads «شامل الضرائب والرسوم»). The table carries the pre-discount
+figure alone, with the folded taxes taken back out and the discounted current
+price kept as an informational value. This module reads the live DOM instead
+of asking a model:
 
 - ``## BOOKING_RATE ##`` carries that original price, the room area, the
   current discounted price (informational), the taxes line and the rate policy.
@@ -33,6 +35,14 @@ BOOKING_TABLE_ROW_SELECTOR = '#hprt-table tr[data-block-id]'
 # The currency every Booking page is opened with (hotel_stay.STAY_PARAMS);
 # data-hotel-rounded-price is rendered in it regardless of the locale display.
 SELECTED_CURRENCY = 'SAR'
+# A session outside Saudi Arabia gets the room table with the property's own
+# taxes already folded in — the taxes line reads «شامل الضرائب والرسوم» — and
+# that folded amount is the Saudi hotel stack: 15% VAT plus the 5% municipality
+# fee, both levied on the net, so the displayed figure is the pre-tax price
+# times 1.2075. The Saudi view prints the same room pre-tax with a separate
+# taxes line. Verified against the owner's own screen on one property: the
+# table's 622-1570 maps to 515-1300, both ends off by this exact factor.
+KSA_HOTEL_TAX_FACTOR = 1.2075
 
 
 def _table_timeout_ms():
@@ -229,6 +239,15 @@ def normalize_rate_row(raw):
             original_price = round(original_price * scale, 1)
         if taxes:
             taxes = round(taxes * scale, 1)
+    if tax_included:
+        # This session's view already carries the property's taxes in the
+        # figure it prints; the owner's comparison is the pre-tax one, so the
+        # folded taxes come back out here.
+        if price is not None and price > 0:
+            price = round(price / KSA_HOTEL_TAX_FACTOR, 4)
+        if original_price:
+            original_price = round(original_price / KSA_HOTEL_TAX_FACTOR, 4)
+        taxes = 0
     row_text = str(raw.get('row_text') or '')
     occupancy_text = str(raw.get('occupancy_text') or '')
     adults = _block_occupancy(block_id)
@@ -378,8 +397,13 @@ def select_cheapest_rate(rows, adults=2):
     comparison_price = (original_price if original_price and original_price > 0
                         else current_price)
     taxes = selected.get('taxes')
-    current_total = current_price if selected.get('tax_included') else (
-        current_price + taxes if taxes is not None else None)
+    if selected.get('tax_included'):
+        # current_price is already the pre-tax figure; what the property
+        # charges is that figure with the view's folded taxes back on top.
+        current_total = round(current_price * KSA_HOTEL_TAX_FACTOR, 4)
+    else:
+        current_total = (current_price + taxes
+                         if taxes is not None else None)
     policy = []
     if selected.get('breakfast_included'):
         policy.append('breakfast included')
@@ -448,9 +472,9 @@ def wait_and_extract(page, url='', adults=2, retries=5, delay_ms=1000):
 def _print_rate_audit(rate, rows, url=''):
     """One audit line per property page, naming the DOM field behind each figure.
 
-    A wrong table price has to be traceable to the field it came from: the
-    chosen row's own raw texts (rounded-price attribute, visible current,
-    visible original, taxes) sit beside the values this module applied.
+    A table price has to be traceable to the field it came from: the chosen
+    row's own raw texts (rounded-price attribute, visible current, visible
+    original, taxes) sit beside the values this module applied.
     """
     block = str((rate or {}).get('block_id') or '')
     raw = next((row for row in rows or []
@@ -463,47 +487,13 @@ def _print_rate_audit(rate, rows, url=''):
         'attr=' + repr(str(raw.get('price_attr') or '')),
         'current_text=' + repr(str(raw.get('current_text') or '')[:40]),
         'original_text=' + repr(str(raw.get('original_text') or '')[:40]),
-        'original_value=' + repr(str(raw.get('original_value') or '')[:40]),
         'taxes_text=' + repr(str(raw.get('taxes_text') or '')[:40]),
         'applied=' + str(rate.get('price_from')) + '-' + str(rate.get('price_to')),
         'price=' + str(rate.get('price')),
         'current=' + str(rate.get('current_price')),
-        'taxes=' + str(rate.get('taxes')),
+        'tax_included=' + str(bool(rate.get('tax_included'))),
     ]
     print(' '.join(parts), flush=True)
-    for index, row in enumerate(rows or []):
-        if not isinstance(row, dict):
-            continue
-        print('[BOOKING RATE ROW] n=' + str(index)
-              + ' room=' + repr(str(row.get('room_name') or '')[:36])
-              + ' attr=' + repr(str(row.get('price_attr') or ''))
-              + ' current=' + repr(str(row.get('current_text') or '')[:24])
-              + ' original=' + repr(str(row.get('original_text') or '')[:24])
-              + ' taxes=' + repr(str(row.get('taxes_text') or '')[:28]),
-              flush=True)
-
-
-def _print_booking_cookies(page):
-    """Name Booking's own cookies, so the currency one can be set explicitly.
-
-    Booking renders the room table in a currency taken from its session cookie
-    even when the URL asks for SAR, which is why the table's visible figures
-    came back in EUR while ``data-hotel-rounded-price`` was already riyals.
-    """
-    try:
-        cookies = page.context.cookies('https://www.booking.com')
-    except Exception:
-        return
-    items = []
-    for cookie in cookies or []:
-        if not isinstance(cookie, dict):
-            continue
-        name = str(cookie.get('name') or '')
-        if not name:
-            continue
-        items.append(f'{name}={str(cookie.get("value") or "")[:20]}')
-    if items:
-        print('[BOOKING COOKIES] ' + ' '.join(items[:40]), flush=True)
 
 
 def extract_booking_rate(page, url='', adults=2):
@@ -531,7 +521,6 @@ def extract_booking_rate(page, url='', adults=2):
     if stars:
         rate['hotel_stars'] = stars
     _print_rate_audit(rate, rows, rate.get('source_url'))
-    _print_booking_cookies(page)
     return rate
 
 
@@ -561,15 +550,18 @@ def format_rate_block(rate):
         'current_total_including_tax: '
         + ('' if current_total is None else f'{current_total:g}'),
         'tax_included: ' + ('true' if rate.get('tax_included') else 'false'),
+        'tax_factor_removed: '
+        + (f'{KSA_HOTEL_TAX_FACTOR:g}' if rate.get('tax_included') else ''),
         'rate_policy: ' + str(rate.get('rate_policy') or ''),
         'price_range_before_discount: '
         + _range_text(price_from, price_to),
         'area_range_sqm: '
         + _range_text(rate.get('area_from'), rate.get('area_to')),
         'room_type_count: ' + str(rate.get('room_count') or ''),
-        'price_basis: original pre-discount room price for the stay, taxes and '
-        'fees excluded, rounded to whole riyals; the discounted current price '
-        'and the taxes line are informational',
+        'price_basis: original pre-discount room price for the stay, pre-tax, '
+        'rounded to whole riyals; a view that folds the property\'s taxes into '
+        'the figure it prints has that factor removed, and the discounted '
+        'current price stays informational',
         BOOKING_RATE_END,
     ]
     return '\n'.join(lines)

@@ -163,6 +163,42 @@ class BookingRateSelectionTests(unittest.TestCase):
         self.assertEqual((parsed['area_from'], parsed['area_to']),
                          (35.0, 42.0))
 
+    def test_a_tax_inclusive_view_is_brought_back_to_its_pre_tax_figure(self):
+        # A session outside Saudi Arabia is served the room table with the
+        # property's taxes already folded into the figure it prints: the live
+        # row read '89 €' beside a 375 SAR rounded attribute and a taxes line
+        # that only said «شامل الضرائب والرسوم». The owner's own screen shows
+        # the same room pre-tax (515/1300 against that table's 622/1570), so
+        # the folded 1.2075 (15% VAT + 5% municipality) comes back out.
+        row = {
+            'block_id': '1559334001_438176898_2_2_0',
+            'price_attr': '375',
+            'current_text': '89 €',
+            'original_text': '148 €',
+            'original_value': '147.883448314875',
+            'taxes_text': 'شامل الضرائب والرسوم',
+            'taxes_raw': '',
+            'room_name': 'غرفة ديلوكس كينغ 30 م²',
+            'area_text': '30 م²',
+            'occupancy_text': 'Max. people: 2',
+            'row_text': 'Guests: 2 adults',
+        }
+        rate = booking_rooms.select_cheapest_rate([row])
+        self.assertTrue(rate['tax_included'])
+        # 375 SAR displayed tax-inclusive, 310.56 without the folded taxes.
+        self.assertAlmostEqual(rate['current_price'], 310.56, delta=0.05)
+        # 148 EUR x (375/89) = 623.6 tax-inclusive, 516.44 pre-tax.
+        self.assertAlmostEqual(rate['price'], 516.44, delta=0.05)
+        self.assertAlmostEqual(rate['current_price_including_tax'], 375.0,
+                               delta=0.05)
+        ranges = booking_rooms.room_ranges([row])
+        self.assertEqual(ranges['price_from'], 516)
+        self.assertEqual(ranges['price_to'], 516)
+        block = booking_rooms.format_rate_block(rate)
+        self.assertIn('tax_included: true', block)
+        self.assertIn('tax_factor_removed: 1.2075', block)
+        self.assertIn('price_range_before_discount: 516', block)
+
     def test_no_table_rows_returns_none(self):
         self.assertIsNone(booking_rooms.select_cheapest_rate([]))
 
