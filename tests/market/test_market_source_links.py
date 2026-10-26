@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 _WEB_BROWSE = ROOT / 'modules' / 'web_browse'
@@ -192,6 +193,74 @@ class HotelPriceRangeTests(unittest.TestCase):
         self.assertNotIn('price_range_current', prompt)
         self.assertIn('الصفحة النهائية', prompt)
         self.assertIn('لا تضع روابط البحث أو النتائج', prompt)
+
+
+class AqarListingUrlTests(unittest.TestCase):
+    """aqar has no route with a district after the city — that URL is a 404."""
+
+    def test_a_district_segment_is_dropped_from_a_listing_url(self):
+        self.assertEqual(
+            market_study.normalize_aqar_listing_url(
+                'https://sa.aqar.fm/فلل-للبيع/جدة/الاندلس'),
+            'https://sa.aqar.fm/فلل-للبيع/جدة')
+        # The city page itself (with or without a trailing slash) is left
+        # exactly as written; only the district-shaped third segment goes.
+        self.assertEqual(
+            market_study.normalize_aqar_listing_url(
+                'https://sa.aqar.fm/فلل-للبيع/جدة/'),
+            'https://sa.aqar.fm/فلل-للبيع/جدة/')
+
+    def test_an_advertised_unit_and_a_project_page_are_untouched(self):
+        for url in ('https://sa.aqar.fm/شقق-للبيع/جدة/12345',
+                    'https://sa.aqar.fm/المشاريع-العقارية/'
+                    'شركة-ابياتنا-255/أبياتنا-هيلز-790',
+                    'https://example.com/فلل-للبيع/جدة/الاندلس'):
+            self.assertEqual(market_study.normalize_aqar_listing_url(url), url)
+
+    def test_the_plan_never_carries_a_district_shaped_aqar_url(self):
+        plan = market_study.build_source_plan(
+            {'city': 'جدة', 'district': 'الاندلس', 'projectType': 'سكني',
+             'competitorScope': {'mode': 'district'}},
+            market_wide=True)
+        urls = [entry.get('url') for entry in plan]
+        self.assertTrue(any('aqar.fm' in (url or '') for url in urls), urls)
+        self.assertFalse(any('/الاندلس' in (url or '') for url in urls), urls)
+
+    def test_a_chosen_property_kind_narrows_the_listing_categories(self):
+        def slugs(unit_types, kind='سكني', operation='بيع'):
+            return [unquote(url).rsplit('/', 2)[-2] for url, _label in
+                    market_study._listing_urls([kind], {operation}, 'جدة',
+                                               unit_types)]
+
+        # No kind selected keeps the whole set for the project kind.
+        self.assertEqual(slugs(()), ['فلل-للبيع', 'شقق-للبيع', 'أدوار-للبيع'])
+        self.assertEqual(slugs(['فيلا مستقلة']), ['فلل-للبيع'])
+        self.assertEqual(slugs(['شقة', 'دور مستقل']),
+                         ['شقق-للبيع', 'أدوار-للبيع'])
+        self.assertEqual(slugs(['مكتب'], 'تجاري', 'إيجار'),
+                         ['مكاتب-للإيجار'])
+
+    def test_the_plan_reads_the_chosen_property_kinds(self):
+        plan = market_study.build_source_plan(
+            {'city': 'جدة', 'district': 'الروضة', 'projectType': 'سكني',
+             'competitorScope': {'mode': 'district',
+                                 'unit_types': ['فيلا مستقلة']}},
+            market_wide=True)
+        urls = [unquote(entry.get('url') or '') for entry in plan]
+        self.assertTrue(any('/فلل-للبيع/' in url for url in urls), urls)
+        self.assertFalse(any('/شقق-للبيع/' in url for url in urls), urls)
+
+    def test_row_canonicalization_reads_the_city_page(self):
+        row = {'name': 'مشروع اختبار', 'operation_type': 'بيع',
+               'source_url': 'https://sa.aqar.fm/فلل-للبيع/جدة/الاندلس',
+               'field_sources': {
+                   'name': ['https://sa.aqar.fm/فلل-للبيع/جدة/الاندلس']},
+               'row_source': 'ai'}
+        market_study.canonicalize_competitor_source_urls(row)
+        self.assertEqual(row['source_url'],
+                         'https://sa.aqar.fm/فلل-للبيع/جدة')
+        self.assertEqual(row['field_sources']['name'],
+                         ['https://sa.aqar.fm/فلل-للبيع/جدة'])
 
 
 if __name__ == '__main__':

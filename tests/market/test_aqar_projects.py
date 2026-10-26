@@ -49,6 +49,39 @@ _NO_PRICE_CARD = """
 </a>
 """
 
+# Directory cards that print the city but not the district — the shape that
+# made every district-scoped run come back with zero projects.
+_CITY_ONLY_CARDS_HTML = """
+<html><body>
+<a href="/المشاريع-العقارية/شركة-الرمز-7/مشروع-الرمز-71">
+  <div>شقق للبيع</div><div>مشروع الرمز</div>
+  <div>يبدأ من 400 ألف §</div><div>جدة</div>
+</a>
+<a href="/المشاريع-العقارية/شركة-الرمز-7/مشروع-الظل-72">
+  <div>شقق للبيع</div><div>مشروع الظل</div>
+  <div>يبدأ من 300 ألف §</div><div>جدة</div>
+</a>
+</body></html>
+"""
+
+_RAMZ_PAGE = """
+المساحات
+من 100 م² إلى 140 م²
+الأسعار
+من 400,000 إلى 600,000 §
+ريال
+حي الأندلس ، جدة ، جدة
+"""
+
+_ZILL_PAGE = """
+المساحات
+من 90 م² إلى 120 م²
+الأسعار
+من 300,000 إلى 450,000 §
+ريال
+حي الشاطئ ، جدة ، جدة
+"""
+
 _LISTING_HTML = """
 <html><body>
 <a href="/شقق-للبيع/جدة/12345">
@@ -79,6 +112,20 @@ class _Session:
     def open_url(self, url):
         self.opened.append(url)
         return {'text': self.detail, 'error': ''}
+
+
+class _PerPageSession(_Session):
+    """A session whose project pages each carry their own address."""
+
+    def __init__(self, html, pages):
+        super().__init__(html=html)
+        self.pages = pages
+
+    def open_url(self, url):
+        self.opened.append(url)
+        text = next((value for key, value in self.pages.items()
+                     if key in url), '')
+        return {'text': text, 'error': ''}
 
 
 class AqarCardTests(unittest.TestCase):
@@ -236,6 +283,40 @@ class AqarScanTests(unittest.TestCase):
             pairs=[('سكني', 'بيع')], limit=4)
         self.assertEqual(other['rows'], [])
         self.assertEqual(other['matched'], 0)
+
+    def test_a_card_without_a_district_is_confirmed_from_its_own_page(self):
+        """The directory card prints only the city; the project page names the
+        district. Reading the district from the card alone dropped every such
+        project and left a district-scoped run with zero rows."""
+        session = _PerPageSession(
+            _CITY_ONLY_CARDS_HTML,
+            {'مشروع-الرمز-71': _RAMZ_PAGE, 'مشروع-الظل-72': _ZILL_PAGE})
+        result = aqar_projects.scan(
+            session, 'جدة', district='حي الاندلس',
+            pairs=[('سكني', 'بيع')], limit=4)
+        self.assertEqual([row['name'] for row in result['rows']],
+                         ['مشروع الرمز'])
+        self.assertEqual(result['matched'], 1)
+        self.assertEqual(result['rows'][0]['district'], 'حي الاندلس')
+        # Both candidate pages were read: the second one's own address is a
+        # different district, so it is dropped and never presented as this
+        # district's project.
+        self.assertEqual(len(session.opened), 2)
+
+    def test_a_scope_may_name_several_districts(self):
+        """The client can pick more than one neighborhood; each row keeps the
+        client's own text for its own district and nothing outside the list
+        is read."""
+        session = _PerPageSession(
+            _CITY_ONLY_CARDS_HTML,
+            {'مشروع-الرمز-71': _RAMZ_PAGE, 'مشروع-الظل-72': _ZILL_PAGE})
+        result = aqar_projects.scan(
+            session, 'جدة', districts=('حي الأندلس', 'حي الشاطئ'),
+            pairs=[('سكني', 'بيع')], limit=4)
+        self.assertEqual([row['name'] for row in result['rows']],
+                         ['مشروع الرمز', 'مشروع الظل'])
+        self.assertEqual([row['district'] for row in result['rows']],
+                         ['حي الأندلس', 'حي الشاطئ'])
 
     def test_the_limit_bounds_the_detail_reads(self):
         session = _Session()

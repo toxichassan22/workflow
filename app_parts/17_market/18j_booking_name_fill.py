@@ -388,7 +388,7 @@ def _apply_rate(row, rate, url, target_stars=()):
     stay_label = hotel_stay.stay_nights_label_ar()
     note = (
         f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
-        f"({booking_rooms.note_basis_ar(rate.get('tax_included'))}): "
+        f"({booking_rooms.note_basis_ar(rate.get('tax_included'), rate.get('taxes'))}): "
         f'{_money(price_from)} – {_money(price_to)} ر.س'
         + (f'؛ المساحات {_money(area_from)} – {_money(area_to)} م²'
            if area_from is not None else '')

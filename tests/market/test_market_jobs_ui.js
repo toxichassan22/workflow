@@ -71,6 +71,9 @@ function fixture() {
     marketSummaryChatLog: { scrollTop: 0, scrollHeight: 10 },
     marketDisclaimer: { value: '' },
     marketCompetitorScopeMode: { value: 'district' },
+    marketCompetitorDistrictChips: { innerHTML: '' },
+    marketCompetitorDistrictInput: { value: '' },
+    marketCompetitorUnitTypes: { innerHTML: '' },
     marketCompetitorRadius: { value: '10' },
     marketCompetitorRadiusCustomKm: { value: '' },
     marketComparisonTypes: { querySelectorAll: () => [] },
@@ -168,6 +171,9 @@ test('market study separates competitors and market into accessible tabs', () =>
   assert.match(ui, /id="marketComparisonTypes"/);
   assert.match(ui, /id="marketAddComparisonTypeBtn"/);
   assert.match(ui, /id="marketCompetitorTypeTabs"/);
+  assert.match(ui, /id="marketCompetitorDistrictChips"/);
+  assert.match(ui, /id="marketCompetitorUnitTypes"/);
+  assert.match(ui, /أحياء النطاق/);
   assert.match(ui, /data-comparison-field="stars"/);
   assert.match(ui, /إضافة نوع مقارنة/);
   assert.doesNotMatch(source, /outOfRadiusCount/);
@@ -645,4 +651,49 @@ test('fill mode reports a truthful partial count', async () => {
     /أُكملت بيانات 2 منافس/);
   assert.match(inputs.marketCompetitorsNote.textContent,
     /7 منافس بلا سعر موثق/);
+});
+
+test('the competitor scope carries several districts and chosen unit kinds', () => {
+  const { context, inputs } = fixture();
+  const chips = ['الروضة', 'السلامة'];
+  const unitInputs = [
+    { dataset: { unitType: 'فيلا مستقلة' }, checked: true },
+    { dataset: { unitType: 'شقة' }, checked: false }
+  ];
+  context.document.querySelectorAll = selector => {
+    if (String(selector).includes('data-scope-district')) {
+      return chips.map(name => ({ dataset: { scopeDistrict: name } }));
+    }
+    if (String(selector).includes('[data-unit-type]')) return unitInputs;
+    return [];
+  };
+
+  // The client's own list renders as chips, never as one fixed district.
+  context.renderMarketCompetitorDistricts(chips);
+  assert.match(inputs.marketCompetitorDistrictChips.innerHTML, /الروضة/);
+  assert.match(inputs.marketCompetitorDistrictChips.innerHTML, /السلامة/);
+  assert.deepEqual(
+    Array.from(context.marketCompetitorDistrictNames()), chips);
+
+  inputs.marketCompetitorDistrictInput.value = 'الزهراء';
+  context.addMarketCompetitorDistrict();
+  assert.match(inputs.marketCompetitorDistrictChips.innerHTML, /الزهراء/);
+  assert.equal(inputs.marketCompetitorDistrictInput.value, '');
+
+  // The owner's sixteen residential kinds and the commercial ones are offered.
+  context.renderMarketUnitTypes(['فيلا مستقلة']);
+  assert.match(inputs.marketCompetitorUnitTypes.innerHTML, /سكن موظفين/);
+  assert.match(inputs.marketCompetitorUnitTypes.innerHTML, /سكن عمال/);
+  assert.match(inputs.marketCompetitorUnitTypes.innerHTML, /برج مكاتب/);
+  assert.match(inputs.marketCompetitorUnitTypes.innerHTML,
+    /data-unit-type="فيلا مستقلة" checked/);
+  assert.deepEqual(
+    Array.from(context.collectMarketUnitTypeSelections()), ['فيلا مستقلة']);
+
+  // Both reach the saved scope the job posts.
+  context.collectMarketSummaryScope = () => ({ cities: [] });
+  const state = context.collectMarketStudyFromDom();
+  assert.deepEqual(Array.from(state.competitor_scope.districts), chips);
+  assert.deepEqual(
+    Array.from(state.competitor_scope.unit_types), ['فيلا مستقلة']);
 });

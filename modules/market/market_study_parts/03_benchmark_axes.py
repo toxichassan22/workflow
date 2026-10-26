@@ -273,9 +273,18 @@ def competitor_matches_comparison_axis(row, axis):
         star_match = re.search(r'(?<!\d)([1-5])(?!\d)', star_text)
         try:
             actual_stars = int(star_match.group(1)) if star_match else int(star_text.strip())
-            return actual_stars == int(axis.get('stars'))
         except (TypeError, ValueError):
-            return False
+            # A hotel inside the client's scope whose class never reached the
+            # page is still a competitor of that scope (owner decision
+            # 2026-10-27); it is kept with an empty class, never guessed.
+            return True
+        axis_stars = str(axis.get('stars') or '').strip()
+        if not axis_stars:
+            return True
+        try:
+            return actual_stars == int(float(axis_stars))
+        except (TypeError, ValueError):
+            return True
     wanted_type = axis.get('type')
     if wanted_type == 'residential':
         type_match = any(token in project_type for token in ('سكني', 'residential', 'housing'))
@@ -350,7 +359,15 @@ def competitor_matches_location_scope(row, scope, city='', district=''):
     if mode == 'city':
         return True
     row_district = _fold_choice(row.get('district') or row.get('neighborhood'))
-    return bool(row_district and row_district == _fold_choice(district))
+    if not row_district:
+        return False
+    # A district scope may cover several neighborhoods the client picked; any
+    # one of them is inside the scope and nothing outside it is.
+    wanted = [district]
+    if isinstance(scope.get('districts'), (list, tuple)):
+        wanted.extend(scope.get('districts') or [])
+    wanted_keys = {_fold_choice(item) for item in wanted if _fold_choice(item)}
+    return row_district in wanted_keys
 
 
 def filter_and_cap_competitors(rows, axes, limit_per_axis=5, offer_lang='ar',
@@ -388,7 +405,10 @@ def filter_and_cap_competitors(rows, axes, limit_per_axis=5, offer_lang='ar',
         row['benchmarks'] = [benchmark_axis_label(chosen, offer_lang)]
         row['comparison_type'] = chosen['type']
         row['comparison_operation'] = chosen['operation']
-        row['hotel_stars'] = chosen['stars'] if chosen['type'] == 'hotel' else ''
+        # The class column belongs to the row's own page: an unknown class
+        # stays empty instead of being relabelled with the selected one.
+        row['hotel_stars'] = (str(row.get('hotel_stars') or '').strip()
+                              if chosen['type'] == 'hotel' else '')
         counts[chosen['key']] += 1
         seen_names.add(name_key)
         accepted.append(row)

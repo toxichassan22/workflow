@@ -251,17 +251,21 @@ def canonicalize_competitor_source_urls(row):
         return row
     operation = _norm(
         row.get('operation_type') or row.get('operationType') or row.get('operation'))
-    urls = competitor_source_urls(row)
+    urls = _unique_values(normalize_aqar_listing_url(item)
+                          for item in competitor_source_urls(row))
     resolved = _unique_values(canonical_index_source_url(item, operation) for item in urls)
     if resolved:
         row['source_urls'] = resolved
     field_sources = competitor_field_sources(row)
     if field_sources:
         row['field_sources'] = {
-            field: _unique_values(canonical_index_source_url(item, operation) for item in urls)
+            field: _unique_values(
+                canonical_index_source_url(
+                    normalize_aqar_listing_url(item), operation)
+                for item in urls)
             for field, urls in field_sources.items()
         }
-    source_url = _norm(row.get('source_url'))
+    source_url = normalize_aqar_listing_url(_norm(row.get('source_url')))
     if source_url:
         row['source_url'] = canonical_index_source_url(source_url, operation)
     primary = primary_competitor_source_url(row)

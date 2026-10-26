@@ -37,8 +37,16 @@ def _start_aqar_projects_scan(payload, axes, report=None, deadline=None,
     if not pairs or not city:
         return None
     scope = (payload or {}).get('competitorScope') or {}
-    district = (str((payload or {}).get('district') or '').strip()
-                if str(scope.get('mode') or '') == 'district' else '')
+    # A district scope may cover several neighborhoods the client picked.
+    # They are read together and nothing outside them is accepted.
+    districts = []
+    if str(scope.get('mode') or 'district') == 'district':
+        picked = scope.get('districts') if isinstance(scope.get('districts'), list) else []
+        for item in list(picked) + [str((payload or {}).get('district') or '').strip()]:
+            text = str(item or '').strip()
+            if text and text not in districts:
+                districts.append(text)
+    district = districts[0] if districts else ''
     holder = {'rows': [], 'result': {}, 'error': ''}
 
     def _worker():
@@ -49,6 +57,7 @@ def _start_aqar_projects_scan(payload, axes, report=None, deadline=None,
                 session = _market_browser_session()
                 result = aqar_projects.scan(
                     session, city, district=district, pairs=pairs,
+                    districts=tuple(districts),
                     limit=_AQAR_PROJECT_LIMIT,
                     budget_seconds=_AQAR_SCAN_BUDGET_SECONDS,
                     progress=report, offer_lang=offer_lang)
@@ -68,7 +77,8 @@ def _start_aqar_projects_scan(payload, axes, report=None, deadline=None,
     thread = threading.Thread(target=_worker, name='aqar-projects',
                               daemon=True)
     thread.start()
-    return {'thread': thread, 'holder': holder, 'district': district}
+    return {'thread': thread, 'holder': holder, 'district': district,
+            'districts': districts}
 
 
 def _await_aqar_projects_scan(handle, timeout=60):

@@ -70,10 +70,19 @@
             <div><label>المدينة</label><input id="marketCityMirror" readonly></div>
             <div><label>الحي</label><input id="marketDistrictMirror" readonly></div>
           </div>
+          <div class="market-scope-districts" id="marketCompetitorDistrictsWrap">
+            <label>أحياء النطاق</label>
+            <div id="marketCompetitorDistrictChips" class="market-scope-chips"></div>
+            <div class="market-scope-add">
+              <input id="marketCompetitorDistrictInput" type="text" placeholder="اسم الحي">
+              <button type="button" class="btn ghost small" onclick="addMarketCompetitorDistrict()">إضافة حي</button>
+            </div>
+          </div>
         </div>
         <div class="market-block">
           <h4>اختيارات المقارنة</h4>
           <div id="marketComparisonTypes" class="market-comparison-types"></div>
+          <div id="marketCompetitorUnitTypes" class="market-unit-types"></div>
           <div class="market-competitors-mode">
             <label for="marketCompetitorsMode">طريقة الإدخال</label>
             <select id="marketCompetitorsMode" onchange="applyMarketCompetitorsMode()">
@@ -215,6 +224,14 @@
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
         document.getElementById('marketSwot_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
       });
+      document.getElementById('marketCompetitorUnitTypes')?.addEventListener('change', (
+        persistMarketStudyFromDom));
+      document.getElementById('marketCompetitorDistrictInput')?.addEventListener(
+        'keydown', event => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          addMarketCompetitorDistrict();
+        });
       document.getElementById('marketComparisonTypes')?.addEventListener('change', event => {
         if (event.target?.dataset?.comparisonField === 'type') {
           const row = event.target.closest('[data-comparison-row]');
@@ -470,6 +487,87 @@
       } catch (error) {
         console.error('market comparison persist failed', error);
       }
+    }
+
+    function marketCompetitorDistrictNames() {
+      return Array.from(
+        document.querySelectorAll('#marketCompetitorDistrictChips [data-scope-district]'))
+        .map(element => element.dataset.scopeDistrict || '')
+        .filter(Boolean);
+    }
+
+    function renderMarketCompetitorDistricts(names) {
+      const host = document.getElementById('marketCompetitorDistrictChips');
+      if (!host) return;
+      const selected = [];
+      (Array.isArray(names) ? names : []).forEach(item => {
+        const name = String(item || '').trim();
+        if (name && !selected.includes(name)) selected.push(name);
+      });
+      if (!selected.length) {
+        const projectDistrict = (document.querySelector(
+          '#tenantProjectForm [data-key="district"]')?.value
+          || tenantProjectData.district || '').trim();
+        if (projectDistrict) selected.push(projectDistrict);
+      }
+      host.innerHTML = selected.map(name =>
+        '<span class="market-scope-chip" data-scope-district="' + escapeHtml(name) + '">' +
+        escapeHtml(name) +
+        '<button type="button" class="market-scope-chip-remove" onclick="removeMarketCompetitorDistrict(this)">حذف</button>' +
+        '</span>'
+      ).join('') || '<div class="tenant-hint">لا توجد أحياء في نطاق المنافسين</div>';
+      refreshDynamicI18n(host);
+    }
+
+    function addMarketCompetitorDistrict() {
+      const input = document.getElementById('marketCompetitorDistrictInput');
+      const value = String(input?.value || '').trim();
+      if (input) input.value = '';
+      if (!value) return;
+      const names = marketCompetitorDistrictNames();
+      if (names.includes(value)) return;
+      names.push(value);
+      renderMarketCompetitorDistricts(names);
+      if (typeof persistMarketStudyFromDom === 'function') persistMarketStudyFromDom();
+    }
+
+    function removeMarketCompetitorDistrict(button) {
+      const name = button?.closest('[data-scope-district]')?.dataset.scopeDistrict || '';
+      const names = marketCompetitorDistrictNames().filter(item => item !== name);
+      renderMarketCompetitorDistricts(names);
+      if (typeof persistMarketStudyFromDom === 'function') persistMarketStudyFromDom();
+    }
+
+    function marketUnitTypeGroups() {
+      return typeof MARKET_UNIT_TYPE_GROUPS !== 'undefined'
+        ? MARKET_UNIT_TYPE_GROUPS : [];
+    }
+
+    function collectMarketUnitTypeSelections() {
+      return Array.from(document.querySelectorAll(
+        '#marketCompetitorUnitTypes [data-unit-type]'))
+        .filter(input => input.checked)
+        .map(input => input.dataset.unitType || '')
+        .filter(Boolean);
+    }
+
+    function renderMarketUnitTypes(selected) {
+      const host = document.getElementById('marketCompetitorUnitTypes');
+      if (!host) return;
+      const picked = new Set((Array.isArray(selected) ? selected : [])
+        .map(item => String(item || '').trim()).filter(Boolean));
+      const groups = marketUnitTypeGroups();
+      host.innerHTML = groups.length ? groups.map(group =>
+        '<div class="market-unit-type-group">' +
+        '<div class="market-unit-type-label">' + escapeHtml(group.label) + '</div>' +
+        '<div class="market-comparison-multi-options">' +
+        group.options.map(option =>
+          '<label><input type="checkbox" data-unit-type="' + escapeHtml(option) + '"' +
+          (picked.has(option) ? ' checked' : '') + '><span>' + escapeHtml(option) +
+          '</span></label>').join('') +
+        '</div></div>').join('')
+        : '<div class="tenant-hint">لا توجد أنواع عقار محددة</div>';
+      refreshDynamicI18n(host);
     }
 
     function renderMarketTransactionBenchmarks(data) {

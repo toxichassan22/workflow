@@ -303,13 +303,17 @@ def whole_riyal(value):
         return None
 
 
-def note_basis_ar(tax_included):
+def note_basis_ar(tax_included, taxes=None):
     """The parenthetical a hotel row's note uses to name its tax basis.
 
-    A view that folds the property's taxes into the printed figure carries
-    that figure as-is, so the note says so instead of promising a pre-tax
-    number the row no longer holds.
+    A view that folds the property's taxes into the printed figure has a
+    stated amount taken back out before the row is written (owner decision
+    2026-10-27). When the page says «شامل» but states no amount there is
+    nothing to subtract, and the note says the figure still carries them
+    instead of promising a pre-tax number the row does not hold.
     """
+    if tax_included and taxes:
+        return 'السعر الأصلي قبل الخصم بعد استبعاد الضرائب والرسوم'
     if tax_included:
         return 'السعر الأصلي قبل الخصم شامل الضرائب والرسوم كما تعرضه الصفحة'
     return 'السعر الأصلي قبل الخصم بدون الضريبة'
@@ -455,13 +459,29 @@ def _base_rows(rows, adults=2):
 
 
 def room_total(row):
-    """One room's original pre-discount price in riyals, taxes excluded."""
+    """One room's original pre-discount price in riyals, taxes excluded.
+
+    The figure is Booking's original price before its discount (owner decision
+    2026-10-26). When this view folds the property's taxes into that printed
+    figure, the stated taxes are taken back out (owner decision 2026-10-27), so
+    the row carries a room price rather than a stay total; a row whose taxes
+    line is added on top already excludes them.
+    """
+    base = _net_original_price(row)
+    return whole_riyal(base) if base is not None else None
+
+
+def _net_original_price(row):
+    """The pre-discount room price with stated, folded-in taxes removed."""
     base = row.get('original_price')
     if base is None or base <= 0:
         base = row.get('price')
     if base is None or base <= 0:
         return None
-    return whole_riyal(base)
+    taxes = row.get('taxes')
+    if taxes and taxes > 0 and row.get('tax_included'):
+        base = base - taxes
+    return base if base > 0 else None
 
 
 def room_ranges(rows):
@@ -470,9 +490,10 @@ def room_ranges(rows):
     Both ends come from **every** room on the page — suites and family rooms
     included, whatever occupancy their rate is sold for (owner decision
     2026-10-24), so the range matches the room table a client sees. The figure
-    is the row's original pre-discount price alone — 340 reads 340 — never the
-    discounted current price and never the row's taxes line (owner decision
-    2026-10-26). A row after a room header may omit its area, so
+    is the row's original pre-discount price (owner decision 2026-10-26) with
+    the property's taxes removed when the printed figure folds them in (owner
+    decision 2026-10-27) — never the discounted current price. A row after a
+    room header may omit its area, so
     the area is borrowed from another row of the same room.
     """
     normalized = [normalize_rate_row(row) for row in rows or []
@@ -515,9 +536,9 @@ def select_cheapest_rate(rows, adults=2):
 
     The current price identifies the cheapest base rate; a room-only rate wins
     over a breakfast-included sibling for the same room. The figure returned in
-    ``price`` is that base rate's original price before Booking's discount;
-    ``taxes`` rides beside it as an informational value only — the room range
-    never adds it.
+    ``price`` is that base rate's original price before Booking's discount,
+    with the property's taxes removed when the printed figure carries them;
+    ``taxes`` still rides beside it as the informational value the page stated.
     """
     normalized, eligible, base_rows = _base_rows(rows, adults=adults)
     if not eligible or not base_rows:
@@ -525,8 +546,7 @@ def select_cheapest_rate(rows, adults=2):
     selected = _fill_room_metadata(eligible, dict(base_rows[0]))
     current_price = selected['price']
     original_price = selected.get('original_price')
-    comparison_price = (original_price if original_price and original_price > 0
-                        else current_price)
+    comparison_price = _net_original_price(selected) or current_price
     taxes = selected.get('taxes')
     if selected.get('tax_included'):
         # The printed figure already carries the property's taxes; the total

@@ -851,6 +851,49 @@ class AqarProjectsWiringTests(_MarketTestBase):
         # follows the offer language while the row keeps its canonicals.
         self.assertIn('aqar', result.get('notes') or '')
 
+    def test_a_commercial_run_honours_every_chosen_district(self):
+        """The same deterministic aqar path serves تجاري, and a district list
+        of more than one neighborhood accepts each of them and nothing else."""
+        module = self.module
+        inside = self._aqar_row()
+        inside.update({'name': 'مركز الياسمين', 'project_type': 'تجاري',
+                       'operation_type': 'بيع', 'district': 'الياسمين',
+                       'city': 'الرياض'})
+        outside = self._aqar_row()
+        outside.update({'name': 'مركز الزهراء', 'project_type': 'تجاري',
+                        'operation_type': 'بيع', 'district': 'الزهراء',
+                        'city': 'الرياض'})
+
+        with self.app.app_context(), \
+                patch.object(module, '_start_aqar_projects_scan',
+                             return_value={'thread': None,
+                                           'holder': {'rows': [inside, outside]},
+                                           'district': 'النرجس',
+                                           'districts': ['النرجس', 'الياسمين']}), \
+                patch.object(module, '_await_aqar_projects_scan',
+                             return_value=[inside, outside]), \
+                patch.object(module, '_start_source_plan_async',
+                             return_value=None), \
+                patch.object(module, '_run_scan_tasks', return_value=[]), \
+                patch.object(module, '_verify_competitor_rows'), \
+                patch.object(module, '_verify_market_urls',
+                             return_value=set()), \
+                patch.object(module, '_auto_import_competitor_logos'):
+            result = module._run_market_competitors({
+                'city': 'الرياض',
+                'district': 'النرجس',
+                'competitorScope': {
+                    'mode': 'district',
+                    'districts': ['النرجس', 'الياسمين'],
+                    'unit_types': ['محل تجاري'],
+                },
+                'comparisonTypes': [{'type': 'commercial', 'operation': 'sale'}],
+                'mode': 'generate',
+            })
+        self.assertTrue(result['success'], result)
+        self.assertEqual([item.get('name') for item in result['competitors']],
+                         ['مركز الياسمين'])
+
     def test_aqar_rows_skip_the_per_row_agent_verification(self):
         module = self.module
         seen = []
@@ -872,6 +915,9 @@ class AqarProjectsWiringTests(_MarketTestBase):
 
 
 from tests.market.test_competitors_evidence_pipeline_parts.banned_listing_portal import BannedListingPortalTests
+from tests.market.test_competitors_evidence_pipeline_parts.hotel_empty_regeneration import HotelEmptyRegenerationTests
+from tests.market.test_competitors_evidence_pipeline_parts.empty_result_note import EmptyResultNoteTests
+from tests.market.test_competitors_evidence_pipeline_parts.protected_portal_404 import ProtectedPortal404Tests
 from tests.market.test_competitors_evidence_pipeline_parts.own_source_price import OwnSourcePriceTests
 from tests.market.test_competitors_evidence_pipeline_parts.parallelism import ParallelismTests
 

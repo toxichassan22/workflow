@@ -50,7 +50,43 @@ def competitor_scope_text(payload):
         return f'ضمن مسافة {radius:g} كم من موقع المشروع'
     if mode == 'city':
         return f'كامل مدينة {city}' if city else 'كامل المدينة'
+    districts = competitor_scope_districts(scope, district)
+    if len(districts) > 1:
+        joined = '، '.join(districts)
+        return f'أحياء {joined} في مدينة {city}' if city else f'أحياء {joined}'
+    district = districts[0] if districts else ''
     return f'حي {district} في مدينة {city}' if district and city else f'حي {district}' if district else 'حي المشروع'
+
+
+def competitor_scope_districts(scope, district=''):
+    """The districts the competitor table is limited to — the client's own list,
+    else the project's single district. Order is kept and repeats are dropped."""
+    scope = scope if isinstance(scope, dict) else {}
+    raw = (scope.get('districts') or scope.get('district_list')
+           or scope.get('districts_list'))
+    if isinstance(raw, str):
+        raw = [part for part in re.split(r'[،,\n]+', raw)]
+    values = []
+    for item in list(raw or []) + [_norm(district)]:
+        item = _norm(item)
+        if item and item not in values:
+            values.append(item)
+    return values
+
+
+def competitor_scope_unit_types(scope):
+    """The property kinds the client asked to compare (فيلا، شقة، مكتب …)."""
+    scope = scope if isinstance(scope, dict) else {}
+    raw = (scope.get('unit_types') or scope.get('unitTypes')
+           or scope.get('property_types') or scope.get('unit_type'))
+    if isinstance(raw, str):
+        raw = re.split(r'[،,\n]+', raw)
+    values = []
+    for item in raw or []:
+        item = _norm(item)
+        if item and item not in values:
+            values.append(item)
+    return values
 
 
 def normalize_competitor_scope(value):
@@ -74,6 +110,14 @@ def normalize_competitor_scope(value):
             radius_choice = 'custom'
             custom = scope.get('radius_km') or scope.get('radiusKm')
         result['radius_km'] = resolve_competitor_radius_km(radius_choice, custom)
+    # A district scope may name several districts; the client's list is kept
+    # whole and is never widened on our side.
+    districts = competitor_scope_districts(scope)
+    if districts:
+        result['districts'] = districts
+    unit_types = competitor_scope_unit_types(scope)
+    if unit_types:
+        result['unit_types'] = unit_types
     return result
 SUMMARY_TITLE = 'الملخص التنفيذي لسوق المشروع'
 SUMMARY_WORD_TARGET = 350

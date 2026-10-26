@@ -627,6 +627,27 @@ _MARKET_URL_CHECK_HEADERS = {
     'Accept-Language': 'ar,en;q=0.9',
 }
 
+# Portals that answer a plain HTTP request with a 404 instead of a challenge
+# page. Their 404 is a refusal of the automated request, not proof that the
+# page is gone, so it never marks a competitor's source as dead.
+_PROTECTED_PORTAL_HOSTS = {'aqar.fm', 'sa.aqar.fm', 'booking.com',
+                           'www.booking.com', 'bayut.sa', 'wasalt.sa',
+                           'dealapp.sa'}
+
+
+def _protected_portal_url(url):
+    """True when the URL belongs to a portal that 404s automated requests."""
+    try:
+        host = (urlsplit(str(url or '').strip()).hostname or '').casefold()
+    except Exception:
+        return False
+    if not host:
+        return False
+    try:
+        return market_study._registrable_host(host) in _PROTECTED_PORTAL_HOSTS
+    except Exception:
+        return host in _PROTECTED_PORTAL_HOSTS
+
 
 def _market_dns_failure(exc):
     """True when a request failure traces back to DNS — the only network
@@ -678,7 +699,10 @@ def _market_url_alive(url, timeout=8):
         # for pages that GET fine. Only the GET's 404/410 is proof of death.
         if status in (404, 410):
             if method == 'get':
-                return False
+                # A protected portal's 404 is its way of refusing the plain
+                # request; the managed browser is the only reader that proves
+                # whether the page exists, so the row keeps its source.
+                return _protected_portal_url(url)
             continue
         # Any other status means a live server answered — 2xx/3xx resolve,
         # 401/403/405/429 are bot walls, 5xx is an origin problem, not a

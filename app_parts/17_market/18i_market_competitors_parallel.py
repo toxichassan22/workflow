@@ -311,18 +311,21 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         matched = booking_search.match_district_facet(
             search.get('booking_districts') or [], district_ar, district_en)
 
-        def _apply_district(district_id, as_destination=False):
+        def _apply_district(district_id, as_destination=False, stars_filter='unset'):
+            if stars_filter == 'unset':
+                stars_filter = stars or None
             if as_destination:
                 # Booking serves the district itself as a destination; that
                 # page is narrower than the city and honours the class filter
                 # even when the nflt neighbourhood filter is ignored.
                 filtered_url = booking_search.build_search_url(
-                    city_en or city_ar, stars=stars or None,
+                    city_en or city_ar, stars=stars_filter or None,
                     dest_id=district_id, dest_type='district')
             else:
                 filtered_url = booking_search.build_search_url(
-                    city_en or city_ar, stars=stars or None, dest_id=dest_id,
-                    dest_type=dest_type, district_id=district_id)
+                    city_en or city_ar, stars=stars_filter or None,
+                    dest_id=dest_id, dest_type=dest_type,
+                    district_id=district_id)
             filtered = session.open_url(filtered_url)
             filtered = filtered if isinstance(filtered, dict) else {}
             filtered_hotels = ((filtered.get('booking_search') or {})
@@ -342,13 +345,47 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                   f'final={filtered_final[:320]}', flush=True)
             return filtered, filtered_final, applied
 
+        unfiltered_city = {}
+
+        def _unfiltered_city_cards():
+            """The city page without the class filter, read once.
+
+            A class-filtered page lists only the districts that hold a hotel of
+            that class, so it can omit the project's district entirely. A hotel
+            inside the district whose class Booking does not state is still a
+            competitor there, so the district is asked for without the class
+            filter before a run reports having found nothing.
+            """
+            if 'result' not in unfiltered_city:
+                plain_url = booking_search.build_search_url(
+                    city_en or city_ar, dest_id=dest_id, dest_type=dest_type)
+                plain = session.open_url(plain_url)
+                plain = plain if isinstance(plain, dict) else {}
+                citations.append(_booking_scan_citation(
+                    str(plain.get('final_url') or plain_url),
+                    plain.get('title'), plain.get('text')))
+                unfiltered_city['result'] = plain
+            return unfiltered_city['result']
+
+        def _narrow_unfiltered_to_district():
+            plain = _unfiltered_city_cards()
+            cards = booking_search.filter_hotels_by_district(
+                (plain.get('booking_search') or {}).get('hotels') or [],
+                district_ar, district_en)
+            if not cards:
+                return None
+            narrowed = dict(plain)
+            narrowed['booking_search'] = dict(
+                plain.get('booking_search') or {}, hotels=cards)
+            return narrowed
+
         def _district_card_search():
             """The city cards whose own Booking address names the district."""
             cards = booking_search.filter_hotels_by_district(
                 (search.get('booking_search') or {}).get('hotels') or [],
                 district_ar, district_en)
             if not cards:
-                return None
+                return _narrow_unfiltered_to_district()
             narrowed = dict(search)
             narrowed['booking_search'] = dict(
                 search.get('booking_search') or {}, hotels=cards)
@@ -356,12 +393,13 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
 
         def _use_filtered(district_id):
             nonlocal matched
-            attempts = ((False, 'neighbourhood filter'),
-                        (False, 'neighbourhood filter retry'),
-                        (True, 'district destination'))
-            for as_destination, label in attempts:
+            attempts = ((False, 'neighbourhood filter', 'unset'),
+                        (False, 'neighbourhood filter retry', 'unset'),
+                        (True, 'district destination', 'unset'),
+                        (False, 'district without class filter', None))
+            for as_destination, label, stars_filter in attempts:
                 filtered, filtered_final, applied = _apply_district(
-                    district_id, as_destination)
+                    district_id, as_destination, stars_filter)
                 hotels = ((filtered.get('booking_search') or {})
                           .get('hotels') or [])
                 kept = booking_search.filter_hotels_by_district(
@@ -457,6 +495,15 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 district_cards = booking_search.filter_hotels_by_district(
                     (search.get('booking_search') or {}).get('hotels') or [],
                     district_ar, district_en)
+                if not district_cards:
+                    # The class filter can hide the district's own hotels; the
+                    # city page read without it still names them.
+                    plain = _narrow_unfiltered_to_district()
+                    if plain is not None:
+                        search = plain
+                        matched = {'id': '', 'label': display_district or district_ar}
+                        district_cards = ((plain.get('booking_search') or {})
+                                          .get('hotels') or [])
                 if district_cards:
                     search = dict(search)
                     search['booking_search'] = dict(
@@ -580,7 +627,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     stay_label = hotel_stay.stay_nights_label_ar()
                     note = (
                         f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
-                        f"({booking_rooms.note_basis_ar(rate.get('tax_included'))}): "
+                        f"({booking_rooms.note_basis_ar(rate.get('tax_included'), rate.get('taxes'))}): "
                         f'{_range(price_from, price_to)} ر.س'
                         + (f' (محوّل من {source_currency})'
                            if source_currency != 'SAR' else '')

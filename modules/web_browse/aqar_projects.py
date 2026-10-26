@@ -491,12 +491,14 @@ def project_for_link(session, link, offer_lang='ar', cards=()):
 
 
 def scan(session, city, district='', pairs=(), limit=12,
-         budget_seconds=90, progress=None, offer_lang='ar'):
+         budget_seconds=90, progress=None, offer_lang='ar', districts=()):
     """Read the city's projects and complete up to ``limit`` of them.
 
     ``pairs`` are the requested (project_type, operation) Arabic pairs;
     an empty set reads every mapped project. A district scope keeps only
-    cards whose own address names that district — never widened.
+    projects whose own address names one of the client's districts — the
+    card's address when it prints one, otherwise the project page's — and is
+    never widened to another district.
     """
     report = progress if callable(progress) else (lambda *_args: None)
     start = time.time()
@@ -504,34 +506,55 @@ def scan(session, city, district='', pairs=(), limit=12,
     cards = catalog['cards']
     report(24, f'قراءة مشاريع عقار — {len(cards)} مشروعًا في {city}...')
     wanted = {tuple(pair) for pair in pairs or []}
-    wanted_district = _district_key(district) if district else ''
+    scope_districts = []
+    for item in list(districts or []) + [district]:
+        text = str(item or '').strip()
+        if text and text not in scope_districts:
+            scope_districts.append(text)
+    wanted_keys = {_district_key(item) for item in scope_districts if _district_key(item)}
     picked = []
     for card in cards:
         if not card.get('project_type') or not card.get('operation'):
             continue
         if wanted and (card['project_type'], card['operation']) not in wanted:
             continue
-        if wanted_district and _district_key(card.get('district')) != wanted_district:
+        card_district = _district_key(card.get('district'))
+        # A district scope never widens. A card that names a different
+        # district is dropped without a page read; one that names no district
+        # is confirmed from the project's own address below, because the
+        # directory card often prints only the city — dropping those cards
+        # returned zero projects for every district scope.
+        if wanted_keys and card_district and card_district not in wanted_keys:
             continue
         picked.append(card)
     rows = []
     limit_value = max(1, int(limit or 1))
-    for card in picked[:limit_value]:
+    for card in picked:
+        if len(rows) >= limit_value:
+            break
         if time.time() - start > float(budget_seconds or 90):
             break
         detail_page = session.open_url(card['url'])
         detail = parse_detail((detail_page or {}).get('text') or '')
+        found_district = (_district_key(card.get('district'))
+                          or _district_key(detail.get('district')))
+        if wanted_keys:
+            if found_district not in wanted_keys:
+                continue
         row = project_row(card, detail, offer_lang=offer_lang)
-        if district:
+        if scope_districts:
             # The row must carry the client's own district text so the
             # downstream scope filter (exact folded match) accepts it.
-            row['district'] = district
+            row['district'] = next(
+                (text for text in scope_districts
+                 if _district_key(text) == found_district),
+                scope_districts[0])
         rows.append(row)
         report(24, f'قراءة مشروع «{card["name"]}» من عقار '
                    f'({len(rows)} من {min(len(picked), limit_value)})...')
     return {
         'cards': len(cards),
-        'matched': len(picked),
+        'matched': len(rows),
         'rows': rows,
         'card_rows': cards,
         'project_links': catalog['links'],

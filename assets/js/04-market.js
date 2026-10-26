@@ -7,7 +7,13 @@
       state.competitor_scope = {
         mode: document.getElementById('marketCompetitorScopeMode')?.value || 'district',
         radius: competitorRadius?.value || '10',
-        radius_custom_km: competitorRadiusCustom?.value || ''
+        radius_custom_km: competitorRadiusCustom?.value || '',
+        districts: typeof marketCompetitorDistrictNames === 'function'
+          ? marketCompetitorDistrictNames()
+          : ((state.competitor_scope || {}).districts || []),
+        unit_types: typeof collectMarketUnitTypeSelections === 'function'
+          ? collectMarketUnitTypeSelections()
+          : ((state.competitor_scope || {}).unit_types || [])
       };
       state.comparison_types = typeof collectMarketComparisonTypes === 'function'
         ? collectMarketComparisonTypes() : (state.comparison_types || []);
@@ -62,6 +68,8 @@
       const customRadiusWrap = document.getElementById('marketCompetitorRadiusCustomWrap');
       if (radiusWrap) radiusWrap.hidden = scopeMode !== 'distance';
       if (customRadiusWrap) customRadiusWrap.hidden = scopeMode !== 'distance' || radius !== 'custom';
+      const districtsWrap = document.getElementById('marketCompetitorDistrictsWrap');
+      if (districtsWrap) districtsWrap.hidden = scopeMode !== 'district';
       syncMarketSummaryScopeUI();
     }
 

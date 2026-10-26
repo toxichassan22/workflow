@@ -559,6 +559,20 @@
     ];
     const MARKET_PROJECT_TYPES = ['سكني', 'تجاري', 'فندقي', 'صناعي ولوجستي'];
     const MARKET_MIXED_TYPE_OPTIONS = MARKET_PROJECT_TYPES.slice();
+    // The property kinds a competitor may be compared by. They narrow the
+    // search to the kinds the client picked; an empty selection keeps them all.
+    const MARKET_UNIT_TYPE_GROUPS = [
+      { key: 'residential', label: 'سكني', options: [
+        'استوديو', 'شقة', 'شقة دوبلكس', 'بنتهاوس', 'دور مستقل', 'ملحق سكني',
+        'فيلا مستقلة', 'فيلا دوبلكس', 'تاون هاوس', 'توين هاوس', 'قصر',
+        'بيت شعبي / بيت عربي', 'عمارة سكنية', 'مجمع سكني', 'سكن موظفين',
+        'سكن عمال'
+      ] },
+      { key: 'commercial', label: 'تجاري', options: [
+        'مكتب', 'محل تجاري', 'معرض تجاري', 'مركز تجاري', 'مستودع تجاري',
+        'برج مكاتب'
+      ] }
+    ];
     const MARKET_SUBTYPES = {
       'سكني': [],
       'تجاري': ['مكاتب', 'تجزئة ومحلات', 'مطاعم ومقاهي', 'مركز تجاري'],
@@ -809,7 +823,7 @@
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => { summary[item.key] = ''; });
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => { swot[item.key] = ''; });
       return {
-        competitor_scope: { mode: 'district' },
+        competitor_scope: { mode: 'district', districts: [], unit_types: [] },
         comparison_types: [],
         transaction_benchmarks: null,
         summary_scope: { cities: [] },

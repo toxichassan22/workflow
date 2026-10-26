@@ -15,7 +15,7 @@
 # ---------------------------------------------------------------------------
 
 import time
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 # Fetched page text under this size is a shell, not evidence — the entry falls
 # back to the browser instead of being stored.
@@ -76,6 +76,34 @@ _LISTING_CATEGORIES = {
     'فندقي': [],
     'صناعي ولوجستي': ['مستودعات'],
     '_default': ['شقق'],
+}
+
+# Client-selected property kinds → the aqar.fm listing category that carries
+# them. Building-level kinds resolve to the unit pages inside them, because
+# aqar publishes units, not buildings.
+_UNIT_TYPE_CATEGORIES = {
+    'استوديو': 'شقق',
+    'شقة': 'شقق',
+    'شقة دوبلكس': 'شقق',
+    'بنتهاوس': 'شقق',
+    'دور مستقل': 'أدوار',
+    'ملحق سكني': 'أدوار',
+    'فيلا مستقلة': 'فلل',
+    'فيلا دوبلكس': 'فلل',
+    'تاون هاوس': 'فلل',
+    'توين هاوس': 'فلل',
+    'قصر': 'فلل',
+    'بيت شعبي / بيت عربي': 'فلل',
+    'عمارة سكنية': 'شقق',
+    'مجمع سكني': 'شقق',
+    'سكن موظفين': 'شقق',
+    'سكن عمال': 'شقق',
+    'مكتب': 'مكاتب',
+    'برج مكاتب': 'مكاتب',
+    'محل تجاري': 'محلات',
+    'معرض تجاري': 'محلات',
+    'مركز تجاري': 'محلات',
+    'مستودع تجاري': 'مستودعات',
 }
 
 _DATASET_LABELS = {
@@ -223,22 +251,68 @@ def _payload_source_kinds(payload):
     return kinds
 
 
-def _listing_urls(kinds, ops, city):
+def _listing_urls(kinds, ops, city, unit_types=()):
     """City-scoped aqar.fm listing pages — the current asking-price stock a
     resident actually sees. aqar is a bot-walled SPA, so callers always emit
-    these needs_browser=True."""
+    these needs_browser=True.
+
+    An explicit property kind from the client narrows the categories to the
+    ones that carry it; nothing selected keeps the whole project-kind list."""
     categories = []
-    for kind in kinds or ['_default']:
-        kind_categories = _LISTING_CATEGORIES.get(
-            kind, _LISTING_CATEGORIES['_default'])
-        for cat in kind_categories:
-            if cat not in categories:
-                categories.append(cat)
+    selected = []
+    for item in unit_types or []:
+        cat = _UNIT_TYPE_CATEGORIES.get(_norm(item))
+        if cat and cat not in selected:
+            selected.append(cat)
+    if selected:
+        categories = selected
+    else:
+        for kind in kinds or ['_default']:
+            kind_categories = _LISTING_CATEGORIES.get(
+                kind, _LISTING_CATEGORIES['_default'])
+            for cat in kind_categories:
+                if cat not in categories:
+                    categories.append(cat)
     for op in sorted(ops):
         rent = op == 'إيجار'
         for cat in categories:
             yield (f'https://sa.aqar.fm/{quote(cat + ("-للإيجار" if rent else "-للبيع"))}/{quote(city)}',
                    f'aqar.fm — {cat} {op} — {city}')
+
+
+# aqar has no route that puts a district after the city: a
+# `/فلل-للبيع/جدة/الاندلس` link answers 404 or redirects to the national page
+# and teaches the run that the district has no projects. Only an advertised
+# unit's numeric id may follow the city, so a district-shaped segment is
+# dropped and the city page — which aqar does serve — is used instead.
+_AQAR_HOSTS = {'aqar.fm', 'sa.aqar.fm'}
+_AQAR_PROJECTS_PATH = '/المشاريع-العقارية'
+_AQAR_CITY_PATH_RE = re.compile(r'^/([^/]+)/([^/]+)/([^/]+)/?$')
+
+
+def normalize_aqar_listing_url(url):
+    """Drop a district-shaped segment from an aqar listing URL.
+
+    Project directory pages and advertised units (numeric id) are returned
+    untouched — only the `/category/city/<name>` shape aqar answers 404 to is
+    rewritten to `/category/city`.
+    """
+    text = str(url or '').strip()
+    if not text.startswith(('http://', 'https://')):
+        return text
+    parsed = urlsplit(text)
+    host = (parsed.hostname or '').casefold()
+    if host not in _AQAR_HOSTS and _registrable_host(host) not in _AQAR_HOSTS:
+        return text
+    path = parsed.path or ''
+    if path.startswith(_AQAR_PROJECTS_PATH):
+        return text
+    match = _AQAR_CITY_PATH_RE.match(path)
+    if not match or match.group(3).isdigit():
+        return text
+    return urlunsplit((parsed.scheme, parsed.netloc,
+                       f'/{match.group(1)}/{match.group(2)}',
+                       parsed.query, ''))
 
 
 def build_source_plan(payload, offer_lang='ar', market_wide=False):
@@ -255,7 +329,7 @@ def build_source_plan(payload, offer_lang='ar', market_wide=False):
     seen = {}
 
     def _add(url, purpose, label='', needs_browser=False):
-        url = str(url or '').strip()
+        url = normalize_aqar_listing_url(str(url or '').strip())
         if not url.startswith(('http://', 'https://')):
             return
         host = _source_host(url)
@@ -323,7 +397,11 @@ def build_source_plan(payload, offer_lang='ar', market_wide=False):
     for city in cities:
         _add(f'https://rei.rega.gov.sa/ar/cities/{quote(city)}', 'dataset',
              label=f'المؤشرات العقارية — صفحة المدينة — {city}', needs_browser=True)
-        for url, label in _listing_urls(kinds, ops, city):
+        for url, label in _listing_urls(
+                kinds, ops, city,
+                competitor_scope_unit_types(normalize_competitor_scope(
+                    payload.get('competitorScope')
+                    or payload.get('competitor_scope')))):
             _add(url, 'listing', label=label, needs_browser=True)
 
     entries.sort(key=lambda item: item['tier'])   # stable — catalog order survives inside a tier

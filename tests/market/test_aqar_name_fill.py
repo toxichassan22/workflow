@@ -168,6 +168,85 @@ class AqarNameFillTests(unittest.TestCase):
         self.assertFalse(row.get('price_value'))
         self.assertIn('إعلانات عقار', row.get('notes') or '')
 
+    def test_a_chosen_property_kind_reads_only_its_own_listing_page(self):
+        def listing_url(unit_types):
+            return [url for url, _label in
+                    self.module.market_study._listing_urls(
+                        ['سكني'], {'بيع'}, 'جدة', unit_types)]
+
+        villa = listing_url(['فيلا مستقلة'])[0]
+        flats = listing_url(['شقة'])[0]
+        # The villa page carries no advertisement of this project, so only
+        # the flat page can satisfy the control pass below.
+        pages = {villa: '<html><body></body></html>', flats: _LISTING_HTML}
+
+        def row():
+            return {'name': 'مرقاة الشاطئ', 'project_type': 'سكني',
+                    'operation_type': 'بيع'}
+
+        # No kind selected keeps the whole residential set.
+        _filled, session = self._fill(
+            [row()], {}, payload={'city': 'جدة'}, pages=pages)
+        self.assertIn(flats, session.fetched)
+
+        _filled, session = self._fill(
+            [row()], {},
+            payload={'city': 'جدة',
+                     'competitorScope': {'mode': 'district',
+                                         'unit_types': ['فيلا مستقلة']}},
+            pages=pages)
+        self.assertIn(villa, session.fetched)
+        self.assertNotIn(flats, session.fetched)
+
+    def test_a_blocked_directory_is_reported_not_treated_as_an_empty_one(self):
+        class _Blocked:
+            def fetch_html(self, url, timeout=None):
+                return {'html': '', 'error': 'access_denied'}
+
+            def open_url(self, url):
+                return {'text': '', 'error': ''}
+
+            def close(self):
+                pass
+
+        row = {'name': 'مرقاة الشاطئ', 'project_type': 'سكني',
+               'operation_type': 'بيع'}
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=_Blocked()):
+            self.module._fill_project_rows_from_aqar(
+                [row], {'city': 'جدة'}, {}, tenant_id=None)
+        note = row.get('notes') or ''
+        self.assertIn('تعذر قراءة دليل المشاريع', note)
+        self.assertIn('access_denied', note)
+        self.assertNotIn('لم يُعثر', note)
+
+    def test_a_blocked_listing_page_is_reported_not_read_as_an_empty_one(self):
+        directory_url = self.module.aqar_projects.build_projects_url('جدة')
+
+        class _ListingsBlocked:
+            def fetch_html(self, url, timeout=None):
+                if url == directory_url:
+                    return {'html': _DIRECTORY_HTML, 'error': ''}
+                return {'html': '', 'error': 'access_denied'}
+
+            def open_url(self, url):
+                return {'text': '', 'error': ''}
+
+            def close(self):
+                pass
+
+        row = {'name': 'مرقاة الشاطئ', 'project_type': 'سكني',
+               'operation_type': 'بيع'}
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=_ListingsBlocked()):
+            self.module._fill_project_rows_from_aqar(
+                [row], {'city': 'جدة'}, {}, tenant_id=None)
+        note = row.get('notes') or ''
+        self.assertIn('تعذر قراءة صفحات إعلانات عقار', note)
+        self.assertIn('access_denied', note)
+
     def test_a_single_word_name_is_not_matched_to_an_ad(self):
         row = {'name': 'المرقاة', 'project_type': 'سكني',
                'operation_type': 'بيع'}

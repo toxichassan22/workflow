@@ -52,6 +52,7 @@ def catalog_payload():
         'projectTypes': PROJECT_TYPE_MAIN,
         'subtypes': PROJECT_TYPE_SUBTYPES,
         'mixedUseComponents': MIXED_USE_COMPONENT_OPTIONS,
+        'unitTypesByKind': UNIT_TYPE_OPTIONS,
         'levels': PROJECT_LEVELS,
         'activityClassByType': ACTIVITY_CLASS_BY_TYPE,
         'generalAudience': GENERAL_TARGET_AUDIENCE,
@@ -352,6 +353,21 @@ def _site_context_lines(payload):
     return rows
 
 
+def _scope_districts_text(payload):
+    scope = normalize_competitor_scope(
+        payload.get('competitorScope') or payload.get('competitor_scope'))
+    districts = competitor_scope_districts(
+        scope, payload.get('district') or payload.get('neighborhood'))
+    return '، '.join(districts) if districts else 'غير مدخل'
+
+
+def _scope_unit_types_text(payload):
+    scope = normalize_competitor_scope(
+        payload.get('competitorScope') or payload.get('competitor_scope'))
+    unit_types = competitor_scope_unit_types(scope)
+    return '، '.join(unit_types) if unit_types else 'كل أنواع الوحدات'
+
+
 def _project_input_block(payload):
     components = payload.get('components')
     if isinstance(components, list) and components:
@@ -375,6 +391,8 @@ def _project_input_block(payload):
         f"- نوع المشروع الفرعي: {payload.get('projectSubtype') or payload.get('project_subtype') or 'غير مدخل'}",
         f"- المدينة: {payload.get('city') or 'غير مدخل'}",
         f"- الحي: {payload.get('district') or payload.get('neighborhood') or 'غير مدخل'}",
+        f"- أحياء نطاق المنافسين: {_scope_districts_text(payload)}",
+        f"- أنواع العقار المطلوبة في المنافسين: {_scope_unit_types_text(payload)}",
         f"- الإحداثيات: {payload.get('locationLat') or payload.get('location_lat') or ''} , {payload.get('locationLng') or payload.get('location_lng') or ''}",
         f"- مساحة الأرض: {payload.get('landArea') or payload.get('approved_financial_area') or payload.get('croquis_land_area') or 'غير مدخل'}",
         f"- مساحة البناء المتاحة: {payload.get('builtArea') or payload.get('built_area') or 'غير مدخل'}",

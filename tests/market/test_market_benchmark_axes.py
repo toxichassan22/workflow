@@ -242,6 +242,56 @@ class BenchmarkAxesTests(unittest.TestCase):
         self.assertFalse(any('مدينة أخرى' in row['name'] or 'حي آخر' in row['name']
                              for row in accepted))
 
+    def test_a_hotel_without_a_class_stays_inside_the_selected_scope(self):
+        """Owner decision 2026-10-27: a hotel in the scope whose class never
+        reached the page is a competitor too — kept with an empty class, never
+        relabelled with the selected one."""
+        axis = market_study.normalize_comparison_types([
+            {'type': 'hotel', 'stars': 4}])[0]
+        known = {'name': 'فندق معروف', 'project_type': 'فندقي',
+                 'hotel_stars': '4', 'operation_type': 'تشغيل فندقي'}
+        unknown = {'name': 'فندق بلا تصنيف', 'project_type': 'فندقي',
+                   'operation_type': 'تشغيل فندقي'}
+        other = {'name': 'فندق خمس نجوم', 'project_type': 'فندقي',
+                 'hotel_stars': '5', 'operation_type': 'تشغيل فندقي'}
+        self.assertTrue(market_study.competitor_matches_comparison_axis(
+            known, axis))
+        self.assertTrue(market_study.competitor_matches_comparison_axis(
+            unknown, axis))
+        self.assertFalse(market_study.competitor_matches_comparison_axis(
+            other, axis))
+
+        accepted = market_study.filter_and_cap_competitors(
+            [dict(unknown, city='جدة', district='الاندلس')], [axis],
+            scope={'mode': 'district'}, city='جدة', district='الاندلس')
+        self.assertEqual([row['name'] for row in accepted], ['فندق بلا تصنيف'])
+        self.assertEqual(accepted[0]['hotel_stars'], '')
+
+    def test_a_district_scope_may_cover_several_chosen_districts(self):
+        axis = market_study.normalize_comparison_types(
+            [{'type': 'residential', 'operation': 'sale'}])
+        scope = market_study.normalize_competitor_scope({
+            'mode': 'district',
+            'districts': ['الروضة', 'السلامة'],
+            'unit_types': ['فيلا مستقلة', 'شقة'],
+        })
+        self.assertEqual(scope['districts'], ['الروضة', 'السلامة'])
+        self.assertEqual(scope['unit_types'], ['فيلا مستقلة', 'شقة'])
+        self.assertIn('الروضة، السلامة', market_study.competitor_scope_text({
+            'competitorScope': scope, 'city': 'جدة', 'district': 'الروضة'}))
+        rows = [
+            {'name': 'الروضة أول', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'جدة', 'district': 'الروضة'},
+            {'name': 'السلامة ثان', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'جدة', 'district': 'السلامة'},
+            {'name': 'حي آخر', 'project_type': 'سكني', 'operation_type': 'بيع',
+             'city': 'جدة', 'district': 'الزهراء'},
+        ]
+        accepted = market_study.filter_and_cap_competitors(
+            rows, axis, scope=scope, city='جدة', district='الروضة')
+        self.assertEqual([row['name'] for row in accepted],
+                         ['الروضة أول', 'السلامة ثان'])
+
     def test_city_scope_allows_other_neighborhoods_in_selected_city_only(self):
         axis = market_study.normalize_comparison_types(
             [{'type': 'residential', 'operation': 'sale'}])

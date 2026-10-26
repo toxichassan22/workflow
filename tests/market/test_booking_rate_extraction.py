@@ -327,6 +327,32 @@ class BookingRateSelectionTests(unittest.TestCase):
         self.assertIn('current_price_after_discount: 578', block)
         self.assertIn('price_range_before_discount: 680', block)
 
+    def test_a_tax_inclusive_figure_loses_its_taxes_before_the_row_is_written(self):
+        # The view folds the property's taxes into the printed original:
+        # 680 printed with 103 stated as «included» is a 577 room price. The
+        # row carries the pre-discount, pre-tax figure (owner decision
+        # 2026-10-27), not the 680 stay total.
+        row = {
+            'block_id': '1559334001_438176898_2_2_0',
+            'price_attr': '577',
+            'current_text': 'SAR 577',
+            'original_value': '680',
+            'original_text': 'SAR 680',
+            'taxes_text': 'SAR 103 taxes and fees included',
+            'taxes_raw': '103',
+            'room_name': 'Standard Double Room',
+            'area_text': '35 m²',
+            'occupancy_text': 'Max. people: 2',
+            'row_text': 'Guests: 2 adults',
+        }
+        rate = booking_rooms.select_cheapest_rate([row])
+        self.assertTrue(rate['tax_included'])
+        self.assertEqual(rate['price'], 577.0)
+        self.assertEqual(rate['taxes'], 103.0)
+        self.assertEqual(booking_rooms.room_ranges([row])['price_from'], 577.0)
+        self.assertIn('بعد استبعاد الضرائب',
+                      booking_rooms.note_basis_ar(True, 103))
+
     def test_a_discount_never_inflates_the_original_room_price(self):
         # The live row displayed 340 as the original, 289 as the current
         # discounted price and +52 taxes. Applying 340/289 as a ratio

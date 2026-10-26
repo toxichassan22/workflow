@@ -189,24 +189,36 @@ def _listing_area_sqm(text):
     return value if 8 <= value <= 20000 else None
 
 
-def _listing_page_urls(row, city):
-    """The aqar city listing pages this row's own activity appears on."""
+def _listing_page_urls(row, city, unit_types=()):
+    """The aqar city listing pages this row's own activity appears on.
+
+    The property kinds the client picked narrow the categories to the ones
+    that carry them, and only the kinds that belong to this row's own kind.
+    """
     kind = str((row or {}).get('project_type') or '').strip()
     kind = {'سكني': 'سكني', 'تجاري': 'تجاري'}.get(kind, '')
     operation = str((row or {}).get('operation_type') or '').strip()
     if not kind or operation not in ('بيع', 'إيجار'):
         return []
+    row_kinds = set(market_study.UNIT_TYPE_OPTIONS.get(
+        {'سكني': 'residential', 'تجاري': 'commercial'}.get(kind)) or [])
+    kinds = [item for item in (unit_types or []) if item in row_kinds]
     try:
         return [url for url, _label in market_study._listing_urls(
-            [kind], {operation}, city)]
+            [kind], {operation}, city, kinds)]
     except Exception as exc:
         print(f'[MARKET STUDY] aqar listing urls skipped: {exc}', flush=True)
         return []
 
 
-def _find_listing_link(session, row, city, cache):
+# A refused listing page is not an empty one: the reason is kept in the page
+# cache so a row can state the block instead of claiming no advertisement.
+_LISTING_CACHE_ERROR_KEY = '__error__'
+
+
+def _find_listing_link(session, row, city, cache, unit_types=()):
     """The first listing card in the city pages whose own text names the row."""
-    for url in _listing_page_urls(row, city):
+    for url in _listing_page_urls(row, city, unit_types):
         if url not in cache:
             if len(cache) >= _LISTING_PAGE_LIMIT:
                 return None
@@ -215,7 +227,10 @@ def _find_listing_link(session, row, city, cache):
             except Exception as exc:
                 print(f'[MARKET STUDY] aqar listing page failed: {exc}',
                       flush=True)
-                page = {}
+                page = {'error': str(exc)}
+            error = str((page or {}).get('error') or '').strip()
+            if error:
+                cache[_LISTING_CACHE_ERROR_KEY] = error
             cache[url] = aqar_projects.parse_listing_links(
                 (page or {}).get('html') or '')
         match = aqar_projects.match_listing_link(
@@ -233,7 +248,7 @@ def _listing_name_is_specific(row, city):
     return len(tokens) >= 2
 
 
-def _fill_row_from_aqar_listings(session, row, city, cache):
+def _fill_row_from_aqar_listings(session, row, city, cache, unit_types=()):
     """Complete a row from one advertised unit's own page on aqar.
 
     A competitor that is a single advertised unit has no entry in the named
@@ -245,8 +260,13 @@ def _fill_row_from_aqar_listings(session, row, city, cache):
     """
     if not _listing_name_is_specific(row, city):
         return False
-    link = _find_listing_link(session, row, city, cache)
+    link = _find_listing_link(session, row, city, cache, unit_types)
     if not link:
+        blocked = str((cache or {}).get(_LISTING_CACHE_ERROR_KEY) or '').strip()
+        if blocked:
+            _set_note_if_empty(
+                row, 'تعذر قراءة صفحات إعلانات عقار '
+                     f'({blocked})؛ لم تُقرأ أسعار أو مساحات.')
         return False
     opened = session.open_url(link.get('url'))
     opened = opened if isinstance(opened, dict) else {}
@@ -317,6 +337,10 @@ def _fill_project_rows_from_aqar(rows, payload, data, tenant_id=None,
               flush=True)
         return 0
     offer_lang = slide_engine.resolve_offer_lang(data)
+    unit_types = market_study.competitor_scope_unit_types(
+        market_study.normalize_competitor_scope(
+            (payload or {}).get('competitorScope')
+            or (payload or {}).get('competitor_scope')))
     budget = float(budget_seconds or _AQAR_FILL_BUDGET_SECONDS)
     stop = time.time() + budget
     if deadline is not None:
@@ -340,9 +364,18 @@ def _fill_project_rows_from_aqar(rows, payload, data, tenant_id=None,
                     projects = aqar_projects.load_projects(session, city)
                 links = projects.get('links') or []
                 cards = projects.get('cards') or []
+                directory_error = str(projects.get('error') or '').strip()
                 print(f'[MARKET STUDY] aqar name fill city={city!r} '
                       f'links={len(links)} cards={len(cards)} '
-                      f'error={projects.get("error") or ""!r}', flush=True)
+                      f'error={directory_error!r}', flush=True)
+                if directory_error and not links:
+                    # A refused or blocked directory read is not an empty
+                    # directory; saying «لم يُعثر» here would hide the block.
+                    for row in targets:
+                        _set_note_if_empty(
+                            row, 'تعذر قراءة دليل المشاريع المسمّاة على عقار '
+                                 f'({directory_error})؛ لم تُقرأ أسعار أو مساحات.')
+                    return
                 total = len(targets)
                 listing_cache = {}
                 for index, row in enumerate(targets, start=1):
@@ -366,7 +399,7 @@ def _fill_project_rows_from_aqar(rows, payload, data, tenant_id=None,
                                   flush=True)
                     if not applied:
                         applied = _fill_row_from_aqar_listings(
-                            session, row, city, listing_cache)
+                            session, row, city, listing_cache, unit_types)
                     if not applied:
                         if _listing_name_is_specific(row, city):
                             note = ('لم يُعثر على هذا المشروع في دليل المشاريع '

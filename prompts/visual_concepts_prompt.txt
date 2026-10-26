@@ -14,3 +14,6 @@ Show the main building facade, modern luxury architecture, glass and stone mater
 CRITICAL: Output a pure, photorealistic architectural perspective photograph. NEVER include any text, titles, "CONCEPTUAL 3D MASSING", program keys, legends, or graphic labels.
 Do NOT overlay buildings onto raw satellite imagery.
 The composition is a cinematic exterior establishing shot, 16:9.
+
+
+# ==============================================================================

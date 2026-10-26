@@ -184,5 +184,107 @@ class BookingOnlyValueTests(unittest.TestCase):
         self.assertNotIn('searchresults.html', captured['prompt'])
 
 
+class _HotelSearchSession:
+    """A Booking session whose district filter is silently dropped.
+
+    The class-filtered page comes back without the district; the unfiltered
+    city page still lists the hotel, and its own address names the district.
+    """
+
+    def __init__(self):
+        self.opened = []
+
+    def open_url(self, url):
+        self.opened.append(url)
+        if '/hotel/' in url:
+            return {'final_url': url, 'title': 'WA Hotel Jeddah',
+                    'text': 'WA Hotel Jeddah'}
+        if 'nflt=' in url or 'dest_id=777' in url:
+            return {'final_url': url, 'title': 'Booking', 'text': '',
+                    'booking_search': {'hotels': []},
+                    'booking_districts': [
+                        {'id': '777', 'label': 'Al Andalus'}]}
+        return {'final_url': url, 'title': 'Booking', 'text': '',
+                'booking_search': {'hotels': [{
+                    'name': 'WA Hotel Jeddah',
+                    'location': 'Al Andalus, Jeddah',
+                    'url': BOOKING_URL,
+                    'text': 'Al Andalus',
+                }]},
+                'booking_districts': [{'id': '777', 'label': 'Al Andalus'}]}
+
+    def open_urls(self, urls):
+        return [self.open_url(url) for url in urls]
+
+    def close(self):
+        pass
+
+
+class BookingDistrictFallbackTests(unittest.TestCase):
+    """A dropped district filter must never end a hotel run with zero rows."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.temp_dir = tempfile.TemporaryDirectory()
+        db.DB_PATH = os.path.join(cls.temp_dir.name, 'hotel-district-fallback.db')
+        import app as application_module
+        cls.module = application_module
+        cls.app = application_module.app
+        cls.app.config.update(TESTING=True)
+        with cls.app.app_context():
+            db.init_db()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temp_dir.cleanup()
+
+    def _scan(self, stars='4'):
+        session = _HotelSearchSession()
+        with self.app.app_context(),                 patch.object(self.module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'sa')),                 patch.object(self.module, '_market_browser_session',
+                             return_value=session),                 patch.object(self.module.booking_destination,
+                             'resolve_city_destination',
+                             return_value={'dest_id': '1234',
+                                           'dest_type': 'city'}),                 patch.object(self.module.booking_destination,
+                             'remember_district_id'),                 patch.object(self.module.booking_destination,
+                             'cached_district_id', return_value=''),                 patch.object(self.module.booking_search,
+                             'search_has_district', return_value=False):
+            return self.module._booking_hotel_scan(
+                {'axis': {'type': 'hotel', 'stars': stars}},
+                {'city': 'جدة', 'district': 'حي الأندلس',
+                 'competitorScope': {'mode': 'district'}},
+                {}, offer_lang='ar')
+
+    def test_a_dropped_district_filter_falls_back_to_the_plain_city_page(self):
+        result = self._scan()
+        rows = [row for row in result.get('parsed', {}).get('competitors', [])
+                if isinstance(row, dict)]
+        self.assertEqual([row['name'] for row in rows], ['WA Hotel Jeddah'])
+        self.assertEqual(rows[0]['district'], 'حي الأندلس')
+        self.assertTrue(result.get('search_ran'))
+        self.assertEqual(result.get('parse_error'), '')
+
+    def test_the_fallback_reads_the_district_without_the_class_filter(self):
+        session = _HotelSearchSession()
+        with self.app.app_context(),                 patch.object(self.module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'sa')),                 patch.object(self.module, '_market_browser_session',
+                             return_value=session),                 patch.object(self.module.booking_destination,
+                             'resolve_city_destination',
+                             return_value={'dest_id': '1234',
+                                           'dest_type': 'city'}),                 patch.object(self.module.booking_destination,
+                             'remember_district_id'),                 patch.object(self.module.booking_destination,
+                             'cached_district_id', return_value=''),                 patch.object(self.module.booking_search,
+                             'search_has_district', return_value=False):
+            self.module._booking_hotel_scan(
+                {'axis': {'type': 'hotel', 'stars': '4'}},
+                {'city': 'جدة', 'district': 'حي الأندلس',
+                 'competitorScope': {'mode': 'district'}},
+                {}, offer_lang='ar')
+        # One of the attempts asks for the district with no class filter, so a
+        # hotel whose class Booking does not state is still read.
+        self.assertTrue(any('nflt=' in url and 'class=' not in url
+                            for url in session.opened), session.opened)
+
+
 if __name__ == '__main__':
     unittest.main()

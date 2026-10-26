@@ -585,6 +585,14 @@
         competitorRadiusCustom.value = String(next.competitor_scope?.radius_custom_km
           || next.competitor_scope?.radiusCustomKm || '');
       }
+      if (typeof renderMarketCompetitorDistricts === 'function') {
+        renderMarketCompetitorDistricts(next.competitor_scope?.districts
+          || next.competitor_scope?.district_list || []);
+      }
+      if (typeof renderMarketUnitTypes === 'function') {
+        renderMarketUnitTypes(next.competitor_scope?.unit_types
+          || next.competitor_scope?.unitTypes || []);
+      }
       if (typeof renderMarketComparisonTypes === 'function') {
         renderMarketComparisonTypes(Array.isArray(next.comparison_types) ? next.comparison_types : []);
       }

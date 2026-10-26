@@ -569,10 +569,26 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         except Exception as exc:
             print(f'[MARKET STUDY] aqar name fill skipped: {exc}', flush=True)
     if mode != 'fill':
+        # The scope filter decides which rows THIS run may add; it is not a
+        # licence to delete what the table already held. A hotel row completed
+        # from Booking carries no district, so filtering the merged list used
+        # to drop every existing row and leave an empty table after a run that
+        # discovered nothing new.
+        existing_keys = {
+            market_study._fold_choice(row.get('name'))
+            for row in existing
+            if isinstance(row, dict) and str(row.get('name') or '').strip()
+        }
+        fresh_rows = [row for row in merged
+                      if market_study._fold_choice(row.get('name'))
+                      not in existing_keys]
+        carried_rows = [row for row in merged
+                        if market_study._fold_choice(row.get('name'))
+                        in existing_keys]
         merged = market_study.filter_and_cap_competitors(
-            merged, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
+            fresh_rows, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
             offer_lang=offer_lang, scope=payload.get('competitorScope'),
-            city=payload.get('city'), district=payload.get('district'))
+            city=payload.get('city'), district=payload.get('district')) + carried_rows
     # The pool's pages are a superset of the citation list once the agent
     # layer records into it — union rather than assume, so matching works on
     # either side of that landing.
@@ -678,7 +694,28 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     # layer failed to ground rows or fill their prices, or the provider
     # reported an error we recovered from. The owner must see that instead of
     # a silent «تم» over an unsourced, unpriced table.
-    partial = bool(provider_error) or not search_ran or no_evidence > 0 or missing_prices > 0
+    nothing_generated = not [row for row in generated or []
+                             if isinstance(row, dict)
+                             and str(row.get('name') or '').strip()]
+    partial = (bool(provider_error) or not search_ran or no_evidence > 0
+               or missing_prices > 0 or nothing_generated)
+    if nothing_generated and merged:
+        kept_note = ('No new competitors were found; the existing rows were kept.'
+                     if offer_lang == slide_engine.OFFER_LANG_ENGLISH else
+                     'لم يُعثر على منافسين جدد؛ أُبقيت الصفوف الحالية.')
+        notes = f'{notes} — {kept_note}' if notes else kept_note
+    elif nothing_generated:
+        place = (str(payload.get('district') or '').strip()
+                 or str(payload.get('city') or '').strip())
+        if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+            empty_note = ('No matching competitors were found'
+                          + (f' in {place}.' if place
+                             else ' in the selected scope.'))
+        else:
+            empty_note = ('لم يُعثر على منافسين مطابقين'
+                          + (f' في «{place}».' if place
+                             else ' في النطاق المحدد.'))
+        notes = f'{notes} — {empty_note}' if notes else empty_note
     if not provider_error:
         # The main call can succeed while every per-competitor verify hits a
         # deterministic refusal (e.g. the tenant-key gate). Surface the row

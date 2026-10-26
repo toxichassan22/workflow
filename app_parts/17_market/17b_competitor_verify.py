@@ -254,16 +254,22 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
     source_ar = f' (محوّل من {currency})' if currency != 'SAR' else ''
     price_text = (row['price_from'] if row['price_from'] == row['price_to']
                   else f"{row['price_from']} - {row['price_to']}")
+    stated_taxes = rate.get('taxes')
     if offer_lang == 'en':
-        basis = ('taxes and fees included as the page prints them'
-                 if tax_included else 'taxes excluded')
+        if tax_included and stated_taxes:
+            basis = 'taxes and fees removed from the printed figure'
+        elif tax_included:
+            basis = 'taxes and fees included as the page prints them'
+        else:
+            basis = 'taxes excluded'
         note = ('Booking original pre-discount room-price range, '
                 f'{basis}, for {hotel_stay.stay_nights_label_en()}: '
                 f'{price_text} SAR{source_en}.')
     else:
         note = (
             f'نطاق أسعار الغرف مقابل {hotel_stay.stay_nights_label_ar()} '
-            f'على Booking ({booking_rooms.note_basis_ar(tax_included)}): '
+            f'على Booking '
+            f'({booking_rooms.note_basis_ar(tax_included, stated_taxes)}): '
             f'{price_text} ر.س{source_ar}.')
     existing = str(row.get('notes') or '').strip()
     if ('السعر الأصلي قبل الخصم' not in existing

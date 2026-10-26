@@ -883,6 +883,62 @@
       gap: 12px;
     }
 
+    #section-market-study .market-scope-districts {
+      margin-top: 12px;
+    }
+
+    #section-market-study .market-scope-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+
+    #section-market-study .market-scope-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f3f7fb;
+      font-size: 13px;
+    }
+
+    #section-market-study .market-scope-chip-remove {
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--teal-dark);
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+    }
+
+    #section-market-study .market-scope-add {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    #section-market-study .market-scope-add input {
+      max-width: 220px;
+    }
+
+    #section-market-study .market-unit-types {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    #section-market-study .market-unit-type-label {
+      margin-bottom: 4px;
+      color: var(--p);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
     #marketSummaryFailure,
     #marketCompetitorsNote {
       margin-top: 8px;

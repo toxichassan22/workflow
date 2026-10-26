@@ -41,6 +41,42 @@ PROJECT_TYPE_SUBTYPES = {
     ],
 }
 
+# The unit kinds a competitor table may compare (owner list, 2026-10-27).
+# They narrow aqar's listing categories and the competitor prompt; they never
+# delete a row that names no unit kind of its own.
+RESIDENTIAL_UNIT_TYPES = [
+    'استوديو',
+    'شقة',
+    'شقة دوبلكس',
+    'بنتهاوس',
+    'دور مستقل',
+    'ملحق سكني',
+    'فيلا مستقلة',
+    'فيلا دوبلكس',
+    'تاون هاوس',
+    'توين هاوس',
+    'قصر',
+    'بيت شعبي / بيت عربي',
+    'عمارة سكنية',
+    'مجمع سكني',
+    'سكن موظفين',
+    'سكن عمال',
+]
+
+COMMERCIAL_UNIT_TYPES = [
+    'مكتب',
+    'محل تجاري',
+    'معرض تجاري',
+    'مركز تجاري',
+    'مستودع تجاري',
+    'برج مكاتب',
+]
+
+UNIT_TYPE_OPTIONS = {
+    'residential': RESIDENTIAL_UNIT_TYPES,
+    'commercial': COMMERCIAL_UNIT_TYPES,
+}
+
 MIXED_USE_COMPONENT_OPTIONS = PROJECT_TYPE_SUBTYPES['متعدد الاستخدامات'][:]
 
 PROJECT_LEVELS = [
