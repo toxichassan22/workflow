@@ -165,6 +165,17 @@ _DISCOUNT_CONTEXT_RE = re.compile(
     r'|final\s*price|deal\s*price|after\s*discount',
     re.IGNORECASE)
 
+# A price is «per square metre» only when the page says so. A unit price
+# printed beside the unit's own area («السعر 1,250,000 ريال» … «المساحة 240
+# م²») used to be read as a per-sqm rate because both figures shared a window.
+_PER_SQM_RE = re.compile(
+    r'(?:سعر|إيجار|ايجار|price|rent|rate)\s*(?:ال)?متر'
+    r'|(?:ريال|ر\.?\s?س|SAR|SR)\s*/\s*(?:م²|م2|متر|sqm|square\s*met)'
+    r'|/\s*(?:م²|م2|sqm|متر\s*مربع|square\s*met)'
+    r'|per\s*sq(?:uare)?\s*(?:m\b|meter|metre)'
+    r'|للمتر\b',
+    re.IGNORECASE)
+
 _LISTING_PRICE_MIN = 300.0
 # A sub-300 SAR figure is a date or a percentage, but a €25 night rate is real —
 # foreign-currency mentions pass on a much lower floor.
@@ -219,7 +230,7 @@ def _extract_listing_prices(html):
                 period = 'ليلة'
             else:
                 period = ''
-            per_sqm = bool(re.search(r'متر|sqm|م²|per\s*sq', window, re.IGNORECASE))
+            per_sqm = bool(_PER_SQM_RE.search(window))
             # "Original" means THIS figure sits inside the struck element; a
             # promo figure whose window merely contains the struck tag is not
             # the original.

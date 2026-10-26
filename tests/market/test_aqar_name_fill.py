@@ -65,22 +65,44 @@ def _link_url(word):
 _ABYATNA_URL = _link_url('أبياتنا')
 _TOWER_URL = _link_url('الواجهة')
 
+_LISTING_URL = 'https://sa.aqar.fm/شقق-للبيع/جدة/12345'
+_LISTING_HTML = """
+<html><body>
+<a href="/شقق-للبيع/جدة/12345">
+  <div>شقة للبيع في مشروع مرقاة الشاطئ</div><div>حي الشاطئ ، جدة</div>
+  <div>1,250,000 ريال</div>
+</a>
+<a href="/عقارات-للبيع/جدة/999">
+  <div>أرض للبيع في حي النخبة</div>
+</a>
+</body></html>
+"""
+_LISTING_PAGE = {
+    'final_url': _LISTING_URL,
+    'title': 'شقة للبيع في مرقاة الشاطئ | عقار',
+    'text': 'السعر المطلوب 1,250,000 ريال\nالمساحة 240 م²\nحي الشاطئ ، جدة',
+}
+
 
 class _Session:
-    def __init__(self, details=None, html=_DIRECTORY_HTML):
+    def __init__(self, details=None, html=_DIRECTORY_HTML, pages=None):
         self.html = html
         self.details = details or {}
+        self.pages = pages or {}
         self.fetched = []
         self.opened = []
         self.closed = False
 
     def fetch_html(self, url, timeout=None):
         self.fetched.append(url)
-        return {'html': self.html, 'error': ''}
+        return {'html': self.pages.get(url, self.html), 'error': ''}
 
     def open_url(self, url):
         self.opened.append(url)
-        return {'text': self.details.get(url, ''), 'error': ''}
+        value = self.details.get(url, '')
+        if isinstance(value, dict):
+            return value
+        return {'text': value, 'error': ''}
 
     def close(self):
         self.closed = True
@@ -105,14 +127,55 @@ class AqarNameFillTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.temp_dir.cleanup()
 
-    def _fill(self, rows, details, payload=None):
-        session = _Session(details)
+    def _fill(self, rows, details, payload=None, pages=None):
+        session = _Session(details, pages=pages)
         with self.app.app_context(), \
                 patch.object(self.module, '_market_browser_session',
                              return_value=session):
             filled = self.module._fill_project_rows_from_aqar(
                 rows, payload or {'city': 'جدة'}, {}, tenant_id=None)
         return filled, session
+
+    def _listing_pages(self):
+        urls = [url for url, _label in self.module.market_study._listing_urls(
+            ['سكني'], {'بيع'}, 'جدة')]
+        return {url: _LISTING_HTML for url in urls}
+
+    def test_a_single_listed_unit_gets_its_asking_price_and_area(self):
+        row = {'name': 'مرقاة الشاطئ', 'project_type': 'سكني',
+               'operation_type': 'بيع'}
+        filled, session = self._fill(
+            [row], {_LISTING_URL: _LISTING_PAGE}, pages=self._listing_pages())
+        self.assertEqual(filled, 1)
+        self.assertEqual(row['price_type'], 'سعر الوحدة')
+        self.assertEqual(row['price_value'], '1250000')
+        self.assertEqual(row['area_sqm'], '240')
+        self.assertEqual(row['source'], 'عقار')
+        self.assertEqual(row['source_url'], _LISTING_URL)
+        self.assertEqual(row['row_source'], 'aqar')
+        self.assertEqual(row['verify_state'], 'verified')
+        self.assertIn(_LISTING_URL, session.opened)
+
+    def test_a_listing_that_does_not_name_the_row_is_rejected(self):
+        row = {'name': 'مرقاة الشاطئ', 'project_type': 'سكني',
+               'operation_type': 'بيع'}
+        other_page = dict(_LISTING_PAGE, title='شقة للبيع في حي السلامة | عقار',
+                          text='السعر 900,000 ريال\nالمساحة 180 م²')
+        filled, _session = self._fill(
+            [row], {_LISTING_URL: other_page}, pages=self._listing_pages())
+        self.assertEqual(filled, 0)
+        self.assertIsNone(row.get('source_url'))
+        self.assertFalse(row.get('price_value'))
+        self.assertIn('إعلانات عقار', row.get('notes') or '')
+
+    def test_a_single_word_name_is_not_matched_to_an_ad(self):
+        row = {'name': 'المرقاة', 'project_type': 'سكني',
+               'operation_type': 'بيع'}
+        filled, session = self._fill(
+            [row], {_LISTING_URL: _LISTING_PAGE}, pages=self._listing_pages())
+        self.assertEqual(filled, 0)
+        self.assertEqual(len(session.fetched), 1)
+        self.assertEqual(session.opened, [])
 
     def test_a_named_residential_row_gets_its_project_page_figures(self):
         row = {'name': 'أبياتنا هيلز', 'project_type': 'سكني',

@@ -724,6 +724,21 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         monthly = [item for item in prices if item['value'] == 45000.0]
         self.assertEqual(monthly[0]['period'], 'شهري')
 
+    def test_extract_listing_prices_keeps_a_unit_price_beside_its_area(self):
+        """A unit price printed next to the unit's area is not a per-sqm rate."""
+        module = self.application_module
+        html = ('<div>شقة للبيع في مرقاة الشاطئ</div>'
+                '<div>السعر المطلوب 1,250,000 ريال</div>'
+                '<div>المساحة 240 م²</div>')
+        prices = module._extract_listing_prices(html)
+        unit = [item for item in prices if item['value'] == 1250000.0]
+        self.assertTrue(unit)
+        self.assertFalse(unit[0]['per_sqm'])
+        per_sqm = module._extract_listing_prices(
+            '<div>شقة للبيع سعر المتر 4,500 ريال</div>')
+        self.assertTrue(per_sqm)
+        self.assertTrue(per_sqm[0]['per_sqm'])
+
     def test_fill_competitor_price_from_listings_sets_median_and_marks_estimated(self):
         """Empty price fields get the median of grounded listing mentions, a
         «متوسط» type, source attribution and the estimated marker."""

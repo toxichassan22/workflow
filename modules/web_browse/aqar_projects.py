@@ -238,6 +238,75 @@ def project_name_tokens(value):
     return tokens
 
 
+def parse_listing_links(html):
+    """Listing cards on a city page: the ad's own link and its card text.
+
+    A named competitor that is one advertised unit (not a project in the
+    directory) lives here; the card text names it, and the listing page behind
+    the link carries its price and area.
+    """
+    links = []
+    seen = set()
+    for attrs, inner in _ANCHOR_RE.findall(str(html or '')):
+        href_match = _HREF_RE.search(attrs)
+        if not href_match:
+            continue
+        href = unquote(html_module.unescape(href_match.group(1))).strip()
+        parts = urlsplit(href)
+        if parts.netloc and 'aqar.fm' not in parts.netloc:
+            continue
+        path = parts.path
+        if not path or _PROJECT_PATH_RE.match(path):
+            continue
+        text = _text(inner)[:300]
+        if len(text) < 8:
+            continue
+        url = urljoin(BASE, path)
+        if url in seen:
+            continue
+        seen.add(url)
+        links.append({'url': url, 'text': text})
+    return links
+
+
+def match_listing_link(links, name, city=''):
+    """The city listing whose own card names this typed competitor.
+
+    A card always names the unit and its location, so a single distinctive
+    word is never enough — «النخبة» is a district as often as a building. The
+    row needs two distinctive words, all present in the card, and the closest
+    card (the one with the least surrounding text) wins.
+    """
+    city_tokens = set(project_name_tokens(city))
+    wanted = [token for token in project_name_tokens(name)
+              if token not in city_tokens]
+    if len(set(wanted)) < 2:
+        return None
+    best = None
+    for link in links or []:
+        if not isinstance(link, dict):
+            continue
+        folded = booking_search.normalize_label(link.get('text'))
+        if not all(token in folded for token in wanted):
+            continue
+        score = len(folded)
+        if best is None or score < best[0]:
+            best = (score, link)
+    return best[1] if best else None
+
+
+def listing_page_names(title, text, name, city=''):
+    """True when the opened page is the listing this row names."""
+    city_tokens = set(project_name_tokens(city))
+    wanted = [token for token in project_name_tokens(name)
+              if token not in city_tokens]
+    if not wanted:
+        return False
+    folded = booking_search.normalize_label(
+        f'{title} {str(text or "")[:2000]}')
+    return all(token in folded for token in wanted)
+
+
 def match_project_link(links, name, city=''):
     """The directory entry whose own project name is this typed competitor.
 

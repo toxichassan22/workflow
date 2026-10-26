@@ -49,6 +49,22 @@ _NO_PRICE_CARD = """
 </a>
 """
 
+_LISTING_HTML = """
+<html><body>
+<a href="/شقق-للبيع/جدة/12345">
+  <div>شقة للبيع في مشروع مرقاة الشاطئ</div><div>حي الشاطئ ، جدة</div>
+  <div>1,250,000 ريال</div>
+</a>
+<a href="/عقارات-للبيع/جدة/999">
+  <div>أرض للبيع في حي النخبة</div>
+</a>
+<a href="/المشاريع-العقارية/شركة-الواجهة-4/برج-الواجهة-77">
+  <div>برج الواجهة</div>
+</a>
+<a href="/about">من نحن</a>
+</body></html>
+"""
+
 
 class _Session:
     def __init__(self, html=_CARDS_HTML, detail=_DETAIL_TEXT):
@@ -140,6 +156,36 @@ class AqarProjectLinkTests(unittest.TestCase):
             links, 'برج الواجهة الذهبية', city='جدة'))
         self.assertIsNone(aqar_projects.match_project_link(
             links, 'مجمع النخيل', city='جدة'))
+
+    def test_listing_cards_keep_their_own_link_and_card_text(self):
+        links = aqar_projects.parse_listing_links(_LISTING_HTML)
+        self.assertEqual(len(links), 2)
+        self.assertTrue(links[0]['url'].endswith('/شقق-للبيع/جدة/12345'))
+        self.assertIn('مرقاة الشاطئ', links[0]['text'])
+        self.assertFalse(any('المشاريع-العقارية' in link['url']
+                             for link in links))
+
+    def test_a_two_word_name_matches_its_listing_card(self):
+        links = aqar_projects.parse_listing_links(_LISTING_HTML)
+        match = aqar_projects.match_listing_link(
+            links, 'مرقاة الشاطئ', city='جدة')
+        self.assertIsNotNone(match)
+        self.assertIn('12345', match['url'])
+
+    def test_one_distinctive_word_never_claims_an_ad(self):
+        links = aqar_projects.parse_listing_links(_LISTING_HTML)
+        self.assertIsNone(aqar_projects.match_listing_link(
+            links, 'النخبة', city='جدة'))
+        self.assertIsNone(aqar_projects.match_listing_link(
+            links, 'مرقاة', city='جدة'))
+
+    def test_the_opened_listing_must_itself_name_the_row(self):
+        self.assertTrue(aqar_projects.listing_page_names(
+            'شقة للبيع في مرقاة الشاطئ | عقار',
+            'السعر 1,250,000 ريال', 'مرقاة الشاطئ', city='جدة'))
+        self.assertFalse(aqar_projects.listing_page_names(
+            'شقة للبيع في حي السلامة | عقار',
+            'السعر 900,000 ريال', 'مرقاة الشاطئ', city='جدة'))
 
     def test_a_card_less_project_is_still_read_by_name(self):
         links = aqar_projects.parse_project_links(_NO_PRICE_CARD)
