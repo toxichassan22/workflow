@@ -1,5 +1,6 @@
 """Named hotel rows are completed from Booking's own cards, not an agent."""
 
+import json
 import os
 import sys
 import tempfile
@@ -67,7 +68,9 @@ class BookingNameFillTests(unittest.TestCase):
             name_url: {'final_url': name_url, 'booking_search': {'hotels': [
                 {'name': 'WA Hotel Jeddah', 'url': hotel_url,
                  'location': 'الأندلس, جدة'}]}},
-            hotel_url: {'final_url': hotel_url, 'booking_rate': {
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'WA Hotel Jeddah, Jeddah - Booking.com',
+                        'booking_rate': {
                 'price': 629.0, 'current_price': 535.0, 'currency': 'SAR',
                 'price_from': 629.0, 'price_to': 1100.0,
                 'area_from': 32.0, 'area_to': 63.0, 'taxes': 111.0}},
@@ -134,7 +137,9 @@ class BookingNameFillTests(unittest.TestCase):
         session = _Session({
             name_url: {'final_url': name_url, 'booking_search': {'hotels': [
                 {'name': 'WA Hotel Jeddah', 'url': hotel_url}]}},
-            hotel_url: {'final_url': hotel_url, 'booking_rate': {
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'WA Hotel Jeddah, Jeddah - Booking.com',
+                        'booking_rate': {
                 'price': 629.0, 'currency': 'SAR'}},
         })
         events = []
@@ -185,7 +190,9 @@ class BookingNameFillTests(unittest.TestCase):
         session = _Session({
             city_url: {'final_url': city_url, 'booking_search': {'hotels': [
                 {'name': 'WA Hotel Jeddah', 'url': hotel_url}]}},
-            hotel_url: {'final_url': hotel_url, 'booking_rate': {
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'WA Hotel Jeddah, Jeddah - Booking.com',
+                        'booking_rate': {
                 'price': 629.0, 'currency': 'SAR', 'hotel_stars': 5}},
         })
         row = {'name': 'WA Hotel', 'project_type': 'فندقي'}
@@ -274,7 +281,9 @@ class BookingNameFillTests(unittest.TestCase):
             name_url: {'final_url': name_url, 'booking_search': {'hotels': [
                 {'name': 'شقق أداجيو الفندقية سيتي سنتر جدة',
                  'url': hotel_url}]}},
-            hotel_url: {'final_url': hotel_url, 'booking_rate': {
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'Adagio Jeddah City Center - Booking.com',
+                        'booking_rate': {
                 'price': 471.0, 'currency': 'SAR',
                 'price_from': 471.0, 'price_to': 900.0,
                 'area_from': 30.0, 'area_to': 55.0}},
@@ -291,6 +300,95 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(row['price_from'], '471')
         self.assertEqual(row['source_url'], hotel_url)
         self.assertIn(name_url, session.urls)
+
+    def test_the_name_resolver_maps_typed_names_to_booking_names(self):
+        content = json.dumps({'hotels': [
+            {'name': 'فندق جدة ماريوت طريق المدينة',
+             'booking_name': 'Jeddah Marriott Hotel Madinah Road'},
+            {'name': 'WA Hotel', 'booking_name': 'WA Hotel Jeddah'}]},
+            ensure_ascii=False)
+        reply = {'choices': [{'message': {'content': content}}]}
+        with self.app.app_context(), \
+                patch.object(self.module, 'call_text_chat',
+                             return_value=reply) as call:
+            hints = self.module._resolve_booking_names(
+                [{'name': 'فندق جدة ماريوت طريق المدينة'},
+                 {'name': 'WA Hotel'}],
+                {'city': 'جدة'}, {}, tenant_id=None)
+        self.assertEqual(hints['WA Hotel'], 'WA Hotel Jeddah')
+        self.assertEqual(hints['فندق جدة ماريوت طريق المدينة'],
+                         'Jeddah Marriott Hotel Madinah Road')
+        self.assertEqual(call.call_args.kwargs.get('model'),
+                         self.module.MARKET_STUDY_MODEL)
+        self.assertIn('JSON', call.call_args.args[0])
+
+    def test_a_booking_page_that_does_not_match_the_name_is_rejected(self):
+        module = self.module
+        self.assertTrue(module._page_identity(
+            'WA Hotel Jeddah',
+            'https://www.booking.com/hotel/sa/wa-jeddah.html',
+            ['WA Hotel'], 'جدة'))
+        self.assertFalse(module._page_identity(
+            'Boudl Hotel Jeddah',
+            'https://www.booking.com/hotel/sa/boudl-jeddah.html',
+            ['WA Hotel'], 'جدة'))
+
+    def test_the_ai_name_hint_finds_an_arabic_row(self):
+        city_url = self.module.booking_search.build_search_url(
+            'Jeddah', dest_id='-3096108')
+        hotel_url = 'https://www.booking.com/hotel/sa/wa-jeddah.html'
+        session = _Session({
+            city_url: {'final_url': city_url, 'booking_search': {'hotels': [
+                {'name': 'WA Hotel Jeddah', 'url': hotel_url}]}},
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'WA Hotel Jeddah - Booking.com',
+                        'booking_rate': {'price': 700.0, 'currency': 'SAR'}},
+        })
+        row = {'name': 'فندق دبليو', 'project_type': 'فندقي'}
+        self.app.config['TESTING'] = False
+        try:
+            with self.app.app_context(), \
+                    patch.object(self.module, '_market_browser_session',
+                                 return_value=session), \
+                    patch.object(self.module, '_english_booking_location',
+                                 return_value=('Jeddah', 'Al Andalus', 'SA')), \
+                    patch.object(self.module, '_resolve_booking_names',
+                                 return_value={
+                                     'فندق دبليو': 'WA Hotel Jeddah'}), \
+                    patch.object(
+                        self.module.booking_destination,
+                        'resolve_city_destination',
+                        return_value={'dest_id': '-3096108',
+                                      'dest_type': 'city'}):
+                filled = self.module._fill_hotel_rows_from_booking(
+                    [row], {'city': 'جدة'}, {}, tenant_id=None)
+        finally:
+            self.app.config['TESTING'] = True
+        self.assertEqual(filled, 1)
+        self.assertEqual(row['name'], 'فندق دبليو')
+        self.assertEqual(row['price_from'], '700')
+
+    def test_a_wrong_card_page_is_not_written(self):
+        name_url = self.module.booking_search.build_search_url('WA Hotel')
+        hotel_url = 'https://www.booking.com/hotel/sa/other-hotel.html'
+        session = _Session({
+            name_url: {'final_url': name_url, 'booking_search': {'hotels': [
+                {'name': 'WA Hotel Jeddah', 'url': hotel_url}]}},
+            hotel_url: {'final_url': hotel_url,
+                        'title': 'Other Hotel Jeddah - Booking.com',
+                        'booking_rate': {'price': 700.0, 'currency': 'SAR'}},
+        })
+        row = {'name': 'WA Hotel', 'project_type': 'فندقي'}
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session), \
+                patch.object(self.module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'SA')):
+            filled = self.module._fill_hotel_rows_from_booking(
+                [row], {'city': 'جدة'}, {}, tenant_id=None)
+        self.assertEqual(filled, 0)
+        self.assertIsNone(row.get('price_from'))
+        self.assertIn('لا تطابق', row.get('notes') or '')
 
     def test_fill_mode_skips_the_district_pipeline_and_completes_hotels(self):
         module = self.module

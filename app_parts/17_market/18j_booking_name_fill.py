@@ -8,7 +8,9 @@ whose title matches the row's name, open its ``/hotel/`` page, read the
 rate block, and write the room ranges onto the row.
 """
 
+import json
 import os
+import queue
 import re
 import threading
 import time
@@ -195,6 +197,74 @@ def _target_hotel_stars(payload):
     return stars
 
 
+def _resolve_booking_names(rows, payload, data=None, tenant_id=None):
+    """One text call maps each typed hotel name to Booking's own Latin name.
+
+    The fill's matching is deterministic; the only step that needs language
+    understanding is the Arabic/Latin and spelling conversion, so it happens
+    once, and the model returns names only — never URLs or figures.
+    """
+    names = []
+    for row in rows or []:
+        name = str((row or {}).get('name') or '').strip()
+        if name and name not in names:
+            names.append(name)
+    if not names:
+        return {}
+    city = str((payload or {}).get('city') or '').strip()
+    system_prompt = (
+        'You map hotel names to the exact property name Booking.com uses. '
+        'Return JSON only: {"hotels":[{"name":"<typed name>",'
+        '"booking_name":"<the official Booking.com property name in Latin '
+        'letters>"}]}. Never invent a hotel; if the typed name is already the '
+        'official name, repeat it. No URLs, prices, or commentary.')
+    user_content = (f'City: {city}\nHotels:\n'
+                    + json.dumps(names, ensure_ascii=False))
+    try:
+        response = call_text_chat(
+            system_prompt, user_content, temperature=0.1, max_tokens=1200,
+            model=MARKET_STUDY_MODEL,
+            usage_ctx=_usage_ctx('market', data, tenant_id=tenant_id))
+    except Exception as exc:
+        print(f'[MARKET STUDY] booking name resolver failed: {exc}',
+              flush=True)
+        return {}
+    parsed, error = _parse_market_model_json(response)
+    if error:
+        print(f'[MARKET STUDY] booking name resolver: {error}', flush=True)
+        return {}
+    resolved = {}
+    for item in (parsed or {}).get('hotels') or []:
+        if not isinstance(item, dict):
+            continue
+        typed = str(item.get('name') or '').strip()
+        official = str(item.get('booking_name') or '').strip()
+        if typed and official and typed not in resolved:
+            resolved[typed] = official
+    print(f'[MARKET STUDY] booking name resolver resolved='
+          f'{len(resolved)}/{len(names)}', flush=True)
+    return resolved
+
+
+def _name_variants(row, hints=None):
+    """The model's official Booking spelling first, then the typed name."""
+    name = str((row or {}).get('name') or '').strip()
+    hint = str((hints or {}).get(name) or '').strip()
+    variants = []
+    for value in (hint, name):
+        if value and value.casefold() not in {
+                item.casefold() for item in variants}:
+            variants.append(value)
+    return variants
+
+
+def _page_identity(title, url, variants, city_terms=''):
+    """True when the opened booking page is one of this row's name variants."""
+    return any(_title_matches(title, variant, city_terms)
+               or _url_matches_name(url, variant, city_terms)
+               for variant in variants or [])
+
+
 def _apply_rate(row, rate, url, target_stars=()):
     price_from = rate.get('price_from') or rate.get('price')
     price_to = rate.get('price_to') or price_from
@@ -291,22 +361,42 @@ def _title_matches(title, name, city_terms=''):
 
 
 def _fill_from_candidate_pages(session, row, city_ar, city_terms='',
-                               target_stars=()):
+                               target_stars=(), variants=None):
     """Open the searched Booking pages and accept the one whose own title, or
-    whose search title together with Booking's URL slug, names the hotel."""
-    name = row.get('name')
+    whose search title together with Booking's URL slug, names the hotel.
+
+    The first name variant that yields candidates owns the search; at most
+    three property pages are opened, because a variant pair used to double
+    the page waits and starve the fill's own deadline.
+    """
+    variants = list(variants or _name_variants(row))
+    candidates = []
+    seen_urls = set()
+    for variant in variants:
+        found = _booking_hotel_candidates(session, variant, city_ar)
+        for candidate in found:
+            url = str((candidate or {}).get('url') or '').strip()
+            if url and url not in seen_urls:
+                seen_urls.add(url)
+                candidates.append((variant, candidate))
+        if candidates:
+            break
     rate_seen = False
     identity_seen = False
-    for candidate in _booking_hotel_candidates(session, name, city_ar):
+    for variant, candidate in candidates[:3]:
         url = candidate.get('url')
         prop = session.open_url(url)
         prop = prop if isinstance(prop, dict) else {}
         rate = prop.get('booking_rate')
         title = str(prop.get('title') or (rate or {}).get('page_title') or '')
-        identity = _title_matches(title, name, city_terms) or (
-            _title_matches(candidate.get('title') or '', name, city_terms)
-            and _url_matches_name(url, name, city_terms))
-        print(f'[MARKET STUDY] booking candidate name={name!r} '
+        title_hit = any(_title_matches(candidate.get('title') or '', item,
+                                       city_terms)
+                        for item in variants)
+        url_hit = any(_url_matches_name(url, item, city_terms)
+                      for item in variants)
+        identity = _page_identity(title, url, variants, city_terms) or (
+            title_hit and url_hit)
+        print(f'[MARKET STUDY] booking candidate name={variant!r} '
               f'url={url[:120]!r} page_title={title[:80]!r} '
               f'identity={identity} '
               f'rate={rate.get("price") if isinstance(rate, dict) else None} '
@@ -336,6 +426,13 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
           f'targets={len(targets)}', flush=True)
     if not targets:
         return 0
+    hints = {}
+    if not current_app.config.get('TESTING'):
+        try:
+            hints = _resolve_booking_names(targets, payload, data, tenant_id)
+        except Exception as exc:
+            print(f'[MARKET STUDY] booking name resolver skipped: {exc}',
+                  flush=True)
     budget = float(budget_seconds or NAME_FILL_BUDGET_SECONDS)
     result = {'filled': 0}
     timed_out = threading.Event()
@@ -351,7 +448,8 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
         # «cannot switch to a different thread». The fill owns its thread and
         # its browser, and the join bounds it.
         result['filled'] = _fill_rows(targets, payload, data, tenant_id,
-                                      budget, progress=_report, band=band)
+                                      budget, progress=_report, band=band,
+                                      hints=hints)
 
     thread = threading.Thread(target=_worker, name='booking-name-fill',
                               daemon=True)
@@ -363,7 +461,7 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
 
 
 def _fill_rows(targets, payload, data, tenant_id, budget,
-               progress=None, band=(12, 48)):
+               progress=None, band=(12, 48), hints=None):
     city_ar = str((payload or {}).get('city') or '').strip()
     report = progress if callable(progress) else (lambda *_args: None)
     lo, hi = band if isinstance(band, (tuple, list)) and len(band) == 2 else (12, 48)
@@ -380,7 +478,7 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
     done = [0]
     lock = threading.Lock()
 
-    def _worker(chunk):
+    def _worker():
         session = _market_browser_session()
         if session is None:
             return
@@ -407,24 +505,36 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
             print(f'[MARKET STUDY] booking city cards skipped: {exc}',
                   flush=True)
         try:
-            for _index, row in chunk:
+            while True:
+                try:
+                    row = task_queue.get_nowait()
+                except queue.Empty:
+                    break
                 if time.time() > deadline:
                     row['notes'] = ('لم تُكمل بيانات الفندق في الوقت '
                                     'المتاح لهذه المحاولة.')
                     continue
-                card = _card_for_name(city_cards, row.get('name'), city_terms)
-                if card:
-                    print(f'[MARKET STUDY] booking city card match '
-                          f'name={row.get("name")!r} '
-                          f'url={str(card.get("url") or "")[:120]!r}',
-                          flush=True)
-                else:
-                    card = _card_from_name_search(session, row.get('name'),
-                                                  city_terms)
+                variants = _name_variants(row, hints)
+                card = None
+                for variant in variants:
+                    card = _card_for_name(city_cards, variant, city_terms)
+                    if card:
+                        print(f'[MARKET STUDY] booking city card match '
+                              f'name={variant!r} '
+                              f'url={str(card.get("url") or "")[:120]!r}',
+                              flush=True)
+                        break
+                if not card:
+                    for variant in variants:
+                        card = _card_from_name_search(session, variant,
+                                                      city_terms)
+                        if card:
+                            break
                 url = str((card or {}).get('url') or '').strip()
                 if not url:
-                    if _fill_from_candidate_pages(session, row, city_ar,
-                                                  city_terms, target_stars):
+                    if _fill_from_candidate_pages(
+                            session, row, city_ar, city_terms, target_stars,
+                            variants):
                         with lock:
                             filled[0] += 1
                     else:
@@ -434,7 +544,23 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                 else:
                     prop = session.open_url(url)
                     rate = (prop or {}).get('booking_rate')
-                    if isinstance(rate, dict) and rate.get('price') is not None:
+                    title = str((prop or {}).get('title') or
+                                (rate or {}).get('page_title') or '')
+                    if not _page_identity(title, url, variants, city_terms):
+                        print(f'[MARKET STUDY] booking page identity rejected '
+                              f'name={row.get("name")!r} url={url[:120]!r} '
+                              f'title={title[:80]!r}', flush=True)
+                        if _fill_from_candidate_pages(
+                                session, row, city_ar, city_terms,
+                                target_stars, variants):
+                            with lock:
+                                filled[0] += 1
+                        else:
+                            row.setdefault('notes', (
+                                'صفحة Booking المفتوحة لا تطابق اسم الفندق؛ '
+                                'لم تُكتب بيانات.'))
+                    elif (isinstance(rate, dict)
+                          and rate.get('price') is not None):
                         _apply_rate(row, rate, url, target_stars=target_stars)
                         with lock:
                             filled[0] += 1
@@ -455,21 +581,29 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
             except Exception:
                 pass
 
+    task_queue = queue.Queue()
+    for row in targets:
+        task_queue.put(row)
     worker_count = min(3, len(targets))
-    chunks = [[] for _ in range(worker_count)]
-    for index, row in enumerate(targets):
-        chunks[index % worker_count].append((index, row))
     report(lo, f'البحث باسم كل فندق على Booking.com '
                f'({len(targets)} فندق)...')
-    threads = [threading.Thread(target=_worker, args=(chunk,),
+    threads = [threading.Thread(target=_worker,
                                 name=f'booking-name-fill-{number}',
                                 daemon=True)
-               for number, chunk in enumerate(chunks)]
+               for number in range(worker_count)]
     for thread in threads:
         thread.start()
     for thread in threads:
         remaining = max(5, deadline + 30 - time.time())
         thread.join(timeout=remaining)
+    # A row no worker reached before the join keeps an honest note instead of
+    # silently looking untouched.
+    while True:
+        try:
+            row = task_queue.get_nowait()
+        except queue.Empty:
+            break
+        row['notes'] = ('لم تُكمل بيانات الفندق في الوقت المتاح لهذه المحاولة.')
     report(hi, 'اكتمل إكمال بيانات الفنادق من Booking.com.')
     return filled[0]
 
