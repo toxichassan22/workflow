@@ -36,6 +36,13 @@ _GENERIC_NAME_TOKENS = {
     'the', 'and', 'by', 'a', 'an', 'of', 'in', 'at', 'stay', 'stays',
 }
 _HOTEL_SLUG_RE = re.compile(r'/hotel/[a-z]{2}/([^/?#]+)', re.I)
+# Address words in a catalogue label must never identify a hotel on their own.
+_ADDRESS_NAME_TOKENS = {
+    'road', 'street', 'st', 'avenue', 'ave', 'district', 'neighborhood',
+    'neighbourhood', 'madinah', 'makkah', 'jeddah', 'riyadh', 'saudi',
+    'طريق', 'شارع', 'حي', 'الحي', 'المدينه', 'المدينة', 'مكه', 'مكة',
+    'جده', 'جدة', 'السعودية',
+}
 
 
 def _fold_latin(value):
@@ -50,7 +57,8 @@ def _name_tokens(value):
             if len(token) >= 3 and token not in _GENERIC_NAME_TOKENS]
 
 
-def _tokens_match(wanted_tokens, candidate_text, required=None):
+def _tokens_match(wanted_tokens, candidate_text, required=None,
+                  min_ratio=0.0):
     if not wanted_tokens:
         return False
     have = set(_name_tokens(candidate_text))
@@ -58,7 +66,14 @@ def _tokens_match(wanted_tokens, candidate_text, required=None):
         return False
     hits = sum(1 for token in wanted_tokens if token in have)
     needed = required if required is not None else min(2, len(wanted_tokens))
-    return hits >= needed
+    if hits < needed:
+        return False
+    return hits / len(wanted_tokens) >= min_ratio
+
+
+def _token_hits(wanted_tokens, candidate_text):
+    have = set(_name_tokens(candidate_text))
+    return sum(1 for token in wanted_tokens if token in have)
 
 
 def _hotel_slug_tokens(url):
@@ -133,12 +148,22 @@ def _card_for_name(cards, name, city_terms=''):
     # spelling twin like بلس/بلاس). Two distinctive non-city tokens identify
     # the brand without ever matching a sibling that shares only the city.
     city_tokens = set(_name_tokens(_fold_latin(city_terms)))
-    wanted_tokens = [token for token in _name_tokens(name)
-                     if token not in city_tokens]
+    wanted_tokens = [
+        token for token in _name_tokens(name)
+        if token not in city_tokens and token not in _ADDRESS_NAME_TOKENS]
+    if not wanted_tokens:
+        wanted_tokens = [token for token in _name_tokens(name)
+                         if token not in city_tokens]
+    token_matches = []
     for card in cards:
-        if _tokens_match(wanted_tokens, card.get('name'),
-                         required=min(2, len(wanted_tokens))):
-            return card
+        if not _tokens_match(
+                wanted_tokens, card.get('name'),
+                required=min(2, len(wanted_tokens)), min_ratio=0.6):
+            continue
+        hits = _token_hits(wanted_tokens, card.get('name'))
+        token_matches.append((hits / len(wanted_tokens), hits, card))
+    if token_matches:
+        return max(token_matches, key=lambda item: (item[0], item[1]))[2]
     for card in cards:
         if _url_matches_name(card.get('url'), name, city_terms):
             return card

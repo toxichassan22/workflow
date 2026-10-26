@@ -418,6 +418,27 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertIsNone(self.module._card_for_name(
             [wrong], 'Mövenpick Hotel Tahlia Jeddah', 'جدة Jeddah'))
 
+    def test_a_shared_street_name_does_not_match_a_different_hotel(self):
+        adagio = {
+            'name': ('Adagio Jeddah City CenterP. O. Box 43356, '
+                     'Madinah Branch Road, Al Andalus Jeddah 23326'),
+            'url': 'https://www.booking.com/hotel/sa/'
+                   'adagio-jeddah-city-center.html',
+        }
+        best_western = {
+            'name': ('Best Western Plus Jeddah Hotel Madinah Road'
+                     'Madinah Road, Abi Hatham Al Ansari St'),
+            'url': 'https://www.booking.com/hotel/sa/'
+                   'best-western-plus-jeddah.html',
+        }
+        self.assertIs(
+            self.module._card_for_name(
+                [adagio, best_western],
+                'Best Western Plus Madinah Road Jeddah', 'جدة Jeddah'),
+            best_western)
+        self.assertIsNone(self.module._card_for_name(
+            [adagio], 'Best Western Plus Madinah Road Jeddah', 'جدة Jeddah'))
+
     def test_a_card_missing_a_road_word_still_matches_two_brand_tokens(self):
         card = {'name': 'بيست ويسترن بلاس جدة',
                 'url': 'https://www.booking.com/hotel/sa/'
