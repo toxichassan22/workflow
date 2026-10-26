@@ -80,12 +80,16 @@ class BookingRateSelectionTests(unittest.TestCase):
         block = booking_rooms.format_rate_block(rate)
         self.assertIn('price_before_discount: 350', block)
         self.assertIn('current_price_after_discount: 245', block)
-        self.assertIn('price_basis: original pre-discount', block)
+        self.assertIn('price_range_original_plus_taxes: 394', block)
+        self.assertIn('price_basis: original pre-discount room price plus',
+                      block)
         parsed = booking_rooms.parse_rate_block(block)
         self.assertEqual(parsed['price'], 350.0)
         self.assertEqual(parsed['current_price'], 245.0)
         self.assertEqual(parsed['area_sqm'], 35.0)
         self.assertEqual(parsed['taxes'], 44.0)
+        self.assertEqual(parsed['price_from'], 394.0)
+        self.assertEqual(parsed['price_to'], 394.0)
 
     def test_arabic_room_name_and_area_are_parsed(self):
         rate = booking_rooms.select_cheapest_rate(
@@ -101,8 +105,8 @@ class BookingRateSelectionTests(unittest.TestCase):
             _row('101_201_2_2_0', 400, 500, area='42 m²', room='Suite'),
         ]
         ranges = booking_rooms.room_ranges(rows)
-        self.assertEqual(ranges['price_from'], 350.0)
-        self.assertEqual(ranges['price_to'], 500.0)
+        self.assertEqual(ranges['price_from'], 394.0)
+        self.assertEqual(ranges['price_to'], 544.0)
         self.assertEqual(ranges['area_from'], 35.0)
         self.assertEqual(ranges['area_to'], 42.0)
         self.assertEqual(ranges['room_count'], 2)
@@ -116,8 +120,8 @@ class BookingRateSelectionTests(unittest.TestCase):
                  row_text='Guests: 2 adults Very good breakfast included'),
         ]
         ranges = booking_rooms.room_ranges(rows)
-        self.assertEqual(ranges['price_from'], 350.0)
-        self.assertEqual(ranges['price_to'], 560.0)
+        self.assertEqual(ranges['price_from'], 394.0)
+        self.assertEqual(ranges['price_to'], 604.0)
         self.assertEqual(ranges['area_from'], 35.0)
         self.assertEqual(ranges['area_to'], 42.0)
         self.assertEqual(ranges['room_count'], 2)
@@ -129,7 +133,7 @@ class BookingRateSelectionTests(unittest.TestCase):
                  room='Family Suite', row_text='Guests: 4 adults'),
         ]
         ranges = booking_rooms.room_ranges(rows)
-        self.assertEqual(ranges['price_to'], 1200.0)
+        self.assertEqual(ranges['price_to'], 1244.0)
         self.assertEqual(ranges['area_to'], 90.0)
         self.assertEqual(ranges['room_count'], 2)
 
@@ -142,7 +146,7 @@ class BookingRateSelectionTests(unittest.TestCase):
         ranges = booking_rooms.room_ranges(rows)
         self.assertEqual((ranges['area_from'], ranges['area_to']),
                          (35.0, 35.0))
-        self.assertEqual(ranges['price_to'], 430.0)
+        self.assertEqual(ranges['price_to'], 474.0)
 
     def test_block_round_trips_the_price_and_area_ranges(self):
         rows = [
@@ -152,11 +156,11 @@ class BookingRateSelectionTests(unittest.TestCase):
         rate = booking_rooms.select_cheapest_rate(rows)
         rate.update(booking_rooms.room_ranges(rows))
         block = booking_rooms.format_rate_block(rate)
-        self.assertIn('price_range_before_discount: 350 - 500', block)
+        self.assertIn('price_range_original_plus_taxes: 394 - 544', block)
         self.assertIn('area_range_sqm: 35 - 42', block)
         parsed = booking_rooms.parse_rate_block(block)
         self.assertEqual((parsed['price_from'], parsed['price_to']),
-                         (350.0, 500.0))
+                         (394.0, 544.0))
         self.assertEqual((parsed['area_from'], parsed['area_to']),
                          (35.0, 42.0))
 
@@ -185,6 +189,54 @@ class BookingRateSelectionTests(unittest.TestCase):
         block = booking_rooms.format_rate_block(rate)
         self.assertIn('price_before_discount: 680', block)
         self.assertIn('current_price_after_discount: 578', block)
+        self.assertIn('price_range_original_plus_taxes: 783', block)
+
+    def test_a_discount_never_inflates_the_original_plus_tax_amount(self):
+        # The live row displayed 340 as the original, 289 as the current
+        # discounted price and +52 taxes. Applying 340/289 as a ratio
+        # multiplied the original into 400; the client's screen reads
+        # 340 + 52 = 392, and that is what the table must carry.
+        row = {
+            'block_id': '1559334001_438176898_2_2_0',
+            'price_attr': '340',
+            'current_text': '289 SAR',
+            'original_value': '340',
+            'original_text': '340 SAR',
+            'taxes_text': '+52 SAR taxes and fees',
+            'taxes_raw': '51.6588',
+            'room_name': 'Standard Double Room',
+            'area_text': '35 m²',
+            'occupancy_text': 'Max. people: 2',
+            'row_text': 'Guests: 2 adults',
+        }
+        ranges = booking_rooms.room_ranges([row])
+        self.assertEqual(ranges['price_from'], 392.0)
+        self.assertEqual(ranges['price_to'], 392.0)
+        block = booking_rooms.format_rate_block(
+            booking_rooms.select_cheapest_rate([row]))
+        self.assertIn('price_range_original_plus_taxes: 392', block)
+
+    def test_a_local_currency_row_becomes_the_displayed_original_plus_tax(self):
+        # One night in the browser's EGP display: the page shows 5,010 EGP
+        # original, 4,258 EGP current and +761 EGP taxes beside the requested
+        # 289 SAR current. 5,010 and 761 convert to 340 and 52, so the range
+        # must read 392, not 400.
+        row = {
+            'block_id': '1559334001_438176898_2_2_0',
+            'price_attr': '289',
+            'current_text': '4,258 EGP',
+            'original_value': '5010',
+            'original_text': '5,010 EGP',
+            'taxes_text': '+761 EGP taxes and fees',
+            'taxes_raw': '761',
+            'room_name': 'Standard Double Room',
+            'area_text': '35 م²',
+            'occupancy_text': 'Max. people: 2',
+            'row_text': 'Guests: 2 adults',
+        }
+        ranges = booking_rooms.room_ranges([row])
+        self.assertEqual(ranges['price_from'], 392.0)
+        self.assertEqual(ranges['price_to'], 392.0)
 
     def test_local_currency_original_is_restated_in_the_page_currency(self):
         row = {
@@ -206,6 +258,9 @@ class BookingRateSelectionTests(unittest.TestCase):
         self.assertAlmostEqual(rate['price'], 629.5, delta=0.6)
         self.assertAlmostEqual(rate['taxes'], 111.0, places=1)
         self.assertEqual(rate['current_price_including_tax'], 646.0)
+        ranges = booking_rooms.room_ranges([row])
+        self.assertAlmostEqual(ranges['price_from'], 741.0, delta=1.0)
+        self.assertAlmostEqual(ranges['price_to'], 741.0, delta=1.0)
 
 
 class BookingRoomTableWiringTests(unittest.TestCase):

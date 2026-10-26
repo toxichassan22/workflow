@@ -61,7 +61,7 @@ class BookingRateApplyTests(unittest.TestCase):
             'content': 'property page\n' + booking_rooms.format_rate_block(_rate()),
         }}
 
-    def test_ai_hotel_row_gets_the_original_base_room_rate_and_area(self):
+    def test_ai_hotel_row_gets_the_original_plus_tax_rate_and_area(self):
         row = {
             'name': 'Sedra Al Alami',
             'operation_type': 'تشغيل فندقي',
@@ -76,8 +76,8 @@ class BookingRateApplyTests(unittest.TestCase):
             applied = self.module._apply_booking_rate_block(
                 row, self._pages(), offer_lang='ar')
         self.assertTrue(applied)
-        self.assertEqual(row['price_from'], '350')
-        self.assertEqual(row['price_to'], '350')
+        self.assertEqual(row['price_from'], '394')
+        self.assertEqual(row['price_to'], '394')
         self.assertEqual(row['price_type'], 'نطاق أسعار الغرف')
         self.assertEqual(row['area_sqm'], '35')
         self.assertNotIn('price_value', row)
@@ -90,7 +90,8 @@ class BookingRateApplyTests(unittest.TestCase):
         self.assertIn(BOOKING_URL, row['field_sources']['price_from'])
         self.assertIn(BOOKING_URL, row['field_sources']['price_to'])
         self.assertIn(BOOKING_URL, row['field_sources']['area_sqm'])
-        self.assertIn('قبل الخصم', row['notes'])
+        self.assertIn('الأصلي + الضريبة', row['notes'])
+        self.assertIn('394', row['notes'])
 
     def test_manual_row_is_never_overwritten(self):
         row = {
@@ -120,7 +121,7 @@ class BookingRateApplyTests(unittest.TestCase):
         self.assertFalse(applied)
         self.assertEqual(row['price_value'], '900000')
 
-    def test_foreign_currency_block_converts_the_original_price(self):
+    def test_foreign_currency_block_converts_the_original_plus_tax_range(self):
         rate = _rate()
         rate.update({'currency': 'EGP', 'price': 10000.0,
                      'current_price': 7017.0, 'taxes': 1254.0})
@@ -135,8 +136,8 @@ class BookingRateApplyTests(unittest.TestCase):
             applied = self.module._apply_booking_rate_block(
                 row, {BOOKING_URL: {'content': block}}, offer_lang='ar')
         self.assertTrue(applied)
-        self.assertEqual(row['price_from'], '680')
-        self.assertEqual(row['price_to'], '680')
+        self.assertEqual(row['price_from'], '765.272')
+        self.assertEqual(row['price_to'], '765.272')
         self.assertEqual(row['price_currency'], 'SAR')
         self.assertEqual(row['price_cache']['original_currency'], 'EGP')
         self.assertEqual(row['price_cache']['original_price_value'], '10000')

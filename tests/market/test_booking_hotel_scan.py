@@ -278,8 +278,8 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         row = rows[0]
         self.assertEqual(row['name'], 'Eden Residence')
-        self.assertEqual(row['price_from'], '680')
-        self.assertEqual(row['price_to'], '680')
+        self.assertEqual(row['price_from'], '765')
+        self.assertEqual(row['price_to'], '765')
         self.assertEqual(row['price_value'], '')
         self.assertEqual(row['price_currency'], 'SAR')
         self.assertEqual(row['price_type'], 'نطاق أسعار الغرف')
@@ -290,7 +290,7 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual(row['source_url'], PROPERTY_URL)
         self.assertEqual(row['source_urls'], [PROPERTY_URL])
         self.assertEqual(row['row_source'], 'booking')
-        self.assertIn('قبل الخصم', row['notes'])
+        self.assertIn('الأصلي + الضريبة', row['notes'])
 
     def test_hotel_row_carries_the_room_price_and_area_range(self):
         search_url = self._search_url()
@@ -334,6 +334,7 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual(row['area_to'], '90')
         self.assertIn('من 680 إلى 1200', row['notes'])
         self.assertIn('من 59 إلى 90', row['notes'])
+        self.assertIn('الأصلي + الضريبة', row['notes'])
         self.assertTrue(result['search_ran'])
         self.assertIn(self._search_url(), session.urls)
         self.assertIn(PROPERTY_URL, session.urls)

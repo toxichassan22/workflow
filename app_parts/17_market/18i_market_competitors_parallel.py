@@ -17,6 +17,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import booking_destination
+import booking_rooms
 import booking_search
 import hotel_stay
 import maps_service
@@ -560,8 +561,17 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                             return f'من {low} إلى {high}'
                         return low or high
 
-                    price_from = rate.get('price_from') or rate.get('price')
-                    price_to = rate.get('price_to') or price_from
+                    price_from = rate.get('price_from')
+                    price_to = rate.get('price_to')
+                    if price_from is None and price_to is None:
+                        base = rate.get('price')
+                        row_taxes = (0 if rate.get('tax_included')
+                                     else (rate.get('taxes') or 0))
+                        price_from = price_to = (
+                            booking_rooms.whole_riyal(base + row_taxes)
+                            if base is not None else None)
+                    price_from = price_from or price_to
+                    price_to = price_to or price_from
                     area_from = rate.get('area_from')
                     area_to = rate.get('area_to')
                     if area_from is None and area_to is None:
@@ -571,16 +581,13 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     taxes = rate.get('taxes')
                     stay_label = hotel_stay.stay_nights_label_ar()
                     note = (
-                        f'نطاق أسعار الغرف مقابل {stay_label} '
-                        'على Booking قبل الخصم وقبل الضرائب: '
+                        f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
+                        '(السعر الأصلي + الضريبة): '
                         f'{_range(price_from, price_to)} ر.س'
                         + (f' (محوّل من {source_currency})'
                            if source_currency != 'SAR' else '')
                         + (f'؛ المساحات {_range(area_from, area_to)} م²'
-                           if area_from is not None else '')
-                        + f'؛ أقل سعر حالي مقابل {stay_label} بعد الخصم '
-                        f'{current if current is not None else "غير متوفر"} '
-                        f'والضرائب {taxes if taxes is not None else "غير متوفر"}.')
+                           if area_from is not None else ''))
                     row.update({
                         'price_type': 'نطاق أسعار الغرف',
                         'price_value': '',

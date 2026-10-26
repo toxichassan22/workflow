@@ -18,6 +18,7 @@ import unicodedata
 
 import booking_catalog
 import booking_destination
+import booking_rooms
 import booking_search
 import hotel_stay
 from numeric_precision import format_precise_number
@@ -304,8 +305,16 @@ def _page_identity(title, url, variants, city_terms=''):
 
 
 def _apply_rate(row, rate, url, target_stars=()):
-    price_from = rate.get('price_from') or rate.get('price')
-    price_to = rate.get('price_to') or price_from
+    price_from = rate.get('price_from')
+    price_to = rate.get('price_to')
+    if price_from is None and price_to is None:
+        base = rate.get('price')
+        row_taxes = 0 if rate.get('tax_included') else (rate.get('taxes') or 0)
+        price_from = price_to = (
+            booking_rooms.whole_riyal(base + row_taxes)
+            if base is not None else None)
+    price_from = price_from or price_to
+    price_to = price_to or price_from
     raw_area_from = rate.get('area_from')
     raw_area_to = rate.get('area_to')
     if raw_area_from is None and raw_area_to is None:
@@ -315,7 +324,6 @@ def _apply_rate(row, rate, url, target_stars=()):
     area_to = _sane_area(raw_area_to)
     if area_from is None or area_to is None:
         area_from = area_to = None
-    current = rate.get('current_price')
     stars_value = str(rate.get('hotel_stars') or '').strip()
     if not (stars_value.isdigit() and 1 <= int(stars_value) <= 5):
         stars_value = ''
@@ -323,12 +331,11 @@ def _apply_rate(row, rate, url, target_stars=()):
     effective_stars = str(row.get('hotel_stars') or stars_value or '').strip()
     stay_label = hotel_stay.stay_nights_label_ar()
     note = (
-        f'نطاق أسعار الغرف مقابل {stay_label} على Booking قبل الخصم وقبل الضرائب: '
+        f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
+        '(السعر الأصلي + الضريبة): '
         f'{_money(price_from)} – {_money(price_to)} ر.س'
         + (f'؛ المساحات {_money(area_from)} – {_money(area_to)} م²'
            if area_from is not None else '')
-        + (f'؛ أقل سعر حالي مقابل {stay_label} بعد الخصم {current}'
-           if current is not None else '')
         + (f'؛ التصنيف {stars_value} نجوم' if stars_value
            else '؛ لا يعرض Booking تصنيف نجوم لهذا الفندق'))
     if raw_area_from is not None and area_from is None:

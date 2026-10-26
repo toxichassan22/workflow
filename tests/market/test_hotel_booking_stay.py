@@ -320,8 +320,8 @@ class VerifiedAreaTests(unittest.TestCase):
                     'content': booking_rooms.format_rate_block(rate),
                 }}, offer_lang='ar')
         self.assertTrue(applied)
-        self.assertEqual(row['price_from'], '350')
-        self.assertEqual(row['price_to'], '350')
+        self.assertEqual(row['price_from'], '394')
+        self.assertEqual(row['price_to'], '394')
         self.assertEqual(row['area_sqm'], '35')
 
     def test_hotel_expansion_is_deterministic_not_a_new_agent_search(self):

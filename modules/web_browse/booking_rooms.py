@@ -6,23 +6,24 @@ a breakfast-included/flexible rate or a higher room category for the same
 area, which is why the same stay could be reported ~20% above the price the
 owner compares against.
 
-The owner's comparison basis is the **price Booking shows for the stay**, for
-the cheapest base (room-only) rate that fits the requested occupancy, before
-Booking's discount and before taxes. This module reads the live DOM instead:
+The owner's comparison basis is the **original price Booking displays plus the
+row's taxes** for the stay: the pre-discount room price (340) plus the taxes
+line (52) reads 392, exactly what the client's own screen shows. This module
+reads the live DOM instead of asking a model:
 
-- ``## BOOKING_RATE ##`` carries that original pre-discount price, the room
-  area, the current discounted price (informational), the taxes line and the
-  rate policy.
-- ``select_cheapest_rate`` identifies the base rate by its current price,
-  prefers a room-only rate over a breakfast-included sibling, and reports the
-  base rate's original price. It never averages or builds a range across rate
-  plans, and never adds taxes.
+- ``## BOOKING_RATE ##`` carries that original price, the room area, the
+  current discounted price (informational), the taxes line and the rate policy.
+- ``select_cheapest_rate`` identifies the cheapest base rate for the requested
+  occupancy and reports its original price.
+- ``room_ranges`` spans every room row and returns the original price plus that
+  row's taxes at both ends, rounded to whole riyals.
 - ``parse_rate_block`` lets the market pipeline apply the block even when the
   model's own JSON picked a different figure.
 """
 
 import os
 import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 BOOKING_RATE_START = '## BOOKING_RATE ##'
 BOOKING_RATE_END = '## END_BOOKING_RATE ##'
@@ -154,6 +155,20 @@ def extract_hotel_stars(page):
     return int(match.group(1)) if match else 0
 
 
+def whole_riyal(value):
+    """Round a positive money amount half-up to the whole riyal Booking shows."""
+    try:
+        number = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not number.is_finite():
+        return None
+    try:
+        return float(number.quantize(Decimal('1'), rounding=ROUND_HALF_UP))
+    except InvalidOperation:
+        return None
+
+
 def _parse_taxes(raw):
     text = str(raw.get('taxes_text') or '').strip()
     amount = parse_number(text)
@@ -180,6 +195,11 @@ def normalize_rate_row(raw):
     reached the table as 760. The row's own two current figures give the
     exact ratio, so the original and the taxes are expressed in the same
     currency as the price without any external rate.
+
+    The ratio is a currency conversion only. When the visible amount already
+    carries the requested currency, the original and the taxes are taken
+    literally: applying the current/original difference as a ratio multiplied
+    a discounted room's original 340 by 340/289 and turned it into 400.
     """
     raw = raw if isinstance(raw, dict) else {}
     block_id = str(raw.get('block_id') or '')
@@ -192,8 +212,11 @@ def normalize_rate_row(raw):
     if not currency:
         currency = (parse_currency(raw.get('current_text'))
                     or parse_currency(raw.get('price_attr')) or '')
+    visible_currency = parse_currency(raw.get('current_text'))
     scale = 1.0
-    if price_attr and visible_current and price_attr > 0 and visible_current > 0:
+    if (price_attr and visible_current and price_attr > 0
+            and visible_current > 0 and visible_currency
+            and visible_currency != SELECTED_CURRENCY):
         scale = price_attr / visible_current
     original_price = parse_number(raw.get('original_text'))
     if original_price is None:
@@ -279,14 +302,28 @@ def _base_rows(rows, adults=2):
     return normalized, eligible, base_rows
 
 
-def room_ranges(rows):
-    """Cheapest-to-priciest room price and smallest-to-largest room area.
+def room_total(row):
+    """One room's original pre-discount price plus its own taxes, in riyals."""
+    base = row.get('original_price')
+    if base is None or base <= 0:
+        base = row.get('price')
+    if base is None or base <= 0:
+        return None
+    if row.get('tax_included'):
+        return whole_riyal(base)
+    return whole_riyal(base + (row.get('taxes') or 0))
 
-    The competitor table shows a room-price range, so both ends come from
-    **every** room on the page — suites and family rooms included, whatever
-    occupancy their rate is sold for (owner decision 2026-10-24), so the range
-    matches the room table a client sees. A row after a room header may omit
-    its area, so the area is borrowed from another row of the same room.
+
+def room_ranges(rows):
+    """Cheapest-to-priciest original-plus-tax room total and room area.
+
+    Both ends come from **every** room on the page — suites and family rooms
+    included, whatever occupancy their rate is sold for (owner decision
+    2026-10-24), so the range matches the room table a client sees. The figure
+    is the row's original pre-discount price plus that row's taxes — 340 + 52
+    reads 392 — never the discounted current price alone and never a ratio
+    applied across the two. A row after a room header may omit its area, so
+    the area is borrowed from another row of the same room.
     """
     normalized = [normalize_rate_row(row) for row in rows or []
                   if isinstance(row, dict)]
@@ -306,11 +343,13 @@ def room_ranges(rows):
     for row in priced:
         room_key = row.get('room_id') or row.get('block_id') or ''
         rooms.add(room_key)
-        prices.append(row['original_price'] if row.get('original_price')
-                      else row['price'])
+        prices.append(room_total(row))
         area = row.get('area_sqm') or areas_by_room.get(room_key)
         if area:
             areas.append(area)
+    prices = [price for price in prices if price is not None]
+    if not prices:
+        return {}
     return {
         'price_from': min(prices),
         'price_to': max(prices),
@@ -326,8 +365,8 @@ def select_cheapest_rate(rows, adults=2):
 
     The current price identifies the cheapest base rate; a room-only rate wins
     over a breakfast-included sibling for the same room. The figure returned in
-    ``price`` is that base rate's original price before Booking's discount —
-    the owner's comparison basis — and taxes stay informational.
+    ``price`` is that base rate's original price before Booking's discount;
+    ``taxes`` rides beside it so the room range can add the row's own taxes.
     """
     normalized, eligible, base_rows = _base_rows(rows, adults=adults)
     if not eligible or not base_rows:
@@ -437,6 +476,13 @@ def format_rate_block(rate):
     taxes = rate.get('taxes')
     current = rate.get('current_price')
     current_total = rate.get('current_price_including_tax')
+    price_from = rate.get('price_from')
+    price_to = rate.get('price_to')
+    if price_from is None and price_to is None:
+        room_only = rate.get('price')
+        if room_only is not None:
+            row_taxes = 0 if rate.get('tax_included') else (taxes or 0)
+            price_from = price_to = whole_riyal(room_only + row_taxes)
     lines = [
         BOOKING_RATE_START,
         'source_url: ' + str(rate.get('source_url') or ''),
@@ -452,13 +498,14 @@ def format_rate_block(rate):
         + ('' if current_total is None else f'{current_total:g}'),
         'tax_included: ' + ('true' if rate.get('tax_included') else 'false'),
         'rate_policy: ' + str(rate.get('rate_policy') or ''),
-        'price_range_before_discount: '
-        + _range_text(rate.get('price_from'), rate.get('price_to')),
+        'price_range_original_plus_taxes: '
+        + _range_text(price_from, price_to),
         'area_range_sqm: '
         + _range_text(rate.get('area_from'), rate.get('area_to')),
         'room_type_count: ' + str(rate.get('room_count') or ''),
-        'price_basis: original pre-discount price of the cheapest base room for '
-        'the stay, before taxes; the discounted current price is informational',
+        'price_basis: original pre-discount room price plus that room\'s '
+        'taxes for the stay, rounded to whole riyals; the discounted current '
+        'price is informational',
         BOOKING_RATE_END,
     ]
     return '\n'.join(lines)
@@ -501,7 +548,17 @@ def parse_rate_block(text):
     taxes = parse_number(data.get('taxes_and_fees_current_rate'))
     total = parse_number(data.get('current_total_including_tax'))
     adults = parse_number(data.get('adults'))
-    price_from, price_to = _parse_range(data.get('price_range_before_discount'))
+    price_from, price_to = _parse_range(
+        data.get('price_range_original_plus_taxes'))
+    if price_from is None and price_to is None:
+        price_from, price_to = _parse_range(
+            data.get('price_range_before_discount'))
+    if price_from is None and price_to is None:
+        price_from, price_to = _parse_range(data.get('price_range_current'))
+    if price_from is None and price_to is None:
+        row_taxes = 0 if str(
+            data.get('tax_included') or '').lower() == 'true' else (taxes or 0)
+        price_from = price_to = whole_riyal(price + row_taxes)
     area_from, area_to = _parse_range(data.get('area_range_sqm'))
     rooms = parse_number(data.get('room_type_count'))
     return {
