@@ -483,6 +483,29 @@ def _print_rate_audit(rate, rows, url=''):
               flush=True)
 
 
+def _print_booking_cookies(page):
+    """Name Booking's own cookies, so the currency one can be set explicitly.
+
+    Booking renders the room table in a currency taken from its session cookie
+    even when the URL asks for SAR, which is why the table's visible figures
+    came back in EUR while ``data-hotel-rounded-price`` was already riyals.
+    """
+    try:
+        cookies = page.context.cookies('https://www.booking.com')
+    except Exception:
+        return
+    items = []
+    for cookie in cookies or []:
+        if not isinstance(cookie, dict):
+            continue
+        name = str(cookie.get('name') or '')
+        if not name:
+            continue
+        items.append(f'{name}={str(cookie.get("value") or "")[:20]}')
+    if items:
+        print('[BOOKING COOKIES] ' + ' '.join(items[:40]), flush=True)
+
+
 def extract_booking_rate(page, url='', adults=2):
     """Read the DOM of an already-loaded Booking property page."""
     try:
@@ -508,6 +531,7 @@ def extract_booking_rate(page, url='', adults=2):
     if stars:
         rate['hotel_stars'] = stars
     _print_rate_audit(rate, rows, rate.get('source_url'))
+    _print_booking_cookies(page)
     return rate
 
 
