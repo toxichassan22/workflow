@@ -30,6 +30,9 @@ class _Session:
     def open_urls(self, urls, timeout=None):
         return [self.open_url(url) for url in urls]
 
+    def fetch_html(self, url, timeout=None):
+        raise RuntimeError('no destination page in the test session')
+
     def web_search(self, query, max_results=8):
         self.queries.append(query)
         return self.search_hits
@@ -175,6 +178,64 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertIn('لا تُظهر أسعارًا', row['notes'])
         self.assertIsNone(row.get('source_url'))
 
+    def test_the_city_cards_fill_a_row_before_the_name_search(self):
+        city_url = self.module.booking_search.build_search_url(
+            'Jeddah', dest_id='-3096108')
+        hotel_url = 'https://www.booking.com/hotel/sa/wa-jeddah.html'
+        session = _Session({
+            city_url: {'final_url': city_url, 'booking_search': {'hotels': [
+                {'name': 'WA Hotel Jeddah', 'url': hotel_url}]}},
+            hotel_url: {'final_url': hotel_url, 'booking_rate': {
+                'price': 629.0, 'currency': 'SAR', 'hotel_stars': 5}},
+        })
+        row = {'name': 'WA Hotel', 'project_type': 'فندقي'}
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session), \
+                patch.object(self.module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'SA')), \
+                patch.object(
+                    self.module.booking_destination,
+                    'resolve_city_destination',
+                    return_value={'dest_id': '-3096108',
+                                  'dest_type': 'city'}):
+            filled = self.module._fill_hotel_rows_from_booking(
+                [row], {'city': 'جدة'}, {}, tenant_id=None)
+        self.assertEqual(filled, 1)
+        self.assertEqual(row['source_url'], hotel_url)
+        self.assertEqual(row['hotel_stars'], '5')
+        self.assertEqual(row['status'], 'قائم')
+        self.assertEqual(row['classification'], 'مباشر')
+        name_url = self.module.booking_search.build_search_url('WA Hotel')
+        self.assertNotIn(name_url, session.urls)
+
+    def test_booking_fill_carries_stars_status_and_classification(self):
+        row = {'name': 'فندق اختبار', 'project_type': 'فندقي'}
+        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 900.0,
+                'area_from': 4.0, 'area_to': 5.0, 'hotel_stars': 5,
+                'current_price': 550.0}
+        self.module._apply_rate(
+            row, rate, 'https://www.booking.com/hotel/sa/x.html',
+            target_stars={'4'})
+        self.assertEqual(row['hotel_stars'], '5')
+        self.assertEqual(row['status'], 'قائم')
+        self.assertEqual(row['classification'], 'غير مباشر')
+        self.assertEqual(row['area_from'], '')
+        self.assertEqual(row['area_to'], '')
+        self.assertIn('غير منطقية', row['notes'])
+        self.assertEqual(row['price_from'], '600')
+        self.assertEqual(row['price_to'], '900')
+        self.assertIn('5 نجوم', row['notes'])
+
+    def test_booking_fill_classifies_a_matching_star_class_as_direct(self):
+        row = {'name': 'فندق اختبار', 'project_type': 'فندقي'}
+        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0,
+                'area_from': 30.0, 'area_to': 40.0, 'hotel_stars': 4}
+        self.module._apply_rate(row, rate, 'https://x', target_stars={'4', '5'})
+        self.assertEqual(row['classification'], 'مباشر')
+        self.assertEqual(row['area_from'], '30')
+        self.assertEqual(row['area_to'], '40')
+
     def test_english_name_matches_an_arabic_card_by_booking_slug(self):
         card = {'name': 'فندق موفنبيك جدة التحلية',
                 'url': 'https://www.booking.com/hotel/sa/movenpick-tahlia.ar.html'}
@@ -190,12 +251,19 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertIsNone(self.module._card_for_name(
             [wrong], 'Mövenpick Hotel Tahlia Jeddah', 'جدة Jeddah'))
 
+    def test_a_card_missing_a_road_word_still_matches_two_brand_tokens(self):
+        card = {'name': 'بيست ويسترن بلاس جدة',
+                'url': 'https://www.booking.com/hotel/sa/'
+                       'best-western-plus-jeddah.ar.html'}
+        self.assertIs(self.module._card_for_name(
+            [card], 'فندق بيست ويسترن بلس طريق المدينه', 'جدة'), card)
+
     def test_arabic_title_matches_without_the_generic_hotel_word(self):
         self.assertTrue(self.module._title_matches(
             'جدة ماريوت، طريق المدينة',
-            'فندق جدة ماريوت طريق المدينة'))
+            'فندق جدة ماريوت طريق المدينة', 'جدة'))
         self.assertFalse(self.module._title_matches(
-            'ماريوت جدة', 'فندق جدة ماريوت طريق المدينة'))
+            'ماريوت جدة', 'فندق جدة ماريوت طريق المدينة', 'جدة'))
 
     def test_a_row_missing_from_the_cards_is_filled_by_the_name_search(self):
         name = 'Adagio Jeddah City Center'

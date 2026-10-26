@@ -136,7 +136,22 @@ def parse_area(text):
         value = float(match.group(1).replace(',', ''))
     except (TypeError, ValueError):
         return None
-    return value if 1 <= value <= 2000 else None
+    # A hotel room is never 4–5 m²; a bare occupancy/room count next to a
+    # stray unit in the row text used to be stored as the room area.
+    return value if 8 <= value <= 2000 else None
+
+
+def extract_hotel_stars(page):
+    """The property's own star class (rating-stars aria-label), 0 if absent."""
+    try:
+        aria = page.evaluate(
+            "() => { const el = document.querySelector("
+            "'[data-testid=\"rating-stars\"]');"
+            " return el ? (el.getAttribute('aria-label') || '') : ''; }")
+    except Exception:
+        return 0
+    match = re.search(r'([1-5])', str(aria or '').translate(_ARABIC_DIGITS))
+    return int(match.group(1)) if match else 0
 
 
 def _parse_taxes(raw):
@@ -410,6 +425,9 @@ def extract_booking_rate(page, url='', adults=2):
     rate['source_url'] = (requested if 'booking.com/hotel/' in requested
                           else (final_url or requested))
     rate['page_title'] = str(data.get('title') or '')
+    stars = extract_hotel_stars(page)
+    if stars:
+        rate['hotel_stars'] = stars
     return rate
 
 

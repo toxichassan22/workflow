@@ -206,5 +206,28 @@ class BookingRoomTableWiringTests(unittest.TestCase):
         self.assertIn("payload['booking_rate'] = rate", text)
 
 
+class BookingStarsAndAreaTests(unittest.TestCase):
+
+    def test_rating_stars_aria_is_read(self):
+        class _Page:
+            def __init__(self, aria):
+                self.aria = aria
+
+            def evaluate(self, _script):
+                return self.aria
+
+        self.assertEqual(
+            booking_rooms.extract_hotel_stars(_Page('5 من أصل 5 نجوم')), 5)
+        self.assertEqual(
+            booking_rooms.extract_hotel_stars(_Page('4 out of 5 stars')), 4)
+        self.assertEqual(booking_rooms.extract_hotel_stars(_Page('')), 0)
+        self.assertEqual(booking_rooms.extract_hotel_stars(_Page('8.7')), 0)
+
+    def test_an_implausible_room_area_is_rejected(self):
+        self.assertIsNone(booking_rooms.parse_area('4 م²'))
+        self.assertIsNone(booking_rooms.parse_area('5 m²'))
+        self.assertEqual(booking_rooms.parse_area('42 م²'), 42.0)
+
+
 if __name__ == '__main__':
     unittest.main()
