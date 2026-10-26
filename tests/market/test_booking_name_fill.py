@@ -172,12 +172,17 @@ class BookingNameFillTests(unittest.TestCase):
         novotel_url = 'https://www.booking.com/hotel/sa/' \
                       'novotel-jeddah-tahlia.ar.html'
         other_url = 'https://www.booking.com/hotel/sa/boudl-jeddah.ar.html'
+        # The locale variants the search returns are opened through their
+        # canonical URL, so the pages themselves are keyed that way.
+        novotel_page = 'https://www.booking.com/hotel/sa/' \
+                       'novotel-jeddah-tahlia.html'
+        other_page = 'https://www.booking.com/hotel/sa/boudl-jeddah.html'
         session = _Session({
-            novotel_url: {'final_url': novotel_url,
-                          'title': 'نوفوتيل جدة التحلية، جدة'},
-            other_url: {'final_url': other_url,
-                        'title': 'بودل التحلية، جدة',
-                        'booking_rate': {'price': 680.0}},
+            novotel_page: {'final_url': novotel_page,
+                           'title': 'نوفوتيل جدة التحلية، جدة'},
+            other_page: {'final_url': other_page,
+                         'title': 'بودل التحلية، جدة',
+                         'booking_rate': {'price': 680.0}},
         }, search_hits=[
             {'title': 'نوفوتيل جدة التحلية، جدة', 'url': novotel_url},
             {'title': 'بودل التحلية، جدة', 'url': other_url},
@@ -193,6 +198,34 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(filled, 0)
         self.assertIn('لا تُظهر أسعارًا', row['notes'])
         self.assertIsNone(row.get('source_url'))
+
+    def test_locale_variants_of_one_hotel_do_not_eat_the_candidate_opens(self):
+        # Booking returns one property once per locale (.ar, .es, .fr).
+        # Counting those as three candidates spent every page open on the same
+        # hotel and left the others unread, which is how a row ended up with no
+        # price at all.
+        module = self.module
+        canonical = 'https://www.booking.com/hotel/sa/alpha.html'
+        session = _Session({}, search_hits=[
+            {'title': 'Alpha Hotel',
+             'url': 'https://www.booking.com/hotel/sa/alpha.ar.html'},
+            {'title': 'Alpha Hotel',
+             'url': 'https://www.booking.com/hotel/sa/alpha.es.html'},
+            {'title': 'Alpha Hotel',
+             'url': 'https://www.booking.com/hotel/sa/alpha.fr.html'},
+        ])
+        session.replies = {canonical: {
+            'final_url': canonical, 'title': 'Alpha Hotel',
+            'booking_rate': {'price': 400.0, 'price_from': 400.0,
+                             'price_to': 400.0, 'currency': 'SAR',
+                             'hotel_stars': 4}}}
+        row = {'name': 'Alpha Hotel', 'project_type': 'فندقي'}
+        with self.app.app_context():
+            filled = module._fill_from_candidate_pages(
+                session, row, 'جدة', 'جدة Jeddah', ('4',), ['Alpha Hotel'])
+        self.assertTrue(filled)
+        self.assertEqual(session.urls, [canonical])
+        self.assertEqual(row['price_from'], '400')
 
     def test_the_city_cards_fill_a_row_before_the_name_search(self):
         city_url = self.module.booking_search.build_search_url(

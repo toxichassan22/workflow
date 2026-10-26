@@ -471,9 +471,15 @@ def _fill_from_candidate_pages(session, row, city_ar, city_terms='',
         found = _booking_hotel_candidates(session, variant, city_ar)
         for candidate in found:
             url = str((candidate or {}).get('url') or '').strip()
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                candidates.append((variant, candidate))
+            # Booking lists one property once per locale (.ar, .es, .fr…), and
+            # counting those as three candidates spent every page open on one
+            # hotel. The canonical URL collapses them so the three opens reach
+            # three different properties.
+            canonical = booking_catalog.canonical_hotel_url(url) or url
+            if not canonical or canonical in seen_urls:
+                continue
+            seen_urls.add(canonical)
+            candidates.append((variant, {**candidate, 'url': canonical}))
         if candidates:
             break
     rate_seen = False
@@ -491,6 +497,17 @@ def _fill_from_candidate_pages(session, row, city_ar, city_terms='',
                       for item in variants)
         identity = _page_identity(title, url, variants, city_terms) or (
             title_hit and url_hit)
+        if identity and not (isinstance(rate, dict)
+                             and rate.get('price') is not None):
+            # The right property answered without a room table — a late paint
+            # is commoner than a sold-out night, and this row is the only one
+            # whose price may never come back. One more open beats losing it.
+            retry = session.open_url(url)
+            retry = retry if isinstance(retry, dict) else {}
+            retry_rate = retry.get('booking_rate')
+            if isinstance(retry_rate, dict) and retry_rate.get('price') is not None:
+                prop = retry
+                rate = retry_rate
         print(f'[MARKET STUDY] booking candidate name={variant!r} '
               f'url={url[:120]!r} page_title={title[:80]!r} '
               f'identity={identity} '
