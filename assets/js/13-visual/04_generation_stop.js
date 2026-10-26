@@ -23,15 +23,24 @@ function interruptiblePollSleep(ms) {
   return new Promise(resolve => {
     if (tenantGenerationStopRequested) return resolve(false);
     let timer = null;
-    const unsub = onTenantGenerationStop(() => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
       if (timer) clearTimeout(timer);
       unsub();
-      resolve(false);
-    });
-    timer = setTimeout(() => {
-      unsub();
-      resolve(true);
-    }, ms);
+      document.removeEventListener('visibilitychange', onVisibility);
+      resolve(value);
+    };
+    // Chrome throttles timers in a hidden tab — a 2.5 s poll waits ~1 minute,
+    // and a minute per tick after five hidden minutes — so a study running
+    // fine on the server looked frozen until its tab was focused again.
+    // Coming back to the tab ends the wait at once, so the next poll reports
+    // the job's own progress instead of an old one.
+    const onVisibility = () => { if (!document.hidden) finish(true); };
+    const unsub = onTenantGenerationStop(() => finish(false));
+    document.addEventListener('visibilitychange', onVisibility);
+    timer = setTimeout(() => finish(true), ms);
   });
 }
 
