@@ -186,6 +186,7 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
     currency = market_study._canonical_price_currency(
         rate.get('currency') or 'SAR') or 'SAR'
     value = rate.get('price')
+    tax_included = bool(rate.get('tax_included'))
     price_from = rate.get('price_from')
     price_to = rate.get('price_to')
     if price_from is None and price_to is None:
@@ -224,6 +225,7 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
         'booking_current_price': rate.get('current_price'),
         'booking_taxes': rate.get('taxes'),
         'booking_current_total': rate.get('current_price_including_tax'),
+        'booking_tax_included': tax_included,
         'booking_currency': currency,
         'booking_room_name': rate.get('room_name'),
         'booking_rate_policy': rate.get('rate_policy'),
@@ -253,16 +255,18 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
     price_text = (row['price_from'] if row['price_from'] == row['price_to']
                   else f"{row['price_from']} - {row['price_to']}")
     if offer_lang == 'en':
-        note = ('Booking original pre-discount room-price range, taxes excluded, '
-                f'for {hotel_stay.stay_nights_label_en()}: '
+        basis = ('taxes and fees included as the page prints them'
+                 if tax_included else 'taxes excluded')
+        note = ('Booking original pre-discount room-price range, '
+                f'{basis}, for {hotel_stay.stay_nights_label_en()}: '
                 f'{price_text} SAR{source_en}.')
     else:
         note = (
             f'نطاق أسعار الغرف مقابل {hotel_stay.stay_nights_label_ar()} '
-            'على Booking (السعر الأصلي قبل الخصم بدون الضريبة): '
+            f'على Booking ({booking_rooms.note_basis_ar(tax_included)}): '
             f'{price_text} ر.س{source_ar}.')
     existing = str(row.get('notes') or '').strip()
-    if ('السعر الأصلي قبل الخصم بدون الضريبة' not in existing
+    if ('السعر الأصلي قبل الخصم' not in existing
             and 'original pre-discount room-price range' not in existing):
         row['notes'] = f'{existing} — {note}' if existing else note
     row['verify_state'] = 'verified'
@@ -313,9 +317,11 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     if is_hotel:
         price_rule += (
             'للفندق: استخدم نطاق أسعار الغرف المعروض على Booking من صفحة الفندق '
-            '(أقل سعر وأعلى سعر)، وهو السعر الأصلي قبل الخصم بدون ضرائب أو رسوم. '
-            'لا تجمع أسعار الغرف أو الباقات في متوسط، ولا تعتمد السعر الحالي بعد الخصم '
-            'ولا السعر شامل الضريبة. '
+            '(أقل سعر وأعلى سعر)، وهو السعر الأصلي قبل الخصم كما تطبعه الصفحة. '
+            'إذا كانت الصفحة تقول «شامل الضرائب والرسوم» فاكتب الرقم كما هو شاملاً '
+            'الضريبة ولا تخصمها، وإذا عرضت الضريبة في سطر منفصل فاكتب سعر الغرفة '
+            'بدونها. '
+            'لا تجمع أسعار الغرف أو الباقات في متوسط، ولا تعتمد السعر الحالي بعد الخصم. '
             'إذا ظهر قسم ## BOOKING_RATE ## في نص الصفحة فاستخدم '
             'price_range_before_discount و area_range_sqm حرفيًا. '
         )

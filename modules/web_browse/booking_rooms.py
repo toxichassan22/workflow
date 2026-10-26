@@ -7,13 +7,15 @@ area, which is why the same stay could be reported ~20% above the price the
 owner compares against.
 
 The owner's comparison basis is the **original pre-discount room price** for
-the stay, pre-tax. Booking prints a taxes line beside the room price; in the
-Saudi view that line is charged on top of the printed figure, while a session
-outside Saudi Arabia is served prices with the property's taxes already folded
-in (the line reads «شامل الضرائب والرسوم»). The table carries the pre-discount
-figure alone, with the folded taxes taken back out and the discounted current
-price kept as an informational value. This module reads the live DOM instead
-of asking a model:
+the stay, exactly as the page prints it. Booking prints a taxes line beside
+the room price; in the Saudi view that line is charged on top of the printed
+figure, while a session outside Saudi Arabia is served prices with the
+property's taxes already folded in — the line then reads «شامل الضرائب
+والرسوم» and states no amount. The owner's decision (2026-10-26) is that the
+folded figure is kept **as printed**: dividing it back out by a fixed stack
+put a number on the row that a client reading their own view never sees. The
+discounted current price stays an informational value. This module reads the
+live DOM instead of asking a model:
 
 - ``## BOOKING_RATE ##`` carries that original price, the room area, the
   current discounted price (informational), the taxes line and the rate policy.
@@ -35,14 +37,12 @@ BOOKING_TABLE_ROW_SELECTOR = '#hprt-table tr[data-block-id]'
 # The currency every Booking page is opened with (hotel_stay.STAY_PARAMS);
 # data-hotel-rounded-price is rendered in it regardless of the locale display.
 SELECTED_CURRENCY = 'SAR'
-# A session outside Saudi Arabia gets the room table with the property's own
-# taxes already folded in — the taxes line reads «شامل الضرائب والرسوم» — and
-# that folded amount is the Saudi hotel stack: 15% VAT plus the 5% municipality
-# fee, both levied on the net, so the displayed figure is the pre-tax price
-# times 1.2075. The Saudi view prints the same room pre-tax with a separate
-# taxes line. Verified against the owner's own screen on one property: the
-# table's 622-1570 maps to 515-1300, both ends off by this exact factor.
-KSA_HOTEL_TAX_FACTOR = 1.2075
+# A session outside Saudi Arabia is served the room table with the property's
+# taxes already folded into the printed figure: the taxes line then reads
+# «شامل الضرائب والرسوم» and carries no amount, so there is nothing to
+# subtract and no rate the page proves. The printed figure is therefore the
+# row's figure (owner decision 2026-10-26); ``tax_included`` rides along so
+# the row's note can say the figure includes the taxes and fees.
 
 
 def _table_timeout_ms():
@@ -248,6 +248,18 @@ def whole_riyal(value):
         return None
 
 
+def note_basis_ar(tax_included):
+    """The parenthetical a hotel row's note uses to name its tax basis.
+
+    A view that folds the property's taxes into the printed figure carries
+    that figure as-is, so the note says so instead of promising a pre-tax
+    number the row no longer holds.
+    """
+    if tax_included:
+        return 'السعر الأصلي قبل الخصم شامل الضرائب والرسوم كما تعرضه الصفحة'
+    return 'السعر الأصلي قبل الخصم بدون الضريبة'
+
+
 def _parse_taxes(raw):
     text = str(raw.get('taxes_text') or '').strip()
     amount = parse_number(text)
@@ -307,14 +319,11 @@ def normalize_rate_row(raw):
         if taxes:
             taxes = round(taxes * scale, 1)
     if tax_included:
-        # This session's view already carries the property's taxes in the
-        # figure it prints; the owner's comparison is the pre-tax one, so the
-        # folded taxes come back out here.
-        if price is not None and price > 0:
-            price = round(price / KSA_HOTEL_TAX_FACTOR, 4)
-        if original_price:
-            original_price = round(original_price / KSA_HOTEL_TAX_FACTOR, 4)
-        taxes = 0
+        # This session's view folds the property's taxes into the figure it
+        # prints and states no amount, so the figure is the row's figure. A
+        # fixed stack cannot be derived from it, and dividing by one put a
+        # number beside a link that showed a different one.
+        taxes = taxes or None
     row_text = str(raw.get('row_text') or '')
     occupancy_text = str(raw.get('occupancy_text') or '')
     adults = _block_occupancy(block_id)
@@ -465,9 +474,9 @@ def select_cheapest_rate(rows, adults=2):
                         else current_price)
     taxes = selected.get('taxes')
     if selected.get('tax_included'):
-        # current_price is already the pre-tax figure; what the property
-        # charges is that figure with the view's folded taxes back on top.
-        current_total = round(current_price * KSA_HOTEL_TAX_FACTOR, 4)
+        # The printed figure already carries the property's taxes; the total
+        # the guest pays is that same figure, not a multiplied one.
+        current_total = current_price
     else:
         current_total = (current_price + taxes
                          if taxes is not None else None)
@@ -706,18 +715,17 @@ def format_rate_block(rate):
         'current_total_including_tax: '
         + ('' if current_total is None else f'{current_total:g}'),
         'tax_included: ' + ('true' if rate.get('tax_included') else 'false'),
-        'tax_factor_removed: '
-        + (f'{KSA_HOTEL_TAX_FACTOR:g}' if rate.get('tax_included') else ''),
         'rate_policy: ' + str(rate.get('rate_policy') or ''),
         'price_range_before_discount: '
         + _range_text(price_from, price_to),
         'area_range_sqm: '
         + _range_text(rate.get('area_from'), rate.get('area_to')),
         'room_type_count: ' + str(rate.get('room_count') or ''),
-        'price_basis: original pre-discount room price for the stay, pre-tax, '
-        'rounded to whole riyals; a view that folds the property\'s taxes into '
-        'the figure it prints has that factor removed, and the discounted '
-        'current price stays informational',
+        'price_basis: original pre-discount room price for the stay, rounded to '
+        'whole riyals, exactly as the page prints it; when the view folds the '
+        "property's taxes into the figure it prints (tax_included), that "
+        'printed total is the row figure and is not divided back out; the '
+        'discounted current price stays informational',
         BOOKING_RATE_END,
     ]
     return '\n'.join(lines)

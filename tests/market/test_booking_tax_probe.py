@@ -46,15 +46,15 @@ _PRE_TAX_ROW = {
 
 class BookingTaxProbeTests(unittest.TestCase):
 
-    def test_summarize_reports_the_pre_tax_division(self):
-        """A folded view is reported as divided, not as a read figure — the
-        property that showed 389 and stored 322."""
+    def test_summarize_reports_the_folded_figure_as_printed(self):
+        """A folded view is reported as the page printed it: the property that
+        showed 389 stores 389, and the probe flags that the taxes are folded."""
         summary = probe.summarize({'rows': [dict(_FOLDED_ROW)]})
         self.assertEqual(summary['rows'], 1)
         self.assertTrue(summary['tax_included'])
-        self.assertAlmostEqual(summary['price'], 322.15, places=2)
-        self.assertEqual(summary['applied_from'], 322)
-        self.assertEqual(summary['applied_to'], 322)
+        self.assertEqual(summary['price'], 389)
+        self.assertEqual(summary['applied_from'], 389)
+        self.assertEqual(summary['applied_to'], 389)
 
     def test_summarize_reports_a_pre_tax_page_as_is(self):
         """The client's own view prints the price before tax beside the tax

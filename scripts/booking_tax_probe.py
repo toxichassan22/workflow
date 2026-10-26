@@ -12,8 +12,8 @@ then prints each room row's raw DOM figures:
     taxes_text      the taxes line, and whether it says «شامل»
     taxes_raw       data-excl-charges-raw — the excluded charges amount
 
-and finally what the pipeline would store from those rows (applied range,
-the pre-tax division included).
+and finally what the pipeline would store from those rows (the applied range
+and whether the printed figure carries the property's taxes).
 
 Pass ``--cookie name=value`` (repeatable) to reload the page with a cookie set,
 which is how a different country view — the one a client in Saudi Arabia sees,

@@ -17,6 +17,7 @@ import booking_rooms  # noqa: E402
 import db  # noqa: E402
 
 BOOKING_URL = 'https://www.booking.com/hotel/sa/sedra-global-jeddah.html'
+FOLDED_URL = 'https://www.booking.com/hotel/sa/novotel-jeddah-tahlia.html'
 
 
 def _rate():
@@ -35,6 +36,23 @@ def _rate():
                      'No prepayment needed'),
     }])
     rate['source_url'] = BOOKING_URL
+    return rate
+
+
+def _folded_rate():
+    """The Novotel row: one printed figure, taxes folded in, no amount shown."""
+    rate = booking_rooms.select_cheapest_rate([{
+        'block_id': '193957202_398986150_2_42_0',
+        'price_attr': '389',
+        'current_text': '389 SAR',
+        'original_text': '',
+        'taxes_text': 'شامل الضرائب والرسوم',
+        'room_name': 'غرفة سوبيرير مع سرير مزدوج',
+        'area_text': '38 m²',
+        'occupancy_text': 'Max. people: 2',
+        'row_text': 'Guests: 2 adults',
+    }])
+    rate['source_url'] = FOLDED_URL
     return rate
 
 
@@ -92,6 +110,41 @@ class BookingRateApplyTests(unittest.TestCase):
         self.assertIn(BOOKING_URL, row['field_sources']['area_sqm'])
         self.assertIn('الأصلي قبل الخصم بدون الضريبة', row['notes'])
         self.assertIn('350', row['notes'])
+
+    def test_folded_view_figure_is_stored_as_the_page_prints_it(self):
+        """The view that folds the taxes into its printed figure (Novotel read
+        389 beside «شامل الضرائب والرسوم») stores 389 — dividing it by a fixed
+        stack put 322 beside a page showing 325."""
+        row = {'name': 'Novotel Jeddah Tahlia',
+               'operation_type': 'تشغيل فندقي', 'row_source': 'ai'}
+        pages = {FOLDED_URL: {
+            'title': 'Novotel Jeddah Tahlia',
+            'content': 'property page\n' + booking_rooms.format_rate_block(
+                _folded_rate()),
+        }}
+        with self.app.app_context():
+            applied = self.module._apply_booking_rate_block(
+                row, pages, offer_lang='ar')
+        self.assertTrue(applied)
+        self.assertEqual(row['price_from'], '389')
+        self.assertEqual(row['price_to'], '389')
+        self.assertEqual(row['price_currency'], 'SAR')
+        self.assertTrue(row['price_cache']['booking_tax_included'])
+        self.assertIn('شامل الضرائب والرسوم', row['notes'])
+        self.assertIn('389', row['notes'])
+        self.assertNotIn('بدون الضريبة', row['notes'])
+
+    def test_name_fill_keeps_the_folded_figure_and_says_so(self):
+        """The completion pass applies the same basis: the printed figure and
+        a note that names it as tax-inclusive."""
+        row = {'name': 'Novotel Jeddah Tahlia'}
+        with self.app.app_context():
+            self.module._apply_rate(row, _folded_rate(), FOLDED_URL)
+        self.assertEqual(row['price_from'], '389')
+        self.assertEqual(row['price_to'], '389')
+        self.assertEqual(row['price_type'], 'نطاق أسعار الغرف')
+        self.assertIn('شامل الضرائب والرسوم', row['notes'])
+        self.assertNotIn('بدون الضريبة', row['notes'])
 
     def test_manual_row_is_never_overwritten(self):
         row = {

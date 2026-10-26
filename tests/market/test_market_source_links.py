@@ -183,7 +183,10 @@ class HotelPriceRangeTests(unittest.TestCase):
              'competitorScope': {'mode': 'district'},
              'comparisonTypes': [{'type': 'hotel', 'stars': 4}]}, [])
         self.assertIn('السعر الأصلي قبل الخصم', prompt)
-        self.assertIn('بدون ضرائب', prompt)
+        # The printed figure is the row's figure: a page that folds the taxes
+        # into it is used as-is, not divided back out.
+        self.assertIn('شامل الضرائب والرسوم', prompt)
+        self.assertNotIn('ولا السعر شامل الضريبة', prompt)
         self.assertIn('## BOOKING_RATE ##', prompt)
         self.assertIn('price_range_before_discount', prompt)
         self.assertNotIn('price_range_current', prompt)

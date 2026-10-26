@@ -580,7 +580,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     stay_label = hotel_stay.stay_nights_label_ar()
                     note = (
                         f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
-                        '(السعر الأصلي قبل الخصم بدون الضريبة): '
+                        f"({booking_rooms.note_basis_ar(rate.get('tax_included'))}): "
                         f'{_range(price_from, price_to)} ر.س'
                         + (f' (محوّل من {source_currency})'
                            if source_currency != 'SAR' else '')
