@@ -774,8 +774,22 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                         with lock:
                             filled[0] += 1
                     else:
-                        row['notes'] = ('صفحة الفندق على Booking.com لم تُظهر '
-                                        'جدول أسعار لهذه الإقامة.')
+                        # The right property answered without a room table.
+                        # The same page read its rates minutes earlier, so one
+                        # more open beats losing the row to a late paint.
+                        retry = session.open_url(url)
+                        retry_rate = ((retry or {}).get('booking_rate')
+                                      if isinstance(retry, dict) else None)
+                        if (isinstance(retry_rate, dict)
+                                and retry_rate.get('price') is not None):
+                            _apply_rate(row, retry_rate, url,
+                                        target_stars=target_stars)
+                            with lock:
+                                filled[0] += 1
+                        else:
+                            row['notes'] = (
+                                'صفحة الفندق على Booking.com لم تُظهر '
+                                'جدول أسعار لهذه الإقامة.')
                 with lock:
                     done[0] += 1
                     report(lo + int((hi - lo - 5) * done[0] / total),
