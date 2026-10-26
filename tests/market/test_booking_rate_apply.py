@@ -22,12 +22,12 @@ BOOKING_URL = 'https://www.booking.com/hotel/sa/sedra-global-jeddah.html'
 def _rate():
     rate = booking_rooms.select_cheapest_rate([{
         'block_id': '1559334001_438176898_2_2_0',
-        'price_attr': '245',
-        'current_text': 'SAR 245',
-        'original_value': '350',
-        'original_text': 'SAR 350',
-        'taxes_text': '+SAR 44 taxes and fees',
-        'taxes_raw': '43.79',
+        'price_attr': '490',
+        'current_text': 'SAR 490',
+        'original_value': '700',
+        'original_text': 'SAR 700',
+        'taxes_text': '+SAR 88 taxes and fees',
+        'taxes_raw': '87.58',
         'room_name': 'Standard Double Room',
         'area_text': '35 m²',
         'occupancy_text': 'Max. people: 2',

@@ -565,13 +565,13 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     current = rate.get('current_price')
                     taxes = rate.get('taxes')
                     note = (
-                        'نطاق أسعار الغرف على Booking قبل الخصم وقبل الضرائب: '
+                        'نطاق أسعار الغرف لليلة على Booking قبل الخصم وقبل الضرائب: '
                         f'{_range(price_from, price_to)} ر.س'
                         + (f' (محوّل من {source_currency})'
                            if source_currency != 'SAR' else '')
                         + (f'؛ المساحات {_range(area_from, area_to)} م²'
                            if area_from is not None else '')
-                        + f'؛ أقل سعر حالي بعد الخصم '
+                        + f'؛ أقل سعر حالي لليلة بعد الخصم '
                         f'{current if current is not None else "غير متوفر"} '
                         f'والضرائب {taxes if taxes is not None else "غير متوفر"}.')
                     row.update({

@@ -303,10 +303,10 @@ class VerifiedAreaTests(unittest.TestCase):
     def test_hotel_area_and_price_come_from_the_booking_block_only(self):
         rate = booking_rooms.select_cheapest_rate([{
             'block_id': '100_200_2_2_0',
-            'price_attr': '245',
-            'current_text': 'SAR 245',
-            'original_value': '350',
-            'taxes_text': '+SAR 44 taxes and fees',
+            'price_attr': '490',
+            'current_text': 'SAR 490',
+            'original_value': '700',
+            'taxes_text': '+SAR 88 taxes and fees',
             'room_name': 'Standard Double Room',
             'area_text': '35 m²',
             'occupancy_text': 'Max. people: 2',

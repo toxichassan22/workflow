@@ -352,6 +352,14 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(row['price_to'], '900')
         self.assertIn('5 نجوم', row['notes'])
 
+    def test_booking_fill_says_when_booking_has_no_star_rating(self):
+        row = {'name': 'فندق بلا تصنيف', 'project_type': 'فندقي'}
+        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 900.0,
+                'area_from': 30.0, 'area_to': 40.0}
+        self.module._apply_rate(
+            row, rate, 'https://www.booking.com/hotel/sa/no-stars.html')
+        self.assertIn('لا يعرض Booking تصنيف نجوم', row['notes'])
+
     def test_booking_fill_classifies_a_matching_star_class_as_direct(self):
         row = {'name': 'فندق اختبار', 'project_type': 'فندقي'}
         rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0,

@@ -21,15 +21,17 @@ import browser  # noqa: E402
 
 
 def _row(block_id, price, original, area='35 m²', room='Standard Double Room',
-         taxes='+SAR 44 taxes and fees', row_text='Guests: 2 adults'):
+         taxes='+SAR 88 taxes and fees', row_text='Guests: 2 adults'):
+    # Booking's room table prices the whole two-night stay; the selector
+    # returns the nightly figure.
     return {
         'block_id': block_id,
-        'price_attr': str(price),
-        'current_text': f'SAR {price}',
-        'original_value': str(original) if original else '',
-        'original_text': f'SAR {original}' if original else '',
+        'price_attr': str(price * 2),
+        'current_text': f'SAR {price * 2}',
+        'original_value': str(original * 2) if original else '',
+        'original_text': f'SAR {original * 2}' if original else '',
         'taxes_text': taxes,
-        'taxes_raw': '43.79',
+        'taxes_raw': '87.58',
         'room_name': room,
         'area_text': area,
         'occupancy_text': 'Max. people: 2',
@@ -163,6 +165,29 @@ class BookingRateSelectionTests(unittest.TestCase):
     def test_no_table_rows_returns_none(self):
         self.assertIsNone(booking_rooms.select_cheapest_rate([]))
 
+    def test_a_two_night_room_total_is_returned_as_a_nightly_price(self):
+        row = {
+            'block_id': '1559334001_438176898_2_2_0',
+            'price_attr': '578',
+            'current_text': 'SAR 578',
+            'original_value': '680',
+            'original_text': 'SAR 680',
+            'taxes_text': '+SAR 103 taxes and fees',
+            'taxes_raw': '103',
+            'room_name': 'Standard Double Room',
+            'area_text': '35 m²',
+            'occupancy_text': 'Max. people: 2',
+            'row_text': 'Guests: 2 adults',
+        }
+        rate = booking_rooms.select_cheapest_rate([row])
+        self.assertEqual(rate['price'], 340.0)
+        self.assertEqual(rate['current_price'], 289.0)
+        self.assertEqual(rate['taxes'], 51.5)
+        self.assertEqual(rate['current_price_including_tax'], 340.5)
+        block = booking_rooms.format_rate_block(rate)
+        self.assertIn('nightly_price_before_discount: 340', block)
+        self.assertIn('current_price_after_discount: 289', block)
+
     def test_local_currency_original_is_restated_in_the_page_currency(self):
         row = {
             'block_id': '100_200_2_2_0',
@@ -179,10 +204,10 @@ class BookingRateSelectionTests(unittest.TestCase):
         }
         rate = booking_rooms.select_cheapest_rate([row])
         self.assertEqual(rate['currency'], 'SAR')
-        self.assertEqual(rate['current_price'], 535.0)
-        self.assertAlmostEqual(rate['price'], 629.5, delta=0.6)
-        self.assertAlmostEqual(rate['taxes'], 111.0, places=1)
-        self.assertEqual(rate['current_price_including_tax'], 646.0)
+        self.assertEqual(rate['current_price'], 267.5)
+        self.assertAlmostEqual(rate['price'], 314.8, delta=0.6)
+        self.assertAlmostEqual(rate['taxes'], 55.5, places=1)
+        self.assertEqual(rate['current_price_including_tax'], 323.0)
 
 
 class BookingRoomTableWiringTests(unittest.TestCase):
