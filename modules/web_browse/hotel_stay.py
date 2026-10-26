@@ -4,7 +4,9 @@ Booking hides both the nightly price and the room size until a stay is
 selected — the page answers «Select dates to see this property's availability
 and prices» and every later row comes back with an empty price and area. The
 window is part of the observation, so all properties are opened for the same
-stay: tomorrow, one night, one room, two adults, SAR.
+stay: two weeks out, one night, one room, two adults, SAR. A stay that
+starts tomorrow leaves nothing to book once the read lands late in the day,
+so the window opens 14 days ahead (check-in today+14, check-out today+15).
 
 ``with_booking_stay_params`` rewrites only property pages (``/hotel/``); city,
 district and search-result pages keep their URL untouched.
@@ -13,7 +15,7 @@ district and search-result pages keep their URL untouched.
 from datetime import date, timedelta
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-STAY_LEAD_DAYS = 1
+STAY_LEAD_DAYS = 14
 STAY_NIGHTS = 1
 STAY_PARAMS = (
     'checkin', 'checkout', 'group_adults', 'group_children',

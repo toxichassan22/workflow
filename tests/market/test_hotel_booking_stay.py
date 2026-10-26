@@ -38,10 +38,12 @@ STAY_OUT = date(2026, 1, 17)
 
 class BookingStayWindowTests(unittest.TestCase):
 
-    def test_window_is_tomorrow_for_one_night(self):
+    def test_window_opens_two_weeks_out_for_one_night(self):
+        """A stay starting tomorrow leaves nothing to book when the read lands
+        late in the day: check-in is today+14 and check-out is today+15."""
         check_in, check_out = hotel_stay.booking_stay_window(date(2026, 1, 1))
-        self.assertEqual(check_in, date(2026, 1, 2))
-        self.assertEqual(check_out, date(2026, 1, 3))
+        self.assertEqual(check_in, date(2026, 1, 15))
+        self.assertEqual(check_out, date(2026, 1, 16))
 
     def test_hotel_url_carries_the_shared_stay(self):
         url = hotel_stay.with_booking_stay_params(HOTEL_URL, STAY_IN, STAY_OUT)
