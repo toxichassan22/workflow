@@ -210,25 +210,117 @@ def _district_key(value):
         str(value or '').replace('حي ', '', 1))
 
 
+# Words that describe a unit or a building without naming the project. Two
+# different projects both called «برج» are not the same competitor.
+_GENERIC_PROJECT_TOKENS = {
+    'مشروع', 'مشاريع', 'وحدات', 'وحدة', 'سكني', 'سكنية', 'تجاري', 'تجارية',
+    'برج', 'بروج', 'مجمع', 'مجمعات', 'كمبوند', 'عمارة', 'عمارات',
+    'شقة', 'شقق', 'فيلا', 'فلل', 'دور', 'أدوار', 'مكتب', 'مكاتب',
+    'محل', 'محلات', 'معرض', 'معارض', 'مستودع', 'مستودعات', 'أرض', 'أراضي',
+    'project', 'projects', 'tower', 'towers', 'residence', 'residences',
+    'suites', 'apartments', 'the', 'and', 'of', 'by',
+}
+
+
+def project_name_tokens(value):
+    """The words of a project name that actually identify it.
+
+    The definite article is dropped before the generic words are checked, so
+    «السكني» is the same descriptor as «سكني» and never identifies a project.
+    """
+    folded = booking_search.normalize_label(value)
+    tokens = []
+    for token in folded.split():
+        if token.startswith('ال') and len(token) > 3:
+            token = token[2:]
+        if len(token) >= 3 and token not in _GENERIC_PROJECT_TOKENS:
+            tokens.append(token)
+    return tokens
+
+
+def match_project_link(links, name, city=''):
+    """The directory entry whose own project name is this typed competitor.
+
+    Aqar slugs carry the project's own name, so matching is on those words:
+    every distinctive word of the typed name must appear, with the city and
+    the generic property words («برج»، «شقق»، «مشروع»…) left out. A name with a
+    single distinctive word matches only an entry whose own name has that one
+    word too, so one shared word never claims a different project.
+    """
+    city_tokens = set(project_name_tokens(city))
+    wanted = [token for token in project_name_tokens(name)
+              if token not in city_tokens]
+    if not wanted:
+        return None
+    wanted_set = set(wanted)
+    best = None
+    for link in links or []:
+        if not isinstance(link, dict):
+            continue
+        have = {token for token in project_name_tokens(link.get('name'))
+                if token not in city_tokens}
+        if not have:
+            continue
+        if len(wanted_set) == 1:
+            if have != wanted_set:
+                continue
+        elif not wanted_set <= have:
+            continue
+        # The closest entry wins: fewest extra words around the same name.
+        score = len(have - wanted_set)
+        if best is None or score < best[0]:
+            best = (score, link)
+    return best[1] if best else None
+
+
+def price_fields(card, detail):
+    """The project's price exactly as its own page states it.
+
+    The directory card prints «يبدأ من …», which is a single starting number,
+    not a spread. Reading it as a two-sided range put the same figure in both
+    cells and made the table claim a range the page never showed; the project
+    page's own «الأسعار من … إلى …» is the only real range.
+    """
+    detail_from = detail.get('price_from')
+    detail_to = detail.get('price_to')
+    if detail_from is not None and detail_to is not None:
+        if detail_to != detail_from:
+            return {'price_type': 'نطاق سعري', 'price_value': None,
+                    'price_from': detail_from, 'price_to': detail_to}
+        detail_to = None
+    if detail_from is not None:
+        return {'price_type': 'يبدأ من', 'price_value': detail_from,
+                'price_from': None, 'price_to': None}
+    card_from = card.get('price_from')
+    if card_from is not None:
+        return {'price_type': 'يبدأ من', 'price_value': card_from,
+                'price_from': None, 'price_to': None}
+    return {'price_type': '', 'price_value': None,
+            'price_from': None, 'price_to': None}
+
+
 def project_row(card, detail, offer_lang='ar'):
-    price_from = detail.get('price_from')
-    price_to = detail.get('price_to')
-    if price_from is None:
-        price_from = card.get('price_from')
-        price_to = price_from
+    price = price_fields(card, detail)
     area_from = detail.get('area_from')
     area_to = detail.get('area_to')
     url = card.get('url') or ''
+    is_range = price['price_type'] == 'نطاق سعري'
     if offer_lang == 'en':
-        notes = 'Price and unit-area ranges from the project page on aqar'
-        if price_from is None:
-            notes += '; the page showed no price range'
+        if is_range:
+            notes = 'Price range and unit areas from the project page on aqar'
+        elif price['price_type']:
+            notes = ('Starting price and unit areas from the project page on aqar')
+        else:
+            notes = 'The project page on aqar showed no price'
         if area_from is None:
             notes += '; the page showed no unit areas'
     else:
-        notes = 'نطاق الأسعار والمساحات من صفحة المشروع على عقار'
-        if price_from is None:
-            notes += '؛ لم تُظهر الصفحة نطاقًا سعريًا'
+        if is_range:
+            notes = 'نطاق الأسعار والمساحات من صفحة المشروع على عقار'
+        elif price['price_type']:
+            notes = 'سعر البداية والمساحات من صفحة المشروع على عقار'
+        else:
+            notes = 'لم تُظهر صفحة المشروع على عقار سعرًا'
         if area_from is None:
             notes += '؛ لم تُظهر الصفحة مساحات الوحدات'
     flags = card.get('flags') or []
@@ -236,10 +328,10 @@ def project_row(card, detail, offer_lang='ar'):
         'name': card.get('name') or '',
         'project_type': card.get('project_type') or '',
         'operation_type': card.get('operation') or '',
-        'price_type': 'نطاق سعري' if price_from is not None else '',
-        'price_value': '',
-        'price_from': _display(price_from),
-        'price_to': _display(price_to),
+        'price_type': price['price_type'],
+        'price_value': _display(price['price_value']),
+        'price_from': _display(price['price_from']),
+        'price_to': _display(price['price_to']),
         'price_currency': 'SAR',
         'area_mode': 'range' if area_from is not None else '',
         'area_sqm': '',
@@ -257,12 +349,76 @@ def project_row(card, detail, offer_lang='ar'):
         'notes': notes,
         'field_sources': {
             'name': [url],
-            'price_from': [url],
-            'price_to': [url],
+            'price_value': ([url] if price['price_value'] is not None else []),
+            'price_from': ([url] if price['price_from'] is not None else []),
+            'price_to': ([url] if price['price_to'] is not None else []),
             'area_from': [url] if area_from is not None else [],
             'area_to': [url] if area_to is not None else [],
         },
     }
+
+
+def _project_slug_name(path):
+    segments = [part for part in str(path or '').strip('/').split('/') if part]
+    if len(segments) < 3:
+        return ''
+    return re.sub(r'\s+\d+$', '', _slug_text(segments[2])).strip()
+
+
+def parse_project_links(html):
+    """Every named project on the directory page: its URL and its own name.
+
+    The card name depends on a price line being present, so a project listed
+    without one used to disappear completely. Its URL slug carries the same
+    name, which is all a per-name lookup needs.
+    """
+    links = []
+    seen = set()
+    for attrs, _inner in _ANCHOR_RE.findall(str(html or '')):
+        href_match = _HREF_RE.search(attrs)
+        if not href_match:
+            continue
+        href = unquote(html_module.unescape(href_match.group(1))).strip()
+        path = urlsplit(href).path
+        if not _PROJECT_PATH_RE.match(path):
+            continue
+        url = urljoin(BASE, path)
+        if url in seen:
+            continue
+        name = _project_slug_name(path)
+        if not name:
+            continue
+        seen.add(url)
+        links.append({'url': url, 'name': name})
+    return links
+
+
+def load_projects(session, city):
+    """The city's project directory: named project links plus price cards."""
+    page = session.fetch_html(build_projects_url(city), timeout=45)
+    html = (page or {}).get('html') or ''
+    return {
+        'links': parse_project_links(html),
+        'cards': parse_cards(html),
+        'error': str((page or {}).get('error') or ''),
+    }
+
+
+def project_for_link(session, link, offer_lang='ar', cards=()):
+    """Build a project row from its own page; None when the page is empty."""
+    url = str((link or {}).get('url') or '').strip()
+    if not url:
+        return None
+    opened = session.open_url(url)
+    text = str((opened or {}).get('text') or '')
+    if not text:
+        return None
+    card = next((item for item in cards or []
+                 if str((item or {}).get('url') or '') == url), None)
+    if card is None:
+        card = {'name': str((link or {}).get('name') or ''), 'url': url,
+                'project_type': '', 'operation': '', 'flags': []}
+    return project_row(card, parse_detail(text), offer_lang=offer_lang)
 
 
 def scan(session, city, district='', pairs=(), limit=12,
@@ -275,9 +431,8 @@ def scan(session, city, district='', pairs=(), limit=12,
     """
     report = progress if callable(progress) else (lambda *_args: None)
     start = time.time()
-    page = session.fetch_html(build_projects_url(city), timeout=45)
-    html = (page or {}).get('html') or ''
-    cards = parse_cards(html)
+    catalog = load_projects(session, city)
+    cards = catalog['cards']
     report(24, f'قراءة مشاريع عقار — {len(cards)} مشروعًا في {city}...')
     wanted = {tuple(pair) for pair in pairs or []}
     wanted_district = _district_key(district) if district else ''
@@ -309,5 +464,7 @@ def scan(session, city, district='', pairs=(), limit=12,
         'cards': len(cards),
         'matched': len(picked),
         'rows': rows,
-        'error': str((page or {}).get('error') or ''),
+        'card_rows': cards,
+        'project_links': catalog['links'],
+        'error': catalog['error'],
     }

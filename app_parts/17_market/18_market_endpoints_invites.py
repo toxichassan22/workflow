@@ -547,6 +547,27 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                 merged, payload, data, tenant_id=tenant_id)
         except Exception as exc:
             print(f'[MARKET STUDY] hotel name fill skipped: {exc}', flush=True)
+    # Residential and commercial rows are completed from aqar's named-project
+    # directory the same way, so a named project's figures never rest on a
+    # model search. The discovery scan already read that directory; its links
+    # are reused instead of fetching the page a second time.
+    if not current_app.config.get('TESTING'):
+        try:
+            aqar_catalog = None
+            if aqar_handle:
+                aqar_result = ((aqar_handle.get('holder') or {})
+                               .get('result') or {})
+                if aqar_result.get('project_links'):
+                    aqar_catalog = {
+                        'links': aqar_result.get('project_links') or [],
+                        'cards': aqar_result.get('card_rows') or [],
+                    }
+            _fill_project_rows_from_aqar(
+                merged, payload, data, tenant_id=tenant_id,
+                deadline=deadline, progress=report, band=(48, 52),
+                catalog=aqar_catalog)
+        except Exception as exc:
+            print(f'[MARKET STUDY] aqar name fill skipped: {exc}', flush=True)
     if mode != 'fill':
         merged = market_study.filter_and_cap_competitors(
             merged, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,

@@ -848,12 +848,14 @@ def _filled_row_signature(row):
 
 def _run_market_competitors_fill(data, payload, existing, offer_lang='ar',
                                  tenant_id=None, deadline=None, report=None):
-    """Complete the table's own rows: hotels from Booking, others by name.
+    """Complete the table's own rows: hotels from Booking, others from aqar.
 
     The completion mode never discovers competitors, so it never runs the
     district scans, the known-source plan or the logo discovery call. A row
     whose per-name lookup finds nothing keeps its values and says so — one
-    miss never turns the whole run into «تعذر توليد المنافسين».
+    miss never turns the whole run into «تعذر توليد المنافسين». Residential
+    and commercial rows are completed from aqar before the browse agent, so a
+    named project's price and area never depend on a model search.
     """
     report = report if callable(report) else (lambda *_args: None)
     report(10, 'إكمال بيانات المنافسين المسجلين بالبحث باسم كل منافس...')
@@ -889,11 +891,24 @@ def _run_market_competitors_fill(data, payload, existing, offer_lang='ar',
                 progress=report, band=(12, 48)) or 0
         except Exception as exc:
             print(f'[MARKET STUDY] hotel name fill skipped: {exc}', flush=True)
-    if other_targets:
+    aqar_filled = 0
+    if other_targets and not current_app.config.get('TESTING'):
+        try:
+            aqar_filled = _fill_project_rows_from_aqar(
+                other_targets, payload, data, tenant_id=tenant_id,
+                budget_seconds=min(
+                    _AQAR_FILL_BUDGET_SECONDS,
+                    max(20, int(fill_deadline - time.time()))),
+                progress=report, band=(48, 56),
+                deadline=fill_deadline) or 0
+        except Exception as exc:
+            print(f'[MARKET STUDY] aqar name fill skipped: {exc}', flush=True)
+    still_missing = [row for row in other_targets if _needs_name_fill(row)]
+    if still_missing:
         _verify_competitor_rows(
-            other_targets, payload, data, tenant_id=tenant_id,
+            still_missing, payload, data, tenant_id=tenant_id,
             progress=report, evidence_pool=None, deadline=fill_deadline,
-            band=(52, 88))
+            band=(56, 88))
     for row in merged:
         market_study.canonicalize_competitor_source_urls(row)
         _drop_foreign_competitor_urls(row)
@@ -904,7 +919,8 @@ def _run_market_competitors_fill(data, payload, existing, offer_lang='ar',
         and _filled_row_signature(row) != before.get(id(row)))
     changed = min(changed, attempted)
     print(f'[MARKET STUDY] fill completed rows={changed} '
-          f'attempted={attempted} hotel_report={hotel_filled}', flush=True)
+          f'attempted={attempted} hotel_report={hotel_filled} '
+          f'aqar_report={aqar_filled}', flush=True)
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(
         sources, payload.get('dataPeriodBounds'))

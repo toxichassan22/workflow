@@ -42,6 +42,13 @@ _DETAIL_TEXT = """
 حي الأمير عبدالمجيد ، جدة ، جدة
 """
 
+_NO_PRICE_CARD = """
+<a href="/المشاريع-العقارية/شركة-الواجهة-4/برج-الواجهة-77">
+  <div>تحت الإنشاء</div><div>برج الواجهة</div>
+  <div>حي الشاطئ ، جدة ، جدة</div>
+</a>
+"""
+
 
 class _Session:
     def __init__(self, html=_CARDS_HTML, detail=_DETAIL_TEXT):
@@ -83,6 +90,66 @@ class AqarCardTests(unittest.TestCase):
         self.assertEqual(detail['district'], 'الأمير عبدالمجيد')
         self.assertEqual(detail['city'], 'جدة')
 
+    def test_a_starting_price_is_not_written_as_a_range(self):
+        card = aqar_projects.parse_cards(_CARDS_HTML)[0]
+        row = aqar_projects.project_row(card, {})
+        self.assertEqual(row['price_type'], 'يبدأ من')
+        self.assertEqual(row['price_value'], '366900')
+        self.assertEqual(row['price_from'], '')
+        self.assertEqual(row['price_to'], '')
+        self.assertEqual(row['field_sources']['price_value'], [card['url']])
+
+    def test_a_single_detail_price_is_also_a_starting_price(self):
+        card = aqar_projects.parse_cards(_CARDS_HTML)[0]
+        detail = {'price_from': 500000, 'price_to': 500000}
+        row = aqar_projects.project_row(card, detail)
+        self.assertEqual(row['price_type'], 'يبدأ من')
+        self.assertEqual(row['price_value'], '500000')
+        self.assertEqual(row['price_to'], '')
+
+
+class AqarProjectLinkTests(unittest.TestCase):
+
+    def test_every_named_project_is_a_link_even_without_a_price(self):
+        links = aqar_projects.parse_project_links(_CARDS_HTML + _NO_PRICE_CARD)
+        self.assertEqual(len(links), 4)
+        names = [link['name'] for link in links]
+        self.assertIn('أبياتنا هيلز', names)
+        self.assertIn('برج الواجهة', names)
+        self.assertTrue(links[0]['url'].startswith('https://sa.aqar.fm/'))
+
+    def test_the_directory_returns_links_and_price_cards_together(self):
+        catalog = aqar_projects.load_projects(_Session(), 'جدة')
+        self.assertEqual(len(catalog['links']), 3)
+        self.assertEqual(len(catalog['cards']), 3)
+        self.assertEqual(catalog['error'], '')
+
+    def test_a_typed_name_matches_the_projects_own_name(self):
+        links = aqar_projects.parse_project_links(_CARDS_HTML + _NO_PRICE_CARD)
+        for typed in ('أبياتنا هيلز', 'مشروع أبياتنا هيلز السكني',
+                      'أبياتنا هيلز جدة'):
+            match = aqar_projects.match_project_link(links, typed, city='جدة')
+            self.assertIsNotNone(match, typed)
+            self.assertIn('أبياتنا', match['url'])
+        self.assertIsNotNone(
+            aqar_projects.match_project_link(links, 'برج الواجهة', city='جدة'))
+
+    def test_one_shared_word_does_not_claim_a_different_project(self):
+        links = aqar_projects.parse_project_links(_CARDS_HTML + _NO_PRICE_CARD)
+        self.assertIsNone(aqar_projects.match_project_link(
+            links, 'برج الواجهة الذهبية', city='جدة'))
+        self.assertIsNone(aqar_projects.match_project_link(
+            links, 'مجمع النخيل', city='جدة'))
+
+    def test_a_card_less_project_is_still_read_by_name(self):
+        links = aqar_projects.parse_project_links(_NO_PRICE_CARD)
+        session = _Session(html=_NO_PRICE_CARD)
+        row = aqar_projects.project_for_link(session, links[0])
+        self.assertEqual(row['name'], 'برج الواجهة')
+        self.assertEqual(row['source_url'], links[0]['url'])
+        self.assertEqual((row['price_from'], row['price_to']),
+                         ('366905', '812400'))
+
 
 class AqarScanTests(unittest.TestCase):
 
@@ -91,6 +158,7 @@ class AqarScanTests(unittest.TestCase):
         result = aqar_projects.scan(
             session, 'جدة', pairs=[('سكني', 'بيع')], limit=4)
         self.assertEqual(result['cards'], 3)
+        self.assertEqual(len(result['project_links']), 3)
         self.assertEqual(result['matched'], 1)
         self.assertEqual([row['name'] for row in result['rows']],
                          ['أبياتنا هيلز'])
