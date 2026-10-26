@@ -547,17 +547,53 @@ def _print_rate_audit(rate, rows, url='', stars_raw=''):
     print(' '.join(parts), flush=True)
 
 
+_PAGE_STATE_JS = """() => {
+  const body = document.body ? (document.body.innerText || '') : '';
+  const text = body.replace(/\\s+/g, ' ');
+  const flags = [];
+  if (/لا تتوفر|لا توجد غرف|غير متاح|sold out|no availability|not available/i
+      .test(text)) flags.push('unavailable');
+  if (/challenge|Just a moment|Checking your browser|تحدي/i.test(text)) {
+    flags.push('challenge');
+  }
+  if (document.querySelector('#hprt-table')) flags.push('table');
+  return (document.title || '') + ' || flags=' + flags.join(',')
+    + ' || ' + text.slice(0, 200);
+}"""
+
+
+def _page_state_report(page):
+    """Title, unavailability/challenge flags and a text head, for a miss.
+
+    A property page that answers without a room table is either a night with
+    no availability or a page that never left its challenge shell, and the two
+    need different answers. The page says which one it is; without this line
+    the same miss looked like a silent read failure.
+    """
+    try:
+        return str(page.evaluate(_PAGE_STATE_JS) or '')[:400]
+    except Exception:
+        return ''
+
+
 def extract_booking_rate(page, url='', adults=2):
     """Read the DOM of an already-loaded Booking property page."""
+    target = str(url or '')[:120]
     try:
         data = page.evaluate(BOOKING_RATE_JS)
-    except Exception:
+    except Exception as exc:
+        print(f'[BOOKING RATE MISS] url={target!r} '
+              f'reason=read_failed error={type(exc).__name__}', flush=True)
         return None
     if not isinstance(data, dict) or not data.get('found'):
+        print(f'[BOOKING RATE MISS] url={target!r} reason=no_table '
+              f'page={_page_state_report(page)!r}', flush=True)
         return None
     rows = data.get('rows') or []
     rate = select_cheapest_rate(rows, adults=adults)
     if not rate:
+        print(f'[BOOKING RATE MISS] url={target!r} reason=no_priced_rows '
+              f'rows={len(rows)}', flush=True)
         return None
     rate.update(room_ranges(rows))
     try:

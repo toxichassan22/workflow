@@ -6,6 +6,8 @@ breakfast-included sibling, other room categories and taxes; picking the wrong
 one is the ~20% gap this suite guards.
 """
 
+import contextlib
+import io
 import sys
 import unittest
 from pathlib import Path
@@ -201,6 +203,31 @@ class BookingRateSelectionTests(unittest.TestCase):
 
     def test_no_table_rows_returns_none(self):
         self.assertIsNone(booking_rooms.select_cheapest_rate([]))
+
+    def test_a_page_without_a_room_table_says_why_it_was_empty(self):
+        # A property page that answers without a room table is either a night
+        # with no availability or a page still in its challenge shell. The miss
+        # must say which, otherwise it reads as a silent extraction failure.
+        class _Page:
+            def __init__(self):
+                self.calls = 0
+
+            def evaluate(self, _script):
+                self.calls += 1
+                if self.calls == 1:
+                    return {'found': False, 'rows': []}
+                return ('نوفوتيل جدة التحلية || flags=unavailable, || '
+                        'لا تتوفر غرف لهذه التواريخ')
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            rate = booking_rooms.extract_booking_rate(
+                _Page(), 'https://www.booking.com/hotel/sa/x.html')
+        self.assertIsNone(rate)
+        printed = buffer.getvalue()
+        self.assertIn('[BOOKING RATE MISS]', printed)
+        self.assertIn('reason=no_table', printed)
+        self.assertIn('unavailable', printed)
 
     def test_the_room_table_price_is_kept_as_the_site_supplies_it(self):
         row = {
