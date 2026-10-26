@@ -400,6 +400,56 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(filled, 0)
         self.assertIn('موقع المشروع', rows[0]['notes'])
 
+    def test_search_price_cards_are_read_from_the_booking_search_page(self):
+        search_url = self.module.booking_search.build_search_url(
+            'Jeddah', dest_id='5654', dest_type='district')
+        session = _Session({
+            search_url: {'booking_search': {'hotels': [{
+                'name': 'Adagio Jeddah City Center',
+                'url': 'https://www.booking.com/hotel/sa/'
+                       'adagio-jeddah-city-center.html',
+                'price_text': '624 SAR',
+                'text': 'ليلتان، شخصان بالغان 624 SAR',
+            }]}},
+        })
+        with self.app.app_context(), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session), \
+                patch.object(
+                    self.module.booking_destination,
+                    'resolve_city_destination',
+                    return_value={'dest_id': '-3096108',
+                                  'dest_type': 'city',
+                                  'city_url':
+                                  'https://www.booking.com/city/sa/jeddah.html'}), \
+                patch.object(
+                    self.module.booking_destination,
+                    'cached_district_id', return_value='5654'):
+            cards = self.module._build_search_price_cards(
+                {'city': 'جدة', 'district': 'الاندلس'},
+                {}, None, 'جدة', 'Jeddah', 'SA', 300)
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]['price_text'], '624 SAR')
+        self.assertIn(search_url, session.urls)
+
+    def test_booking_fill_uses_the_search_card_price_when_present(self):
+        row = {'name': 'Adagio Jeddah City Center', 'project_type': 'فندقي'}
+        rate = {'price': 735.0, 'price_from': 735.0, 'price_to': 2751.0,
+                'current_price': 624.0, 'area_from': 35.0, 'area_to': 73.0}
+        card = {'price_text': '624 SAR',
+                'text': 'ليلتان، شخصان بالغان 624 SAR',
+                'url': 'https://www.booking.com/hotel/sa/'
+                       'adagio-jeddah-city-center.html'}
+        self.module._apply_rate(
+            row, rate, card['url'], price_card=card)
+        self.assertEqual(row['price_value'], '624')
+        self.assertEqual(row['price_from'], '')
+        self.assertEqual(row['price_to'], '')
+        self.assertEqual(row['price_type'], 'يبدأ من')
+        self.assertEqual(row['area_from'], '35')
+        self.assertIn('سعر البحث على Booking', row['notes'])
+        self.assertIn('ليلتين', row['notes'])
+
     def test_booking_fill_says_when_booking_has_no_star_rating(self):
         row = {'name': 'فندق بلا تصنيف', 'project_type': 'فندقي'}
         rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 900.0,

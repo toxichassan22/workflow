@@ -18,6 +18,7 @@ import unicodedata
 
 import booking_catalog
 import booking_destination
+import booking_rooms
 import booking_search
 from numeric_precision import format_precise_number
 
@@ -295,6 +296,12 @@ def _has_booking_price(row):
                for key in ('price_value', 'price_from', 'price_to'))
 
 
+def _search_card_price(card):
+    if not isinstance(card, dict):
+        return None
+    return booking_rooms.parse_number(card.get('price_text'))
+
+
 def _page_identity(title, url, variants, city_terms=''):
     """True when the opened booking page is one of this row's name variants."""
     return any(_title_matches(title, variant, city_terms)
@@ -302,9 +309,10 @@ def _page_identity(title, url, variants, city_terms=''):
                for variant in variants or [])
 
 
-def _apply_rate(row, rate, url, target_stars=()):
+def _apply_rate(row, rate, url, target_stars=(), price_card=None):
     price_from = rate.get('price_from') or rate.get('price')
     price_to = rate.get('price_to') or price_from
+    card_price = _search_card_price(price_card)
     raw_area_from = rate.get('area_from')
     raw_area_to = rate.get('area_to')
     if raw_area_from is None and raw_area_to is None:
@@ -320,17 +328,46 @@ def _apply_rate(row, rate, url, target_stars=()):
         stars_value = ''
     target = {str(item) for item in (target_stars or ()) if str(item).strip()}
     effective_stars = str(row.get('hotel_stars') or stars_value or '').strip()
-    note = (
-        'نطاق أسعار الغرف مقابل ليلتين على Booking قبل الخصم وقبل الضرائب: '
-        f'{_money(price_from)} – {_money(price_to)} ر.س'
-        + (f'؛ المساحات {_money(area_from)} – {_money(area_to)} م²'
-           if area_from is not None else '')
-        + (f'؛ أقل سعر حالي مقابل ليلتين بعد الخصم {current}'
-           if current is not None else '')
-        + (f'؛ التصنيف {stars_value} نجوم' if stars_value
-           else '؛ لا يعرض Booking تصنيف نجوم لهذا الفندق'))
+    card_text = str((price_card or {}).get('text') or '')
+    card_period = ('ليلتين' if ('ليلتان' in card_text
+                                or 'two nights' in card_text.lower()) else '')
+    if card_price is not None:
+        price_value = _money(card_price)
+        price_from = price_to = ''
+        price_type = 'يبدأ من'
+        note = (
+            'سعر البحث على Booking'
+            + (f' مقابل {card_period}' if card_period else '')
+            + f': {price_value} ر.س'
+            + (f'؛ المساحات {_money(area_from)} – {_money(area_to)} م²'
+               if area_from is not None else '')
+            + (f'؛ التصنيف {stars_value} نجوم' if stars_value
+               else '؛ لا يعرض Booking تصنيف نجوم لهذا الفندق'))
+    else:
+        price_value = ''
+        price_type = 'نطاق أسعار الغرف'
+        note = (
+            'نطاق أسعار الغرف مقابل ليلتين على Booking قبل الخصم وقبل الضرائب: '
+            f'{_money(price_from)} – {_money(price_to)} ر.س'
+            + (f'؛ المساحات {_money(area_from)} – {_money(area_to)} م²'
+               if area_from is not None else '')
+            + (f'؛ أقل سعر حالي مقابل ليلتين بعد الخصم {current}'
+               if current is not None else '')
+            + (f'؛ التصنيف {stars_value} نجوم' if stars_value
+               else '؛ لا يعرض Booking تصنيف نجوم لهذا الفندق'))
     if raw_area_from is not None and area_from is None:
         note += '؛ المساحة المقروءة غير منطقية فلم تُسجل'
+    field_sources = {
+        'name': [url],
+        'area_from': [url] if area_from is not None else [],
+        'area_to': [url] if area_to is not None else [],
+        'hotel_stars': [url] if stars_value else [],
+    }
+    if card_price is not None:
+        field_sources['price_value'] = [url]
+    else:
+        field_sources['price_from'] = [url]
+        field_sources['price_to'] = [url]
     row.update({
         'project_type': row.get('project_type') or 'فندقي',
         'operation_type': row.get('operation_type') or 'تشغيل فندقي',
@@ -340,10 +377,10 @@ def _apply_rate(row, rate, url, target_stars=()):
             if target and effective_stars and effective_stars not in target
             else 'مباشر'),
         'status': row.get('status') or 'قائم',
-        'price_type': 'نطاق أسعار الغرف',
-        'price_value': '',
-        'price_from': _money(price_from),
-        'price_to': _money(price_to),
+        'price_type': price_type,
+        'price_value': price_value,
+        'price_from': (_money(price_from) if price_from else ''),
+        'price_to': (_money(price_to) if price_to else ''),
         'price_currency': 'SAR',
         'area_sqm': '',
         'area_mode': 'range' if area_from is not None else '',
@@ -355,15 +392,16 @@ def _apply_rate(row, rate, url, target_stars=()):
         'row_source': 'booking',
         'verify_state': 'verified',
         'notes': note,
-        'field_sources': {
-            'name': [url],
-            'price_from': [url],
-            'price_to': [url],
-            'area_from': [url] if area_from is not None else [],
-            'area_to': [url] if area_to is not None else [],
-            'hotel_stars': [url] if stars_value else [],
-        },
+        'field_sources': field_sources,
     })
+    if card_price is not None:
+        price_cache = dict(row.get('price_cache') or {})
+        price_cache.update({
+            'search_card_price': price_value,
+            'search_card_text': str((price_card or {}).get('price_text') or ''),
+            'search_card_url': str((price_card or {}).get('url') or ''),
+        })
+        row['price_cache'] = price_cache
 
 
 def _booking_hotel_candidates(session, name, city=''):
@@ -492,6 +530,85 @@ def _build_booking_catalog(payload, data, tenant_id, city_ar, city_en,
             pass
 
 
+def _build_search_price_cards(payload, data, tenant_id, city_ar, city_en,
+                              country, budget_seconds):
+    """Read the current prices displayed on Booking's own search cards."""
+    if not country or not (city_en or city_ar):
+        return []
+    session = _market_browser_session()
+    if session is None:
+        return []
+    try:
+        cache_path = (os.path.join(
+            UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
+            if UPLOADS_DIR else '')
+        destination = booking_destination.resolve_city_destination(
+            session, country, city_en or city_ar, city_ar,
+            cache_path=cache_path)
+        dest_id = str((destination or {}).get('dest_id') or '')
+        if not dest_id:
+            return []
+        district = str((payload or {}).get('district') or '').strip()
+        if district.startswith('حي '):
+            district = district[3:].strip()
+        district_id = ''
+        if district:
+            district_id = booking_destination.cached_district_id(
+                cache_path, country, city_en or city_ar, district)
+        city_search_url = booking_search.build_search_url(
+            city_en or city_ar, dest_id=dest_id,
+            dest_type=str((destination or {}).get('dest_type') or 'city'))
+        search = None
+        if district_id:
+            search_url = booking_search.build_search_url(
+                city_en or city_ar, dest_id=district_id,
+                dest_type='district')
+        else:
+            search = session.open_url(city_search_url)
+            facets = ((search or {}).get('booking_search') or {}
+                      ).get('booking_districts') or []
+            match = booking_search.match_district_facet(
+                facets, district) if district else None
+            district_id = str((match or {}).get('id') or '')
+            if not district_id and district and str(
+                    (destination or {}).get('dest_type') or 'city') == 'city':
+                # The city result page exposes at most ten districts; the
+                # 5-star page is the reliable place to read the hidden id.
+                probe_url = booking_search.build_search_url(
+                    city_en or city_ar, stars='5', dest_id=dest_id,
+                    dest_type='city')
+                probe = session.open_url(probe_url)
+                probe_facets = ((probe or {}).get('booking_search') or {}
+                                ).get('booking_districts') or []
+                probe_match = booking_search.match_district_facet(
+                    probe_facets, district) if district else None
+                district_id = str((probe_match or {}).get('id') or '')
+                if district_id:
+                    booking_destination.remember_district_id(
+                        cache_path, country, city_en or city_ar,
+                        district, district_id)
+            search_url = (booking_search.build_search_url(
+                city_en or city_ar, dest_id=district_id,
+                dest_type='district') if district_id else city_search_url)
+            if district_id:
+                search = None
+        if search is None:
+            search = session.open_url(search_url)
+        cards = ((search or {}).get('booking_search') or {}).get('hotels') or []
+        print(f'[MARKET STUDY] booking search price cards={len(cards)} '
+              f'url={search_url[:180]}', flush=True)
+        return [card for card in cards if isinstance(card, dict)]
+    except Exception as exc:
+        print(f'[MARKET STUDY] booking search price cards skipped: {exc}',
+              flush=True)
+        return []
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
+
+
 def _targets_missing_from_catalog(targets, hints, catalog, city_terms):
     missing = []
     for row in targets or []:
@@ -552,6 +669,10 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
             payload, data, tenant_id, city_ar, city_en, country, budget,
             deadline=catalog_deadline)
         catalog = booking_catalog.merge_entries(catalog, extra)
+    price_cards = []
+    if not current_app.config.get('TESTING'):
+        price_cards = _build_search_price_cards(
+            payload, data, tenant_id, city_ar, city_en, country, budget)
     remaining = max(30.0, budget - (time.time() - started))
     result = {'filled': 0}
     timed_out = threading.Event()
@@ -569,6 +690,7 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
         result['filled'] = _fill_rows(
             targets, payload, data, tenant_id, remaining,
             progress=_report, band=band, hints=hints, catalog=catalog,
+            price_cards=price_cards,
             city_ar=city_ar, city_en=city_en, country=country,
             city_terms=city_terms)
 
@@ -592,11 +714,13 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
 
 def _fill_rows(targets, payload, data, tenant_id, budget,
                progress=None, band=(12, 48), hints=None, catalog=None,
-               city_ar='', city_en='', country='', city_terms=''):
+               price_cards=None, city_ar='', city_en='', country='',
+               city_terms=''):
     report = progress if callable(progress) else (lambda *_args: None)
     lo, hi = band if isinstance(band, (tuple, list)) and len(band) == 2 else (12, 48)
     total = max(1, len(targets))
     catalog = list(catalog or [])
+    price_cards = list(price_cards or [])
     target_stars = _target_hotel_stars(payload)
     deadline = time.time() + float(budget or NAME_FILL_BUDGET_SECONDS)
     filled = [0]
@@ -643,6 +767,16 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                                     'المتاح لهذه المحاولة.')
                     continue
                 variants = _name_variants(row, hints)
+                price_card = None
+                for variant in variants:
+                    price_card = _card_for_name(
+                        price_cards, variant, city_terms)
+                    if price_card:
+                        print(f'[MARKET STUDY] booking search price match '
+                              f'name={variant!r} '
+                              f'price={price_card.get("price_text")!r}',
+                              flush=True)
+                        break
                 card = None
                 for variant in variants:
                     card = _card_for_name(catalog_cards, variant, city_terms)
@@ -697,7 +831,8 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                                 'لم تُكتب بيانات.'))
                     elif (isinstance(rate, dict)
                           and rate.get('price') is not None):
-                        _apply_rate(row, rate, url, target_stars=target_stars)
+                        _apply_rate(row, rate, url, target_stars=target_stars,
+                                    price_card=price_card)
                         with lock:
                             filled[0] += 1
                     else:
