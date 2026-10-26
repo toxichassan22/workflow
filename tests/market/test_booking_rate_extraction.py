@@ -336,6 +336,40 @@ class BookingStarsAndAreaTests(unittest.TestCase):
         self.assertEqual(booking_rooms.extract_hotel_stars(_Page('')), 0)
         self.assertEqual(booking_rooms.extract_hotel_stars(_Page('8.7')), 0)
 
+    def test_a_star_class_is_read_from_the_header_when_the_widget_is_gone(self):
+        # Booking drops the rating widget on some property pages while the
+        # header still names the class, so the header and title are read too.
+        # Every pattern needs the word that makes a digit a star class.
+        class _Page:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def evaluate(self, _script):
+                return self.raw
+
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page("bui-rating | فندق جاليريا جدة، 4 نجوم | Galleria")), 4)
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page("| | Mövenpick Hotel Tahlia Jeddah | جدة (4-star hotel)")), 4)
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page("| | Assila, a Luxury Collection Hotel | جدة "
+                  "(أسعار محدثة لعام 2027)")), 0)
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page("8.7 رائع | فندق تجريبي | 2.8 كم من الأندلس")), 0)
+
+    def test_a_starless_page_reports_the_text_it_was_read_from(self):
+        class _Page:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def evaluate(self, _script):
+                return self.raw
+
+        stars, raw = booking_rooms._read_stars(
+            _Page('| | فندق بلا تصنيف | جدة'))
+        self.assertEqual(stars, 0)
+        self.assertIn('فندق بلا تصنيف', raw)
+
     def test_an_implausible_room_area_is_rejected(self):
         self.assertIsNone(booking_rooms.parse_area('4 م²'))
         self.assertIsNone(booking_rooms.parse_area('5 m²'))

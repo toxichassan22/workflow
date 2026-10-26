@@ -154,17 +154,56 @@ def parse_area(text):
     return value if 8 <= value <= 2000 else None
 
 
-def extract_hotel_stars(page):
-    """The property's own star class (rating-stars aria-label), 0 if absent."""
+_STARS_JS = """() => {
+  const text = (el) => el ? ((el.innerText || el.textContent || '')
+      .replace(/\\s+/g, ' ').trim()) : '';
+  const out = [];
+  document.querySelectorAll('[data-testid="rating-stars"]').forEach((el) => {
+    out.push(el.getAttribute('aria-label') || '');
+    out.push(el.getAttribute('class') || '');
+    out.push(text(el));
+  });
+  const header = document.querySelector('h2.pp-header__title')
+    || document.querySelector('[data-testid="property-name"]')
+    || document.querySelector('h1');
+  out.push(text(header));
+  out.push(document.title || '');
+  return out.join(' | ').slice(0, 1500);
+}"""
+
+# Every pattern needs the word that makes the digit a star class, so a review
+# score, a distance or a year in the same header text is never read as one.
+_STAR_PATTERNS = (
+    re.compile(r'([1-5])\s*(?:من\s*أصل|out\s*of)\s*5'),
+    re.compile(r'([1-5])\s*(?:نجوم|نجمه|نجمة)'),
+    re.compile(r'([1-5])\s*-?\s*stars?\b'),
+    re.compile(r'\b(?:stars?|rating)\b[^\d|]{0,10}([1-5])\b'),
+)
+
+
+def _read_stars(page):
+    """(stars, raw) — the property's own star class and the text that says so.
+
+    The header rating is the usual source, but Booking drops the stars widget
+    on some property pages while the header still names the class («فندق 4
+    نجوم»), so the header and page title are read beside it. The raw text rides
+    out with a zero so a missing class can be told from a missed read.
+    """
     try:
-        aria = page.evaluate(
-            "() => { const el = document.querySelector("
-            "'[data-testid=\"rating-stars\"]');"
-            " return el ? (el.getAttribute('aria-label') || '') : ''; }")
+        raw = page.evaluate(_STARS_JS)
     except Exception:
-        return 0
-    match = re.search(r'([1-5])', str(aria or '').translate(_ARABIC_DIGITS))
-    return int(match.group(1)) if match else 0
+        return 0, ''
+    text = str(raw or '').translate(_ARABIC_DIGITS)
+    for pattern in _STAR_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            return int(match.group(1)), text
+    return 0, text
+
+
+def extract_hotel_stars(page):
+    """The property's own star class, 0 when its page states none."""
+    return _read_stars(page)[0]
 
 
 def whole_riyal(value):
@@ -469,12 +508,13 @@ def wait_and_extract(page, url='', adults=2, retries=5, delay_ms=1000):
     return None
 
 
-def _print_rate_audit(rate, rows, url=''):
+def _print_rate_audit(rate, rows, url='', stars_raw=''):
     """One audit line per property page, naming the DOM field behind each figure.
 
     A table price has to be traceable to the field it came from: the chosen
     row's own raw texts (rounded-price attribute, visible current, visible
-    original, taxes) sit beside the values this module applied.
+    original, taxes) sit beside the values this module applied. A page that
+    states no star class prints the text it was read from instead.
     """
     block = str((rate or {}).get('block_id') or '')
     raw = next((row for row in rows or []
@@ -492,7 +532,10 @@ def _print_rate_audit(rate, rows, url=''):
         'price=' + str(rate.get('price')),
         'current=' + str(rate.get('current_price')),
         'tax_included=' + str(bool(rate.get('tax_included'))),
+        'stars=' + str(rate.get('hotel_stars') or 0),
     ]
+    if stars_raw:
+        parts.append('stars_src=' + repr(str(stars_raw)[:160]))
     print(' '.join(parts), flush=True)
 
 
@@ -517,10 +560,11 @@ def extract_booking_rate(page, url='', adults=2):
     rate['source_url'] = (requested if 'booking.com/hotel/' in requested
                           else (final_url or requested))
     rate['page_title'] = str(data.get('title') or '')
-    stars = extract_hotel_stars(page)
+    stars, stars_raw = _read_stars(page)
     if stars:
         rate['hotel_stars'] = stars
-    _print_rate_audit(rate, rows, rate.get('source_url'))
+    _print_rate_audit(rate, rows, rate.get('source_url'),
+                      stars_raw='' if stars else stars_raw)
     return rate
 
 
