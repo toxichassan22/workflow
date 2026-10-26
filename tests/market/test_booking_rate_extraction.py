@@ -475,6 +475,35 @@ class BookingStarsAndAreaTests(unittest.TestCase):
         self.assertIsNone(booking_rooms.parse_area('4 م²'))
         self.assertIsNone(booking_rooms.parse_area('5 m²'))
         self.assertEqual(booking_rooms.parse_area('42 م²'), 42.0)
+    def test_a_one_star_badge_is_not_read_as_the_five_its_scale_names(self):
+        # The live badge on a one-star property reads «نجمة واحدة من أصل 5
+        # نجوم»: the class is spelled out in words while its scale is a digit,
+        # so reading the denominator put five stars on every one-star hotel.
+        class _Page:
+            def __init__(self, raw):
+                self.raw = raw
+
+            def evaluate(self, _script):
+                return self.raw
+
+        live = ('نجمة واحدة من أصل 5 نجوم | b5ab46c480 ecac3a7c7a | '
+                'نوفوتيل جدة التحلية | نجمة واحدة من أصل 5 نجوم | '
+                'de576f5064 | شهادة الاستدامة نوفوتيل جدة التحلية | '
+                'نوفوتيل جدة التحلية، جدة (أسعار محدثة لعام 2027)')
+        self.assertEqual(booking_rooms.extract_hotel_stars(_Page(live)), 1)
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page('نجمة واحدة من أصل 5 نجوم')), 1)
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page('نجمتان من أصل 5 نجوم')), 2)
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page('ثلاث نجوم من أصل 5')), 3)
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page('خمسة نجوم | فندق خمسة نجوم')), 5)
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page('one-star hotel')), 1)
+        # The scale on its own still is not a class.
+        self.assertEqual(booking_rooms.extract_hotel_stars(
+            _Page('من أصل 5 نجوم')), 0)
 
 
 if __name__ == '__main__':

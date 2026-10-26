@@ -196,10 +196,47 @@ _STARS_JS = """() => {
   return out.join(' | ').slice(0, 2000);
 }"""
 
+# A one-star class is spelled out in words — the badge reads «نجمة واحدة من
+# أصل 5 نجوم» — while its denominator is a digit, so reading the denominator as
+# the class put five stars on every one-star hotel.
+_STAR_WORD_NUMBERS = {
+    'واحدة': 1, 'واحد': 1, 'أولى': 1,
+    'اثنتان': 2, 'اثنتين': 2, 'اثنان': 2, 'اثنين': 2,
+    'ثنتان': 2, 'ثنتين': 2,
+    'ثلاث': 3, 'ثلاثة': 3, 'ثلاثه': 3,
+    'أربع': 4, 'أربعة': 4, 'اربعة': 4,
+    'خمس': 5, 'خمسة': 5, 'خمسه': 5,
+    'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+}
+_STAR_WORD_GROUP = '|'.join(
+    sorted(_STAR_WORD_NUMBERS, key=len, reverse=True))
+
+# «من أصل 5» / «out of 5» states the scale, never the class.
+_STAR_DENOMINATOR_RE = re.compile(
+    r'(?:من\s*أصل|out\s*of)\s*\d+\s*(?:نجوم|نجمه|نجمة|نجم|stars?)?', re.I)
+
+# The badge's own ratio: a digit numerator in front of the denominator.
+_STAR_RATIO_PATTERNS = (
+    re.compile(r'([1-5])\s*(?:من\s*أصل|out\s*of)\s*5'),
+)
+
+# The dual form carries the number inside the word: «نجمتان» / «نجمتين».
+_STAR_DUAL_PATTERNS = (
+    re.compile(r'نجمت(?:ان|ين)\b'),
+)
+
+# Word-spelled classes: «نجمة واحدة»، «نجوم خمسة»، «one-star hotel».
+_STAR_WORD_PATTERNS = (
+    re.compile(r'(?:نجوم|نجمه|نجمة|نجم)\s*(' + _STAR_WORD_GROUP + r')\b',
+               re.I),
+    re.compile(r'\b(' + _STAR_WORD_GROUP + r')\s*(?:نجوم|نجمه|نجمة|نجم)\b',
+               re.I),
+    re.compile(r'\b(' + _STAR_WORD_GROUP + r')\s*[-\s]\s*stars?\b', re.I),
+)
+
 # Every pattern needs the word that makes the digit a star class, so a review
 # score, a distance or a year in the same header text is never read as one.
 _STAR_PATTERNS = (
-    re.compile(r'([1-5])\s*(?:من\s*أصل|out\s*of)\s*5'),
     re.compile(r'([1-5])\s*(?:نجوم|نجمه|نجمة)'),
     re.compile(r'([1-5])\s*-?\s*stars?\b'),
     re.compile(r'\b(?:stars?|rating)\b[^\d|]{0,10}([1-5])\b'),
@@ -216,14 +253,32 @@ def _read_stars(page):
     read from a related-property card put five stars on a one-star hotel. The
     raw text rides out with a zero so a missing class can be told from a missed
     read.
+
+    Three passes, in this order: the digit ratio a badge prints («4 من أصل 5»),
+    a class spelled out in words («نجمة واحدة من أصل 5 نجوم»), then a bare
+    digit class on the text with the denominator removed — the `5` in «من أصل
+    5» is the scale and must never be read as the class.
     """
     try:
         raw = page.evaluate(_STARS_JS)
     except Exception:
         return 0, ''
     text = str(raw or '').translate(_ARABIC_DIGITS)
-    for pattern in _STAR_PATTERNS:
+    for pattern in _STAR_RATIO_PATTERNS:
         match = pattern.search(text)
+        if match:
+            return int(match.group(1)), text
+    if any(pattern.search(text) for pattern in _STAR_DUAL_PATTERNS):
+        return 2, text
+    for pattern in _STAR_WORD_PATTERNS:
+        match = pattern.search(text)
+        if match:
+            stars = _STAR_WORD_NUMBERS.get(match.group(1).casefold())
+            if stars:
+                return int(stars), text
+    class_text = _STAR_DENOMINATOR_RE.sub(' ', text)
+    for pattern in _STAR_PATTERNS:
+        match = pattern.search(class_text)
         if match:
             return int(match.group(1)), text
     return 0, text
