@@ -872,6 +872,7 @@ class AqarProjectsWiringTests(_MarketTestBase):
 
 
 from tests.market.test_competitors_evidence_pipeline_parts.banned_listing_portal import BannedListingPortalTests
+from tests.market.test_competitors_evidence_pipeline_parts.own_source_price import OwnSourcePriceTests
 from tests.market.test_competitors_evidence_pipeline_parts.parallelism import ParallelismTests
 
 

@@ -14,6 +14,38 @@ def _hotel_competitor_row(row):
     return any(token in folded for token in ('فندقي', 'فندق', 'hotel', 'hospitality'))
 
 
+def _own_source_urls(row):
+    """The pages this row itself points at — what its source cell opens.
+
+    A verification search hit is not one of them: the table shows one link
+    per competitor, and a figure read from some other page while that link
+    shows a different one is the mismatch the client reports as a bug.
+    """
+    if not isinstance(row, dict):
+        return []
+    return list(market_study.competitor_source_urls(row))
+
+
+def _explicit_own_source_url(row):
+    """The one link the row states for itself ('' when it states none).
+
+    ``source_url`` is what the table's source cell holds, so it is the page
+    the client opens to check the figure. A row carrying only the evidence
+    list (``source_urls``) has no stated page — the table derives one — so the
+    listing evidence keeps answering as it always did.
+    """
+    if not isinstance(row, dict):
+        return ''
+    for key in ('source_url', 'sourceUrl', 'url'):
+        url = str(row.get(key) or '').strip()
+        if not url.startswith(('http://', 'https://')):
+            continue
+        if market_study.is_search_source_url(url):
+            continue
+        return url
+    return ''
+
+
 def _apply_verified_competitor_area(row, parsed, citation_urls):
     """Fill an empty unit/room area from a page this verification retrieved.
 
@@ -263,6 +295,13 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     officially documented tariff. A row with no project-specific page keeps
     its price fields empty — an empty cell is honest, a borrowed median is
     not.
+
+    The row's own source link leads: it is the page the client opens to check
+    the figure. When it carries a price it is the whole pool, so the cell and
+    the link never disagree — a median blended across pages put 268,000
+    beside a link showing 275,000, and a small gap like that reads as a
+    broken system to whoever checks. Other pages only fill a row whose own
+    page has no figure to give.
     """
     if _hotel_competitor_row(row):
         return False
@@ -276,11 +315,18 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
             page_titles[page_url] = str(page.get('title') or '')
     operation = str(row.get('operation_type') or '').strip() or 'أخرى'
     tokens = _competitor_name_tokens(row.get('name'))
+    own_urls = _own_source_urls(row)
+    own_keys = {url.casefold() for url in own_urls}
+    primary_key = _explicit_own_source_url(row).casefold()
+    ordered_urls = []
+    for candidate in own_urls + [str(item or '').strip() for item in (urls or [])]:
+        if candidate and candidate not in ordered_urls:
+            ordered_urls.append(candidate)
     mentions = []
     searched = 0
     unreadable = 0
-    for url in list(dict.fromkeys(urls or []))[:4]:
-        url_key = str(url).strip().casefold()
+    for url in ordered_urls[:4]:
+        url_key = url.casefold()
         if url_key in dead:
             continue
         if market_study.banned_competitor_listing_host(
@@ -301,6 +347,7 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         searched += 1
         for item in _extract_listing_prices(html):
             item['url'] = url
+            item['own_source'] = url_key in own_keys
             mentions.append(item)
         if len(mentions) >= 4:
             break
@@ -308,6 +355,18 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
         print(f"[MARKET STUDY] «{row.get('name') or 'منافس'}» no listing prices "
               f"({searched} pages searched, {unreadable} unreadable)")
         return False
+    # The page the source cell opens wins outright. Only when it carries no
+    # figure does the row's other own pages answer, and only then do the
+    # search-hit pages join — a wider pool is what invented a number that
+    # appeared on none of them.
+    primary_mentions = [item for item in mentions
+                        if str(item.get('url') or '').casefold() == primary_key]
+    if primary_mentions:
+        mentions = primary_mentions
+    else:
+        own_mentions = [item for item in mentions if item.get('own_source')]
+        if own_mentions:
+            mentions = own_mentions
     original_mentions = [item for item in mentions if item.get('original')]
     if original_mentions:
         # A struck-through original is the price before the discount; the
@@ -434,3 +493,23 @@ def _fill_competitor_price_from_listings(row, urls, pages=None):
     if marker not in note:
         row['note'] = f'{note} — {marker}' if note else marker
     return True
+
+
+def _fill_row_price_from_own_source(row, pages=None):
+    """Read the row's own source page before a search supplies a figure.
+
+    Completion searches each competitor's name, and the model's price comes
+    from whichever page it happened to open. A row that already carries the
+    client's link has a page they will open to check the number, so that page
+    answers first. A page with no price leaves the row to the search path
+    instead of writing a figure from elsewhere.
+    """
+    if not isinstance(row, dict) or _hotel_competitor_row(row):
+        return False
+    if any(str(row.get(key) or '').strip()
+           for key in ('price_value', 'price_from', 'price_to')):
+        return False
+    urls = _own_source_urls(row)
+    if not urls:
+        return False
+    return _fill_competitor_price_from_listings(row, urls, pages=pages)

@@ -390,6 +390,10 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     if response.get('error') is None:
         if _market_citation_pages(response):
             search_ran_any = True
+            # The row's own source page answers before the model's figure is
+            # applied — its price is what the client checks against the link.
+            _fill_row_price_from_own_source(
+                row, pages=_market_citation_pages(response))
             prompt_matched, official = _absorb_verify_response(
                 row, response, tokens, needed, matched_pages,
                 offer_lang=offer_lang)
@@ -562,6 +566,7 @@ def _verify_row_from_pool(row, payload, data, evidence_pool):
         return False
     offer_lang = slide_engine.resolve_offer_lang(data)
     matched_pages = {}
+    _fill_row_price_from_own_source(row, pages=pages)
     matched, official = _absorb_verify_response(
         row, _pages_as_agent_response(pages), tokens, needed, matched_pages,
         offer_lang=offer_lang)
