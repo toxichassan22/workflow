@@ -292,50 +292,6 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual(row['row_source'], 'booking')
         self.assertIn('قبل الخصم', row['notes'])
 
-    def test_hotel_scan_uses_the_price_displayed_on_the_search_card(self):
-        search_url = self._search_url()
-        session = _Session({
-            search_url: {
-                'final_url': search_url,
-                'title': 'Booking.com: Search results',
-                'text': '',
-                'booking_search': {'hotels': [{
-                    'name': 'Eden Residence',
-                    'url': PROPERTY_URL,
-                    'price_text': '624 SAR',
-                    'text': 'ليلتان، شخصان بالغان 624 SAR',
-                }]},
-            },
-            PROPERTY_URL: {
-                'final_url': PROPERTY_URL,
-                'title': 'Eden Residence',
-                'text': '',
-                'booking_rate': {
-                    'price': 680.0, 'current_price': 476.0,
-                    'currency': 'SAR', 'taxes': 85.0,
-                    'price_from': 680.0, 'price_to': 1200.0,
-                    'area_from': 59.0, 'area_to': 90.0,
-                },
-            },
-        })
-        with self.app.app_context(), \
-                patch.object(self.module.maps_service,
-                             'reverse_geocode_location',
-                             return_value=self._geocode()), \
-                patch.object(self.module, '_market_browser_session',
-                             return_value=session):
-            result = self.module._booking_hotel_scan(
-                self._task(), self._payload(), {}, tenant_id=None,
-                offer_lang='ar', deadline=None)
-        row = result['parsed']['competitors'][0]
-        self.assertEqual(row['price_value'], '624')
-        self.assertEqual(row['price_from'], '')
-        self.assertEqual(row['price_to'], '')
-        self.assertEqual(row['price_type'], 'يبدأ من')
-        self.assertEqual(row['area_from'], '59')
-        self.assertIn('سعر البحث على Booking', row['notes'])
-        self.assertIn('ليلتين', row['notes'])
-
     def test_hotel_row_carries_the_room_price_and_area_range(self):
         search_url = self._search_url()
         session = _Session({

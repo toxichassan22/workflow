@@ -17,8 +17,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import booking_destination
-import booking_rooms
 import booking_search
+import hotel_stay
 import maps_service
 from numeric_precision import format_precise_number
 
@@ -498,12 +498,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             name = str(hotel.get('name') or '').strip()
             url = str(hotel.get('url') or '').strip()
             if name and url:
-                wanted.append({
-                    'name': name,
-                    'url': url,
-                    'price_text': str(hotel.get('price_text') or '').strip(),
-                    'card_text': str(hotel.get('text') or '').strip(),
-                })
+                wanted.append({'name': name, 'url': url})
         # Booking needs ~20 s per hotel (WAF + room table); loading the tabs
         # together overlaps that wait instead of paying it five times.
         props = session.open_urls([item['url'] for item in wanted])
@@ -574,51 +569,23 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                         area_to = area_from
                     current = rate.get('current_price')
                     taxes = rate.get('taxes')
-                    card_price = booking_rooms.parse_number(
-                        item.get('price_text'))
-                    card_text = str(item.get('card_text') or '')
-                    card_period = (
-                        'ليلتين' if ('ليلتان' in card_text
-                                     or 'two nights' in card_text.lower())
-                        else '')
-                    if card_price is not None:
-                        price_value = _money(card_price)
-                        note = (
-                            'سعر البحث على Booking'
-                            + (f' مقابل {card_period}' if card_period else '')
-                            + f': {price_value} ر.س'
-                            + (f'؛ المساحات {_range(area_from, area_to)} م²'
-                               if area_from is not None else ''))
-                    else:
-                        price_value = ''
-                        note = (
-                            'نطاق أسعار الغرف مقابل ليلتين على Booking قبل الخصم وقبل الضرائب: '
-                            f'{_range(price_from, price_to)} ر.س'
-                            + (f' (محوّل من {source_currency})'
-                               if source_currency != 'SAR' else '')
-                            + (f'؛ المساحات {_range(area_from, area_to)} م²'
-                               if area_from is not None else '')
-                            + f'؛ أقل سعر حالي مقابل ليلتين بعد الخصم '
-                            f'{current if current is not None else "غير متوفر"} '
-                            f'والضرائب {taxes if taxes is not None else "غير متوفر"}.')
-                    field_sources = {
-                        'name': [url],
-                        'area_from': [url] if area_from is not None else [],
-                        'area_to': [url] if area_to is not None else [],
-                    }
-                    if card_price is not None:
-                        field_sources['price_value'] = [url]
-                    else:
-                        field_sources['price_from'] = [url]
-                        field_sources['price_to'] = [url]
+                    stay_label = hotel_stay.stay_nights_label_ar()
+                    note = (
+                        f'نطاق أسعار الغرف مقابل {stay_label} '
+                        'على Booking قبل الخصم وقبل الضرائب: '
+                        f'{_range(price_from, price_to)} ر.س'
+                        + (f' (محوّل من {source_currency})'
+                           if source_currency != 'SAR' else '')
+                        + (f'؛ المساحات {_range(area_from, area_to)} م²'
+                           if area_from is not None else '')
+                        + f'؛ أقل سعر حالي مقابل {stay_label} بعد الخصم '
+                        f'{current if current is not None else "غير متوفر"} '
+                        f'والضرائب {taxes if taxes is not None else "غير متوفر"}.')
                     row.update({
-                        'price_type': ('يبدأ من' if card_price is not None
-                                       else 'نطاق أسعار الغرف'),
-                        'price_value': price_value,
-                        'price_from': ('' if card_price is not None
-                                       else _money(price_from)),
-                        'price_to': ('' if card_price is not None
-                                     else _money(price_to)),
+                        'price_type': 'نطاق أسعار الغرف',
+                        'price_value': '',
+                        'price_from': _money(price_from),
+                        'price_to': _money(price_to),
                         'price_currency': 'SAR',
                         'area_sqm': '',
                         'area_mode': ('range' if area_from is not None
@@ -630,13 +597,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                         'price_listed': True,
                         'notes': note,
                         'price_cache': {
-                            'price_from': ('' if card_price is not None
-                                           else _money(price_from)),
-                            'price_to': ('' if card_price is not None
-                                         else _money(price_to)),
-                            'search_card_price': price_value,
-                            'search_card_text': str(
-                                item.get('price_text') or ''),
+                            'price_from': _money(price_from),
+                            'price_to': _money(price_to),
                             'area_from': (_money(area_from)
                                           if area_from is not None else ''),
                             'area_to': (_money(area_to)
@@ -647,7 +609,13 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                             'booking_room_name': rate.get('room_name'),
                             'booking_source_url': url,
                         },
-                        'field_sources': field_sources,
+                        'field_sources': {
+                            'name': [url],
+                            'price_from': [url],
+                            'price_to': [url],
+                            'area_from': [url] if area_from is not None else [],
+                            'area_to': [url] if area_to is not None else [],
+                        },
                     })
             if not priced:
                 row['notes'] = (

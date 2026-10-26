@@ -3,7 +3,7 @@
 The property page hides every price and room size until a check-in/check-out
 is selected — the owner saw «Select dates to see this property's availability
 and prices» and rows with no price and no area. Every hotel lookup now opens
-the same two-week-out, two-night, one-room, two-adult, SAR window, and the
+the same tomorrow, one-night, one-room, two-adult, SAR window, and the
 verification pass reads the room size from the retrieved page.
 """
 
@@ -32,23 +32,23 @@ import hotel_stay  # noqa: E402
 import market_study  # noqa: E402
 
 HOTEL_URL = 'https://www.booking.com/hotel/sa/assila.ar.html'
-STAY_IN = date(2026, 1, 15)
+STAY_IN = date(2026, 1, 16)
 STAY_OUT = date(2026, 1, 17)
 
 
 class BookingStayWindowTests(unittest.TestCase):
 
-    def test_window_is_two_weeks_out_for_two_nights(self):
+    def test_window_is_tomorrow_for_one_night(self):
         check_in, check_out = hotel_stay.booking_stay_window(date(2026, 1, 1))
-        self.assertEqual(check_in, date(2026, 1, 15))
-        self.assertEqual(check_out, date(2026, 1, 17))
+        self.assertEqual(check_in, date(2026, 1, 2))
+        self.assertEqual(check_out, date(2026, 1, 3))
 
     def test_hotel_url_carries_the_shared_stay(self):
         url = hotel_stay.with_booking_stay_params(HOTEL_URL, STAY_IN, STAY_OUT)
         parsed = urlsplit(url)
         query = parse_qs(parsed.query)
         self.assertEqual(parsed.path, '/hotel/sa/assila.ar.html')
-        self.assertEqual(query['checkin'], ['2026-01-15'])
+        self.assertEqual(query['checkin'], ['2026-01-16'])
         self.assertEqual(query['checkout'], ['2026-01-17'])
         self.assertEqual(query['group_adults'], ['2'])
         self.assertEqual(query['group_children'], ['0'])
@@ -60,7 +60,7 @@ class BookingStayWindowTests(unittest.TestCase):
             HOTEL_URL + '?checkin=2020-01-01&checkout=2020-01-02&lang=ar',
             STAY_IN, STAY_OUT)
         query = parse_qs(urlsplit(url).query)
-        self.assertEqual(query['checkin'], ['2026-01-15'])
+        self.assertEqual(query['checkin'], ['2026-01-16'])
         self.assertEqual(query['checkout'], ['2026-01-17'])
         self.assertEqual(query['lang'], ['ar'])
 

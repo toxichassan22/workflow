@@ -1,6 +1,7 @@
 from numeric_precision import format_precise_number
 
 import booking_rooms
+import hotel_stay
 
 
 def _agent_run_accepts(agent_module, param):
@@ -254,7 +255,8 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
     price_text = (row['price_from'] if row['price_from'] == row['price_to']
                   else f"{row['price_from']} - {row['price_to']}")
     if offer_lang == 'en':
-        note = ('Booking original pre-discount room-price range for two nights '
+        note = ('Booking original pre-discount room-price range for '
+                f'{hotel_stay.stay_nights_label_en()} '
                 f'before tax: {price_text} SAR{source_en}; the discounted '
                 'current price is '
                 f"{current_text + ' ' + currency if current_text else 'unavailable'} "
@@ -262,7 +264,8 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
                 f"{taxes_text + ' ' + currency if taxes_text else 'unavailable'}.")
     else:
         note = (
-            'نطاق أسعار الغرف مقابل ليلتين على Booking قبل الخصم وقبل الضرائب: '
+            f'نطاق أسعار الغرف مقابل {hotel_stay.stay_nights_label_ar()} '
+            'على Booking قبل الخصم وقبل الضرائب: '
             f'{price_text} ر.س{source_ar}؛ '
             'السعر الحالي بعد الخصم '
             f"{current_text + ' ' + currency if current_text else 'غير متوفر'} "
