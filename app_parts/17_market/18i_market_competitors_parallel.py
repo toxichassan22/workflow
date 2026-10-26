@@ -565,10 +565,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     price_to = rate.get('price_to')
                     if price_from is None and price_to is None:
                         base = rate.get('price')
-                        row_taxes = (0 if rate.get('tax_included')
-                                     else (rate.get('taxes') or 0))
                         price_from = price_to = (
-                            booking_rooms.whole_riyal(base + row_taxes)
+                            booking_rooms.whole_riyal(base)
                             if base is not None else None)
                     price_from = price_from or price_to
                     price_to = price_to or price_from
@@ -582,7 +580,7 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                     stay_label = hotel_stay.stay_nights_label_ar()
                     note = (
                         f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
-                        '(السعر الأصلي + الضريبة): '
+                        '(السعر الأصلي قبل الخصم بدون الضريبة): '
                         f'{_range(price_from, price_to)} ر.س'
                         + (f' (محوّل من {source_currency})'
                            if source_currency != 'SAR' else '')

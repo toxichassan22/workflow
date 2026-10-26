@@ -189,8 +189,7 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
     price_from = rate.get('price_from')
     price_to = rate.get('price_to')
     if price_from is None and price_to is None:
-        row_taxes = 0 if rate.get('tax_included') else (rate.get('taxes') or 0)
-        price_from = price_to = booking_rooms.whole_riyal(value + row_taxes)
+        price_from = price_to = booking_rooms.whole_riyal(value)
     price_from = price_from or value
     price_to = price_to or price_from
     cache = row.get('price_cache') if isinstance(row.get('price_cache'), dict) else {}
@@ -254,17 +253,17 @@ def _apply_booking_rate_block(row, matched_pages, offer_lang='ar'):
     price_text = (row['price_from'] if row['price_from'] == row['price_to']
                   else f"{row['price_from']} - {row['price_to']}")
     if offer_lang == 'en':
-        note = ('Booking original room-price range plus taxes for '
-                f'{hotel_stay.stay_nights_label_en()}: '
+        note = ('Booking original pre-discount room-price range, taxes excluded, '
+                f'for {hotel_stay.stay_nights_label_en()}: '
                 f'{price_text} SAR{source_en}.')
     else:
         note = (
             f'نطاق أسعار الغرف مقابل {hotel_stay.stay_nights_label_ar()} '
-            'على Booking (السعر الأصلي + الضريبة): '
+            'على Booking (السعر الأصلي قبل الخصم بدون الضريبة): '
             f'{price_text} ر.س{source_ar}.')
     existing = str(row.get('notes') or '').strip()
-    if ('السعر الأصلي + الضريبة' not in existing
-            and 'original room-price range plus taxes' not in existing):
+    if ('السعر الأصلي قبل الخصم بدون الضريبة' not in existing
+            and 'original pre-discount room-price range' not in existing):
         row['notes'] = f'{existing} — {note}' if existing else note
     row['verify_state'] = 'verified'
     row.pop('verify_provider_error', None)
@@ -314,10 +313,11 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
     if is_hotel:
         price_rule += (
             'للفندق: استخدم نطاق أسعار الغرف المعروض على Booking من صفحة الفندق '
-            '(أقل سعر وأعلى سعر)، وهو السعر الأصلي قبل الخصم مضافًا إليه ضريبة كل غرفة كما تعرضها الصفحة. '
-            'لا تجمع أسعار الغرف أو الباقات في متوسط، ولا تعتمد السعر الحالي بعد الخصم وحده. '
+            '(أقل سعر وأعلى سعر)، وهو السعر الأصلي قبل الخصم بدون ضرائب أو رسوم. '
+            'لا تجمع أسعار الغرف أو الباقات في متوسط، ولا تعتمد السعر الحالي بعد الخصم '
+            'ولا السعر شامل الضريبة. '
             'إذا ظهر قسم ## BOOKING_RATE ## في نص الصفحة فاستخدم '
-            'price_range_original_plus_taxes و area_range_sqm حرفيًا. '
+            'price_range_before_discount و area_range_sqm حرفيًا. '
         )
     else:
         price_rule += (

@@ -6,17 +6,19 @@ a breakfast-included/flexible rate or a higher room category for the same
 area, which is why the same stay could be reported ~20% above the price the
 owner compares against.
 
-The owner's comparison basis is the **original price Booking displays plus the
-row's taxes** for the stay: the pre-discount room price (340) plus the taxes
-line (52) reads 392, exactly what the client's own screen shows. This module
-reads the live DOM instead of asking a model:
+The owner's comparison basis is the **original pre-discount room price** for
+the stay, with taxes and fees excluded: Booking prints the room line as a
+pre-discount price beside a separate taxes-and-fees line, and the table carries
+the pre-discount figure alone. The discounted current price and the taxes line
+stay in the block as informational values. This module reads the live DOM
+instead of asking a model:
 
 - ``## BOOKING_RATE ##`` carries that original price, the room area, the
   current discounted price (informational), the taxes line and the rate policy.
 - ``select_cheapest_rate`` identifies the cheapest base rate for the requested
   occupancy and reports its original price.
-- ``room_ranges`` spans every room row and returns the original price plus that
-  row's taxes at both ends, rounded to whole riyals.
+- ``room_ranges`` spans every room row and returns the original pre-discount
+  price at both ends, rounded to whole riyals.
 - ``parse_rate_block`` lets the market pipeline apply the block even when the
   model's own JSON picked a different figure.
 """
@@ -303,26 +305,24 @@ def _base_rows(rows, adults=2):
 
 
 def room_total(row):
-    """One room's original pre-discount price plus its own taxes, in riyals."""
+    """One room's original pre-discount price in riyals, taxes excluded."""
     base = row.get('original_price')
     if base is None or base <= 0:
         base = row.get('price')
     if base is None or base <= 0:
         return None
-    if row.get('tax_included'):
-        return whole_riyal(base)
-    return whole_riyal(base + (row.get('taxes') or 0))
+    return whole_riyal(base)
 
 
 def room_ranges(rows):
-    """Cheapest-to-priciest original-plus-tax room total and room area.
+    """Cheapest-to-priciest original pre-discount room price and room area.
 
     Both ends come from **every** room on the page — suites and family rooms
     included, whatever occupancy their rate is sold for (owner decision
     2026-10-24), so the range matches the room table a client sees. The figure
-    is the row's original pre-discount price plus that row's taxes — 340 + 52
-    reads 392 — never the discounted current price alone and never a ratio
-    applied across the two. A row after a room header may omit its area, so
+    is the row's original pre-discount price alone — 340 reads 340 — never the
+    discounted current price and never the row's taxes line (owner decision
+    2026-10-26). A row after a room header may omit its area, so
     the area is borrowed from another row of the same room.
     """
     normalized = [normalize_rate_row(row) for row in rows or []
@@ -366,7 +366,8 @@ def select_cheapest_rate(rows, adults=2):
     The current price identifies the cheapest base rate; a room-only rate wins
     over a breakfast-included sibling for the same room. The figure returned in
     ``price`` is that base rate's original price before Booking's discount;
-    ``taxes`` rides beside it so the room range can add the row's own taxes.
+    ``taxes`` rides beside it as an informational value only — the room range
+    never adds it.
     """
     normalized, eligible, base_rows = _base_rows(rows, adults=adults)
     if not eligible or not base_rows:
@@ -481,8 +482,7 @@ def format_rate_block(rate):
     if price_from is None and price_to is None:
         room_only = rate.get('price')
         if room_only is not None:
-            row_taxes = 0 if rate.get('tax_included') else (taxes or 0)
-            price_from = price_to = whole_riyal(room_only + row_taxes)
+            price_from = price_to = whole_riyal(room_only)
     lines = [
         BOOKING_RATE_START,
         'source_url: ' + str(rate.get('source_url') or ''),
@@ -498,14 +498,14 @@ def format_rate_block(rate):
         + ('' if current_total is None else f'{current_total:g}'),
         'tax_included: ' + ('true' if rate.get('tax_included') else 'false'),
         'rate_policy: ' + str(rate.get('rate_policy') or ''),
-        'price_range_original_plus_taxes: '
+        'price_range_before_discount: '
         + _range_text(price_from, price_to),
         'area_range_sqm: '
         + _range_text(rate.get('area_from'), rate.get('area_to')),
         'room_type_count: ' + str(rate.get('room_count') or ''),
-        'price_basis: original pre-discount room price plus that room\'s '
-        'taxes for the stay, rounded to whole riyals; the discounted current '
-        'price is informational',
+        'price_basis: original pre-discount room price for the stay, taxes and '
+        'fees excluded, rounded to whole riyals; the discounted current price '
+        'and the taxes line are informational',
         BOOKING_RATE_END,
     ]
     return '\n'.join(lines)
@@ -549,16 +549,16 @@ def parse_rate_block(text):
     total = parse_number(data.get('current_total_including_tax'))
     adults = parse_number(data.get('adults'))
     price_from, price_to = _parse_range(
-        data.get('price_range_original_plus_taxes'))
+        data.get('price_range_before_discount'))
     if price_from is None and price_to is None:
+        # Blocks written before the taxes-excluded basis carry the old
+        # tax-inclusive range key.
         price_from, price_to = _parse_range(
-            data.get('price_range_before_discount'))
+            data.get('price_range_original_plus_taxes'))
     if price_from is None and price_to is None:
         price_from, price_to = _parse_range(data.get('price_range_current'))
     if price_from is None and price_to is None:
-        row_taxes = 0 if str(
-            data.get('tax_included') or '').lower() == 'true' else (taxes or 0)
-        price_from = price_to = whole_riyal(price + row_taxes)
+        price_from = price_to = whole_riyal(price)
     area_from, area_to = _parse_range(data.get('area_range_sqm'))
     rooms = parse_number(data.get('room_type_count'))
     return {

@@ -24,11 +24,16 @@ import hotel_stay
 from numeric_precision import format_precise_number
 
 _HOTEL_TOKENS = ('فندق', 'فندقي', 'hotel', 'hospitality', 'تشغيل')
-NAME_FILL_BUDGET_SECONDS = 300
-CATALOG_BUDGET_SECONDS = 120
+# The owner's ceiling for one completion run: ten minutes for the whole fill,
+# past which a per-name lookup is stuck on Booking rather than working.
+NAME_FILL_BUDGET_SECONDS = 600
+# One catalogue pass reads the city page plus five category pages; at ~20-45 s
+# a page the pass needs longer than the old 120 s to reach all six.
+CATALOG_BUDGET_SECONDS = 240
 # The completion phase has its own wall-clock limit: a per-name lookup must
-# never grow into the district job's hour-long verification tail.
-FILL_PHASE_BUDGET_SECONDS = 330
+# never grow into the district job's hour-long verification tail, and the
+# limit must not cut the name fill's own budget short.
+FILL_PHASE_BUDGET_SECONDS = 620
 # Words that describe a property without naming it. They never identify a
 # hotel on their own, so they take no part in token matching.
 _GENERIC_NAME_TOKENS = {
@@ -172,23 +177,67 @@ def _card_for_name(cards, name, city_terms=''):
     return None
 
 
-def _card_from_name_search(session, name, city_terms=''):
-    """Booking's own free-text name search: the fill looks a row up by name."""
+def _city_destination(session, country, city_ar, city_en):
+    """Booking's own destination for this project's city (cached on disk)."""
+    cache_path = (os.path.join(
+        UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
+        if UPLOADS_DIR else '')
+    return booking_destination.resolve_city_destination(
+        session, country, city_en or city_ar, city_ar,
+        cache_path=cache_path) or {}
+
+
+def _card_from_name_search(session, name, city_terms='',
+                           country='', city_ar='', city_en=''):
+    """Booking's own name search: the fill looks a row up by name.
+
+    A free-text-only ``ss`` is answered with Booking's SEO city page — zero
+    cards — so when the first attempt finds nothing the resolved city
+    destination rides along on a second attempt before the row falls back to
+    the much slower catalogue/candidate paths.
+    """
     query = str(name or '').strip()
     if len(query) < 4:
         return None
-    try:
-        page = session.open_url(booking_search.build_search_url(query))
-    except Exception as exc:
-        print(f'[MARKET STUDY] name search failed for {name!r}: {exc}',
-              flush=True)
-        return None
-    hotels = ((page or {}).get('booking_search') or {}).get('hotels') or []
-    card = _card_for_name(hotels, name, city_terms)
-    print(f'[MARKET STUDY] booking name search name={name!r} '
-          f'cards={len(hotels)} '
-          f'match={str((card or {}).get("url") or "")[:120]!r}', flush=True)
-    return card
+    attempts = [{}]
+    if country and (city_ar or city_en):
+        attempts.append({'destination': True})
+    for attempt, extra in enumerate(attempts, 1):
+        params = {}
+        if extra.get('destination'):
+            try:
+                destination = _city_destination(
+                    session, country, city_ar, city_en)
+            except Exception as exc:
+                print(f'[MARKET STUDY] booking destination skipped: {exc}',
+                      flush=True)
+                destination = {}
+            dest_id = str(destination.get('dest_id') or '')
+            if not dest_id:
+                break
+            params = {
+                'dest_id': dest_id,
+                'dest_type': str(destination.get('dest_type') or 'city'),
+            }
+        try:
+            page = session.open_url(
+                booking_search.build_search_url(query, **params))
+        except Exception as exc:
+            print(f'[MARKET STUDY] name search failed for {name!r}: {exc}',
+                  flush=True)
+            continue
+        page = page if isinstance(page, dict) else {}
+        hotels = ((page.get('booking_search') or {}).get('hotels') or [])
+        card = _card_for_name(hotels, name, city_terms)
+        print(f'[MARKET STUDY] booking name search name={name!r} '
+              f'attempt={attempt} cards={len(hotels)} '
+              f'match={str((card or {}).get("url") or "")[:120]!r}', flush=True)
+        if card:
+            return card
+        if params:
+            # The destination form is the last shape worth trying.
+            break
+    return None
 
 
 def _money(value):
@@ -309,9 +358,8 @@ def _apply_rate(row, rate, url, target_stars=()):
     price_to = rate.get('price_to')
     if price_from is None and price_to is None:
         base = rate.get('price')
-        row_taxes = 0 if rate.get('tax_included') else (rate.get('taxes') or 0)
         price_from = price_to = (
-            booking_rooms.whole_riyal(base + row_taxes)
+            booking_rooms.whole_riyal(base)
             if base is not None else None)
     price_from = price_from or price_to
     price_to = price_to or price_from
@@ -332,7 +380,7 @@ def _apply_rate(row, rate, url, target_stars=()):
     stay_label = hotel_stay.stay_nights_label_ar()
     note = (
         f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
-        '(السعر الأصلي + الضريبة): '
+        '(السعر الأصلي قبل الخصم بدون الضريبة): '
         f'{_money(price_from)} – {_money(price_to)} ر.س'
         + (f'؛ المساحات {_money(area_from)} – {_money(area_to)} م²'
            if area_from is not None else '')
@@ -477,13 +525,8 @@ def _build_booking_catalog(payload, data, tenant_id, city_ar, city_en,
             float(CATALOG_BUDGET_SECONDS),
             max(30.0, float(budget_seconds or NAME_FILL_BUDGET_SECONDS) * 0.4))
     try:
-        cache_path = (os.path.join(
-            UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
-            if UPLOADS_DIR else '')
-        destination = booking_destination.resolve_city_destination(
-            session, country, city_en or city_ar, city_ar,
-            cache_path=cache_path)
-        city_url = str((destination or {}).get('city_url') or '')
+        destination = _city_destination(session, country, city_ar, city_en)
+        city_url = str(destination.get('city_url') or '')
         if not city_url:
             print('[MARKET STUDY] booking catalogue skipped: no city_url',
                   flush=True)
@@ -553,10 +596,17 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
         deadline=catalog_deadline)
     missing = _targets_missing_from_catalog(
         targets, hints, catalog, city_terms)
-    if (len(missing) >= 2 or not catalog) and time.time() < catalog_deadline:
-        print(f'[MARKET STUDY] booking catalogue retry missing='
-              f'{len(missing)} '
-              f'names={[row.get("name") for row in missing]!r}', flush=True)
+    print(f'[MARKET STUDY] booking catalogue resolved='
+          f'{len(targets) - len(missing)}/{len(targets)} '
+          f'links={len(catalog)} missing='
+          f'{[row.get("name") for row in missing]!r}', flush=True)
+    # One pass over the city's own pages is the whole catalogue: the page list
+    # is fixed, so a second pass re-reads the same pages under the same
+    # deadline and only eats the fill's budget. Retry only when the first pass
+    # produced nothing at all.
+    if not catalog and time.time() < catalog_deadline:
+        print('[MARKET STUDY] booking catalogue retry: empty first pass',
+              flush=True)
         extra = _build_booking_catalog(
             payload, data, tenant_id, city_ar, city_en, country, budget,
             deadline=catalog_deadline)
@@ -622,12 +672,8 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
         catalog_source = 'catalogue' if catalog_cards else 'city cards'
         if not catalog_cards:
             try:
-                cache_path = (os.path.join(
-                    UPLOADS_DIR, booking_destination.CACHE_FILE_NAME)
-                    if UPLOADS_DIR else '')
-                destination = booking_destination.resolve_city_destination(
-                    session, country, city_en or city_ar, city_ar,
-                    cache_path=cache_path)
+                destination = _city_destination(
+                    session, country, city_ar, city_en)
                 dest_id = str(destination.get('dest_id') or '')
                 if dest_id:
                     search = session.open_url(booking_search.build_search_url(
@@ -666,8 +712,9 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                           f'name={row.get("name")!r} '
                           f'variants={variants!r}', flush=True)
                     for variant in variants:
-                        card = _card_from_name_search(session, variant,
-                                                      city_terms)
+                        card = _card_from_name_search(
+                            session, variant, city_terms, country=country,
+                            city_ar=city_ar, city_en=city_en)
                         if card:
                             break
                 url = str((card or {}).get('url') or '').strip()
