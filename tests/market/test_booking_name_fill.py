@@ -441,6 +441,33 @@ class BookingNameFillTests(unittest.TestCase):
             row, rate, 'https://www.booking.com/hotel/sa/no-stars.html')
         self.assertIn('لا يعرض Booking تصنيف نجوم', row['notes'])
 
+    def test_a_fresh_star_read_corrects_a_row_from_an_earlier_pass(self):
+        # Booking once answered five stars for a one-star hotel; the row kept
+        # the value, and because an old row value used to win, every later pass
+        # left it there. The page's own class now wins for a row this pipeline
+        # wrote.
+        row = {'name': 'فندق اختبار', 'project_type': 'فندقي',
+               'row_source': 'ai', 'hotel_stars': '5'}
+        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0,
+                'hotel_stars': 1}
+        self.module._apply_rate(row, rate, 'https://x')
+        self.assertEqual(row['hotel_stars'], '1')
+
+    def test_a_manual_row_keeps_the_class_its_owner_typed(self):
+        row = {'name': 'فندق اختبار', 'project_type': 'فندقي',
+               'row_source': 'manual', 'hotel_stars': '5'}
+        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0,
+                'hotel_stars': 1}
+        self.module._apply_rate(row, rate, 'https://x')
+        self.assertEqual(row['hotel_stars'], '5')
+
+    def test_a_page_that_states_no_class_leaves_the_row_value_alone(self):
+        row = {'name': 'فندق اختبار', 'project_type': 'فندقي',
+               'row_source': 'ai', 'hotel_stars': '4'}
+        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0}
+        self.module._apply_rate(row, rate, 'https://x')
+        self.assertEqual(row['hotel_stars'], '4')
+
     def test_booking_fill_classifies_a_matching_star_class_as_direct(self):
         row = {'name': 'فندق اختبار', 'project_type': 'فندقي'}
         rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0,

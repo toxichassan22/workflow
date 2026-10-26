@@ -376,7 +376,15 @@ def _apply_rate(row, rate, url, target_stars=()):
     if not (stars_value.isdigit() and 1 <= int(stars_value) <= 5):
         stars_value = ''
     target = {str(item) for item in (target_stars or ()) if str(item).strip()}
-    effective_stars = str(row.get('hotel_stars') or stars_value or '').strip()
+    row_stars = str(row.get('hotel_stars') or '').strip()
+    if stars_value and str(row.get('row_source') or '') != 'manual':
+        # The page's own class is the authority for a row this pipeline wrote:
+        # a value carried over from an earlier pass used to win, which kept a
+        # wrong class in place forever (five stars left on a one-star hotel).
+        # A row the client typed keeps the class its owner entered.
+        effective_stars = stars_value
+    else:
+        effective_stars = row_stars or stars_value
     stay_label = hotel_stay.stay_nights_label_ar()
     note = (
         f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
