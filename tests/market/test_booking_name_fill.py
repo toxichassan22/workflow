@@ -372,6 +372,20 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(payload['location_lat'], '21.544974')
         self.assertEqual(payload['location_lng'], '39.174685')
 
+    def test_fill_leaves_a_reason_when_a_worker_returns_without_price(self):
+        rows = [{'name': 'Novotel Jeddah Tahlia', 'project_type': 'فندقي',
+                 'notes': ''}]
+        with self.app.app_context(), \
+                patch.object(self.module, '_english_booking_location',
+                             return_value=('Jeddah', 'Al Andalus', 'SA')), \
+                patch.object(self.module, '_build_booking_catalog',
+                             return_value=[]), \
+                patch.object(self.module, '_fill_rows', return_value=0):
+            filled = self.module._fill_hotel_rows_from_booking(
+                rows, {'city': 'جدة'}, {}, tenant_id=None)
+        self.assertEqual(filled, 0)
+        self.assertIn('لم تُقرأ أسعار هذا الفندق', rows[0]['notes'])
+
     def test_fill_skips_booking_when_the_project_has_no_location(self):
         session = _Session({})
         rows = [{'name': 'Adagio Jeddah City Center', 'project_type': 'فندقي',

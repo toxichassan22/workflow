@@ -290,6 +290,11 @@ def _set_note_if_empty(row, note):
         row['notes'] = note
 
 
+def _has_booking_price(row):
+    return any(str((row or {}).get(key) or '').strip()
+               for key in ('price_value', 'price_from', 'price_to'))
+
+
 def _page_identity(title, url, variants, city_terms=''):
     """True when the opened booking page is one of this row's name variants."""
     return any(_title_matches(title, variant, city_terms)
@@ -573,6 +578,13 @@ def _fill_hotel_rows_from_booking(rows, payload, data, tenant_id=None,
     thread.join(timeout=remaining + 30)
     if thread.is_alive():
         timed_out.set()
+        thread.join(timeout=10)
+    for row in targets:
+        if not _has_booking_price(row):
+            _set_note_if_empty(row, (
+                'لم تُقرأ أسعار هذا الفندق؛ قد لا تعرض Booking '
+                'حجزًا لهذه الإقامة.'))
+    result['filled'] = sum(1 for row in targets if _has_booking_price(row))
     print(f'[MARKET STUDY] booking fill result filled={result["filled"]} '
           f'targets={len(targets)} catalogue={len(catalog)}', flush=True)
     return result['filled']
