@@ -89,14 +89,15 @@ class MeetingRequirementsTestsPart16(MeetingRequirementsTests):
         self.assertIn("import market_study", app_source)
         self.assertIn("@app.route('/api/market-study/competitors'", app_source)
         self.assertIn('run_browse_agent', app_source)
-        # Owner-ordered exception: the market summary researches through one
-        # provider-native search plugin with zero page opens. That single
-        # plugin is the only sanctioned native search — the old
-        # 'openrouter:web_search' tool and a second search layer are gone.
+        # Two owner-ordered native calls: the summary researcher's plugin and
+        # the competitor fallback for a local search that never ran. The old
+        # 'openrouter:web_search' tool and the paid Exa layer are gone.
         self.assertNotIn('openrouter:web_search', app_source)
-        self.assertEqual(app_source.count("'id': 'web'"), 1)
+        self.assertEqual(app_source.count("'id': 'web'"), 2)
         self.assertIn("browse_kwargs['plugins'] = [{'id': 'web', 'max_results': 5}]",
                       app_source)
+        self.assertIn('_native_search_fallback(', app_source)
+        self.assertIn('_native_fallback_needed(', app_source)
         self.assertIn('def _start_market_job(kind, executor):', app_source)
 
         self.assertIn('project_idea', {field['key'] for field in db.PREBUILT_FIELDS})
@@ -398,23 +399,23 @@ class MeetingRequirementsTestsPart16(MeetingRequirementsTests):
         self.assertIn('<option value="10" selected>10 كم</option>', index_source)
 
     def test_market_search_layer_is_the_browse_agent(self):
-        """The paid OpenRouter/Exa layer was deleted outright — every market
-        web task rides one self-hosted Chromium agent driven by the task's own
-        model, with one owner-ordered exception: the market summary researches
-        through the provider-native server tool (Google grounding, zero page
-        opens). The old plugin seam must never come back, and no second
-        server-search usage may appear."""
+        """Every market web task rides one self-hosted Chromium agent driven by
+        the task's own model, with two owner-ordered native calls: the summary
+        researcher's plugin search and the competitor fallback used only when
+        the local search layer never ran. The old paid layer must not return."""
         module = self.application_module
         self.assertFalse(hasattr(module, '_call_market_study_model'))
         self.assertFalse(hasattr(module, 'MARKET_SEARCH_ENGINE'))
         app_source = read_module_source('app.py')
-        # The provider-native server tool is gone; the one sanctioned native
-        # search left is the summary researcher's own plugin call, and a
-        # second occurrence anywhere is the deleted paid layer coming back.
+        # The provider-native server tool is gone; the two sanctioned native
+        # searches are the summary researcher's plugin call and the gated
+        # competitor fallback. A third occurrence is the deleted paid layer.
         self.assertNotIn('openrouter:web_search', app_source)
-        self.assertEqual(app_source.count("'id': 'web'"), 1)
+        self.assertEqual(app_source.count("'id': 'web'"), 2)
         self.assertIn("browse_kwargs['plugins'] = [{'id': 'web', 'max_results': 5}]",
                       app_source)
+        self.assertIn('_native_search_fallback(', app_source)
+        self.assertIn('_native_fallback_needed(', app_source)
         self.assertIn('_browse_agent_call(', app_source)
 
     def test_browse_agent_call_sends_task_model_and_full_task(self):

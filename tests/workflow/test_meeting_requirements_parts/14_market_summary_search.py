@@ -9,10 +9,13 @@ class MeetingRequirementsTestsPart14(MeetingRequirementsTests):
         self.assertNotIn('openrouter:web_search', app_source)
         self.assertIn('_run_market_summary_research', app_source)
         self.assertIn("search_provider='searxng'", app_source)
-        # One provider-native search remains: the summary researcher's own
-        # plugin call. A second occurrence anywhere is the deleted paid layer
-        # coming back.
-        self.assertEqual(app_source.count("'id': 'web'"), 1)
+        # One provider-native search is the summary researcher's own plugin
+        # call; the second is the owner-ordered competitor fallback, gated to a
+        # local search that never ran. Any third occurrence is the deleted
+        # paid layer coming back.
+        self.assertEqual(app_source.count("'id': 'web'"), 2)
         self.assertIn("browse_kwargs['plugins'] = [{'id': 'web', 'max_results': 5}]",
                       app_source)
+        self.assertIn('_native_search_fallback(', app_source)
+        self.assertIn('_native_fallback_needed(', app_source)
         self.assertIn('_browse_agent_call(', app_source)
