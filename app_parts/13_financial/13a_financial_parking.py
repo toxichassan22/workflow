@@ -263,9 +263,15 @@ def api_suggest_financial_parking():
     project['parking_regulation_facts'] = _visual_concept_plan_regulation_facts(project)
     context = {'project': snapshot, 'documentedRegulations': project['parking_regulation_facts']}
     try:
+        # The platform default effort spends almost the whole max_tokens budget
+        # on thinking on a context this size (measured: 5.5k/6k and 15.3k/16k
+        # reasoning tokens, empty content) — the caller then sees only a generic
+        # 503. This call emits a small deterministic JSON, so a bounded effort
+        # keeps room for the answer itself.
         response = call_text_chat(FINANCIAL_PARKING_SYSTEM_PROMPT,
-                                  json.dumps(context, ensure_ascii=False), max_tokens=6000,
-                                  timeout=150, response_format={'type': 'json_object'},
+                                  json.dumps(context, ensure_ascii=False), max_tokens=16000,
+                                  timeout=150, reasoning_effort='medium',
+                                  response_format={'type': 'json_object'},
                                   usage_ctx=_usage_ctx('project_data', data, draft_id=draft['id']))
         parsed = parse_json_object(extract_chat_content(response, 'FINANCIAL-PARKING'))
         if not isinstance(parsed, dict) or not isinstance(parsed.get('rules'), list):
@@ -274,7 +280,8 @@ def api_suggest_financial_parking():
         fatal = _ai_fatal_http_response(exc)
         if fatal is not None:
             return fatal
-        app.logger.warning('Financial parking proposal failed: %s', type(exc).__name__)
+        app.logger.warning('Financial parking proposal failed: %s: %s',
+                           type(exc).__name__, str(exc)[:300])
         return jsonify({'success': False, 'error': 'تعذر إعداد اقتراح المواقف.',
                         'error_code': 'PARKING_PROVIDER_FAILED'}), 503
     plan = financial_parking.build_parking_plan(project, parsed, _uuid.uuid4().hex)
@@ -356,15 +363,19 @@ def api_financial_parking_chat():
         'message': message,
     }
     try:
+        # Same bounded effort as the proposal call: a max-effort run thinks its
+        # way through the whole budget and answers with no content at all.
         response = call_text_chat(FINANCIAL_PARKING_CHAT_PROMPT, json.dumps(context, ensure_ascii=False),
-                                  max_tokens=6000, timeout=150, response_format={'type': 'json_object'},
+                                  max_tokens=16000, timeout=150, reasoning_effort='medium',
+                                  response_format={'type': 'json_object'},
                                   usage_ctx=_usage_ctx('project_data', data, draft_id=draft['id']))
         content = extract_chat_content(response, 'FINANCIAL-PARKING-CHAT')
     except Exception as exc:
         fatal = _ai_fatal_http_response(exc)
         if fatal is not None:
             return fatal
-        app.logger.warning('Financial parking chat failed: %s', type(exc).__name__)
+        app.logger.warning('Financial parking chat failed: %s: %s',
+                           type(exc).__name__, str(exc)[:300])
         return jsonify({'success': False, 'error': 'تعذر الرد على المحادثة.',
                         'error_code': 'PARKING_PROVIDER_FAILED'}), 503
     _bill_tenant_unbilled_usage_async(g.tenant_id)
