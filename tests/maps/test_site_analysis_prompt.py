@@ -27,9 +27,9 @@ class SiteAnalysisPromptTests(unittest.TestCase):
             project_data, slide_engine.OFFER_LANG_ARABIC
         )
         self.assertIn('مستشار استراتيجي', system_prompt)
-        self.assertIn('كن إيجابياً ومحفزاً', prompt)
+        self.assertIn('نبرة استثمارية متوازنة ورصينة', prompt)
         self.assertIn('المزايا التنافسية', prompt)
-        self.assertIn('ابتعد تماماً عن النبرة التشكيكية', prompt)
+        self.assertIn('ابتعد عن التطرفين', prompt)
         self.assertIn('برج النخيل', prompt)
 
     def test_english_prompt_carries_investment_positive_directives(self):
@@ -41,7 +41,7 @@ class SiteAnalysisPromptTests(unittest.TestCase):
             project_data, slide_engine.OFFER_LANG_ENGLISH
         )
         self.assertIn('senior real-estate investment and development strategist', system_prompt)
-        self.assertIn('Maintain an encouraging, positive', prompt)
+        self.assertIn('balanced, institutional investment tone', prompt)
         self.assertIn('competitive advantages', prompt)
-        self.assertIn('Avoid cynical', prompt)
+        self.assertIn('Avoid both extremes', prompt)
         self.assertIn('Palm Tower', prompt)

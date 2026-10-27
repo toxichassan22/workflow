@@ -15,13 +15,12 @@ def build_site_analysis_prompts(project_data, offer_lang):
             'connectivity, and commercial opportunities, without inventing facts not supported by the data.\n\n'
             + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
         )
-        prompt = f"""Write an authoritative, strategically positive, and detailed English investment analysis of a real-estate project site based on the data below.
+        prompt = f"""Write an authoritative, strategically balanced, and detailed English investment analysis of a real-estate project site based on the data below.
 
 Required Tone & Objectives:
-- Maintain an encouraging, positive, and inspiring tone throughout the analysis: focus on maximizing strengths, emphasizing the site's vibrant potential, and framing every feature as a compelling investment opportunity.
-- Adopt the confident, persuasive tone of a senior real-estate investment consultant presenting to decision-makers and investors.
-- Highlight the site's competitive advantages, connectivity, and value drivers for the intended project uses.
-- Avoid cynical, defensive, or overly cautionary phrasing (do not debate data points, dispute road measurements, or diminish the site's potential). Instead, frame the location's attributes, road network, and nearby amenities constructively around market appeal, accessibility, and catchment strength.
+- Adopt a balanced, institutional investment tone: blend professional objectivity with compelling value articulation. Highlight genuine competitive advantages and connectivity without promotional hype, superlatives, or cynical skepticism.
+- Speak as a senior real-estate investment strategist presenting to discerning investors: articulate how the site's factual attributes, road connectivity, and catchment dynamics reinforce the project's feasibility and appeal.
+- Avoid both extremes: do not diminish the location with cynical or defensive warnings, nor inflate it with hollow marketing buzzwords. Keep the analysis grounded, credible, and strategically compelling.
 - Write flowing, connected English paragraphs — do not collapse the analysis into a quick summary or generic phrases.
 - Cover every category that has data below; skip none of them.
 - The analysis must reference each of the following where available:
@@ -48,20 +47,20 @@ Project and site data:
     prompt = f"""اكتب تحليلًا عقاريًا استثماريًا احترافيًا ومفصلًا لموقع المشروع استنادًا إلى البيانات المرفقة أدناه.
 
 النبرة والأسلوب المطلوب:
-- كن إيجابياً ومحفزاً ومشجعاً في تحليلك بالكامل: ركّز على تعظيم نقاط القوة، وإبراز المقومات الواعدة للموقع وجاذبيته العالية، وصياغة كل ميزة كفرصة استثمارية قوية ومقنعة للعميل والمستثمر.
-- تحدث بصوت مستشار تطوير عقاري استراتيجي يخاطب المستثمرين وأصحاب القرار؛ ركّز على إبراز المزايا التنافسية، وقوة الموقع الاستراتيجي، وفرص النمو والقيمة المضافة التي يمنحها الموقع للمشروع.
-- ابتعد تماماً عن النبرة التشكيكية أو التحذيرية المفرطة أو لغة التدقيق الدفاعية السلبية (تجنب تماماً عبارات مثل "لا يثبت انتقال الطلب"، "ليست دليلاً على النجاح"، أو التشكيك في المعالم واختلاف التسميات).
-- صغ المعطيات الواقعية (مثل شبكة المحاور والطرق، أوقات القيادة، المعالم القريبة، ومناطق الالتقاط) في سياق تعزيز سهولة الوصول، والربط الحيوي، واتساع قاعدة العملاء والزوار المستهدفة.
+- اعتمد نبرة استثمارية متوازنة ورصينة تجمع بين الواقعية المهنية والجاذبية الاستثمارية؛ ركّز على إبراز المزايا التنافسية والقيمة المضافة الحقيقية للموقع دون مبالغة إنشائية أو إفراط دعائي، ودون لغة تشكيكية جافة.
+- تحدث بصوت مستشار تطوير واستثمار عقاري مؤسسي يخاطب مستثمرين وأصحاب قرار: حلل الموقع بموضوعية إيجابية ووقار مهني يرتكز على الأرقام والمعطيات الواقعية، موضحاً كيف يخدم الموقع أهداف المشروع ومكوناته.
+- ابتعد عن التطرفين: لا تستخدم نبرة تشكيكية دفاعية تقلل من قيمة الموقع أو تشكك في المعالم، وتجنب في نفس الوقت عبارات المديح التسويقي الإنشائي المبالغ فيه.
+- صغ المعطيات الواقعية (مثل شبكة المحاور والطرق، أوقات القيادة، المعالم القريبة، ومناطق الالتقاط) في سياق تحليلي رصين يبرز سهولة الوصول، والربط الحيوي، والعمق الجغرافي لقاعدة العملاء والزوار المتوقعة.
 - اكتب تحليلًا عربيًا مسترسلًا في فقرات مترابطة وثرية ومهنية تليق بعرض استثماري رفيع، دون عناوين أو نقاط تعداد.
 - غطِّ الفئات المتاحة في البيانات:
   1. نوع المشروع وفكرته وأهدافه والجمهور المستهدف وتوافقه مع بيئة الموقع الحيوية.
-  2. المزايا التنافسية ونقاط القوة والفرص الاستثمارية الواعدة التي يتيحها الموقع.
+  2. المزايا التنافسية ونقاط القوة والفرص الاستثمارية الحقيقية التي يتيحها الموقع.
   3. الموقع الاستراتيجي والعنوان التفصيلي ومحيطه الجغرافي.
   4. الكثافة السكانية ومناطق التأثير بوصفها قاعدة داعمة للطلب والحركة.
   5. شبكة الطرق والمحاور الرئيسية وسلاسة الوصول للموقع.
   6. المعالم الحيوية ومعالم المدينة القريبة، موظفاً أوقات القيادة والمسافات كبرهان على حيوية النطاق وسهولة الاتصال.
 - اربط كل عنصر بمدى تعزيزه لجاذبية المشروع ونجاح مرافقه وأنشطته الاستثمارية.
-- التزم بالبيانات المتاحة دون اختلاق معالم وهمية، مع توظيف البيانات الواقعية بإيجابية ورؤية استثمارية داعمة للمشروع.
+- التزم بالبيانات المتاحة دون اختلاق معالم وهمية، مع توظيف البيانات الواقعية برؤية استثمارية متزنة ورصينة.
 
 بيانات المشروع والموقع:
 {data_block}"""
