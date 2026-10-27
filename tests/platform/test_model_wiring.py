@@ -43,9 +43,9 @@ def _chat_payload():
 
 class ModelConstantTests(unittest.TestCase):
 
-    def test_text_model_is_sol_6_1_at_max_effort(self):
+    def test_text_model_is_sol_6_1_at_low_effort(self):
         self.assertEqual(application.GEMINI_TEXT_MODEL, 'openai/gpt-6.1-sol')
-        self.assertEqual(application.TEXT_REASONING_EFFORT, 'max')
+        self.assertEqual(application.TEXT_REASONING_EFFORT, 'low')
         self.assertEqual(application.LUNA_TEXT_MODEL, application.GEMINI_TEXT_MODEL)
         self.assertEqual(application.VISUAL_PLAN_TEXT_MODEL, application.GEMINI_TEXT_MODEL)
         self.assertEqual(application.DESIGNER_AGENT_PLANNER_MODEL, application.GEMINI_TEXT_MODEL)

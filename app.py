@@ -387,11 +387,11 @@ REQUIRE_TENANT_OPENROUTER_KEY = (
     (os.environ.get('REQUIRE_TENANT_OPENROUTER_KEY') or '').strip() == '1'
     and bool(OPENROUTER_MANAGEMENT_KEY)
 )
-# Text/analysis runs on GPT-6.1-sol at max reasoning. Argon stays the vision
+# Text/analysis runs on GPT-6.1-sol at low reasoning effort. Argon stays the vision
 # model (image/document reading) until the owner picks a better one.
 VISION_MODEL = "google/gemini-4-argon"
 GEMINI_TEXT_MODEL = "openai/gpt-6.1-sol"
-TEXT_REASONING_EFFORT = 'max'
+TEXT_REASONING_EFFORT = os.environ.get('TEXT_REASONING_EFFORT', 'low')
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
 # The plans workflow (verify, boundary, distribution, notes, scene) runs its own
