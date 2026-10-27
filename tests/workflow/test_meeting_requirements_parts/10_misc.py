@@ -881,7 +881,7 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             def close(self):
                 pass
 
-        url = 'https://wasalt.sa/property/rent/1'
+        url = 'https://developer.example/property/rent/1'
         with patch.object(module, '_public_host_addresses', return_value=('1.2.3.4',)):
             with patch.object(module.requests, 'head',
                               side_effect=module.requests.ReadTimeout('t')), \
@@ -897,6 +897,12 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
             with patch.object(module.requests, 'head', return_value=_Resp(404)), \
                  patch.object(module.requests, 'get', return_value=_Resp(404)):
                 self.assertFalse(module._market_url_alive(url))
+            # The protected portals answer automated requests with 404 even for
+            # pages that exist, so their GET 404 is a refusal, not proof of death.
+            protected = 'https://wasalt.sa/property/rent/1'
+            with patch.object(module.requests, 'head', return_value=_Resp(404)), \
+                 patch.object(module.requests, 'get', return_value=_Resp(404)):
+                self.assertTrue(module._market_url_alive(protected))
             dns_err = module.requests.ConnectionError('nxdomain')
             dns_err.__cause__ = _socket.gaierror(-2, 'Name or service not known')
             with patch.object(module.requests, 'head', side_effect=dns_err):

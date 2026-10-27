@@ -30,8 +30,15 @@ class MeetingRequirementsTestsPart16(MeetingRequirementsTests):
         self.assertIn("tr.querySelectorAll('input,select,textarea')", index_source)
         self.assertIn('<select data-field="classification">', index_source)
         self.assertIn('<td data-field="logo_cell"></td>', index_source)
-        self.assertIn('data-currency="SAR"', index_source)
-        self.assertIn('placeholder="من (ر.س)"', index_source)
+        # The currency travels with the row's own price, so the cell carries the
+        # row currency rather than one hardcoded code.
+        self.assertIn('data-currency="', index_source)
+        self.assertIn("data-currency=\"' + escapeHtml(rowCurrency) + '\"",
+                      index_source)
+        # The placeholder names the row's own currency, not a fixed riyal tag.
+        self.assertIn("const priceFromPlaceholder = 'من (' + currencyLabel + ')';",
+                      index_source)
+        self.assertIn("escapeHtml(priceFromPlaceholder)", index_source)
         self.assertIn('#section-market-study th {', index_source)
         self.assertIn('color: var(--ink);', index_source)
         self.assertIn("function renderMarketSummaryCompare(current, incoming, currentSwot, incomingSwot)", index_source)
@@ -82,12 +89,14 @@ class MeetingRequirementsTestsPart16(MeetingRequirementsTests):
         self.assertIn("import market_study", app_source)
         self.assertIn("@app.route('/api/market-study/competitors'", app_source)
         self.assertIn('run_browse_agent', app_source)
-        # Owner-ordered exception: the market summary researches through the
-        # provider-native server tool (Google grounding) with zero page opens.
-        # That is the only sanctioned 'openrouter:web_search' occurrence —
-        # a second one anywhere is the deleted paid layer coming back.
-        self.assertEqual(app_source.count('openrouter:web_search'), 1)
-        self.assertIn('_SUMMARY_NATIVE_SEARCH_TOOLS', app_source)
+        # Owner-ordered exception: the market summary researches through one
+        # provider-native search plugin with zero page opens. That single
+        # plugin is the only sanctioned native search — the old
+        # 'openrouter:web_search' tool and a second search layer are gone.
+        self.assertNotIn('openrouter:web_search', app_source)
+        self.assertEqual(app_source.count("'id': 'web'"), 1)
+        self.assertIn("browse_kwargs['plugins'] = [{'id': 'web', 'max_results': 5}]",
+                      app_source)
         self.assertIn('def _start_market_job(kind, executor):', app_source)
 
         self.assertIn('project_idea', {field['key'] for field in db.PREBUILT_FIELDS})
@@ -131,37 +140,48 @@ class MeetingRequirementsTestsPart16(MeetingRequirementsTests):
     def test_market_study_price_currency_survives_and_travels_with_the_price(self):
         """A Booking page priced in euros used to lose its figure entirely —
         the row had no currency slot, so «120 EUR» could only be written as a
-        fake SAR number or dropped. normalize keeps the code, fill-mode merge
-        moves the tag only alongside a price it labels, and the prompt schema
-        declares the field."""
+        fake SAR number or dropped. normalize converts the figure to whole
+        riyals and keeps the printed amount and code beside it in the price
+        cache, fill-mode merge moves the tag only alongside a price it labels,
+        and the prompt schema declares the field."""
         import market_study
-        row = market_study.normalize_competitor_row({
-            'name': 'فندق بوكينج',
-            'operation_type': 'تشغيل فندقي',
-            'price_type': 'سعر الليلة',
-            'price_value': '120',
-            'price_currency': 'يورو',
-        })
-        self.assertEqual(row['price_value'], '120')
-        self.assertEqual(row['price_currency'], 'EUR')
-        aliased = market_study.normalize_competitor_row({
-            'name': 'فندق الدولار',
-            'price': {'type': 'سعر الليلة', 'value': '95', 'currency': 'US$'},
-        })
-        self.assertEqual(aliased['price_currency'], 'USD')
-        merged, _added, _updated = market_study.merge_generated_competitors(
-            [{'id': 'm1', 'name': 'فندق بوكينج', 'price_value': '900'}],
-            [{'id': 'm1', 'name': 'فندق بوكينج', 'price_currency': 'EUR'}],
-            mode='fill')
-        self.assertEqual(merged[0]['price_value'], '900')
-        self.assertNotEqual(merged[0].get('price_currency'), 'EUR')
-        merged2, _added2, _updated2 = market_study.merge_generated_competitors(
-            [{'id': 'm2', 'name': 'فندق آخر'}],
-            [{'id': 'm2', 'name': 'فندق آخر', 'price_value': '480',
-              'price_currency': 'USD'}],
-            mode='fill')
-        self.assertEqual(merged2[0]['price_value'], '480')
-        self.assertEqual(merged2[0]['price_currency'], 'USD')
+        with patch.object(market_study, 'price_fx_to_sar', return_value=4.2):
+            row = market_study.normalize_competitor_row({
+                'name': 'فندق بوكينج',
+                'operation_type': 'تشغيل فندقي',
+                'price_type': 'سعر الليلة',
+                'price_value': '120',
+                'price_currency': 'يورو',
+            })
+            self.assertEqual(row['price_value'], '504')
+            self.assertEqual(row['price_currency'], 'SAR')
+            self.assertEqual(row['price_cache']['original_currency'], 'EUR')
+            self.assertEqual(row['price_cache']['original_price_value'], '120')
+            aliased = market_study.normalize_competitor_row({
+                'name': 'فندق الدولار',
+                'price': {'type': 'سعر الليلة', 'value': '95', 'currency': 'US$'},
+            })
+            self.assertEqual(aliased['price_currency'], 'SAR')
+            self.assertEqual(aliased['price_cache']['original_currency'], 'USD')
+            merged, _added, _updated = market_study.merge_generated_competitors(
+                [{'id': 'm1', 'name': 'فندق بوكينج', 'price_value': '900'}],
+                [{'id': 'm1', 'name': 'فندق بوكينج', 'price_currency': 'EUR'}],
+                mode='fill')
+            # The tag travels only with a price it labels; the client's SAR
+            # figure is never renamed as a foreign amount.
+            self.assertEqual(merged[0]['price_value'], '900')
+            self.assertEqual(merged[0].get('price_currency'), 'SAR')
+            merged2, _added2, _updated2 = market_study.merge_generated_competitors(
+                [{'id': 'm2', 'name': 'فندق آخر'}],
+                [{'id': 'm2', 'name': 'فندق آخر', 'price_value': '480',
+                  'price_currency': 'USD'}],
+                mode='fill')
+            # A foreign figure fills the empty cell as whole riyals, with the
+            # printed amount and code kept in the price cache.
+            self.assertEqual(merged2[0]['price_value'], '2016')
+            self.assertEqual(merged2[0]['price_currency'], 'SAR')
+            self.assertEqual(merged2[0]['price_cache']['original_currency'], 'USD')
+            self.assertEqual(merged2[0]['price_cache']['original_price_value'], '480')
         prompt = market_study.build_competitors_user_prompt({}, [], mode='generate')
         self.assertIn('price_currency', prompt)
 
@@ -388,9 +408,13 @@ class MeetingRequirementsTestsPart16(MeetingRequirementsTests):
         self.assertFalse(hasattr(module, '_call_market_study_model'))
         self.assertFalse(hasattr(module, 'MARKET_SEARCH_ENGINE'))
         app_source = read_module_source('app.py')
-        self.assertEqual(app_source.count('openrouter:web_search'), 1)
-        self.assertIn('_SUMMARY_NATIVE_SEARCH_TOOLS', app_source)
-        self.assertNotIn("'id': 'web'", app_source)
+        # The provider-native server tool is gone; the one sanctioned native
+        # search left is the summary researcher's own plugin call, and a
+        # second occurrence anywhere is the deleted paid layer coming back.
+        self.assertNotIn('openrouter:web_search', app_source)
+        self.assertEqual(app_source.count("'id': 'web'"), 1)
+        self.assertIn("browse_kwargs['plugins'] = [{'id': 'web', 'max_results': 5}]",
+                      app_source)
         self.assertIn('_browse_agent_call(', app_source)
 
     def test_browse_agent_call_sends_task_model_and_full_task(self):
@@ -629,4 +653,7 @@ class MeetingRequirementsTestsPart16(MeetingRequirementsTests):
         # explicit call-site constants, not provider-side search settings.
         self.assertIn('_COMPETITORS_SEARCH_BUDGET', app_source)
         self.assertIn('search_budget=', app_source)
-        self.assertNotIn("'id': 'web'", app_source)
+        # The hosted web plugin belongs to the browse agent's own transport; the
+        # retired one-shot web_search call (and its engine switch) stays gone.
+        self.assertNotIn('openrouter:web_search', app_source)
+        self.assertNotIn('MARKET_SEARCH_ENGINE', app_source)

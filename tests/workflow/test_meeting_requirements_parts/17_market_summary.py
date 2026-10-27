@@ -33,7 +33,7 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
         self.assertIn('طريق الملك فهد', prompt)
         self.assertIn('مجمع الراشد (تسوق)', prompt)
         self.assertIn('annualRent = إيجار سنوي', prompt)
-        self.assertIn('طبيعة الإيرادات في بيانات المشروع ملزمة', prompt)
+        self.assertIn('- طبيعة الإيرادات: وحدات تأجيرية فقط', prompt)
         # A project with no financial data must not render the block at all.
         bare = market_study.build_competitors_user_prompt({'city': 'جدة'}, [], mode='generate')
         self.assertNotIn('مؤشرات الدراسة المالية', bare)
@@ -105,7 +105,10 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
         self.assertEqual(generated.status_code, 200, generated.get_json())
         generated_payload = generated.get_json()
         generated_names = [row['name'] for row in generated_payload['competitors']]
-        self.assertEqual(generated_names, ['برج الشمال'])
+        # The client's own row survives a regeneration; only the generated
+        # rows are replaced.
+        self.assertEqual(generated_names, ['برج الشمال', 'منافس العميل'])
+        self.assertEqual(generated_payload['competitors'][1].get('row_source'), 'manual')
         self.assertEqual(
             [row['url'] for row in generated_payload['sources']],
             ['https://developer.example/north-tower', 'https://listing.example/north-tower'],
@@ -627,6 +630,7 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
             ],
             'فندقي': [
                 'وزارة السياحة mt.gov.sa',
+                'منشورات وزارة السياحة الرسمية tourism.sa/ar/data-insights/publications',
                 'الهيئة العامة للإحصاء stats.gov.sa وإحصاءات المنشآت السياحية',
                 'الهيئة العامة للطيران المدني gaca.gov.sa',
                 'الجهات الرسمية للفعاليات والسياحة في المدينة',
@@ -716,4 +720,4 @@ class MeetingRequirementsTestsPart17(MeetingRequirementsTests):
         self.assertIn('الملخص والمصادر وSWOT السابقة للسياق فقط', summary_prompt)
         self.assertIn('المهام المحورية:', summary_prompt)
         self.assertIn('"market_definition":"تحليل تفصيلي"', summary_prompt)
-        self.assertIn('فقرة تنفيذية متماسكة كاملة بلا حد للكلمات', summary_prompt)
+        self.assertIn('فقرة تنفيذية متماسكة ومسترسلة رفيعة الصياغة بلا حد للكلمات', summary_prompt)

@@ -3,6 +3,7 @@
 The suite uses a temporary SQLite database and never calls Google or an AI API.
 """
 
+import ast
 import base64
 import gzip
 import hashlib
@@ -93,6 +94,51 @@ def read_module_source(name):
     return text
 
 
+def _bundle_order(kind):
+    """The bundle's own load order, read from app_parts/22f_frontend_bundles.py.
+
+    The tuple there is the single order authority shared with
+    scripts/verify-frontend.js; keeping a second copy here let the list fall
+    behind the split, and every file it did not name became invisible to these
+    assertions.
+    """
+    part = (ROOT / 'app_parts' / '22_rules_pages'
+            / '22f_frontend_bundles.py')
+    name = 'FRONTEND_{}_ORDER'.format(kind.upper())
+    try:
+        tree = ast.parse(part.read_text(encoding='utf-8'))
+    except OSError:
+        return ()
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == name
+                   for target in node.targets):
+            continue
+        try:
+            return tuple(ast.literal_eval(node.value))
+        except ValueError:
+            return ()
+    return ()
+
+
+def _asset_files(subdir, extension, order):
+    """The ordered files first, then anything else on disk, so a stale list
+    can never hide client source from a literal assertion."""
+    root = ROOT / 'assets' / subdir
+    files = []
+    seen = set()
+    for name in order:
+        path = root / name
+        if path.is_file():
+            files.append(path)
+            seen.add(path.resolve())
+    for path in sorted(root.rglob('*' + extension)):
+        if path.resolve() not in seen:
+            files.append(path)
+    return files
+
+
 def read_frontend_text():
     """The full client source: shell + styles + scripts in load order.
 
@@ -100,10 +146,10 @@ def read_frontend_text():
     assertions must read the combined text, not the shell alone.
     """
     parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
-    for _css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
-        parts.append(_css.read_text(encoding='utf-8'))
-    for name in FRONTEND_JS_ORDER:
-        parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+    for path in _asset_files('css', '.css', _bundle_order('css')):
+        parts.append(path.read_text(encoding='utf-8'))
+    for path in _asset_files('js', '.js', _bundle_order('js')):
+        parts.append(path.read_text(encoding='utf-8'))
     return '\n'.join(parts)
 
 

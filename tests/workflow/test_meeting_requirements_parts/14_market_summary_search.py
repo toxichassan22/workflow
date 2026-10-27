@@ -9,5 +9,10 @@ class MeetingRequirementsTestsPart14(MeetingRequirementsTests):
         self.assertNotIn('openrouter:web_search', app_source)
         self.assertIn('_run_market_summary_research', app_source)
         self.assertIn("search_provider='searxng'", app_source)
-        self.assertNotIn("'id': 'web'", app_source)
+        # One provider-native search remains: the summary researcher's own
+        # plugin call. A second occurrence anywhere is the deleted paid layer
+        # coming back.
+        self.assertEqual(app_source.count("'id': 'web'"), 1)
+        self.assertIn("browse_kwargs['plugins'] = [{'id': 'web', 'max_results': 5}]",
+                      app_source)
         self.assertIn('_browse_agent_call(', app_source)
