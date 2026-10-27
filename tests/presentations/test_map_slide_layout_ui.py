@@ -148,8 +148,8 @@ class MapSlideLayoutUiTests(unittest.TestCase):
 
     # ── The two location pages the map redesign left behind ─────────────────
 
-    def _render_location_page(self, slide, placeholders=None):
-        project = self.site_project
+    def _render_location_page(self, slide, placeholders=None, project=None):
+        project = project or self.site_project
         raw = self.engine._build_structured_fallback_slide(
             slide, project, self.branding, 21, 80)
         html = self.engine.finalize_slide_html(
@@ -235,6 +235,22 @@ class MapSlideLayoutUiTests(unittest.TestCase):
         # The 16:9 map fills its wrapper, and the measurement date lands in the caption.
         self.assertLessEqual(abs(metrics['imageFill']), 2, metrics)
         self.assertIn('تم قياس زمن القيادة', metrics['caption'])
+
+    def test_a_single_long_reading_is_columned_without_clipping(self):
+        long_text = ' '.join(
+            'يقع المشروع على محور حيوي يربط شمال المدينة بوسطها ويمنحه موقعاً استراتيجياً '
+            'لخدمة الطلب القائم على الخدمات والمرافق المحيطة به.' for _ in range(26))
+        metrics = self._render_location_page({
+            'title': 'ملخص الموقع الجغرافي', 'type': 'content', 'section_key': 'location',
+            'content_source': 'site_analysis', 'image_tokens': ['##MAP_OVERVIEW##'],
+            'requires_image': True},
+            placeholders={'##MAP_OVERVIEW##': self.map_uri},
+            project=dict(self.site_project, site_analysis=long_text))
+        self._assert_location_frame(metrics)
+        # A paragraph that runs long is broken at sentence boundaries and set in
+        # columns, so the approved wording still fits the card whole.
+        self.assertGreaterEqual(metrics['paragraphs'], 2, metrics)
+        self.assertEqual(len(metrics['cards']), 2, metrics)
 
     def test_site_analysis_continuation_page_keeps_the_frame(self):
         metrics = self._render_location_page({

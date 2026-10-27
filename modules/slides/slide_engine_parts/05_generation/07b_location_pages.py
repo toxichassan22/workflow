@@ -344,7 +344,16 @@ def _site_analysis_paragraphs(slide, source):
         start = int(match.group(1)) if match.group(1) else 0
         end = int(match.group(2)) if match.group(2) else len(paragraphs)
         paragraphs = paragraphs[start:end]
-    return paragraphs
+    # The analysis is written as flowing prose, so one paragraph can run past
+    # what a card holds. Breaking it at sentence boundaries is layout only: the
+    # approved wording is untouched.
+    laid_out = []
+    for paragraph in paragraphs:
+        if len(paragraph) > 700:
+            laid_out.extend(_exec_text_chunks(paragraph, target=520) or [paragraph])
+        else:
+            laid_out.append(paragraph)
+    return laid_out
 
 
 def _site_analysis_text_style(paragraphs, has_map):

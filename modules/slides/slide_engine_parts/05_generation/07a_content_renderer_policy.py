@@ -105,7 +105,8 @@ def slide_content_renderer(slide, project_data=None):
     # the same designed frame. A page sliced by paragraph range belongs here too.
     if slide.get('type') == 'site_specs' or source == 'location_detail':
         return CONTENT_RENDERER_DETERMINISTIC
-    if content_source_base(source) == 'site_analysis':
+    if source.startswith('site_analysis'):
+        # Every page of the reading, including its paragraph-range slices.
         return CONTENT_RENDERER_DETERMINISTIC
     if source == 'land_boundary_diagram':
         return CONTENT_RENDERER_DETERMINISTIC
