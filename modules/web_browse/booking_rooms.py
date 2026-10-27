@@ -17,6 +17,17 @@ amount is kept as printed because there is nothing to subtract. The
 discounted current price stays an informational value, never the row price.
 This module reads the live DOM instead of asking a model:
 
+The two views were measured on one property's room block
+(``193957202_94636020_2_0_0``): the ex-tax view printed 298 beside
+``data-excl-charges-raw="53.178…"``, the folded view 351 beside an empty
+attribute — 298 + 53.18 = 351, the same total in both. Which one arrives
+follows the visitor's country, and no client-side lever moves it
+(``scripts/booking_pos_matrix.py`` rules out language, currency and cc1 in the
+URL and as a cookie), so ``BROWSER_WS_ENDPOINT`` is what decides the basis. A
+host must pass ``scripts/booking_page_dump.py --require-net`` before a study
+runs against it: a folded view carries no net price to store, and dividing by
+an assumed tax rate is not a substitute for reading one.
+
 - ``## BOOKING_RATE ##`` carries that original price, the room area, the
   current discounted price (informational), the taxes line and the rate policy.
 - ``select_cheapest_rate`` identifies the cheapest base rate for the requested
