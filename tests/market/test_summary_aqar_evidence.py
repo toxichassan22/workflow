@@ -168,5 +168,46 @@ class SummaryAqarEvidenceTests(unittest.TestCase):
         self.assertIn('red.rega.gov.sa', hosts)
 
 
+    def test_dom_cards_follow_the_price_paragraph_not_its_position(self):
+        module = self.module
+
+        class Page:
+            def evaluate(self, script):
+                return [
+                    {'url': 'https://sa.aqar.fm/villa-1',
+                     'price': '35,000 \u00a7 ريال /سنوي', 'basis': 'سنوي',
+                     'desc': 'فيلا للإيجار في شارع الوفاء, حي الوفاء',
+                     'loc': 'حي الرياض, جدة'},
+                    {'url': 'https://sa.aqar.fm/villa-2',
+                     'price': '80,000', 'basis': 'سنوي',
+                     'desc': 'فيلا للإيجار في شارع أبو يوسف',
+                     'loc': 'حي اللؤلؤ, جدة'},
+                ]
+
+        class Session:
+            _page = Page()
+
+            def open_url(self, url):
+                return {'text': '', 'final_url': url, 'error': None}
+
+        pages = [('https://sa.aqar.fm/villas-rent',
+                  'aqar.fm — فلل إيجار — جدة')]
+        with patch.object(module.market_study, 'summary_activity_profile',
+                          return_value=self._profile()), \
+                patch.object(module.market_study, '_payload_operations',
+                             return_value={'إيجار'}), \
+                patch.object(module.market_study, '_listing_urls',
+                             return_value=iter(pages)):
+            result = module._summary_aqar_evidence(
+                {'city': 'جدة', 'district': 'الاندلس'}, Session(),
+                deadline=time.time() + 30)
+        self.assertIsNotNone(result)
+        self.assertIn('35,000', result['block'])
+        self.assertIn('price_basis: سنوي', result['block'])
+        self.assertIn('https://sa.aqar.fm/villa-1', result['block'])
+        self.assertIn('فيلا للإيجار', result['block'])
+        self.assertEqual(result['rows'], 2)
+
+
 if __name__ == '__main__':
     unittest.main()

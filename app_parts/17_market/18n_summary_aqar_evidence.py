@@ -31,12 +31,20 @@ _AQAR_CARD_JS = """
     if (!text.includes('ريال')) continue;
     const ps = [...a.querySelectorAll('p')]
       .map(p => (p.innerText || '').trim()).filter(Boolean);
-    if (!ps.length) continue;
-    const price = ps[0] || '';
-    if (!/[\\d\\u0660-\\u0669][\\d,\\u0660-\\u0669]*\\s*\\u00a7?\\s*ريال/.test(price)) continue;
+    const priceIndex = ps.findIndex(
+      t => /[\\d\\u0660-\\u0669][\\d,\\u0660-\\u0669]*\\s*\\u00a7?\\s*ريال/.test(t));
+    if (priceIndex < 0) continue;
+    const price = ps[priceIndex];
+    const others = ps.filter((_, i) => i !== priceIndex);
+    const short = others.filter(t => t.length <= 220);
+    const locs = others.filter(t => /حي\\s+[^,،]+[,،]?\\s*جدة/.test(t));
+    const loc = locs.length ? locs[locs.length - 1] : (short[short.length - 1] || '');
+    const desc = short.length ? short[0] : '';
+    const basis = price.includes('سنوي') ? 'سنوي'
+      : (price.includes('شهري') ? 'شهري' : '');
     let url = href;
     try { url = new URL(href, location.origin).href; } catch (e) { url = href; }
-    out.push({url, price, desc: ps[1] || '', loc: ps[2] || ''});
+    out.push({url, price, basis, desc, loc});
     if (out.length >= 60) break;
   }
   return out;
@@ -118,6 +126,8 @@ def _aqar_cards_from_text(text, page_url=''):
         cards.append({
             'url': page_url,
             'price': match.group(1),
+            'basis': ('سنوي' if 'سنوي' in segment[:30]
+                      else ('شهري' if 'شهري' in segment[:30] else '')),
             'desc': re.sub(r'\s+', ' ', description).strip()[:240],
             'loc': re.sub(r'\s+', ' ', location.group(0)).strip() if location else '',
         })
@@ -210,6 +220,9 @@ def _summary_aqar_block(readings, payload):
             description = str(card.get('desc') or '').strip()
             location = str(card.get('loc') or '').strip()
             lines.append(f'{index}. price_sar: {price or "غير ظاهر"}')
+            basis = str(card.get('basis') or '').strip()
+            if basis:
+                lines.append(f'   price_basis: {basis}')
             if description:
                 lines.append(f'   description: {description[:180]}')
             if location:
