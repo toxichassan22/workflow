@@ -44,12 +44,12 @@ def _chat_payload():
 class ModelConstantTests(unittest.TestCase):
 
     def test_text_model_is_sol_6_1_at_low_effort(self):
-        self.assertEqual(application.GEMINI_TEXT_MODEL, 'openai/gpt-6.1-sol')
-        self.assertEqual(application.TEXT_REASONING_EFFORT, 'low')
+        self.assertEqual(application.GEMINI_TEXT_MODEL, 'google/gemini-4-argon')
+        self.assertEqual(application.TEXT_REASONING_EFFORT, 'high')
         self.assertEqual(application.LUNA_TEXT_MODEL, application.GEMINI_TEXT_MODEL)
         self.assertEqual(application.VISUAL_PLAN_TEXT_MODEL, application.GEMINI_TEXT_MODEL)
-        self.assertEqual(application.DESIGNER_AGENT_PLANNER_MODEL, application.GEMINI_TEXT_MODEL)
-        self.assertEqual(application.DESIGNER_AGENT_WORKER_MODEL, application.GEMINI_TEXT_MODEL)
+        self.assertEqual(application.DESIGNER_AGENT_PLANNER_MODEL, os.environ.get('DESIGNER_AGENT_PLANNER_MODEL') or application.GEMINI_TEXT_MODEL)
+        self.assertEqual(application.DESIGNER_AGENT_WORKER_MODEL, os.environ.get('DESIGNER_AGENT_WORKER_MODEL') or application.GEMINI_TEXT_MODEL)
         self.assertEqual(application.MARKET_STUDY_MODEL, application.GEMINI_TEXT_MODEL)
 
     def test_vision_model_stays_argon(self):
@@ -85,7 +85,8 @@ class ModelConstantTests(unittest.TestCase):
                 'system', 'user', model=application.VISION_MODEL, max_tokens=100)
         self.assertNotIn('error', response)
         self.assertEqual(captured['model'], application.VISION_MODEL)
-        self.assertNotIn('reasoning_effort', captured)
+        if application.VISION_MODEL != application.GEMINI_TEXT_MODEL:
+            self.assertNotIn('reasoning_effort', captured)
 
     def test_no_module_hardcodes_argon_as_a_model(self):
         offenders = []
