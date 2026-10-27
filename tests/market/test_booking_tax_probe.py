@@ -75,5 +75,47 @@ class BookingTaxProbeTests(unittest.TestCase):
             [('cc1', 'sa'), ('x', 'a=b'), ('broken', '')])
 
 
+_spec = importlib.util.spec_from_file_location(
+    'booking_pos_matrix', ROOT / 'scripts' / 'booking_pos_matrix.py')
+matrix = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(matrix)
+
+_PROPERTY = 'https://www.booking.com/hotel/sa/novotel-jeddah-tahlia.html'
+
+
+class BookingPosMatrixTests(unittest.TestCase):
+    """The lever matrix must test the lever it says it tests.
+
+    Every variant carries the shared stay window (so the property page keeps
+    its room table) and the variant's own keys replace the stay's keys. A
+    duplicate ``selected_currency`` measured the currency variants in riyals
+    while their label claimed dollars, which made a negative result mean
+    nothing.
+    """
+
+    def test_base_url_carries_the_shared_stay(self):
+        url = matrix.variant_url(_PROPERTY, {})
+        self.assertIn('checkin=', url)
+        self.assertIn('checkout=', url)
+        self.assertIn('selected_currency=SAR', url)
+
+    def test_variant_keys_replace_the_stay_keys_instead_of_repeating_them(self):
+        url = matrix.variant_url(
+            _PROPERTY, {'lang': 'en-us', 'selected_currency': 'USD'})
+        self.assertEqual(url.count('selected_currency='), 1)
+        self.assertIn('selected_currency=USD', url)
+        self.assertNotIn('selected_currency=SAR', url)
+        self.assertIn('lang=en-us', url)
+        self.assertIn('checkin=', url)
+
+    def test_every_variant_label_is_unique(self):
+        labels = list(matrix._PARAMS) + list(matrix._COOKIES)
+        self.assertEqual(len(labels), len(set(labels)))
+
+    def test_a_non_property_url_is_refused(self):
+        self.assertFalse(
+            matrix.hotel_stay.is_booking_hotel_url('https://www.booking.com/index.html'))
+
+
 if __name__ == '__main__':
     unittest.main()
