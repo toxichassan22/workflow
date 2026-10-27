@@ -413,14 +413,20 @@
           tenantProjectData = { ...tenantProjectData, ...safeFilledFields };
           Object.entries(safeFilledFields).forEach(([key, value]) => {
             const fieldInput = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-            if (fieldInput && value !== null && value !== undefined) fieldInput.value = value;
+            if (fieldInput && value !== null && value !== undefined) {
+              fieldInput.value = value;
+              if (typeof liveCollabSetLocalValue === 'function') liveCollabSetLocalValue(key, value);
+            }
           });
           refreshLocationTables();
           updateLoaderProgress(90, 'تم استلام التحليل والبيانات المكملة...');
           tenantProjectData.site_analysis = data.analysis;
           tenantProjectData.site_analysis_approved = false;
-          input.value = data.analysis;
+          const targetInput = document.querySelector('#tenantProjectForm [data-key="site_analysis"]') || input;
+          if (targetInput) targetInput.value = data.analysis;
+          if (typeof liveCollabSetLocalValue === 'function') liveCollabSetLocalValue('site_analysis', data.analysis);
           refreshSiteAnalysisApprovalUI();
+          if (typeof saveProjectAsDraft === 'function') await saveProjectAsDraft(true);
           triggerAutoSaveDraft();
           updateLoaderProgress(100, 'اكتمل تحليل الموقع. راجعه ثم اعتمده أو عدّله.');
         } else if (data.error) {
@@ -605,7 +611,10 @@
         setLocationDataFetchedAt();
         Object.entries(fields).forEach(([key, value]) => {
           const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-          if (input && value !== null && value !== undefined) input.value = value;
+          if (input && value !== null && value !== undefined) {
+            input.value = value;
+            if (typeof liveCollabSetLocalValue === 'function') liveCollabSetLocalValue(key, value);
+          }
         });
         applyCityDistrictToForm(fields.city || tenantProjectData.city, fields.district || tenantProjectData.district, true);
         refreshLocationTables();

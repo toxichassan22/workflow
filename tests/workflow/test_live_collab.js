@@ -110,8 +110,9 @@ testPresenceHeartbeatWhileTheTabIsOpen();
 testPresenceLineNamesTheField();
 testPresenceIsWiredIntoTheLoops();
 testGoogleDocsPresenceHighlight();
+testSetLocalValueAndPreserveInputOnBind();
 console.log('Live collaboration harness passed: bytes, diff, caret, field eligibility,'
-  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight.');
+  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight, local value preservation.');
 
 function testRoundTripBytes() {
   const bytes = new Uint8Array([0, 1, 2, 250, 255]);
@@ -121,7 +122,7 @@ function testRoundTripBytes() {
 }
 
 function testTextDiff() {
-  const doc = new Y.Doc();
+  const doc = new context.Y.Doc();
   const text = doc.getText('field');
   text.insert(0, 'hello');
   assert.equal(context.liveApplyTextDiff(text, 'hello world', 'local'), true);
@@ -341,4 +342,58 @@ function testConcurrentTypingConverges() {
     'a deletion and an insertion must still converge');
   assert.ok(leftText.toString().endsWith('Z'));
   assert.equal(leftText.toString().includes('X'), false);
+}
+
+function testSetLocalValueAndPreserveInputOnBind() {
+  assert.equal(typeof context.liveCollabSetLocalValue, 'function',
+    'liveCollabSetLocalValue must be exposed');
+
+  const doc = new context.Y.Doc();
+  const session = {
+    doc,
+    fields: doc.getMap('fields'),
+    bindings: new Map(),
+    pending: [],
+    localFieldKey: '',
+    localOrigin: { liveCollab: 'local' },
+    remoteOrigin: { liveCollab: 'remote' },
+    applyingRemote: false,
+    stopped: false,
+  };
+  context.liveCollabSession = session;
+
+  // 1. liveCollabSetLocalValue updates CRDT text
+  context.liveCollabSetLocalValue('site_analysis', 'تحليل الموقع الأولي', session);
+  let text = session.fields.get('site_analysis');
+  assert.ok(text instanceof Y.Text, 'field must be created as Y.Text');
+  assert.equal(text.toString(), 'تحليل الموقع الأولي');
+
+  // 2. Setting another value via liveCollabSetLocalValue applies diff cleanly
+  context.liveCollabSetLocalValue('site_analysis', 'تحليل الموقع المحدث', session);
+  assert.equal(text.toString(), 'تحليل الموقع المحدث');
+
+  // 3. Binding an input that has content while CRDT is empty must NOT wipe input
+  const emptyKey = 'new_field';
+  const dummyInput = {
+    tagName: 'TEXTAREA',
+    dataset: { key: emptyKey },
+    value: 'محتوى محلي غير فارغ',
+    disabled: false,
+    readOnly: false,
+    closest: () => null,
+  };
+  const originalGetElementById = context.document.getElementById;
+  context.document.getElementById = id => (id === 'tenantProjectForm' ? {
+    querySelectorAll: () => [dummyInput],
+  } : null);
+
+  context.liveCollabBindFields(session);
+  assert.equal(dummyInput.value, 'محتوى محلي غير فارغ',
+    'local input value must not be erased when CRDT text was empty');
+  const emptyText = session.fields.get(emptyKey);
+  assert.equal(emptyText.toString(), 'محتوى محلي غير فارغ',
+    'CRDT must adopt local input value instead of wiping it');
+
+  context.document.getElementById = originalGetElementById;
+  context.liveCollabSession = null;
 }

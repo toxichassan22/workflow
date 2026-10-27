@@ -253,8 +253,8 @@ function liveCollabFieldLocked(input) {
   return Boolean(section && section.classList && section.classList.contains('section-locked'));
 }
 
-function liveCollabBindFields() {
-  const session = liveCollabSession;
+function liveCollabBindFields(optionalSession) {
+  const session = optionalSession || liveCollabSession;
   if (!session || session.stopped) return;
   const form = document.getElementById('tenantProjectForm');
   if (!form || !form.querySelectorAll) return;
@@ -294,9 +294,17 @@ function liveCollabBindFields() {
     text.observe(observer);
     session.bindings.set(key, { input, text, observer });
     if (input.value !== text.toString()) {
-      // A rebuilt form starts empty: put the live value back and let the
-      // app's listeners react without feeding it back into the CRDT.
-      liveCollabSetInputValue(input, text.toString(), true);
+      const crdtVal = text.toString();
+      if (crdtVal) {
+        // A rebuilt form starts empty: put the live value back and let the
+        // app's listeners react without feeding it back into the CRDT.
+        liveCollabSetInputValue(input, crdtVal, true);
+      } else if (input.value) {
+        // Local input was populated before/during unlock while CRDT stayed empty.
+        session.localFieldKey = key;
+        try { liveApplyTextDiff(text, input.value, session.localOrigin); }
+        finally { session.localFieldKey = ''; }
+      }
     }
   });
   // A field removed from the form keeps its Y.Text in the document, so a
@@ -961,8 +969,28 @@ function liveCollabCaretPoint(input, index) {
   return { left, top };
 }
 
+function liveCollabSetLocalValue(key, value, optionalSession) {
+  const session = optionalSession || liveCollabSession;
+  if (!session || session.stopped || !key) return;
+  const strVal = String(value == null ? '' : value);
+  let text = session.fields.get(key);
+  if (!(text instanceof Y.Text)) {
+    text = new Y.Text();
+    session.localFieldKey = key;
+    try {
+      if (strVal) text.insert(0, strVal);
+      session.fields.set(key, text);
+    } finally { session.localFieldKey = ''; }
+  } else {
+    session.localFieldKey = key;
+    try { liveApplyTextDiff(text, strVal, session.localOrigin); }
+    finally { session.localFieldKey = ''; }
+  }
+}
+
 if (typeof window !== 'undefined') {
   window.startLiveCollaboration = startLiveCollaboration;
   window.stopLiveCollaboration = stopLiveCollaboration;
   window.liveApplySessionToForm = liveCollabApplySessionToForm;
+  window.liveCollabSetLocalValue = liveCollabSetLocalValue;
 }
