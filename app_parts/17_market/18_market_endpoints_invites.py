@@ -843,7 +843,7 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         payload, usage_ctx, evidence_pool, deadline, report=report,
         offer_lang=offer_lang, resume_state=resume_state,
         checkpoint=checkpoint, trace_writer=trace_writer,
-        data=data, tenant_id=tenant_id)
+        data=data, tenant_id=tenant_id, session=session)
     if not research.get('success'):
         fatal = next((_ai_fatal_error_dict(item.get('result') or {})
                       for item in research.get('outcomes') or []

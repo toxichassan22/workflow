@@ -63,6 +63,11 @@ def build_summary_research_jobs(payload, source_map, scope_activities_selected,
                         # The deterministic Booking scan already supplied the
                         # room sample; provider search cannot read its table.
                         continue
+                    if host == 'aqar.fm' and (payload or {}).get(
+                            '_summaryAqarSample'):
+                        # The deterministic listing reader already supplied
+                        # the advertisements; search never opened the page.
+                        continue
                     if scope_activities_selected and not market_study._host_in(
                             host, allowed_activity_hosts):
                         continue

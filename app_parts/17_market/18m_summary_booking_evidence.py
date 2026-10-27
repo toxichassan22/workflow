@@ -161,8 +161,8 @@ def _summary_booking_evidence_into(payload, data, tenant_id, evidence_pool,
     return result
 
 
-def _summary_booking_stage_allowed():
-    """The real scan is browser work; unittest runs must stay offline."""
+def _summary_deterministic_stage_allowed():
+    """The real scans are browser work; unittest runs must stay offline."""
     try:
         return not current_app.config.get('TESTING')
     except Exception:
@@ -171,15 +171,18 @@ def _summary_booking_stage_allowed():
 
 def _run_market_summary_research_with_booking(payload, usage_ctx, evidence_pool,
                                               deadline, data=None, tenant_id=None,
-                                              **kwargs):
-    """Summary research entry: deterministic Booking evidence, then the fan-out.
+                                              session=None, **kwargs):
+    """Summary research entry: deterministic reader evidence, then the fan-out.
 
     Defined here so the job entry stays one call and the large market-part file
     does not grow.
     """
-    if _summary_booking_stage_allowed():
+    if _summary_deterministic_stage_allowed():
         _summary_booking_evidence_into(
             payload, data or {}, tenant_id, evidence_pool,
+            deadline=deadline, report=kwargs.get('report'))
+        _summary_aqar_evidence_into(
+            payload, session, evidence_pool,
             deadline=deadline, report=kwargs.get('report'))
     return _run_market_summary_research(
         payload, usage_ctx, evidence_pool, deadline, **kwargs)

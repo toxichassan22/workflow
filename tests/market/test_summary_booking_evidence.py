@@ -145,28 +145,32 @@ class SummaryBookingEvidenceTests(unittest.TestCase):
     def test_the_wrapper_runs_booking_before_the_research_fan_out(self):
         module = self.module
         calls = []
-        with patch.object(module, '_summary_booking_stage_allowed',
+        with patch.object(module, '_summary_deterministic_stage_allowed',
                           return_value=True), \
                 patch.object(module, '_summary_booking_selected',
                              return_value=True), \
                 patch.object(module, '_summary_booking_evidence_into',
                              side_effect=lambda *a, **k: calls.append('booking')), \
+                patch.object(module, '_summary_aqar_evidence_into',
+                             side_effect=lambda *a, **k: calls.append('aqar')), \
                 patch.object(module, '_run_market_summary_research',
                              side_effect=lambda *a, **k:
                              calls.append('research') or {'success': True}):
             result = module._run_market_summary_research_with_booking(
                 {'city': 'جدة'}, {}, object(), time.time() + 30,
                 data={}, tenant_id='t1')
-        self.assertEqual(calls, ['booking', 'research'])
+        self.assertEqual(calls, ['booking', 'aqar', 'research'])
         self.assertTrue(result['success'])
 
     def test_the_wrapper_leaves_unittest_runs_offline(self):
         module = self.module
         calls = []
-        with patch.object(module, '_summary_booking_stage_allowed',
+        with patch.object(module, '_summary_deterministic_stage_allowed',
                           return_value=False), \
                 patch.object(module, '_summary_booking_evidence_into',
                              side_effect=lambda *a, **k: calls.append('booking')), \
+                patch.object(module, '_summary_aqar_evidence_into',
+                             side_effect=lambda *a, **k: calls.append('aqar')), \
                 patch.object(module, '_run_market_summary_research',
                              side_effect=lambda *a, **k:
                              calls.append('research') or {'success': True}):
