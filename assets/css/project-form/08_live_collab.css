@@ -1,35 +1,80 @@
-/* Live collaboration chrome: another editor's caret inside a field and the
-   presence rail that names who is working in which section. */
+/* Live collaboration chrome: Google-Docs-style field highlight, collaborator name tag badge,
+   and carets inside active fields. */
 
 .live-caret-overlay {
   position: absolute;
   pointer-events: none;
   overflow: visible;
-  z-index: 6;
+  z-index: 10;
+  border-radius: 12px;
+  box-sizing: border-box;
+}
+
+.live-collab-field-outline {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--collab-color, #17C8E3);
+  border-radius: inherit;
+  box-shadow: 0 0 0 3px var(--collab-glow, rgba(23, 200, 227, 0.16));
+  pointer-events: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.live-collab-badge-container {
+  position: absolute;
+  top: -20px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+  z-index: 12;
+}
+
+[dir="ltr"] .live-collab-badge-container,
+html[lang="en"] .live-collab-badge-container {
+  right: auto;
+  left: 12px;
+}
+
+.live-collab-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px 4px 0 0;
+  background: var(--collab-color, #17C8E3);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+  user-select: none;
 }
 
 .live-caret {
   position: absolute;
   width: 2px;
-  min-height: 1.1em;
+  min-height: 1.15em;
   border-radius: 1px;
   transform: translateY(1px);
+  pointer-events: none;
+  animation: liveCaretBlink 1.1s ease-in-out infinite;
+}
+
+@keyframes liveCaretBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
 }
 
 .live-caret-tag {
-  position: absolute;
-  top: -16px;
-  left: -1px;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  padding: 1px 5px;
-  border-radius: 3px;
-  color: #fff;
-  font-size: 10px;
-  line-height: 1.5;
-  font-weight: 600;
+  display: none;
+}
+
+.live-field-collaborator {
+  background-color: var(--collab-tint, rgba(23, 200, 227, 0.04)) !important;
 }
 
 .live-field-updated {
@@ -38,26 +83,9 @@
 }
 
 .live-presence-rail {
-  position: fixed;
-  left: 16px;
-  bottom: 16px;
-  z-index: 9998;
-  max-width: min(360px, calc(100vw - 32px));
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: #07182C;
-  color: #fff;
-  box-shadow: 0 8px 24px rgba(7, 24, 44, 0.28);
-  font-size: 12px;
-  line-height: 1.7;
-  direction: rtl;
-}
-
-.live-presence-rail strong {
-  color: #17C8E3;
-  font-weight: 700;
+  display: none !important;
 }
 
 .live-presence-rail:empty {
-  display: none;
+  display: none !important;
 }

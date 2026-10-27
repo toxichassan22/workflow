@@ -49,7 +49,7 @@ def _summary_booking_block(rows, note, payload):
         _SUMMARY_BOOKING_BLOCK_START,
         'source: Booking.com',
         f'scope: {scope}',
-        f'stay: {check_in.isoformat()} → {check_out.isoformat()} '
+        f'stay: {check_in.isoformat()} إلى {check_out.isoformat()} '
         f'(غرفة واحدة، بالغان، {hotel_stay.stay_nights_label_ar()}، SAR)',
         'priority: هذه عينة أسعار الغرف الحتمية المعتمدة لهذه الإقامة — '
         'استخدم أرقامها في محور الضيافة ولا تستبدلها بتقدير.',

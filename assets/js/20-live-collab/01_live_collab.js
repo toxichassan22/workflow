@@ -182,8 +182,19 @@ function stopLiveCollaboration() {
     });
   }
   document.querySelectorAll('.live-caret-overlay').forEach(node => node.remove());
+  document.querySelectorAll('.live-field-collaborator').forEach(node => {
+    node.classList.remove('live-field-collaborator');
+    if (node.style && node.style.removeProperty) node.style.removeProperty('--collab-tint');
+  });
   const rail = document.getElementById('liveCollabPresenceRail');
   if (rail) rail.remove();
+  try {
+    if (session.draftId && session.clientId && typeof api === 'function') {
+      api('POST', '/api/project-draft/' + encodeURIComponent(session.draftId) + '/live/leave', {
+        clientId: session.clientId
+      }).catch(() => {});
+    }
+  } catch (e) {}
   try { session.doc.destroy(); } catch (e) {}
   liveCollabSession = null;
 }
@@ -424,6 +435,25 @@ function liveCollabInstallListeners(session) {
     current.presenceSignature = '';
     liveCollabRenderCarets();
   }, true);
+  if (typeof window !== 'undefined') {
+    add(window, 'resize', () => {
+      const current = liveCollabSession;
+      if (!current || current !== session) return;
+      current.presenceSignature = '';
+      liveCollabRenderCarets();
+    });
+    add(window, 'beforeunload', () => {
+      const current = liveCollabSession;
+      if (!current || current !== session || !current.draftId || !current.clientId) return;
+      try {
+        const url = '/api/project-draft/' + encodeURIComponent(current.draftId) + '/live/leave';
+        const payload = JSON.stringify({ clientId: current.clientId });
+        if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+          navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
+        }
+      } catch (e) {}
+    });
+  }
   add(document, 'visibilitychange', () => {
     const current = liveCollabSession;
     if (!current || current !== session) return;
@@ -698,6 +728,17 @@ function liveCollabSectionLabel(sectionKey) {
   return label && label.textContent ? label.textContent.trim() : sectionKey;
 }
 
+function liveCollabHexToRgba(hex, alpha) {
+  const clean = String(hex || '').replace('#', '');
+  if (clean.length === 6) {
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
+  }
+  return 'rgba(23, 200, 227, ' + alpha + ')';
+}
+
 function liveCollabRenderPresence(entries) {
   const session = liveCollabSession;
   if (!session || session.stopped) return;
@@ -712,31 +753,69 @@ function liveCollabRenderPresence(entries) {
 }
 
 function liveCollabRenderRail(entries) {
-  let rail = document.getElementById('liveCollabPresenceRail');
-  if (!entries || !entries.length) {
-    if (rail) rail.remove();
-    return;
+  // Presence is rendered directly as field highlights with name badges (like Google Docs).
+  // The bottom rail is never rendered — remove it if present in the DOM.
+  const rail = typeof document !== 'undefined' && document.getElementById
+    ? document.getElementById('liveCollabPresenceRail') : null;
+  if (rail && rail.remove) rail.remove();
+}
+
+function liveCollabFindFieldInput(session, key) {
+  if (session && session.bindings && session.bindings.has(key)) {
+    const b = session.bindings.get(key);
+    if (b && b.input && b.input.isConnected) return b.input;
   }
-  if (!rail) {
-    rail = document.createElement('div');
-    rail.id = 'liveCollabPresenceRail';
-    rail.className = 'live-presence-rail';
-    rail.setAttribute('aria-live', 'polite');
-    document.body.appendChild(rail);
+  if (typeof document === 'undefined' || !document.querySelector) return null;
+  const safeKey = String(key || '').replace(/["\\]/g, '');
+  if (!safeKey) return null;
+  try {
+    return document.querySelector('#tenantProjectForm [data-key="' + safeKey + '"]')
+        || document.querySelector('[data-key="' + safeKey + '"]');
+  } catch (e) {
+    return null;
   }
-  const lines = [];
-  entries.forEach(item => {
-    const line = liveCollabPresenceLine(item);
-    if (!line) return;
-    if (lines.indexOf(line) < 0) lines.push(line);
-  });
-  rail.textContent = lines.join('، ');
+}
+
+function liveCollabGetTargetElement(input) {
+  if (!input) return null;
+  const isHidden = input.type === 'hidden' || (input.style && input.style.display === 'none');
+  const isVisible = input.offsetParent !== null || (input.getClientRects && input.getClientRects().length > 0);
+  if (!isHidden && isVisible) return input;
+  if (typeof input.closest === 'function') {
+    const card = input.closest('.tenant-field');
+    if (card && (card.offsetParent !== null || (card.getClientRects && card.getClientRects().length > 0))) {
+      return card;
+    }
+  }
+  return isVisible ? input : null;
+}
+
+function liveCollabIsSelfActive(targetEl, entry) {
+  if (typeof document === 'undefined') return false;
+  const activeEl = document.activeElement;
+  if (!activeEl || !targetEl) return false;
+  const isFocused = (activeEl === targetEl || (targetEl.contains && targetEl.contains(activeEl)));
+  if (!isFocused) return false;
+  const myName = (typeof tenantUser !== 'undefined' && tenantUser && (tenantUser._userName || tenantUser.companyName)) || '';
+  if (myName && entry && entry.user_name) {
+    return String(entry.user_name).trim().toLowerCase() === String(myName).trim().toLowerCase();
+  }
+  return false;
 }
 
 function liveCollabRenderCarets() {
   const session = liveCollabSession;
   if (!session || session.stopped) return;
-  document.querySelectorAll('.live-caret-overlay').forEach(node => node.remove());
+  if (typeof document === 'undefined') return;
+
+  if (document.querySelectorAll) {
+    document.querySelectorAll('.live-caret-overlay').forEach(node => node.remove());
+    document.querySelectorAll('.live-field-collaborator').forEach(node => {
+      node.classList.remove('live-field-collaborator');
+      if (node.style && node.style.removeProperty) node.style.removeProperty('--collab-tint');
+    });
+  }
+
   const byField = {};
   session.presence.forEach(item => {
     const key = String(item.field_key || '');
@@ -744,80 +823,141 @@ function liveCollabRenderCarets() {
     if (!byField[key]) byField[key] = [];
     byField[key].push(item);
   });
+
   Object.keys(byField).forEach(key => {
-    const binding = session.bindings.get(key);
-    if (!binding) return;
-    const input = binding.input;
-    if (!input || !input.isConnected) return;
-    const visible = input.offsetParent !== null || input.getClientRects().length > 0;
-    if (!visible) return;
-    liveCollabRenderFieldCarets(input, byField[key]);
+    const rawInput = liveCollabFindFieldInput(session, key);
+    if (!rawInput || !rawInput.isConnected) return;
+    const targetEl = liveCollabGetTargetElement(rawInput);
+    if (!targetEl || !targetEl.isConnected) return;
+
+    // Filter out presence from self if currently focused on this exact field
+    const entries = byField[key].filter(entry => !liveCollabIsSelfActive(targetEl, entry));
+    if (!entries.length) return;
+
+    liveCollabRenderFieldCarets(targetEl, entries);
   });
 }
 
-function liveCollabRenderFieldCarets(input, entries) {
-  const parent = input.parentElement;
+function liveCollabRenderFieldCarets(targetEl, entries) {
+  const parent = targetEl.parentElement;
   if (!parent) return;
-  const computed = getComputedStyle(parent);
-  if (computed.position === 'static') parent.style.position = 'relative';
+  const computed = typeof getComputedStyle === 'function' ? getComputedStyle(parent) : null;
+  if (computed && computed.position === 'static') parent.style.position = 'relative';
+
+  const targetRect = typeof targetEl.getBoundingClientRect === 'function'
+    ? targetEl.getBoundingClientRect()
+    : { left: 0, top: 0, width: 0, height: 0 };
+  const parentRect = typeof parent.getBoundingClientRect === 'function'
+    ? parent.getBoundingClientRect()
+    : { left: 0, top: 0, width: 0, height: 0 };
+  const left = targetRect.left - parentRect.left;
+  const top = targetRect.top - parentRect.top;
+
   const layer = document.createElement('div');
   layer.className = 'live-caret-overlay';
-  const inputRect = input.getBoundingClientRect();
-  const parentRect = parent.getBoundingClientRect();
-  layer.style.left = (inputRect.left - parentRect.left) + 'px';
-  layer.style.top = (inputRect.top - parentRect.top) + 'px';
-  layer.style.width = inputRect.width + 'px';
-  layer.style.height = inputRect.height + 'px';
-  entries.forEach(item => {
-    const index = Math.max(0, Math.min(Number(item.caret_start) || 0, input.value.length));
-    const point = liveCollabCaretPoint(input, index);
-    const left = point.left - input.scrollLeft;
-    const top = point.top - input.scrollTop;
-    if (left < 0 || left > input.clientWidth || top < 0 || top > input.clientHeight) return;
-    const caret = document.createElement('span');
-    caret.className = 'live-caret';
-    const color = liveCollabUserColor(item.user_name);
-    caret.style.background = color;
-    caret.style.left = left + 'px';
-    caret.style.top = top + 'px';
-    const tag = document.createElement('span');
-    tag.className = 'live-caret-tag';
-    tag.style.background = color;
-    tag.textContent = String(item.user_name || '').trim() || 'مستخدم';
-    caret.appendChild(tag);
-    layer.appendChild(caret);
+  layer.style.left = left + 'px';
+  layer.style.top = top + 'px';
+  layer.style.width = targetRect.width + 'px';
+  layer.style.height = targetRect.height + 'px';
+
+  const primaryEntry = entries[0];
+  const primaryColor = liveCollabUserColor(primaryEntry.user_name);
+  if (layer.style && layer.style.setProperty) {
+    layer.style.setProperty('--collab-color', primaryColor);
+    layer.style.setProperty('--collab-glow', liveCollabHexToRgba(primaryColor, 0.18));
+    layer.style.setProperty('--collab-tint', liveCollabHexToRgba(primaryColor, 0.04));
+  }
+
+  // Google-Docs style outline around the field
+  const outline = document.createElement('div');
+  outline.className = 'live-collab-field-outline';
+  const targetRadius = typeof getComputedStyle === 'function' ? getComputedStyle(targetEl).borderRadius : '12px';
+  if (targetRadius) outline.style.borderRadius = targetRadius;
+  outline.style.borderColor = primaryColor;
+  outline.style.boxShadow = '0 0 0 3px ' + liveCollabHexToRgba(primaryColor, 0.18);
+  layer.appendChild(outline);
+
+  // Subtle background tint on the input being edited
+  if (targetEl.classList && targetEl.classList.add) {
+    targetEl.classList.add('live-field-collaborator');
+    if (targetEl.style && targetEl.style.setProperty) {
+      targetEl.style.setProperty('--collab-tint', liveCollabHexToRgba(primaryColor, 0.04));
+    }
+  }
+
+  // Google-Docs style collaborator name tag badge
+  const badgeContainer = document.createElement('div');
+  badgeContainer.className = 'live-collab-badge-container';
+  const seenNames = new Set();
+  entries.forEach(entry => {
+    const name = String(entry.user_name || '').trim();
+    if (!name || seenNames.has(name)) return;
+    seenNames.add(name);
+    const badge = document.createElement('span');
+    badge.className = 'live-collab-badge';
+    const userColor = liveCollabUserColor(name);
+    badge.style.backgroundColor = userColor;
+    badge.textContent = name;
+    badgeContainer.appendChild(badge);
   });
+  if (badgeContainer.hasChildNodes && badgeContainer.hasChildNodes()) {
+    layer.appendChild(badgeContainer);
+  }
+
+  // Caret indicator inside text input / textarea
+  const tag = (targetEl.tagName || '').toUpperCase();
+  const isTextEl = tag === 'TEXTAREA' || (tag === 'INPUT' && ['text', 'search', 'url', 'email', 'tel'].indexOf((targetEl.type || 'text').toLowerCase()) >= 0);
+  if (isTextEl) {
+    entries.forEach(entry => {
+      if (entry.caret_start === null || entry.caret_start === undefined) return;
+      const index = Math.max(0, Math.min(Number(entry.caret_start) || 0, (targetEl.value || '').length));
+      const point = liveCollabCaretPoint(targetEl, index);
+      const caretLeft = point.left - targetEl.scrollLeft;
+      const caretTop = point.top - targetEl.scrollTop;
+      if (caretLeft < -5 || caretLeft > (targetEl.clientWidth || 0) + 5
+          || caretTop < -5 || caretTop > (targetEl.clientHeight || 0) + 5) return;
+      const caret = document.createElement('span');
+      caret.className = 'live-caret';
+      const userColor = liveCollabUserColor(entry.user_name);
+      caret.style.backgroundColor = userColor;
+      caret.style.left = caretLeft + 'px';
+      caret.style.top = caretTop + 'px';
+      layer.appendChild(caret);
+    });
+  }
+
   parent.appendChild(layer);
 }
 
 function liveCollabCaretPoint(input, index) {
   const mirror = document.createElement('div');
-  const style = getComputedStyle(input);
+  const style = typeof getComputedStyle === 'function' ? getComputedStyle(input) : {};
   const properties = [
     'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing',
     'lineHeight', 'textTransform', 'textIndent', 'paddingLeft', 'paddingRight',
     'paddingTop', 'paddingBottom', 'borderLeftWidth', 'borderRightWidth',
     'borderTopWidth', 'borderBottomWidth', 'boxSizing', 'wordSpacing',
+    'direction', 'textAlign',
   ];
   properties.forEach(property => { mirror.style[property] = style[property]; });
   mirror.style.position = 'absolute';
   mirror.style.visibility = 'hidden';
   mirror.style.left = '-9999px';
   mirror.style.top = '0';
-  mirror.style.width = input.clientWidth + 'px';
+  mirror.style.width = (input.clientWidth || 0) + 'px';
   mirror.style.height = 'auto';
   mirror.style.boxSizing = 'border-box';
   mirror.style.whiteSpace = input.tagName === 'TEXTAREA' ? 'pre-wrap' : 'pre';
   mirror.style.overflowWrap = 'break-word';
   mirror.style.overflow = 'hidden';
-  mirror.textContent = input.value.slice(0, index);
+  mirror.textContent = (input.value || '').slice(0, index);
   const marker = document.createElement('span');
   marker.textContent = '\u200b';
   mirror.appendChild(marker);
-  document.body.appendChild(mirror);
-  const left = marker.offsetLeft + input.clientLeft;
-  const top = marker.offsetTop + input.clientTop;
-  mirror.remove();
+  if (document.body && document.body.appendChild) document.body.appendChild(mirror);
+  const left = marker.offsetLeft + (input.clientLeft || 0);
+  const top = marker.offsetTop + (input.clientTop || 0);
+  if (mirror.remove) mirror.remove();
   return { left, top };
 }
 

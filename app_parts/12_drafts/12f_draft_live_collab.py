@@ -290,28 +290,34 @@ def api_draft_live_write(draft_id):
                 'AND updated_at < ?',
                 (draft_id, g.tenant_id, _live_cutoff())
             )
-            values = (
-                str(presence.get('fieldKey') or '')[:120] or None,
-                str(presence.get('sectionKey') or '')[:120] or None,
-                _live_clamped_int(presence.get('caretStart')),
-                _live_clamped_int(presence.get('caretEnd')),
-                now,
-            )
-            changed = conn.execute(
-                '''UPDATE draft_live_presence
-                   SET tenant_id = ?, user_id = ?, user_name = ?, field_key = ?,
-                       section_key = ?, caret_start = ?, caret_end = ?, updated_at = ?
-                   WHERE document_id = ? AND client_id = ?''',
-                (g.tenant_id, _live_actor(), _live_actor_name()) + values + (draft_id, client_id)
-            ).rowcount
-            if not changed:
+            if presence.get('leave'):
                 conn.execute(
-                    '''INSERT INTO draft_live_presence
-                       (document_id, client_id, tenant_id, user_id, user_name,
-                        field_key, section_key, caret_start, caret_end, updated_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                    (draft_id, client_id, g.tenant_id, _live_actor(), _live_actor_name()) + values
+                    'DELETE FROM draft_live_presence WHERE document_id = ? AND tenant_id = ? AND client_id = ?',
+                    (draft_id, g.tenant_id, client_id)
                 )
+            else:
+                values = (
+                    str(presence.get('fieldKey') or '')[:120] or None,
+                    str(presence.get('sectionKey') or '')[:120] or None,
+                    _live_clamped_int(presence.get('caretStart')),
+                    _live_clamped_int(presence.get('caretEnd')),
+                    now,
+                )
+                changed = conn.execute(
+                    '''UPDATE draft_live_presence
+                       SET tenant_id = ?, user_id = ?, user_name = ?, field_key = ?,
+                           section_key = ?, caret_start = ?, caret_end = ?, updated_at = ?
+                       WHERE document_id = ? AND client_id = ?''',
+                    (g.tenant_id, _live_actor(), _live_actor_name()) + values + (draft_id, client_id)
+                ).rowcount
+                if not changed:
+                    conn.execute(
+                        '''INSERT INTO draft_live_presence
+                           (document_id, client_id, tenant_id, user_id, user_name,
+                            field_key, section_key, caret_start, caret_end, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                        (draft_id, client_id, g.tenant_id, _live_actor(), _live_actor_name()) + values
+                    )
         conn.commit()
     except Exception as exc:
         try:
@@ -335,6 +341,25 @@ def api_draft_live_write(draft_id):
         'updates': [],
         'presence': [],
     })
+
+
+@app.route('/api/project-draft/<draft_id>/live/leave', methods=['POST'])
+@require_auth
+def api_draft_live_leave(draft_id):
+    """Drop this tab's presence immediately on close or navigation."""
+    draft = _live_draft_state_or_none(draft_id)
+    if not draft:
+        return jsonify({'error': 'No project draft found'}), 404
+    data = request.get_json(silent=True) or {}
+    client_id = str(data.get('clientId') or request.args.get('clientId') or '').strip()
+    if client_id and LIVE_CLIENT_ID_RE.match(client_id):
+        conn = db.get_db()
+        conn.execute(
+            'DELETE FROM draft_live_presence WHERE document_id = ? AND tenant_id = ? AND client_id = ?',
+            (draft_id, g.tenant_id, client_id)
+        )
+        conn.commit()
+    return jsonify({'success': True})
 
 
 def _live_clamped_int(value):

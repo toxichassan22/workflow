@@ -127,6 +127,26 @@ class DraftLiveCollabApiTests(unittest.TestCase):
         self.assertEqual(theirs['presence'][0]['caret_start'], 4)
         self.assertEqual(theirs['presence'][0]['user_name'], 'Live Admin')
 
+    def test_leave_drops_client_presence_immediately(self):
+        self.post_live({
+            'clientId': 'client-aaaa1111',
+            'updates': [],
+            'presence': {'fieldKey': 'site_analysis', 'sectionKey': 'location'},
+        })
+        theirs = self.client.get(
+            self.live_url(since=0, clientId='client-bbbb2222'), headers=self.headers()).get_json()
+        self.assertEqual(len(theirs['presence']), 1)
+        self.assertEqual(theirs['presence'][0]['field_key'], 'site_analysis')
+
+        left = self.client.post('/api/project-draft/%s/live/leave' % self.draft_id,
+                                headers=self.headers(),
+                                json={'clientId': 'client-aaaa1111'})
+        self.assertEqual(left.status_code, 200)
+
+        theirs_after = self.client.get(
+            self.live_url(since=0, clientId='client-bbbb2222'), headers=self.headers()).get_json()
+        self.assertEqual(theirs_after['presence'], [])
+
     def test_a_snapshot_compacts_the_update_log(self):
         self.post_live({'clientId': 'client-aaaa1111',
                         'updates': [self.update(b'one'), self.update(b'two')]})

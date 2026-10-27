@@ -109,8 +109,9 @@ testPresenceFollowsTheFocusedField();
 testPresenceHeartbeatWhileTheTabIsOpen();
 testPresenceLineNamesTheField();
 testPresenceIsWiredIntoTheLoops();
+testGoogleDocsPresenceHighlight();
 console.log('Live collaboration harness passed: bytes, diff, caret, field eligibility,'
-  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text.');
+  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight.');
 
 function testRoundTripBytes() {
   const bytes = new Uint8Array([0, 1, 2, 250, 255]);
@@ -268,6 +269,34 @@ function testPresenceIsWiredIntoTheLoops() {
     'the poll has to repeat the presence on its own');
   assert.ok(/liveCollabFlush\(true\);\s*\n\s*liveCollabSchedulePoll/.test(moduleSource),
     'a freshly opened project announces its editor before the first keystroke');
+}
+
+function testGoogleDocsPresenceHighlight() {
+  assert.equal(context.liveCollabHexToRgba('#17C8E3', 0.2), 'rgba(23, 200, 227, 0.2)');
+  let railRemoved = false;
+  context.document.getElementById = id => (id === 'liveCollabPresenceRail' ? { remove: () => { railRemoved = true; } } : null);
+  context.liveCollabRenderRail([{ user_name: 'Hassan', field_key: 'site_analysis' }]);
+  assert.ok(railRemoved, 'the bottom rail must be removed and never drawn');
+
+  // Verify outline and badge are created in liveCollabRenderFieldCarets
+  const created = [];
+  const parent = {
+    style: {},
+    appendChild: child => created.push(child),
+    getBoundingClientRect: () => ({ left: 10, top: 20, width: 200, height: 100 }),
+  };
+  const input = {
+    tagName: 'TEXTAREA',
+    value: 'محتوى التحليل',
+    parentElement: parent,
+    getBoundingClientRect: () => ({ left: 20, top: 40, width: 180, height: 80 }),
+    style: { setProperty() {} },
+    classList: { add() {} },
+  };
+  context.liveCollabRenderFieldCarets(input, [{ user_name: 'Hassan', caret_start: 3 }]);
+  assert.equal(created.length, 1, 'an overlay layer must be appended to the field container');
+  const layer = created[0];
+  assert.equal(layer.className, 'live-caret-overlay');
 }
 
 function testConcurrentTypingConverges() {
