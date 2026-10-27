@@ -242,6 +242,77 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertIn('تعذّر فتح نتائج فلتر حي', result['parsed']['notes'])
         self.assertNotIn('City Hotel', result['parsed']['notes'])
 
+    def test_hotel_scan_reads_every_selected_district(self):
+        """The Booking filter runs for each district the client picked.
+
+        It used to run for the project's own district alone, so a widened
+        scope never reached the hotel axis.
+        """
+        search_url = self._search_url()
+        andalus_url = booking_search.build_search_url('Jeddah',
+                                                       district_id='5654')
+        rawdah_url = booking_search.build_search_url('Jeddah',
+                                                     district_id='5660')
+        andalus_property = PROPERTY_URL.replace('eden', 'andalus')
+        rawdah_property = PROPERTY_URL.replace('eden', 'rawdah')
+        session = _Session({
+            search_url: {
+                'final_url': search_url,
+                'title': 'Booking.com: Search results: Jeddah',
+                'text': '',
+                'booking_districts': [
+                    {'id': '5654', 'label': 'الأندلس 2'},
+                    {'id': '5660', 'label': 'الروضة 4'},
+                ],
+                'booking_search': {'hotels': []},
+            },
+            andalus_url: {
+                'final_url': andalus_url,
+                'title': 'Booking.com: Search results: Al Andalus',
+                'text': '',
+                'booking_search': {'hotels': [{
+                    'name': 'Andalus Suites', 'url': andalus_property,
+                    'location': 'حي الأندلس، جدة',
+                }]},
+            },
+            rawdah_url: {
+                'final_url': rawdah_url,
+                'title': 'Booking.com: Search results: Al Rawdah',
+                'text': '',
+                'booking_search': {'hotels': [{
+                    'name': 'Rawdah Residence', 'url': rawdah_property,
+                    'location': 'حي الروضة، جدة',
+                }]},
+            },
+            andalus_property: {
+                'final_url': andalus_property, 'title': 'Andalus Suites',
+                'text': '',
+                'booking_rate': {'price': 700.0, 'currency': 'SAR'},
+            },
+            rawdah_property: {
+                'final_url': rawdah_property, 'title': 'Rawdah Residence',
+                'text': '',
+                'booking_rate': {'price': 820.0, 'currency': 'SAR'},
+            },
+        })
+        payload = self._payload()
+        payload['competitorScope'] = {'mode': 'district',
+                                      'districts': ['حي الأندلس', 'حي الروضة']}
+        with self.app.app_context(), \
+                patch.object(self.module.maps_service,
+                             'reverse_geocode_location',
+                             return_value=self._geocode()), \
+                patch.object(self.module, '_market_browser_session',
+                             return_value=session):
+            result = self.module._booking_hotel_scan(
+                self._task(), payload, {}, tenant_id=None,
+                offer_lang='ar', deadline=None)
+        rows = result['parsed']['competitors']
+        self.assertEqual([row['name'] for row in rows],
+                         ['Andalus Suites', 'Rawdah Residence'])
+        self.assertIn('الأندلس', result['parsed']['notes'])
+        self.assertIn('الروضة', result['parsed']['notes'])
+
     def test_hotel_scan_builds_rows_from_booking_search_and_rate_block(self):
         search_url = self._search_url()
         session = _Session({

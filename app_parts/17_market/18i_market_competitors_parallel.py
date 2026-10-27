@@ -350,11 +350,34 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                   f'final={filtered_final[:320]}', flush=True)
             return filtered, filtered_final, applied
 
-        def _district_cards_from_city():
-            """The initial city cards whose own Booking address names the district."""
+        # The Booking filter runs once per district the client picked — the
+        # project's own district plus every one added on the market screen —
+        # and their cards are merged. It used to run for the project district
+        # alone, so a widened scope never reached the hotel axis.
+        scope_districts = ([district_ar] if scope_mode != 'district'
+                           else market_study.competitor_scope_districts(
+                               scope, district_ar))
+
+        def _district_aliases(name):
+            """The names Booking may print for one selected district."""
+            text = str(name or '').strip()
+            aliases = [text]
+            if text == district_ar and district_en:
+                aliases.append(district_en)
+            return tuple(alias for alias in aliases if alias)
+
+        def _display_name(name):
+            text = str(name or '').strip()
+            return text[3:].strip() if text.startswith('حي ') else text
+
+        def _district_cards_from_city(names_list=None):
+            """The initial city cards whose own Booking address names one of
+            the selected districts."""
+            names = tuple(alias for name in (names_list or scope_districts)
+                          for alias in _district_aliases(name))
             cards = booking_search.filter_hotels_by_district(
                 (search.get('booking_search') or {}).get('hotels') or [],
-                district_ar, district_en)
+                *names)
             if not cards:
                 return None
             narrowed = dict(search)
@@ -362,91 +385,110 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 search.get('booking_search') or {}, hotels=cards)
             return narrowed
 
-        def _use_filtered(district_id):
+        def _use_filtered(district_id, name):
             nonlocal matched
+            aliases = _district_aliases(name)
             attempts = ((False, 'neighbourhood filter'),
                         (False, 'neighbourhood filter retry'),
                         (True, 'district destination'))
             for as_destination, label in attempts:
                 filtered, filtered_final, applied = _apply_district(
                     district_id, as_destination)
-                hotels = ((filtered.get('booking_search') or {})
-                          .get('hotels') or [])
+                cards = ((filtered.get('booking_search') or {})
+                         .get('hotels') or [])
                 kept = booking_search.filter_hotels_by_district(
-                    hotels, district_ar, district_en)
+                    cards, *aliases)
                 if not filtered.get('error') and applied and kept:
                     matched = dict(matched or {}, id=str(district_id))
-                    narrowed = dict(filtered)
-                    narrowed['booking_search'] = dict(
-                        filtered.get('booking_search') or {}, hotels=kept)
                     citations.append(_booking_scan_citation(
                         filtered_final, filtered.get('title'),
                         filtered.get('text')))
-                    return narrowed, ''
+                    return kept, ''
                 print(f'[MARKET STUDY] booking district attempt '
                       f'({label}) kept={len(kept)}', flush=True)
             note = _booking_empty_note(
                 filtered, destination=destination, matched_district=None,
                 filter_error=str(
                     filtered.get('error') or 'filter_not_applied'),
-                district_label=display_district or district_en,
+                district_label=_display_name(name) or district_en,
                 city_label=city_ar or city_en)
-            # Booking dropped the neighbourhood filter (or the page failed):
-            # fall back to its own address line before reporting nothing.
-            narrowed = _district_cards_from_city()
-            if narrowed is not None:
-                matched = {'id': '', 'label': display_district or district_ar}
-                return narrowed, ''
-            return None, note
+            return [], note
+
+        collected_hotels = []
+        collected_urls = set()
+        used_districts = []
+        failure_notes = []
+
+        def _collect(cards):
+            added = 0
+            for card in cards or []:
+                if not isinstance(card, dict):
+                    continue
+                key = str(card.get('url') or card.get('name') or '').strip()
+                if not key or key in collected_urls:
+                    continue
+                collected_urls.add(key)
+                collected_hotels.append(card)
+                added += 1
+            return added
 
         if scope_mode == 'district' and (scope or matched):
             district_key_city = city_en or city_ar
-            district_id = str((matched or {}).get('id') or '')
-            if not district_id:
-                district_id = booking_destination.cached_district_id(
-                    cache_path, country_code, district_key_city,
-                    display_district or district_ar)
-            if district_id:
-                if not (matched or {}).get('id'):
-                    matched = {'id': district_id,
-                               'label': display_district or district_ar}
-                booking_destination.remember_district_id(
-                    cache_path, country_code, district_key_city,
-                    display_district or district_ar, district_id)
-                filtered_result, note = _use_filtered(district_id)
-                if note:
-                    return _booking_scan_result(
-                        task, [], citations, note, search_ran=True)
-                search = filtered_result
-            else:
-                # Booking only lists the ten largest districts as facets. When
-                # the project's district is hidden, keep the city cards whose
-                # own address line names it — still the district, never the
-                # whole city.
-                district_cards = _district_cards_from_city()
-                if district_cards is not None:
-                    search = district_cards
-                    matched = {'id': '', 'label': display_district or district_ar}
+            for name in scope_districts:
+                if _market_deadline_hit(deadline):
+                    break
+                label = _display_name(name) or district_en
+                district_id = str((booking_search.match_district_facet(
+                    search.get('booking_districts') or [],
+                    *_district_aliases(name)) or {}).get('id') or '')
+                if not district_id:
+                    district_id = booking_destination.cached_district_id(
+                        cache_path, country_code, district_key_city, label)
+                if district_id:
+                    booking_destination.remember_district_id(
+                        cache_path, country_code, district_key_city, label,
+                        district_id)
+                    kept, note = _use_filtered(district_id, name)
+                    if kept:
+                        used_districts.append((name, 'facet'))
+                        _collect(kept)
+                        continue
+                    failure_notes.append(note)
                 else:
-                    city_cards = ((search.get('booking_search') or {})
-                                  .get('hotels') or [])
-                    sample = [(card.get('location'),
-                               (card.get('text') or '')[:60])
-                              for card in city_cards[:3]]
-                    print(f'[MARKET STUDY] booking district unavailable '
-                          f'id={district_id!r} city_cards={len(city_cards)} '
-                          f'names={[district_ar, district_en]!r} '
-                          f'sample={sample!r}', flush=True)
-                    note = (f'لم يُعرض حي {display_district or district_en} '
-                            f'كفلتر على Booking.com لهذه المدينة، ولم يُوسَّع '
-                            f'البحث إلى المدينة. لم يُستخدم أي مصدر آخر.')
-                    return _booking_scan_result(
-                        task, [], citations, note, search_ran=True)
+                    failure_notes.append(
+                        f'لم يُعرض حي {label} كفلتر على Booking.com لهذه '
+                        f'المدينة، ولم يُوسَّع البحث إلى المدينة. لم يُستخدم أي '
+                        f'مصدر آخر.')
+                # Booking only lists the ten largest districts as facets. When
+                # this district is hidden, keep the city cards whose own
+                # address line names it — still that district, never the
+                # whole city.
+                address_cards = _district_cards_from_city([name])
+                if address_cards is not None and _collect(
+                        (address_cards.get('booking_search') or {})
+                        .get('hotels') or []):
+                    used_districts.append((name, 'address'))
+                    print(f'[MARKET STUDY] booking district {name!r} read '
+                          f'from its own address lines', flush=True)
+            if not collected_hotels:
+                city_cards = ((search.get('booking_search') or {})
+                              .get('hotels') or [])
+                sample = [(card.get('location'), (card.get('text') or '')[:60])
+                          for card in city_cards[:3]]
+                print(f'[MARKET STUDY] booking districts unavailable '
+                      f'districts={scope_districts!r} '
+                      f'city_cards={len(city_cards)} sample={sample!r}',
+                      flush=True)
+                note = failure_notes[0] if failure_notes else (
+                    'لم تُعرض أحياء البحث كفلتر على Booking.com لهذه المدينة، '
+                    'ولم يُوسَّع البحث إلى المدينة. لم يُستخدم أي مصدر آخر.')
+                return _booking_scan_result(
+                    task, [], citations, note, search_ran=True)
         else:
             matched = None
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
-        hotels = search_data.get('hotels') or []
+        hotels = collected_hotels or (search_data.get('hotels') or [])
         print(f'[MARKET STUDY] booking search final_url={search.get("final_url")} '
               f'cards={len(hotels)} '
               f'chars={len(str(search.get("text") or ""))}', flush=True)
@@ -625,20 +667,29 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 task, [], citations, note, search_ran=True)
         priced_count = sum(
             1 for row in rows if row.get('price_from') or row.get('price_to'))
-        if scope_mode == 'district' and matched and matched.get('id'):
-            scope_text = f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
-        elif scope_mode == 'district' and matched:
-            scope_text = (f' (فلتر حي {booking_search.facet_label(matched)} '
-                          f'من عنوان Booking)')
+        used_labels = '، '.join(_display_name(name) for name, _source in used_districts)
+        if scope_mode == 'district' and used_districts:
+            if len(used_districts) == 1:
+                label = _display_name(used_districts[0][0])
+                scope_text = (f' (فلتر حي {label} على Booking)'
+                              if used_districts[0][1] == 'facet' else
+                              f' (فلتر حي {label} من عنوان Booking)')
+            else:
+                scope_text = f' (فلتر أحياء {used_labels} على Booking)'
         elif scope_mode == 'distance':
             scope_text = (f' (داخل نطاق {radius_km:g} كم من موقع المشروع)'
                           if radius_km else '')
         else:
             scope_text = (f' (بحث على مستوى مدينة {city_ar or city_en}: '
                           f'الحي غير مختار كفلتر)')
-        place = (f'لحي {display_district or district_en} في {city_ar or city_en}'
-                 if scope_mode == 'district'
-                 else f'لمدينة {city_ar or city_en}')
+        if scope_mode == 'district' and len(used_districts) > 1:
+            place = f'لأحياء {used_labels} في {city_ar or city_en}'
+        elif scope_mode == 'district':
+            single = (_display_name(used_districts[0][0]) if used_districts
+                      else (display_district or district_en))
+            place = f'لحي {single} في {city_ar or city_en}'
+        else:
+            place = f'لمدينة {city_ar or city_en}'
         note = (
             f'تم جلب {len(rows)} فندقًا من صفحة نتائج Booking.com {place}{scope_text}'
             + (f' — منها {priced_count} بسعر ومساحة.' if rows else '.'))
