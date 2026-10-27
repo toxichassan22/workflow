@@ -149,7 +149,9 @@ class BenchmarkAxesTests(unittest.TestCase):
         self.assertNotIn('فندقي - 4 نجوم', prompt)
         self.assertIn('سكني - بيع', prompt)
         self.assertIn('لا تضف نوعًا أو عملية غير مختارة', prompt)
-        self.assertIn('حي الروضة في جدة', prompt)
+        # The project's district alone is the whole scope when the client added
+        # none; the several-district case has its own test below.
+        self.assertIn('حي الروضة في مدينة جدة', prompt)
         self.assertIn('Booking.com', prompt)
         self.assertIn('Booking.com فقط من مسار /hotel/', prompt)
         self.assertIn('/district/', prompt)
@@ -298,6 +300,59 @@ class BenchmarkAxesTests(unittest.TestCase):
             rows, axis, scope=scope, city='جدة', district='الروضة')
         self.assertEqual([row['name'] for row in accepted],
                          ['الروضة أول', 'السلامة ثان'])
+
+    def test_competitor_prompt_names_every_selected_district(self):
+        """A widened district scope must reach the binding search instruction.
+
+        It used to appear only in the descriptive project block while rules 1
+        and 7 named the project's own district, so the model searched one
+        neighborhood and the added districts were never asked for.
+        """
+        payload = {
+            'projectType': 'سكني', 'city': 'جدة', 'district': 'الروضة',
+            'competitorScope': {'mode': 'district',
+                                'districts': ['الروضة', 'السلامة']},
+            'comparisonTypes': [{'type': 'residential', 'operation': 'sale'}],
+        }
+        prompt = market_study.build_competitors_user_prompt(
+            payload, [], mode='generate')
+        instruction = prompt.split('بيانات المشروع:')[0]
+        self.assertIn('السلامة', instruction)
+        self.assertIn('الأحياء المختارة', instruction)
+        english = market_study.build_competitors_user_prompt(
+            payload, [], mode='generate', offer_lang='en')
+        english_instruction = english.split('بيانات المشروع:')[0]
+        self.assertIn('districts', english_instruction)
+        self.assertIn('السلامة', english_instruction)
+
+    def test_unit_type_filter_drops_a_row_of_another_kind(self):
+        """The client's unit-kind picks are a rule on model rows too, and a row
+        that names no kind at all is kept."""
+        axis = market_study.normalize_comparison_types(
+            [{'type': 'residential', 'operation': 'sale'}])
+        rows = [
+            {'name': 'شقق الياسمين', 'project_type': 'سكني',
+             'operation_type': 'بيع', 'city': 'جدة', 'district': 'الروضة'},
+            {'name': 'فلل النخيل', 'project_type': 'سكني',
+             'operation_type': 'بيع', 'city': 'جدة', 'district': 'الروضة'},
+            {'name': 'مشروع الواحة', 'project_type': 'سكني',
+             'operation_type': 'بيع', 'city': 'جدة', 'district': 'الروضة'},
+        ]
+        accepted = market_study.filter_and_cap_competitors(
+            rows, axis, scope={'mode': 'district'}, city='جدة',
+            district='الروضة', unit_types=['فيلا مستقلة'])
+        self.assertEqual([row['name'] for row in accepted],
+                         ['فلل النخيل', 'مشروع الواحة'])
+        # No unit kind selected: the filter never touches the rows.
+        unfiltered = market_study.filter_and_cap_competitors(
+            rows, axis, scope={'mode': 'district'}, city='جدة',
+            district='الروضة')
+        self.assertEqual(len(unfiltered), 3)
+        # A hotel is compared on its own axis and carries no unit kind, so a
+        # residential pick never deletes it.
+        self.assertTrue(market_study.competitor_matches_unit_types(
+            {'name': 'شقق مخدومة مارينا', 'project_type': 'فندقي'},
+            ['فيلا مستقلة']))
 
     def test_city_scope_allows_other_neighborhoods_in_selected_city_only(self):
         axis = market_study.normalize_comparison_types(

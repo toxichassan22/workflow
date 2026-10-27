@@ -89,6 +89,38 @@ def competitor_scope_unit_types(scope):
     return values
 
 
+# Words that state a property kind inside a competitor row's own text. The
+# client's unit-kind picks (شقة، فيلا، مكتب …) are matched against these so a
+# row that states a different kind is outside the request. A row that states no
+# kind at all carries no evidence of the wrong one and is never dropped. The
+# wording mirrors the aqar portal categories, because a row read from an ad and
+# a row returned by the model must be judged the same way.
+UNIT_TYPE_CATEGORY_TOKENS = {
+    'استوديو': ('استوديو', 'ستوديو', 'studio'),
+    'شقة': ('شقق', 'شقة', 'apartment', 'flat'),
+    'شقة دوبلكس': ('شقة دوبلكس', 'دوبلكس', 'duplex'),
+    'بنتهاوس': ('بنتهاوس', 'penthouse'),
+    'دور مستقل': ('دور مستقل',),
+    'ملحق سكني': ('ملحق سكني', 'ملحق'),
+    'فيلا مستقلة': ('فيلا', 'فلل', 'villa'),
+    'فيلا دوبلكس': ('فيلا دوبلكس', 'فيلا', 'فلل', 'villa'),
+    'تاون هاوس': ('تاون هاوس', 'townhouse', 'town house'),
+    'توين هاوس': ('توين هاوس', 'twin house'),
+    'قصر': ('قصر', 'palace'),
+    'بيت شعبي / بيت عربي': ('بيت شعبي', 'بيت عربي'),
+    'عمارة سكنية': ('عمارة سكنية', 'عمارة'),
+    'مجمع سكني': ('مجمع سكني', 'compound'),
+    'سكن موظفين': ('سكن موظفين', 'staff housing'),
+    'سكن عمال': ('سكن عمال', 'labor housing', 'labour housing'),
+    'مكتب': ('مكتب', 'مكاتب', 'office'),
+    'برج مكاتب': ('برج مكاتب', 'office tower', 'tower'),
+    'محل تجاري': ('محل', 'محلات', 'retail', 'shop'),
+    'معرض تجاري': ('معرض', 'معارض', 'showroom'),
+    'مركز تجاري': ('مركز تجاري', 'mall'),
+    'مستودع تجاري': ('مستودع', 'مستودعات', 'warehouse'),
+}
+
+
 def normalize_competitor_scope(value):
     """Normalize the competitor-only location mode and optional radius."""
     if isinstance(value, str):

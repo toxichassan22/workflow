@@ -440,6 +440,11 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         }
     payload['transactionBenchmarks'] = market_study.build_transaction_price_benchmarks(
         payload, axes)
+    # The property kinds the client picked are a rule, not a hint: a row that
+    # states a different kind is outside the request and never reaches the
+    # table, while a row naming no kind at all is kept.
+    scope_unit_types = market_study.competitor_scope_unit_types(
+        payload.get('competitorScope') or {})
     system_prompt = market_study.build_consultant_system_prompt(offer_lang)
     training_context = (db.get_training_context(tenant_id, surface='content', offer_lang=offer_lang)
                         if tenant_id else '')
@@ -520,7 +525,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     generated = market_study.filter_and_cap_competitors(
         combined_rows, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
         offer_lang=offer_lang, scope=payload.get('competitorScope'),
-        city=payload.get('city'), district=payload.get('district'))
+        city=payload.get('city'), district=payload.get('district'),
+        unit_types=scope_unit_types)
     named_generated = [row for row in generated
                        if isinstance(row, dict) and str(row.get('name') or '').strip()]
     axes = market_study.project_competitor_axes(payload)
@@ -571,7 +577,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                 generated + more, axes,
                 limit_per_axis=min_per_axis, offer_lang=offer_lang,
                 scope=payload.get('competitorScope'), city=payload.get('city'),
-                district=payload.get('district'))
+                district=payload.get('district'),
+                unit_types=scope_unit_types)
             candidate_names = {market_study._fold_choice(row.get('name')) for row in candidates}
             if candidate_names - seen_names:
                 generated = candidates
@@ -630,7 +637,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         merged = market_study.filter_and_cap_competitors(
             fresh_rows, axes, limit_per_axis=market_study.COMPETITOR_MIN_DIRECT,
             offer_lang=offer_lang, scope=payload.get('competitorScope'),
-            city=payload.get('city'), district=payload.get('district')) + carried_rows
+            city=payload.get('city'), district=payload.get('district'),
+            unit_types=scope_unit_types) + carried_rows
     # The pool's pages are a superset of the citation list once the agent
     # layer records into it — union rather than assume, so matching works on
     # either side of that landing.

@@ -340,10 +340,60 @@ def competitor_matches_location_scope(row, scope, city='', district=''):
     return row_district in wanted_keys
 
 
+_FOLDED_UNIT_TYPE_TOKENS = {}
+
+
+def _folded_unit_type_tokens():
+    """The unit-kind words, folded once for matching a row's own text."""
+    if not _FOLDED_UNIT_TYPE_TOKENS:
+        for key, tokens in UNIT_TYPE_CATEGORY_TOKENS.items():
+            _FOLDED_UNIT_TYPE_TOKENS[key] = {_fold_choice(token)
+                                             for token in tokens if token}
+    return _FOLDED_UNIT_TYPE_TOKENS
+
+
+def competitor_matches_unit_types(row, unit_types):
+    """True when a row states one of the selected unit kinds, or states none.
+
+    The kinds are the client's own picks in the comparison filter. They used to
+    reach the prompt and the aqar scan only, so a model row for a different kind
+    stayed in the table and a client who asked for villas got apartments. A row
+    that names no recognised kind at all is kept — a project name alone is not
+    evidence that it is the wrong kind, which is the rule the aqar card filter
+    already applies.
+    """
+    wanted = set()
+    for item in competitor_scope_unit_types({'unit_types': unit_types}):
+        wanted.update(_folded_unit_type_tokens().get(item, ()))
+    if not wanted:
+        return True
+    if not isinstance(row, dict):
+        return False
+    # The kinds describe residential and commercial units; a hotel or an
+    # industrial property is compared on its own axis and carries no unit kind,
+    # so the picks never delete it.
+    row_type = _fold_choice(row.get('project_type') or row.get('projectType'))
+    if not any(token in row_type for token in (
+            'سكني', 'تجاري', 'residential', 'commercial')):
+        return True
+    text = _fold_choice(' '.join(str(row.get(key) or '') for key in (
+        'name', 'project_subtype', 'projectSubtype', 'unit_type', 'unitType',
+        'property_type', 'propertyType', 'notes', 'note')))
+    if not text:
+        return True
+    stated = {token for tokens in _folded_unit_type_tokens().values()
+              for token in tokens if token in text}
+    return not stated or bool(stated & wanted)
+
+
 def filter_and_cap_competitors(rows, axes, limit_per_axis=5, offer_lang='ar',
-                               scope=None, city='', district=''):
+                               scope=None, city='', district='',
+                               unit_types=()):
     """Drop rows outside explicit selections and cap each selected group."""
     rows = [row for row in (rows or []) if isinstance(row, dict)]
+    if unit_types:
+        rows = [row for row in rows
+                if competitor_matches_unit_types(row, unit_types)]
     explicit = bool(axes) and any(axis.get('explicit') for axis in axes)
     if not explicit:
         # A distance scope is a promise to the client: rows outside the radius

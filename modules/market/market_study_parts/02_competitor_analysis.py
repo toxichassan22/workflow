@@ -477,7 +477,14 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
     scope_mode = (scope.get('mode')
                   if scope.get('mode') in ('district', 'city', 'distance') else 'district')
     city_name = _norm(payload.get('city'))
-    district_name = _norm(payload.get('district'))
+    # The client's own list is the scope: the project's district plus every
+    # district added on the market screen. The label used to name the project's
+    # district alone, so a widened search was never actually asked for and the
+    # model stayed inside one neighborhood.
+    scope_districts = competitor_scope_districts(
+        scope, payload.get('district') or payload.get('neighborhood'))
+    districts_text = '، '.join(scope_districts)
+    districts_text_en = ', '.join(scope_districts)
     if scope_mode == 'distance':
         radius = scope.get('radius_km') or scope.get('radiusKm') or DEFAULT_COMPETITOR_RADIUS_KM
         try:
@@ -486,12 +493,27 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
             radius = float(DEFAULT_COMPETITOR_RADIUS_KM)
         scope_label = (f'within {radius:g} km of the project site'
                        if en else f'ضمن مسافة {radius:g} كم من موقع المشروع')
-    elif en:
-        scope_label = (f'the whole city of {city_name}' if scope_mode == 'city'
-                       else f'district {district_name} in {city_name}')
+    elif scope_mode == 'city':
+        if en:
+            scope_label = f'the whole city of {city_name}'
+        else:
+            scope_label = 'كامل المدينة ' + city_name if city_name else 'كامل المدينة'
+    elif not scope_districts:
+        scope_label = 'the project district' if en else 'حي المشروع'
+    elif len(scope_districts) > 1:
+        if en:
+            scope_label = (f'districts {districts_text_en} in {city_name}'
+                           if city_name else f'districts {districts_text_en}')
+        else:
+            scope_label = (f'أحياء {districts_text} في مدينة {city_name}'
+                           if city_name else f'أحياء {districts_text}')
     else:
-        scope_label = ('كامل المدينة ' + city_name if scope_mode == 'city'
-                       else 'حي ' + district_name + ' في ' + city_name)
+        if en:
+            scope_label = (f'district {scope_districts[0]} in {city_name}'
+                           if city_name else f'district {scope_districts[0]}')
+        else:
+            scope_label = (f'حي {scope_districts[0]} في مدينة {city_name}'
+                           if city_name else f'حي {scope_districts[0]}')
     distance_scope_rule = ''
     if scope_mode == 'distance':
         distance_scope_rule = (
@@ -506,6 +528,22 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
             'إحداثيات موثقة لموقع المشروع والمنافس؛ وإلا أعد distance_km موثقًا، '
             'واستبعد الصف الذي لا يمكن التحقق من مسافته. '
         )
+    if scope_mode == 'distance':
+        # The distance rule above already states the boundary.
+        scope_rule = distance_scope_rule
+    elif scope_mode == 'city':
+        scope_rule = (f'لا تُدرج إلا منافسًا داخل مدينة {city_name}. '
+                      if city_name else '')
+    elif len(scope_districts) > 1:
+        scope_rule = (f'لا تُدرج إلا منافسًا داخل أي حي من الأحياء المختارة: '
+                      f'{districts_text}'
+                      + (f' في مدينة {city_name}' if city_name else '')
+                      + '، وأي حي خارجها مرفوض. ')
+    elif scope_districts:
+        scope_rule = (f'لا تُدرج إلا منافسًا داخل الحي {scope_districts[0]}'
+                      + (f' في مدينة {city_name}' if city_name else '') + '. ')
+    else:
+        scope_rule = ''
     distance_km_shape = (
         'distance from the project site in kilometers, or blank if unverified'
         if en else 'المسافة من موقع المشروع بالكيلومتر أو فارغ إن لم تكن موثقة'
@@ -609,10 +647,8 @@ def build_competitors_user_prompt(payload, existing_competitors, mode='generate'
         'بأمانة؛ النظام يحول كل الأسعار إلى الريال قبل عرضها، ويحتفظ بعملة المصدر للتوثيق. '
         'سعر الليلة من Booking.com مقبول للفندق المطابق لاختيار العميل، مع ذكر المصدر '
         'والتاريخ الظاهرين في notes.\n'
-        '7. النطاق الجغرافي ملزم: في نمط الحي لا تُدرج إلا منافسًا داخل الحي '
-        f'{_norm(payload.get("district"))} في مدينة {_norm(payload.get("city"))}. '
-        f'وفي نمط المدينة لا تُدرج إلا منافسًا داخل مدينة {_norm(payload.get("city"))}. '
-        + distance_scope_rule
+        '7. النطاق الجغرافي ملزم: '
+        + scope_rule
         + 'اكتب اسم الحي في district عندما يظهر في المصدر. لا تستخدم المسافة بالكيلومتر '
         'لتوسيع النطاق المختار في نمطي الحي أو المدينة، ولا تُدرج موقعًا خارج النطاق المختار.\n'
         '8. فترة البيانات الملزمة مكتوبة في بيانات المشروع: ارفض أي سعر أو مساحة مصدرها أقدم من '
