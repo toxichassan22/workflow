@@ -1,7 +1,7 @@
 """Regression checks for site analysis prompt construction.
 
-Verifies that the prompt guides the model toward an investment-positive,
-value-focused real-estate consultancy tone rather than a cynical risk-auditor tone.
+Verifies that the prompt provides balanced, objective, professional instructions
+that give the real-estate project and site their full due without fabricated facts.
 """
 
 import sys
@@ -17,7 +17,7 @@ import slide_engine
 
 
 class SiteAnalysisPromptTests(unittest.TestCase):
-    def test_arabic_prompt_carries_investment_positive_directives(self):
+    def test_arabic_prompt_carries_site_analysis_directives(self):
         project_data = {
             'project_name': 'برج النخيل',
             'city': 'جدة',
@@ -26,13 +26,12 @@ class SiteAnalysisPromptTests(unittest.TestCase):
         system_prompt, prompt = app.build_site_analysis_prompts(
             project_data, slide_engine.OFFER_LANG_ARABIC
         )
-        self.assertIn('مستشار استراتيجي', system_prompt)
-        self.assertIn('نبرة استثمارية متوازنة ورصينة', prompt)
-        self.assertIn('المزايا التنافسية', prompt)
-        self.assertIn('ابتعد عن التطرفين', prompt)
+        self.assertIn('محلل مواقع عقارية دقيق', system_prompt)
+        self.assertIn('اربط كل فئة بصلاحية الموقع', prompt)
+        self.assertIn('المميزات الأولية ونقاط القوة', prompt)
         self.assertIn('برج النخيل', prompt)
 
-    def test_english_prompt_carries_investment_positive_directives(self):
+    def test_english_prompt_carries_site_analysis_directives(self):
         project_data = {
             'project_name': 'Palm Tower',
             'city': 'Jeddah',
@@ -40,8 +39,7 @@ class SiteAnalysisPromptTests(unittest.TestCase):
         system_prompt, prompt = app.build_site_analysis_prompts(
             project_data, slide_engine.OFFER_LANG_ENGLISH
         )
-        self.assertIn('senior real-estate investment and development strategist', system_prompt)
-        self.assertIn('balanced, institutional investment tone', prompt)
-        self.assertIn('competitive advantages', prompt)
-        self.assertIn('Avoid both extremes', prompt)
+        self.assertIn('meticulous real-estate site analyst', system_prompt)
+        self.assertIn('Tie every category to how suitable the site is', prompt)
+        self.assertIn('features, strengths, and suitable investment opportunities', prompt)
         self.assertIn('Palm Tower', prompt)

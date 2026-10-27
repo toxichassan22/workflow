@@ -10,57 +10,53 @@ def build_site_analysis_prompts(project_data, offer_lang):
     data_block = json.dumps(project_data, ensure_ascii=False, indent=2)
     if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
         system_prompt = (
-            'You are a senior real-estate investment and development strategist. Produce a compelling, '
-            'authoritative, and value-focused English analysis that highlights the site’s strategic strengths, '
-            'connectivity, and commercial opportunities, without inventing facts not supported by the data.\n\n'
+            'You are a meticulous real-estate site analyst. Produce a smooth English analysis '
+            'that covers every category present in the data without skipping any, and without '
+            'inventing information that is not there.\n\n'
             + slide_engine.OFFER_LANGUAGE_DIRECTIVE_EN
         )
-        prompt = f"""Write an authoritative, strategically balanced, and detailed English investment analysis of a real-estate project site based on the data below.
+        prompt = f"""Write a professional, detailed English analysis of a real-estate project site based only on the data below.
 
-Required Tone & Objectives:
-- Adopt a balanced, institutional investment tone: blend professional objectivity with compelling value articulation. Highlight genuine competitive advantages and connectivity without promotional hype, superlatives, or cynical skepticism.
-- Speak as a senior real-estate investment strategist presenting to discerning investors: articulate how the site's factual attributes, road connectivity, and catchment dynamics reinforce the project's feasibility and appeal.
-- Avoid both extremes: do not diminish the location with cynical or defensive warnings, nor inflate it with hollow marketing buzzwords. Keep the analysis grounded, credible, and strategically compelling.
+Required:
 - Write flowing, connected English paragraphs — do not collapse the analysis into a quick summary or generic phrases.
 - Cover every category that has data below; skip none of them.
-- The analysis must reference each of the following where available:
-  1. Project type, idea, description, goal, current stage, and target audience, connecting them to the site's promise.
-  2. Strategic features, strengths, and lucrative investment opportunities enabled by the location.
-  3. The nature of the site, its prime positioning, detailed address, and coordinates.
-  4. Population density and catchment demographics, framing them as a solid base of potential footfall and demand.
-  5. Main access arteries, highlighting ease of transit and reach.
-  6. Nearby landmarks and city hubs, citing travel times and distances as proof of prime connectivity and synergy.
-  7. Catchment areas and influence zones, emphasizing market coverage.
-- Tie every category to how the site empowers and enhances the project type, concept, and commercial viability.
-- Invent no fictional facts or fabricated landmarks not present in the data.
-- Use no headings or bullet points in the final text; return a polished, flowing English analysis ready for presentation.
+- The analysis must briefly reference each of the following where available, roughly in this order:
+  1. Project type, idea, description, goal, current stage, and target audience.
+  2. Initial features, strengths, and suitable investment opportunities.
+  3. The nature of the site, its strategic position, detailed address, and coordinates.
+  4. Population density and its source, when available.
+  5. Main roads and the nature of access.
+  6. Nearby landmarks and city landmarks, citing distances and drive times as evidence, not as the main topic.
+  7. Catchment areas and zones of influence, when available.
+- Tie every category to how suitable the site is for the project type, idea, goal, stage, target audience, features, and opportunities.
+- Explain relationships and conclusions in detail without repeating the same fact.
+- Invent nothing that is not in the data.
+- If a piece of information is unavailable, never mention it rather than fabricating it.
+- Use no headings or bullet points in the final text; return a smooth English analysis ready for presentation.
 
 Project and site data:
 {data_block}"""
         return system_prompt, prompt
 
-    system_prompt = (
-        'أنت خبير ومستشار استراتيجي أول في التطوير والاستثمار العقاري. مهمتك إعداد تحليل استثماري '
-        'احترافي ومقنع يُبرز القيمة الاستراتيجية للموقع ونقاط قوته التنافسية وتكامله مع أهداف المشروع، '
-        'بأسلوب استثماري رصين وجذاب يخدم العرض الاستثماري دون اختلاق معطيات غير موجودة.'
-    )
-    prompt = f"""اكتب تحليلًا عقاريًا استثماريًا احترافيًا ومفصلًا لموقع المشروع استنادًا إلى البيانات المرفقة أدناه.
+    system_prompt = 'أنت محلل مواقع عقارية دقيق. أخرج تحليلًا عربيًا سلسًا يغطي كل فئة متاحة من البيانات دون تخطي أي منها، ودون اختلاق معلومات غير موجودة.'
+    prompt = f"""اكتب تحليلًا عربيًا احترافيًا ومفصلًا لموقع مشروع عقاري اعتمادًا على البيانات التالية فقط.
 
-النبرة والأسلوب المطلوب:
-- اعتمد نبرة استثمارية متوازنة ورصينة تجمع بين الواقعية المهنية والجاذبية الاستثمارية؛ ركّز على إبراز المزايا التنافسية والقيمة المضافة الحقيقية للموقع دون مبالغة إنشائية أو إفراط دعائي، ودون لغة تشكيكية جافة.
-- تحدث بصوت مستشار تطوير واستثمار عقاري مؤسسي يخاطب مستثمرين وأصحاب قرار: حلل الموقع بموضوعية إيجابية ووقار مهني يرتكز على الأرقام والمعطيات الواقعية، موضحاً كيف يخدم الموقع أهداف المشروع ومكوناته.
-- ابتعد عن التطرفين: لا تستخدم نبرة تشكيكية دفاعية تقلل من قيمة الموقع أو تشكك في المعالم، وتجنب في نفس الوقت عبارات المديح التسويقي الإنشائي المبالغ فيه.
-- صغ المعطيات الواقعية (مثل شبكة المحاور والطرق، أوقات القيادة، المعالم القريبة، ومناطق الالتقاط) في سياق تحليلي رصين يبرز سهولة الوصول، والربط الحيوي، والعمق الجغرافي لقاعدة العملاء والزوار المتوقعة.
-- اكتب تحليلًا عربيًا مسترسلًا في فقرات مترابطة وثرية ومهنية تليق بعرض استثماري رفيع، دون عناوين أو نقاط تعداد.
-- غطِّ الفئات المتاحة في البيانات:
-  1. نوع المشروع وفكرته وأهدافه والجمهور المستهدف وتوافقه مع بيئة الموقع الحيوية.
-  2. المزايا التنافسية ونقاط القوة والفرص الاستثمارية الحقيقية التي يتيحها الموقع.
-  3. الموقع الاستراتيجي والعنوان التفصيلي ومحيطه الجغرافي.
-  4. الكثافة السكانية ومناطق التأثير بوصفها قاعدة داعمة للطلب والحركة.
-  5. شبكة الطرق والمحاور الرئيسية وسلاسة الوصول للموقع.
-  6. المعالم الحيوية ومعالم المدينة القريبة، موظفاً أوقات القيادة والمسافات كبرهان على حيوية النطاق وسهولة الاتصال.
-- اربط كل عنصر بمدى تعزيزه لجاذبية المشروع ونجاح مرافقه وأنشطته الاستثمارية.
-- التزم بالبيانات المتاحة دون اختلاق معالم وهمية، مع توظيف البيانات الواقعية برؤية استثمارية متزنة ورصينة.
+المطلوب:
+- اكتب تحليلًا عربيًا مسترسلًا في فقرات مترابطة، ولا تختصره إلى ملخص سريع أو عبارات عامة.
+- غطِّ جميع الفئات التالية الموجودة في البيانات ولا تتخطى أي فئة فيها بيانات.
+- يجب أن يتضمن التحليل إشارة مختصرة إلى كل ما يلي متاح منه، بالترتيب التالي قدر الإمكان:
+  1. نوع المشروع وفكرته ووصفه والهدف منه ومرحلته الحالية والجمهور المستهدف.
+  2. المميزات الأولية ونقاط القوة وفرص الاستثمار المناسبة للمشروع.
+  3. طبيعة الموقع وموقعه الاستراتيجي والعنوان التفصيلي والإحداثيات.
+  4. الكثافة السكانية ومصدرها إن وجدت.
+  5. الطرق الرئيسية وطبيعة الوصول.
+  6. المعالم القريبة ومعالم المدينة، مع ذكر المسافات وأوقات القيادة كدليل لا كموضوع رئيسي.
+  7. نطاق التأثير ومناطق الالتقاط إن وجدت.
+- اربط كل فئة بصلاحية الموقع لنوع المشروع وفكرته وهدفه ومرحلته والجمهور المستهدف ومميزات المشروع وفرصه.
+- اشرح العلاقة والاستنتاجات بالتفصيل دون تكرار نفس المعلومة.
+- لا تخترع أي معلومة غير موجودة في البيانات.
+- إذا كانت معلومة غير متوفرة، لا تذكرها أبدًا بدلًا من اختلاقها.
+- لا تستخدم عناوين أو نقاط تعداد في النص النهائي؛ أعد تحليلًا عربيًا سلسًا جاهزًا للعرض.
 
 بيانات المشروع والموقع:
 {data_block}"""
