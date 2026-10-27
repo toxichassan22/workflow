@@ -703,13 +703,17 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
 
 
 def _native_fallback_needed(result):
-    """True when the local search layer never ran; a searched empty market is
-    a real answer and must not trigger the paid fallback."""
+    """True when the local search layer never ran or was blocked; a searched
+    empty market is a real answer and must not trigger the paid fallback."""
     if not isinstance(result, dict):
         return True
-    if result.get('search_ran'):
-        return False
-    return True
+    if result.get('search_blocked'):
+        return True
+    if result.get('provider_error'):
+        return True
+    if not result.get('search_ran'):
+        return True
+    return False
 
 
 def _native_search_fallback(system_prompt, prompt, usage_ctx, evidence_pool,
@@ -795,13 +799,18 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
     provider_error = _chat_error_message(response) if isinstance(response, dict) and response.get('error') else ''
     parsed, parse_error = (_parse_market_model_json(response)
                            if isinstance(response, dict) else ({}, 'empty_response'))
+    search_blocked = bool(session is not None and getattr(session, 'search_blocked', False))
+    search_ran = bool(isinstance(response, dict) and _market_search_ran(response))
+    if search_blocked:
+        search_ran = False
     result = {
         'task': task,
         'reply': response if isinstance(response, dict) else None,
         'parsed': parsed if isinstance(parsed, dict) else {},
         'parse_error': parse_error or '',
         'provider_error': provider_error or '',
-        'search_ran': bool(isinstance(response, dict) and _market_search_ran(response)),
+        'search_ran': search_ran,
+        'search_blocked': search_blocked,
     }
     if (str(task.get('kind') or '') != 'fill'
             and _native_fallback_needed(result)):
@@ -909,11 +918,17 @@ def _expansion_scan_tasks(payload, axes, deficits, named_generated,
         ', "distance_km":"المسافة الموثقة من موقع المشروع بالكيلومتر"'
         if (payload or {}).get('competitorScope', {}).get('mode') == 'distance' else '')
     tasks = []
+    scope_raw = payload.get('competitorScope') or payload.get('competitor_scope')
+    districts_list = market_study.competitor_scope_districts(scope_raw, district)
     for axis in deficits:
         if str((axis or {}).get('type') or '') == 'hotel':
             continue
-        angle = (f'{axis["search"]} داخل {scope} في {city}'
-                 + (' عبر Booking.com' if axis.get('type') == 'hotel' else ''))
+        if len(districts_list) > 1:
+            dist_phrase = ' أو '.join(f'حي {d}' for d in districts_list[:3])
+            angle = f'{axis["search"]} في {dist_phrase} بمدينة {city}'
+        else:
+            angle = (f'{axis["search"]} داخل {scope} في {city}'
+                     + (' عبر Booking.com' if axis.get('type') == 'hotel' else ''))
         if evidence_pool is not None and _pool_covers_angle(evidence_pool, angle):
             continue
         target_label = market_study.benchmark_axis_label(axis, offer_lang)
@@ -989,13 +1004,18 @@ def _run_expansion_scan_task(task, payload, existing, mode, offer_lang,
     provider_error = _chat_error_message(response) if isinstance(response, dict) and response.get('error') else ''
     parsed, parse_error = (_parse_market_model_json(response)
                            if isinstance(response, dict) else ({}, 'empty_response'))
+    search_blocked = bool(session is not None and getattr(session, 'search_blocked', False))
+    search_ran = bool(isinstance(response, dict) and _market_search_ran(response))
+    if search_blocked:
+        search_ran = False
     result = {
         'task': task,
         'reply': response if isinstance(response, dict) else None,
         'parsed': parsed if isinstance(parsed, dict) else {},
         'parse_error': parse_error or '',
         'provider_error': provider_error or '',
-        'search_ran': bool(isinstance(response, dict) and _market_search_ran(response)),
+        'search_ran': search_ran,
+        'search_blocked': search_blocked,
     }
     if _native_fallback_needed(result):
         fallback = _native_search_fallback(

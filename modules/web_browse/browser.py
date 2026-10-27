@@ -390,7 +390,12 @@ def _searxng_search(query, cap):
         _browser_log(f'[BROWSER] searxng failed: {exc}')
         return []
     hits = []
-    for row in payload.get('results') or []:
+    results = payload.get('results') or []
+    if not results:
+        unresponsive = payload.get('unresponsive_engines') or []
+        if unresponsive:
+            _browser_log(f'[BROWSER] searxng upstreams suspended/failed: {len(unresponsive)} engines')
+    for row in results:
         if not isinstance(row, dict):
             continue
         link = str(row.get('url') or '').strip()
@@ -1012,22 +1017,51 @@ class BrowserWorker:
             result = self._open_url_once(page, url, timeout)
         return result
 
+    @property
+    def search_blocked(self):
+        """True when search was attempted but every attempt failed, was walled, or produced 0 hits."""
+        attempts = getattr(self, '_search_attempts', 0)
+        hits = getattr(self, '_search_hits_total', 0)
+        if attempts > 0 and hits == 0:
+            return True
+        blocked = getattr(self, '_blocked_serps', None)
+        if blocked and len(blocked) >= len(_DEFAULT_ORDER):
+            return True
+        return False
+
     def web_search(self, query, max_results=MAX_RESULTS):
         """SERP scrape: tries each provider in order until hits; never raises.
         A provider that serves a bot wall twice in a row is skipped for the
         rest of the session — its goto+settle seconds are pure cost."""
         cap = max(1, int(max_results or MAX_RESULTS))
+        self._search_attempts = getattr(self, '_search_attempts', 0) + 1
         for provider in _providers(getattr(self, 'search_provider', None)):
             if provider in getattr(self, '_blocked_serps', ()):
                 continue
+            failed = False
             try:
                 hits = self._search_once(provider, query, cap)
             except Exception as exc:
                 _browser_log(f'[BROWSER] search provider={provider} failed: {exc}')
                 hits = []
+                failed = True
             if hits:
                 _browser_log(f'[BROWSER] search provider={provider} hits={len(hits)}')
+                self._search_hits_total = getattr(self, '_search_hits_total', 0) + len(hits)
+                self._successful_searches = getattr(self, '_successful_searches', 0) + 1
                 return hits
+            if failed:
+                streaks = getattr(self, '_serp_block_streak', None)
+                if streaks is None:
+                    streaks = self._serp_block_streak = {}
+                streaks[provider] = streaks.get(provider, 0) + 1
+                if streaks[provider] >= 2:
+                    blocked = getattr(self, '_blocked_serps', None)
+                    if blocked is None:
+                        blocked = self._blocked_serps = set()
+                    blocked.add(provider)
+                    _browser_log(f'[BROWSER] search provider={provider} skipped for this session')
+                continue
             title, walled = (('', False) if provider == 'searxng'
                              else self._serp_state())
             if walled:
