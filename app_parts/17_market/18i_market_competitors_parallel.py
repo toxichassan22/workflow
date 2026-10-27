@@ -29,6 +29,13 @@ _PARALLEL_SCAN_WORKERS = 4
 # scan that keeps searching past it is cost with no result.
 _MARKET_SCAN_BUDGET_SECONDS = float(
     os.environ.get('MARKET_SCAN_BUDGET_SECONDS') or 240)
+# A radius scope has to look past the first few cards to prove what sits inside
+# it. Ten property pages in batches of five cost roughly a minute of the scan
+# budget and still leave room for the district and verification stages.
+_BOOKING_SCAN_MAX_HOTELS = max(
+    5, int(os.environ.get('BOOKING_SCAN_MAX_HOTELS') or 10))
+_BOOKING_SCAN_TAB_BATCH = max(1, int(
+    os.environ.get('BOOKING_SCAN_TAB_BATCH') or 5))
 
 
 def _scan_deadline(deadline):
@@ -59,7 +66,7 @@ def _axis_scan_payload(payload, axis):
     """A payload whose only explicit comparison pick is this axis."""
     axis_type = str((axis or {}).get('type') or '')
     if axis_type == 'hotel':
-        selection = [{'type': 'hotel', 'stars': [str(axis.get('stars') or '')]}]
+        selection = [{'type': 'hotel'}]
     else:
         selection = [{
             'type': axis_type,
@@ -223,31 +230,29 @@ def _booking_scan_result(task, rows, citations, note='', search_ran=False):
 
 
 def _booking_empty_note(search, *, destination, matched_district,
-                        district_label, city_label, stars,
-                        filter_error=''):
+                        district_label, city_label, filter_error=''):
     """Why a Booking scan produced no hotels, naming the actual cause."""
     search = search if isinstance(search, dict) else {}
     where = (f'لحي {district_label} في {city_label}' if district_label
              else f'في {city_label}')
-    stars_part = f' (النجوم {stars})' if stars else ''
     if filter_error:
         return (f'تعذّر فتح نتائج فلتر حي {district_label} على Booking '
-                f'({filter_error})، فلم تُقرأ فنادق الحي{stars_part}. '
+                f'({filter_error})، فلم تُقرأ فنادق الحي. '
                 f'لم يُستخدم أي مصدر آخر.')
     error_code = booking_search.search_error_code(search.get('final_url'))
     if error_code:
         return (f'رفض Booking البحث النصّي ({error_code}) فلم تُفتح صفحة نتائج '
-                f'{where}{stars_part}. لم يُستخدم أي مصدر آخر.')
+                f'{where}. لم يُستخدم أي مصدر آخر.')
     if search.get('error'):
-        return (f'تعذّر فتح صفحة نتائج Booking.com {where}{stars_part} '
+        return (f'تعذّر فتح صفحة نتائج Booking.com {where} '
                 f'({search.get("error")}). لم يُستخدم أي مصدر آخر.')
     if not (destination or {}).get('dest_id'):
         return (f'تعذّر تحديد وجهة المدينة على Booking، فلم تُرجع صفحة النتائج '
-                f'فنادق {where}{stars_part}. لم يُستخدم أي مصدر آخر.')
+                f'فنادق {where}. لم يُستخدم أي مصدر آخر.')
     if matched_district:
-        return (f'لا توجد فنادق {stars_part or "مطابقة"} لحي {district_label} '
+        return (f'لا توجد فنادق مطابقة لحي {district_label} '
                 f'في {city_label} على Booking.com. لم يُستخدم أي مصدر آخر.')
-    return (f'لم تُرجع صفحة نتائج Booking.com فنادق {where}{stars_part} '
+    return (f'لم تُرجع صفحة نتائج Booking.com فنادق {where} '
             f'دون فلتر حي (الحي غير معروض ضمن أحياء Booking لهذه المدينة). '
             f'لم يُستخدم أي مصدر آخر.')
 
@@ -259,12 +264,12 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     No model decides which hotel page to open: the project city is resolved to
     Booking's own destination id (a free-text search is refused), the city's
     hotels are filtered by Booking's neighbourhood filter for the project
-    district and the selected star class, the hotel cards become the
-    competitors, and each property page's ``## BOOKING_RATE ##`` block supplies
-    the original pre-discount stay price and room area.
+    district, the hotel cards become the competitors, and each property page's
+    ``## BOOKING_RATE ##`` block supplies the original pre-discount stay price
+    and room area. Stars are not a competitor dimension (owner decision
+    2026-10-27), so no class filter is applied.
     """
     axis = task.get('axis') if isinstance(task.get('axis'), dict) else {}
-    stars = str(axis.get('stars') or '').strip()
     city_ar = str((payload or {}).get('city') or '').strip()
     district_ar = str((payload or {}).get('district') or '').strip()
     display_district = (district_ar[3:].strip()
@@ -302,12 +307,10 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         dest_id = str(destination.get('dest_id') or '')
         dest_type = str(destination.get('dest_type') or 'city')
         search_url = booking_search.build_search_url(
-            city_en or city_ar, stars=stars or None,
-            dest_id=dest_id, dest_type=dest_type)
+            city_en or city_ar, dest_id=dest_id, dest_type=dest_type)
         print(f'[MARKET STUDY] booking hotel search city={city_en!r} '
               f'district={district_en!r} country={country_code!r} '
-              f'stars={stars!r} dest_id={dest_id!r} '
-              f'url={search_url}', flush=True)
+              f'dest_id={dest_id!r} url={search_url}', flush=True)
         search = session.open_url(search_url)
         search = search if isinstance(search, dict) else {}
         final_url = str(search.get('final_url') or search_url)
@@ -316,21 +319,18 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
         matched = booking_search.match_district_facet(
             search.get('booking_districts') or [], district_ar, district_en)
 
-        def _apply_district(district_id, as_destination=False, stars_filter='unset'):
-            if stars_filter == 'unset':
-                stars_filter = stars or None
+        def _apply_district(district_id, as_destination=False):
             if as_destination:
                 # Booking serves the district itself as a destination; that
-                # page is narrower than the city and honours the class filter
-                # even when the nflt neighbourhood filter is ignored.
+                # page is narrower than the city when the nflt neighbourhood
+                # filter is ignored.
                 filtered_url = booking_search.build_search_url(
-                    city_en or city_ar, stars=stars_filter or None,
-                    dest_id=district_id, dest_type='district')
+                    city_en or city_ar, dest_id=district_id,
+                    dest_type='district')
             else:
                 filtered_url = booking_search.build_search_url(
-                    city_en or city_ar, stars=stars_filter or None,
-                    dest_id=dest_id, dest_type=dest_type,
-                    district_id=district_id)
+                    city_en or city_ar, dest_id=dest_id,
+                    dest_type=dest_type, district_id=district_id)
             filtered = session.open_url(filtered_url)
             filtered = filtered if isinstance(filtered, dict) else {}
             filtered_hotels = ((filtered.get('booking_search') or {})
@@ -350,47 +350,13 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                   f'final={filtered_final[:320]}', flush=True)
             return filtered, filtered_final, applied
 
-        unfiltered_city = {}
-
-        def _unfiltered_city_cards():
-            """The city page without the class filter, read once.
-
-            A class-filtered page lists only the districts that hold a hotel of
-            that class, so it can omit the project's district entirely. A hotel
-            inside the district whose class Booking does not state is still a
-            competitor there, so the district is asked for without the class
-            filter before a run reports having found nothing.
-            """
-            if 'result' not in unfiltered_city:
-                plain_url = booking_search.build_search_url(
-                    city_en or city_ar, dest_id=dest_id, dest_type=dest_type)
-                plain = session.open_url(plain_url)
-                plain = plain if isinstance(plain, dict) else {}
-                citations.append(_booking_scan_citation(
-                    str(plain.get('final_url') or plain_url),
-                    plain.get('title'), plain.get('text')))
-                unfiltered_city['result'] = plain
-            return unfiltered_city['result']
-
-        def _narrow_unfiltered_to_district():
-            plain = _unfiltered_city_cards()
-            cards = booking_search.filter_hotels_by_district(
-                (plain.get('booking_search') or {}).get('hotels') or [],
-                district_ar, district_en)
-            if not cards:
-                return None
-            narrowed = dict(plain)
-            narrowed['booking_search'] = dict(
-                plain.get('booking_search') or {}, hotels=cards)
-            return narrowed
-
-        def _district_card_search():
-            """The city cards whose own Booking address names the district."""
+        def _district_cards_from_city():
+            """The initial city cards whose own Booking address names the district."""
             cards = booking_search.filter_hotels_by_district(
                 (search.get('booking_search') or {}).get('hotels') or [],
                 district_ar, district_en)
             if not cards:
-                return _narrow_unfiltered_to_district()
+                return None
             narrowed = dict(search)
             narrowed['booking_search'] = dict(
                 search.get('booking_search') or {}, hotels=cards)
@@ -398,13 +364,12 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
 
         def _use_filtered(district_id):
             nonlocal matched
-            attempts = ((False, 'neighbourhood filter', 'unset'),
-                        (False, 'neighbourhood filter retry', 'unset'),
-                        (True, 'district destination', 'unset'),
-                        (False, 'district without class filter', None))
-            for as_destination, label, stars_filter in attempts:
+            attempts = ((False, 'neighbourhood filter'),
+                        (False, 'neighbourhood filter retry'),
+                        (True, 'district destination'))
+            for as_destination, label in attempts:
                 filtered, filtered_final, applied = _apply_district(
-                    district_id, as_destination, stars_filter)
+                    district_id, as_destination)
                 hotels = ((filtered.get('booking_search') or {})
                           .get('hotels') or [])
                 kept = booking_search.filter_hotels_by_district(
@@ -425,68 +390,29 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 filter_error=str(
                     filtered.get('error') or 'filter_not_applied'),
                 district_label=display_district or district_en,
-                city_label=city_ar or city_en, stars=stars)
+                city_label=city_ar or city_en)
             # Booking dropped the neighbourhood filter (or the page failed):
             # fall back to its own address line before reporting nothing.
-            narrowed = _district_card_search()
+            narrowed = _district_cards_from_city()
             if narrowed is not None:
                 matched = {'id': '', 'label': display_district or district_ar}
                 return narrowed, ''
             return None, note
 
-        if matched and scope_mode == 'district':
-            if matched.get('id'):
-                booking_destination.remember_district_id(
-                    cache_path, country_code, city_en or city_ar,
-                    display_district or district_ar, matched.get('id'))
-            filtered_result, note = _use_filtered(matched.get('id'))
-            if note:
-                return _booking_scan_result(
-                    task, [], citations, note, search_ran=True)
-            search = filtered_result
-        elif scope and scope_mode == 'district':
-            # A class-filtered page lists only the districts that have hotels
-            # of that class, so a 4-star page can omit the project's district
-            # even though Booking still filters by it. The district id is
-            # city-scoped: read it once from the unfiltered city page, cache
-            # it, and keep the scope exactly as the client set it.
+        if scope_mode == 'district' and (scope or matched):
             district_key_city = city_en or city_ar
-            district_id = booking_destination.cached_district_id(
-                cache_path, country_code, district_key_city,
-                display_district or district_ar)
+            district_id = str((matched or {}).get('id') or '')
             if not district_id:
-                wide_url = booking_search.build_search_url(
-                    city_en or city_ar, dest_id=dest_id, dest_type=dest_type)
-                wide = session.open_url(wide_url)
-                wide = wide if isinstance(wide, dict) else {}
-                wide_match = booking_search.match_district_facet(
-                    wide.get('booking_districts') or [], district_ar,
-                    district_en)
-                if wide_match:
-                    district_id = str(wide_match.get('id') or '')
-                    matched = wide_match
-                    booking_destination.remember_district_id(
-                        cache_path, country_code, district_key_city,
-                        display_district or district_ar, district_id)
-            if not district_id and str(stars or '') != '5':
-                # The facet list is derived from the current results, so a
-                # 4-star page can hide the district that the 5-star page
-                # lists. Read the id once from that page and cache it; the
-                # district id is city-scoped, not class-scoped.
-                probe = session.open_url(booking_search.build_search_url(
-                    city_en or city_ar, stars='5', dest_id=dest_id,
-                    dest_type=dest_type))
-                probe = probe if isinstance(probe, dict) else {}
-                probe_match = booking_search.match_district_facet(
-                    probe.get('booking_districts') or [], district_ar,
-                    district_en)
-                if probe_match:
-                    district_id = str(probe_match.get('id') or '')
-                    matched = probe_match
-                    booking_destination.remember_district_id(
-                        cache_path, country_code, district_key_city,
-                        display_district or district_ar, district_id)
+                district_id = booking_destination.cached_district_id(
+                    cache_path, country_code, district_key_city,
+                    display_district or district_ar)
             if district_id:
+                if not (matched or {}).get('id'):
+                    matched = {'id': district_id,
+                               'label': display_district or district_ar}
+                booking_destination.remember_district_id(
+                    cache_path, country_code, district_key_city,
+                    display_district or district_ar, district_id)
                 filtered_result, note = _use_filtered(district_id)
                 if note:
                     return _booking_scan_result(
@@ -497,25 +423,11 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 # the project's district is hidden, keep the city cards whose
                 # own address line names it — still the district, never the
                 # whole city.
-                district_cards = booking_search.filter_hotels_by_district(
-                    (search.get('booking_search') or {}).get('hotels') or [],
-                    district_ar, district_en)
-                if not district_cards:
-                    # The class filter can hide the district's own hotels; the
-                    # city page read without it still names them.
-                    plain = _narrow_unfiltered_to_district()
-                    if plain is not None:
-                        search = plain
-                        matched = {'id': '', 'label': display_district or district_ar}
-                        district_cards = ((plain.get('booking_search') or {})
-                                          .get('hotels') or [])
-                if district_cards:
-                    search = dict(search)
-                    search['booking_search'] = dict(
-                        search.get('booking_search') or {},
-                        hotels=district_cards)
+                district_cards = _district_cards_from_city()
+                if district_cards is not None:
+                    search = district_cards
                     matched = {'id': '', 'label': display_district or district_ar}
-                elif scope_mode == 'district':
+                else:
                     city_cards = ((search.get('booking_search') or {})
                                   .get('hotels') or [])
                     sample = [(card.get('location'),
@@ -530,6 +442,8 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                             f'البحث إلى المدينة. لم يُستخدم أي مصدر آخر.')
                     return _booking_scan_result(
                         task, [], citations, note, search_ran=True)
+        else:
+            matched = None
         search_data = search.get('booking_search') \
             if isinstance(search.get('booking_search'), dict) else {}
         hotels = search_data.get('hotels') or []
@@ -540,21 +454,29 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             note = _booking_empty_note(
                 search, destination=destination, matched_district=matched,
                 district_label=display_district or district_en,
-                city_label=city_ar or city_en, stars=stars)
+                city_label=city_ar or city_en)
             return _booking_scan_result(
                 task, [], citations, note, search_ran=True)
         benchmark = market_study.benchmark_axis_label(axis, offer_lang)
         skipped_outside = skipped_unverified = 0
         wanted = []
-        for hotel in hotels[:5]:
+        for hotel in hotels[:_BOOKING_SCAN_MAX_HOTELS]:
             hotel = hotel if isinstance(hotel, dict) else {}
             name = str(hotel.get('name') or '').strip()
             url = str(hotel.get('url') or '').strip()
             if name and url:
                 wanted.append({'name': name, 'url': url})
-        # Booking needs ~20 s per hotel (WAF + room table); loading the tabs
-        # together overlaps that wait instead of paying it five times.
-        props = session.open_urls([item['url'] for item in wanted])
+        # Booking needs ~20 s per hotel (WAF + room table); loading a batch of
+        # tabs together overlaps that wait. A radius scope has to look past the
+        # first five cards, so the scan reads in batches until it has enough
+        # candidates or the deadline arrives.
+        props = []
+        for start in range(0, len(wanted), _BOOKING_SCAN_TAB_BATCH):
+            if _market_deadline_hit(deadline):
+                break
+            props.extend(session.open_urls(
+                [item['url'] for item in
+                 wanted[start:start + _BOOKING_SCAN_TAB_BATCH]]))
         for item, prop in zip(wanted, props):
             if _market_deadline_hit(deadline):
                 break
@@ -573,7 +495,6 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 'name': name,
                 'project_type': 'فندقي',
                 'operation_type': 'تشغيل فندقي',
-                'hotel_stars': stars,
                 'classification': 'مباشر',
                 'status': 'قائم',
                 'city': city_ar or city_en,
@@ -704,18 +625,22 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 task, [], citations, note, search_ran=True)
         priced_count = sum(
             1 for row in rows if row.get('price_from') or row.get('price_to'))
-        if matched and matched.get('id'):
+        if scope_mode == 'district' and matched and matched.get('id'):
             scope_text = f' (فلتر حي {booking_search.facet_label(matched)} على Booking)'
-        elif matched:
+        elif scope_mode == 'district' and matched:
             scope_text = (f' (فلتر حي {booking_search.facet_label(matched)} '
                           f'من عنوان Booking)')
+        elif scope_mode == 'distance':
+            scope_text = (f' (داخل نطاق {radius_km:g} كم من موقع المشروع)'
+                          if radius_km else '')
         else:
-            scope_text = ' (بحث على مستوى المدينة: الحي غير معروض كفلتر على Booking)'
-        if scope_mode == 'distance' and radius_km:
-            scope_text = f' (داخل نطاق {radius_km:g} كم من موقع المشروع)'
+            scope_text = (f' (بحث على مستوى مدينة {city_ar or city_en}: '
+                          f'الحي غير مختار كفلتر)')
+        place = (f'لحي {display_district or district_en} في {city_ar or city_en}'
+                 if scope_mode == 'district'
+                 else f'لمدينة {city_ar or city_en}')
         note = (
-            f'تم جلب {len(rows)} فندقًا من صفحة نتائج Booking.com لحي '
-            f'{display_district or district_en} في {city_ar or city_en}{scope_text}'
+            f'تم جلب {len(rows)} فندقًا من صفحة نتائج Booking.com {place}{scope_text}'
             + (f' — منها {priced_count} بسعر ومساحة.' if rows else '.'))
         return _booking_scan_result(task, rows, citations, note, search_ran=True)
     finally:
@@ -906,7 +831,7 @@ def _expansion_scan_tasks(payload, axes, deficits, named_generated,
                if needs_benchmarks else '')
             + hotel_source_rule
             + 'أعد JSON فقط: {"competitors":[{"name":"","city":"انسخ المدينة من بيانات المشروع حرفيًا",'
-              '"district":"","hotel_stars":"",'
+              '"district":"",'
               '"benchmarks":[],"operation_type":"","price_type":"","price_currency":"",'
               '"price":"","source_urls":[]' + distance_field + '}]} '
               'مع بقية الحقول المعتادة عند توفرها.'

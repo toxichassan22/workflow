@@ -174,7 +174,7 @@ test('market study separates competitors and market into accessible tabs', () =>
   assert.match(ui, /id="marketCompetitorDistrictChips"/);
   assert.match(ui, /id="marketCompetitorUnitTypes"/);
   assert.match(ui, /أحياء النطاق/);
-  assert.match(ui, /data-comparison-field="stars"/);
+  assert.doesNotMatch(ui, /data-comparison-field="stars"/);
   assert.match(ui, /إضافة نوع مقارنة/);
   assert.doesNotMatch(source, /outOfRadiusCount/);
 
@@ -227,7 +227,7 @@ test('transaction benchmark title uses the source recorded in the files', () => 
   assert.doesNotMatch(inputs.marketCompetitorPriceBenchmarks.innerHTML, /مجهولة الهوية/);
 });
 
-test('comparison rows accept several operations or hotel classifications', () => {
+test('comparison rows accept several operations and no hotel classification', () => {
   const { context } = fixture();
   const operationRow = context.marketComparisonTypeRowHtml({
     type: 'residential', operation: ['sale', 'rent']
@@ -235,11 +235,9 @@ test('comparison rows accept several operations or hotel classifications', () =>
   assert.match(operationRow, /value="sale" checked/);
   assert.match(operationRow, /value="rent" checked/);
 
-  const hotelRow = context.marketComparisonTypeRowHtml({
-    type: 'hotel', stars: ['4', '5']
-  });
-  assert.match(hotelRow, /value="4" checked/);
-  assert.match(hotelRow, /value="5" checked/);
+  const hotelRow = context.marketComparisonTypeRowHtml({ type: 'hotel' });
+  assert.doesNotMatch(hotelRow, /data-comparison-field="stars"/);
+  assert.doesNotMatch(hotelRow, /نجوم/);
   const newRow = context.marketComparisonTypeRowHtml({}, ['hotel']);
   assert.doesNotMatch(newRow, /value="hotel"/);
   assert.match(newRow, /value="residential"/);
@@ -248,7 +246,7 @@ test('comparison rows accept several operations or hotel classifications', () =>
     { type: 'residential', operation: 'sale' },
     { type: 'residential', operation: 'rent' }
   ])));
-  assert.deepEqual(merged, [{ type: 'residential', operation: ['sale', 'rent'], stars: [] }]);
+  assert.deepEqual(merged, [{ type: 'residential', operation: ['sale', 'rent'] }]);
 
   const row = {
     querySelector: selector => selector.includes('[data-comparison-field="type"]')
@@ -258,32 +256,28 @@ test('comparison rows accept several operations or hotel classifications', () =>
   };
   context.document.querySelectorAll = () => [row];
   assert.deepEqual(JSON.parse(JSON.stringify(context.collectMarketComparisonTypes())), [{
-    type: 'residential', operation: ['sale', 'rent'], stars: []
+    type: 'residential', operation: ['sale', 'rent']
   }]);
 });
 
 test('competitor table keeps blank type cells aligned and compacts comparison choices', () => {
   const { context } = fixture();
   const renderer = fs.readFileSync(path.join(root, 'assets/js/05-market-competitors.js'), 'utf8');
-  assert.match(renderer, /'<td' \+ marketHotelStarsCellAttributes\(isHotel\)/);
+  assert.doesNotMatch(renderer, /data-hotel-stars-cell/);
+  assert.doesNotMatch(renderer, /data-field="hotel_stars"/);
   assert.match(renderer, /const benchmarksHtml = marketBenchmarkPickerHtml\(benchAxes, benchSelected\)/);
   assert.match(renderer, /el\.style\.visibility = show \? 'visible' : 'hidden'/);
   assert.match(renderer, /benchmarks: marketSelectedBenchmarkValues\(tr\)/);
 
-  const emptyStarsCell = context.marketHotelStarsCellAttributes(false);
-  assert.match(emptyStarsCell, /data-hotel-stars-cell/);
-  assert.match(emptyStarsCell, /market-hotel-stars-empty/);
-  assert.doesNotMatch(emptyStarsCell, /\shidden(?:\s|=|>)/);
-
   const picker = context.marketBenchmarkPickerHtml([
     { label: 'سكني - بيع', labelEn: 'Residential sale' },
-    { label: 'فندقي - 4 نجوم', labelEn: '4-star hotel' }
+    { label: 'فندقي', labelEn: 'Hotel' }
   ], ['سكني - بيع']);
   const summary = picker.match(/<summary>([\s\S]*?)<\/summary>/)[1];
   assert.match(summary, /سكني - بيع/);
   assert.doesNotMatch(summary, /فندقي/);
   assert.match(picker, /type="checkbox"/);
-  assert.match(picker, /فندقي - 4 نجوم/);
+  assert.match(picker, /فندقي/);
 
   const tabs = context.marketCompetitorTypeTabsModel([
     { project_type: 'سكني' }, { project_type: 'فندقي' }, { project_type: 'تجاري' }
@@ -297,7 +291,7 @@ test('competitor table keeps blank type cells aligned and compacts comparison ch
 
   const row = { querySelectorAll: selector => selector.includes(':checked')
     ? [{ checked: true, value: 'سكني - بيع' }]
-    : [{ checked: true, value: 'سكني - بيع' }, { checked: false, value: 'فندقي - 4 نجوم' }] };
+    : [{ checked: true, value: 'سكني - بيع' }, { checked: false, value: 'فندقي' }] };
   assert.deepEqual(JSON.parse(JSON.stringify(context.marketSelectedBenchmarkValues(row))), ['سكني - بيع']);
 });
 

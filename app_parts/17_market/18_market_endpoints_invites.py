@@ -294,6 +294,32 @@ def _run_market_source_plan(payload, offer_lang='ar', evidence_pool=None,
         print(f'[MARKET STUDY] source plan fetch failed: {exc}')
 
 
+_BLOCKED_SOURCE_REASONS = {'blocked', 'http_401', 'http_403', 'http_429'}
+
+
+def _blocked_sources_note(evidence_pool):
+    """Name the hosts whose planned read was refused, so a block is never
+    presented as an empty market. A timeout is a different failure and stays
+    out of this line."""
+    if evidence_pool is None or not hasattr(evidence_pool, 'to_dict'):
+        return ''
+    try:
+        failures = (evidence_pool.to_dict() or {}).get('failures') or {}
+    except Exception:
+        return ''
+    hosts = []
+    for url, reason in (failures or {}).items():
+        if str(reason or '').strip().lower() not in _BLOCKED_SOURCE_REASONS:
+            continue
+        host = market_study._source_host(url)
+        if host and host not in hosts:
+            hosts.append(host)
+    if not hosts:
+        return ''
+    return (f'تعذر قراءة {len(hosts)} مصدرًا محجوبًا '
+            f'({"، ".join(hosts[:5])})؛ لم يُعد الحظر سوقًا فارغًا.')
+
+
 def _pool_covers_angle(evidence_pool, angle):
     """True when an expansion round for ``angle`` would only refetch stored
     evidence: the same query already ran (folded dedupe) or pool pages already
@@ -647,6 +673,9 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     sources = market_study.competitor_source_rows(merged)
     market_study.flag_out_of_period_sources(sources, payload.get('dataPeriodBounds'))
     notes = aggregate['notes']
+    blocked_note = _blocked_sources_note(evidence_pool)
+    if blocked_note:
+        notes = f'{notes} — {blocked_note}' if notes else blocked_note
     if aqar_rows:
         aqar_note = (f'Read {len(aqar_rows)} named projects from aqar.'
                      if offer_lang == 'en' else
@@ -697,8 +726,8 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     nothing_generated = not [row for row in generated or []
                              if isinstance(row, dict)
                              and str(row.get('name') or '').strip()]
-    partial = (bool(provider_error) or not search_ran or no_evidence > 0
-               or missing_prices > 0 or nothing_generated)
+    partial = (bool(provider_error) or bool(blocked_note) or not search_ran
+               or no_evidence > 0 or missing_prices > 0 or nothing_generated)
     if nothing_generated and merged:
         kept_note = ('No new competitors were found; the existing rows were kept.'
                      if offer_lang == slide_engine.OFFER_LANG_ENGLISH else

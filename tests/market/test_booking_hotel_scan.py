@@ -97,14 +97,14 @@ class BookingHotelScanTests(unittest.TestCase):
             'projectType': 'فندقي',
             'location_lat': 21.5433,
             'location_lng': 39.1728,
-            'comparisonTypes': [{'type': 'hotel', 'stars': 4}],
+            'comparisonTypes': [{'type': 'hotel'}],
         }
 
     def _task(self):
         return {
             'kind': 'axis',
-            'axis': {'type': 'hotel', 'stars': '4', 'explicit': True},
-            'label': 'البحث عن فندقي - 4 نجوم',
+            'axis': {'type': 'hotel', 'explicit': True},
+            'label': 'البحث عن فندقي',
         }
 
     def _geocode(self):
@@ -120,7 +120,7 @@ class BookingHotelScanTests(unittest.TestCase):
         }
 
     def _search_url(self):
-        return booking_search.build_search_url('Jeddah', stars='4')
+        return booking_search.build_search_url('Jeddah')
 
     def test_english_location_uses_coordinates(self):
         with self.app.app_context(), \
@@ -161,12 +161,12 @@ class BookingHotelScanTests(unittest.TestCase):
 
     def test_search_url_carries_dest_id_and_the_district_filter(self):
         url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+            'Jeddah', dest_id='-3096108', district_id='5654')
         params = dict(parse_qsl(urlsplit(url).query))
         self.assertEqual(params['ss'], 'Jeddah')
         self.assertEqual(params['dest_id'], '-3096108')
         self.assertEqual(params['dest_type'], 'city')
-        self.assertEqual(params['nflt'], 'class=4;di=5654')
+        self.assertEqual(params['nflt'], 'di=5654')
 
     def test_district_facet_matches_the_arabic_project_district(self):
         facets = [{'id': '5656', 'label': 'الشاطئ 9'},
@@ -202,9 +202,9 @@ class BookingHotelScanTests(unittest.TestCase):
     def test_district_page_that_lost_the_filter_is_not_the_district(self):
         booking_destination._RESOLVED.clear()
         city_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108')
+            'Jeddah', dest_id='-3096108')
         district_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+            'Jeddah', dest_id='-3096108', district_id='5654')
         session = _Session({
             city_url: {
                 'final_url': city_url,
@@ -286,7 +286,7 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual(row['area_mode'], 'range')
         self.assertEqual(row['area_from'], '59')
         self.assertEqual(row['area_to'], '59')
-        self.assertEqual(row['hotel_stars'], '4')
+        self.assertNotIn('hotel_stars', row)
         self.assertEqual(row['source_url'], PROPERTY_URL)
         self.assertEqual(row['source_urls'], [PROPERTY_URL])
         self.assertEqual(row['row_source'], 'booking')
@@ -415,9 +415,9 @@ class BookingHotelScanTests(unittest.TestCase):
     def test_hotel_scan_searches_by_dest_id_and_filters_the_district(self):
         booking_destination._RESOLVED.clear()
         city_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108')
+            'Jeddah', dest_id='-3096108')
         district_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+            'Jeddah', dest_id='-3096108', district_id='5654')
         session = _Session({
             city_url: {
                 'final_url': city_url,
@@ -526,6 +526,65 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertIn('لا توجد فنادق داخل نطاق 1 كم', result['parsed']['notes'])
         self.assertNotIn('City', result['parsed']['notes'])
 
+    def test_hotel_search_has_no_star_class_filter(self):
+        session = _Session({
+            self._search_url(): {
+                'final_url': self._search_url(), 'title': 'Booking',
+                'text': '',
+                'booking_search': {'hotels': [
+                    {'name': 'Near Hotel', 'url': PROPERTY_URL}]},
+            },
+            PROPERTY_URL: {
+                'final_url': PROPERTY_URL, 'title': 'Near Hotel', 'text': '',
+                'booking_rate': {'price': 680.0, 'currency': 'SAR',
+                                 'area_sqm': 59.0},
+            },
+        })
+        result = self._scan(self._payload(), session)
+        search_url = next(url for url in session.urls
+                          if 'searchresults' in url)
+        params = dict(parse_qsl(urlsplit(search_url).query))
+        self.assertNotIn('class=', params.get('nflt', ''))
+        self.assertNotIn('stars', params)
+        row = result['parsed']['competitors'][0]
+        self.assertNotIn('hotel_stars', row)
+        self.assertNotIn('نجوم', row['notes'])
+
+    def test_distance_scope_reads_beyond_the_first_five_cards(self):
+        payload = self._payload()
+        payload['competitorScope'] = {
+            'mode': 'distance', 'radius_km': 5,
+            'origin_lat': 21.5433, 'origin_lng': 39.1728}
+        search_url = self._search_url()
+        far_urls = [
+            f'https://www.booking.com/hotel/sa/far-{index}.html'
+            for index in range(5)
+        ]
+        near_url = 'https://www.booking.com/hotel/sa/near-sixth.html'
+        replies = {
+            search_url: {
+                'final_url': search_url, 'title': 'Booking', 'text': '',
+                'booking_search': {'hotels': [
+                    {'name': f'Far Hotel {index}', 'url': url}
+                    for index, url in enumerate(far_urls)
+                ] + [{'name': 'Near Sixth', 'url': near_url}]},
+            },
+            near_url: {
+                'final_url': near_url, 'title': 'Near Sixth', 'text': '',
+                'booking_coords': {'lat': 21.5450, 'lng': 39.1740},
+            },
+        }
+        for url in far_urls:
+            replies[url] = {
+                'final_url': url, 'title': 'Far', 'text': '',
+                'booking_coords': {'lat': 21.60, 'lng': 39.20},
+            }
+        session = _Session(replies)
+        result = self._scan(payload, session)
+        rows = result['parsed']['competitors']
+        self.assertEqual([row['name'] for row in rows], ['Near Sixth'])
+        self.assertIn(near_url, session.urls)
+
     def test_distance_scope_keeps_a_hotel_inside_the_radius(self):
         payload = self._payload()
         payload['competitorScope'] = {
@@ -564,56 +623,10 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual(result['parsed']['competitors'], [])
         self.assertIn('لم يُوسَّع البحث', result['parsed']['notes'])
 
-    def test_class_page_without_the_facet_reads_it_from_the_city_page(self):
-        payload = self._payload()
-        payload['competitorScope'] = {'mode': 'district'}
-        class_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108')
-        wide_url = booking_search.build_search_url(
-            'Jeddah', dest_id='-3096108')
-        district_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
-        session = _Session({
-            class_url: {
-                'final_url': class_url, 'title': 'Booking', 'text': '',
-                'booking_districts': [{'id': '5656', 'label': 'الشاطئ 14'}],
-                'booking_search': {'hotels': [
-                    {'name': 'Elsewhere', 'url': PROPERTY_URL}]},
-            },
-            wide_url: {
-                'final_url': wide_url, 'title': 'Booking', 'text': '',
-                'booking_districts': [{'id': '5654', 'label': 'الأندلس 2'}],
-                'booking_search': {'hotels': []},
-            },
-            district_url: {
-                'final_url': district_url, 'title': 'Booking', 'text': '',
-                'booking_search': {'hotels': [
-                    {'name': 'Eden Residence', 'url': PROPERTY_URL,
-                     'location': 'الأندلس, جدة',
-                     'text': 'فندق في الأندلس، جدة'}]},
-            },
-            PROPERTY_URL: {
-                'final_url': PROPERTY_URL, 'title': 'Eden Residence',
-                'text': '',
-            },
-        }, pages={COUNTRY_PAGE: {'html': COUNTRY_HTML},
-                  CITY_PAGE: {'html': CITY_HTML}})
-        result = self._scan(payload, session)
-        rows = result['parsed']['competitors']
-        self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
-        self.assertIn(district_url, session.urls)
-        cache = os.path.join(self.module.UPLOADS_DIR,
-                             booking_destination.CACHE_FILE_NAME)
-        self.assertEqual(
-            booking_destination.cached_district_id(
-                cache, 'SA', 'Jeddah', 'الأندلس'), '5654')
-
     def test_district_falls_back_to_booking_address_when_no_facet_exists(self):
         payload = self._payload()
         payload['competitorScope'] = {'mode': 'district'}
         class_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108')
-        wide_url = booking_search.build_search_url(
             'Jeddah', dest_id='-3096108')
         other_url = 'https://www.booking.com/hotel/sa/elsewhere.html'
         session = _Session({
@@ -626,11 +639,6 @@ class BookingHotelScanTests(unittest.TestCase):
                     {'name': 'Elsewhere', 'url': other_url,
                      'location': 'الشاطئ, جدة', 'text': 'الشاطئ, جدة'},
                 ]},
-            },
-            wide_url: {
-                'final_url': wide_url, 'title': 'Booking', 'text': '',
-                'booking_districts': [{'id': '5656', 'label': 'الشاطئ 73'}],
-                'booking_search': {'hotels': []},
             },
             PROPERTY_URL: {
                 'final_url': PROPERTY_URL, 'title': 'Eden Residence',
@@ -647,9 +655,9 @@ class BookingHotelScanTests(unittest.TestCase):
         payload = self._payload()
         payload['competitorScope'] = {'mode': 'district'}
         class_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108')
+            'Jeddah', dest_id='-3096108')
         district_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+            'Jeddah', dest_id='-3096108', district_id='5654')
         session = _Session({
             class_url: {
                 'final_url': class_url, 'title': 'Booking', 'text': '',
@@ -687,11 +695,11 @@ class BookingHotelScanTests(unittest.TestCase):
         payload = self._payload()
         payload['competitorScope'] = {'mode': 'district'}
         class_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108')
+            'Jeddah', dest_id='-3096108')
         district_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
+            'Jeddah', dest_id='-3096108', district_id='5654')
         dest_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='5654', dest_type='district')
+            'Jeddah', dest_id='5654', dest_type='district')
         unfiltered = {
             'final_url': class_url, 'title': 'Booking', 'text': '',
             'booking_search': {'hotels': [
@@ -723,56 +731,6 @@ class BookingHotelScanTests(unittest.TestCase):
         self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
         self.assertIn(dest_url, session.urls)
 
-    def test_district_id_is_probed_from_the_five_star_page_when_hidden(self):
-        payload = self._payload()
-        payload['competitorScope'] = {'mode': 'district'}
-        class_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108')
-        wide_url = booking_search.build_search_url(
-            'Jeddah', dest_id='-3096108')
-        probe_url = booking_search.build_search_url(
-            'Jeddah', stars='5', dest_id='-3096108')
-        district_url = booking_search.build_search_url(
-            'Jeddah', stars='4', dest_id='-3096108', district_id='5654')
-        session = _Session({
-            class_url: {
-                'final_url': class_url, 'title': 'Booking', 'text': '',
-                'booking_districts': [{'id': '5656', 'label': 'الشاطئ 14'}],
-                'booking_search': {'hotels': []},
-            },
-            wide_url: {
-                'final_url': wide_url, 'title': 'Booking', 'text': '',
-                'booking_districts': [{'id': '5656', 'label': 'الشاطئ 73'}],
-                'booking_search': {'hotels': []},
-            },
-            probe_url: {
-                'final_url': probe_url, 'title': 'Booking', 'text': '',
-                'booking_districts': [{'id': '5654', 'label': 'الأندلس 3'}],
-                'booking_search': {'hotels': []},
-            },
-            district_url: {
-                'final_url': district_url, 'title': 'Booking', 'text': '',
-                'booking_search': {'hotels': [
-                    {'name': 'Eden Residence', 'url': PROPERTY_URL,
-                     'location': 'الأندلس, جدة',
-                     'text': 'فندق في الأندلس، جدة'}]},
-            },
-            PROPERTY_URL: {
-                'final_url': PROPERTY_URL, 'title': 'Eden Residence',
-                'text': '',
-            },
-        }, pages={COUNTRY_PAGE: {'html': COUNTRY_HTML},
-                  CITY_PAGE: {'html': CITY_HTML}})
-        result = self._scan(payload, session)
-        rows = result['parsed']['competitors']
-        self.assertEqual([row['name'] for row in rows], ['Eden Residence'])
-        self.assertIn(probe_url, session.urls)
-        cache = os.path.join(self.module.UPLOADS_DIR,
-                             booking_destination.CACHE_FILE_NAME)
-        self.assertEqual(
-            booking_destination.cached_district_id(
-                cache, 'SA', 'Jeddah', 'الأندلس'), '5654')
-
     def test_scan_budget_caps_a_far_job_deadline(self):
         far = time.time() + 3600
         capped = self.module._scan_deadline(far)
@@ -786,7 +744,7 @@ class BookingHotelScanTests(unittest.TestCase):
 
     def test_hotel_axis_skips_the_agent_and_the_portal_twin(self):
         axes = self.module.market_study.project_competitor_axes({
-            'comparisonTypes': [{'type': 'hotel', 'stars': 4}],
+            'comparisonTypes': [{'type': 'hotel'}],
         })
         tasks = self.module._competitor_scan_tasks(axes, 'ar', 'generate')
         self.assertEqual(len(tasks), 1)
@@ -803,7 +761,7 @@ class BookingHotelScanTests(unittest.TestCase):
 
     def test_hotel_expansion_is_not_a_new_agent_search(self):
         axes = self.module.market_study.project_competitor_axes({
-            'comparisonTypes': [{'type': 'hotel', 'stars': 4}],
+            'comparisonTypes': [{'type': 'hotel'}],
         })
         tasks = self.module._expansion_scan_tasks(
             self._payload(), axes, axes, [], offer_lang='ar')

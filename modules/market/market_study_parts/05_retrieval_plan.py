@@ -71,11 +71,19 @@ _USE_TO_SOURCE_KIND = {
 # Listing category slug per source kind on aqar.fm — the only classifieds
 # portal planned; its paths are Arabic ({cat}-للبيع/{city}).
 _LISTING_CATEGORIES = {
-    'سكني': ['فلل', 'شقق', 'أدوار'],
+    'سكني': ['فلل', 'شقق'],
     'تجاري': ['مكاتب', 'محلات'],
     'فندقي': [],
     'صناعي ولوجستي': ['مستودعات'],
     '_default': ['شقق'],
+}
+
+# Measured 2026-10-27 from staging: these aqar paths answer 404, so the plan
+# never schedules a fetch that can only burn its budget.
+_LISTING_INVALID_OPERATIONS = {
+    ('أدوار', 'بيع'), ('أدوار', 'إيجار'),
+    ('مكاتب', 'إيجار'),
+    ('مستودعات', 'إيجار'),
 }
 
 # Client-selected property kinds → the aqar.fm listing category that carries
@@ -86,8 +94,8 @@ _UNIT_TYPE_CATEGORIES = {
     'شقة': 'شقق',
     'شقة دوبلكس': 'شقق',
     'بنتهاوس': 'شقق',
-    'دور مستقل': 'أدوار',
-    'ملحق سكني': 'أدوار',
+    'دور مستقل': 'شقق',
+    'ملحق سكني': 'شقق',
     'فيلا مستقلة': 'فلل',
     'فيلا دوبلكس': 'فلل',
     'تاون هاوس': 'فلل',
@@ -276,6 +284,8 @@ def _listing_urls(kinds, ops, city, unit_types=()):
     for op in sorted(ops):
         rent = op == 'إيجار'
         for cat in categories:
+            if (cat, op) in _LISTING_INVALID_OPERATIONS:
+                continue
             yield (f'https://sa.aqar.fm/{quote(cat + ("-للإيجار" if rent else "-للبيع"))}/{quote(city)}',
                    f'aqar.fm — {cat} {op} — {city}')
 

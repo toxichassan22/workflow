@@ -101,46 +101,54 @@ class BenchmarkAxesTests(unittest.TestCase):
     def test_explicit_comparison_axes_use_only_client_selections(self):
         axes = market_study.project_competitor_axes({
             'comparisonTypes': [
-                {'type': 'hotel', 'stars': '4'},
+                {'type': 'hotel'},
                 {'type': 'residential', 'operation': 'sale'},
                 {'type': 'commercial', 'operation': 'rent'},
-                {'type': 'hotel', 'stars': '9'},
+                {'type': 'hotel'},
             ]})
         self.assertEqual([axis['key'] for axis in axes],
-                         ['hotel:4', 'residential:sale', 'commercial:rent'])
+                         ['hotel', 'residential:sale', 'commercial:rent'])
+        self.assertEqual(axes[0]['label'], 'فندقي')
 
     def test_multiple_values_expand_into_individual_comparison_axes(self):
         axes = market_study.normalize_comparison_types([
-            {'type': 'hotel', 'stars': ['4', '5']},
+            {'type': 'hotel'},
             {'type': 'residential', 'operation': ['sale', 'rent']},
         ])
         self.assertEqual([axis['key'] for axis in axes], [
-            'hotel:4', 'hotel:5', 'residential:sale', 'residential:rent',
+            'hotel', 'residential:sale', 'residential:rent',
         ])
         selected_rows = [
             {'project_type': 'فندقي', 'hotel_stars': 4},
-            {'project_type': 'فندقي', 'hotel_stars': 5},
             {'project_type': 'سكني', 'operation_type': 'بيع'},
             {'project_type': 'سكني', 'operation_type': 'إيجار'},
         ]
         self.assertEqual(
             [sum(market_study.competitor_matches_comparison_axis(row, axis)
                  for row in selected_rows) for axis in axes],
-            [1, 1, 1, 1],
+            [1, 1, 1],
         )
+
+    def test_a_star_selection_is_ignored_and_never_becomes_an_axis(self):
+        axes = market_study.normalize_comparison_types([
+            {'type': 'hotel', 'stars': ['4', '5']},
+        ])
+        self.assertEqual([axis['key'] for axis in axes], ['hotel'])
+        self.assertEqual(axes[0]['stars'], '')
 
     def test_prompt_enforces_selected_axes_location_booking_and_interaction(self):
         payload = {
             'city': 'جدة', 'district': 'الروضة',
             'competitorScope': {'mode': 'district'},
             'comparisonTypes': [
-                {'type': 'hotel', 'stars': '4'},
+                {'type': 'hotel'},
                 {'type': 'residential', 'operation': 'sale'}],
         }
         prompt = market_study.build_competitors_user_prompt(payload, [], mode='generate')
-        self.assertIn('فندقي - 4 نجوم', prompt)
+        self.assertIn('فندقي', prompt)
+        self.assertNotIn('فندقي - 4 نجوم', prompt)
         self.assertIn('سكني - بيع', prompt)
-        self.assertIn('لا تضف نوعًا أو عملية أو تصنيف نجوم غير مختار', prompt)
+        self.assertIn('لا تضف نوعًا أو عملية غير مختارة', prompt)
         self.assertIn('حي الروضة في جدة', prompt)
         self.assertIn('Booking.com', prompt)
         self.assertIn('Booking.com فقط من مسار /hotel/', prompt)
@@ -209,9 +217,9 @@ class BenchmarkAxesTests(unittest.TestCase):
             self.assertTrue(market_study.competitor_matches_comparison_axis(
                 {'project_type': 'سكني', 'operation_type': operation}, axis), operation)
 
-    def test_explicit_filter_enforces_selection_location_stars_and_five_row_cap(self):
+    def test_explicit_filter_enforces_selection_location_and_five_row_cap(self):
         axes = market_study.normalize_comparison_types([
-            {'type': 'hotel', 'stars': 4},
+            {'type': 'hotel'},
             {'type': 'residential', 'operation': 'sale'},
         ])
         rows = [
@@ -237,29 +245,28 @@ class BenchmarkAxesTests(unittest.TestCase):
         self.assertEqual(len(accepted), 10)
         self.assertEqual(sum(row['comparison_type'] == 'hotel' for row in accepted), 5)
         self.assertEqual(sum(row['comparison_type'] == 'residential' for row in accepted), 5)
-        self.assertFalse(any('خمس نجوم' in row['name'] for row in accepted))
         self.assertFalse(any('إيجار' in row['name'] for row in accepted))
         self.assertFalse(any('مدينة أخرى' in row['name'] or 'حي آخر' in row['name']
                              for row in accepted))
+        # Stars are not a dimension any more: the class column is cleared on
+        # every hotel row instead of carrying a value nobody filters on.
+        self.assertTrue(all(row['hotel_stars'] == ''
+                            for row in accepted if row['comparison_type'] == 'hotel'))
 
-    def test_a_hotel_without_a_class_stays_inside_the_selected_scope(self):
-        """Owner decision 2026-10-27: a hotel in the scope whose class never
-        reached the page is a competitor too — kept with an empty class, never
-        relabelled with the selected one."""
+    def test_every_hotel_matches_the_single_hotel_axis(self):
+        """Owner decision 2026-10-27: hotel competitors are compared without a
+        star class, so every hotel row belongs to the one hotel axis."""
         axis = market_study.normalize_comparison_types([
-            {'type': 'hotel', 'stars': 4}])[0]
+            {'type': 'hotel'}])[0]
         known = {'name': 'فندق معروف', 'project_type': 'فندقي',
                  'hotel_stars': '4', 'operation_type': 'تشغيل فندقي'}
         unknown = {'name': 'فندق بلا تصنيف', 'project_type': 'فندقي',
                    'operation_type': 'تشغيل فندقي'}
         other = {'name': 'فندق خمس نجوم', 'project_type': 'فندقي',
                  'hotel_stars': '5', 'operation_type': 'تشغيل فندقي'}
-        self.assertTrue(market_study.competitor_matches_comparison_axis(
-            known, axis))
-        self.assertTrue(market_study.competitor_matches_comparison_axis(
-            unknown, axis))
-        self.assertFalse(market_study.competitor_matches_comparison_axis(
-            other, axis))
+        for row in (known, unknown, other):
+            self.assertTrue(market_study.competitor_matches_comparison_axis(
+                row, axis), row['name'])
 
         accepted = market_study.filter_and_cap_competitors(
             [dict(unknown, city='جدة', district='الاندلس')], [axis],
@@ -386,9 +393,9 @@ class BenchmarkExpansionTests(unittest.TestCase):
             for index in range(5)
         ]
         hotel = [
-            {'name': f'فندق {index}', 'project_type': 'فندقي', 'hotel_stars': 4,
+            {'name': f'فندق {index}', 'project_type': 'فندقي',
              'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
-             'benchmarks': ['فندقي - 4 نجوم']}
+             'benchmarks': ['فندقي']}
             for index in range(5)
         ]
         calls = []
@@ -412,7 +419,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
             'competitorScope': {'mode': 'district'},
             'comparisonTypes': [
                 {'type': 'residential', 'operation': 'sale'},
-                {'type': 'hotel', 'stars': 4}],
+                {'type': 'hotel'}],
             'mode': 'generate',
             'components': [
                 {'name': 'الشقق', 'useType': 'residential', 'investmentModel': 'sale'},
@@ -443,9 +450,9 @@ class BenchmarkExpansionTests(unittest.TestCase):
             for index in range(5)
         ]
         hotel = [
-            {'name': f'فندق {index}', 'project_type': 'فندقي', 'hotel_stars': 4,
+            {'name': f'فندق {index}', 'project_type': 'فندقي',
              'operation_type': 'تشغيل فندقي', 'city': 'الرياض', 'district': 'النرجس',
-             'benchmarks': ['فندقي - 4 نجوم']}
+             'benchmarks': ['فندقي']}
             for index in range(5)
         ]
         calls = []
@@ -469,7 +476,7 @@ class BenchmarkExpansionTests(unittest.TestCase):
             'competitorScope': {'mode': 'district'},
             'comparisonTypes': [
                 {'type': 'residential', 'operation': 'sale'},
-                {'type': 'hotel', 'stars': 4}],
+                {'type': 'hotel'}],
             'mode': 'generate',
             'components': [
                 {'name': 'الشقق', 'useType': 'residential', 'investmentModel': 'sale'},

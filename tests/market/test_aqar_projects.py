@@ -114,6 +114,35 @@ class _Session:
         return {'text': self.detail, 'error': ''}
 
 
+_TYPED_CARDS_HTML = """
+<html><body>
+<a href="/المشاريع-العقارية/شركة-الرمز-7/مشروع-الرمز-71">
+  <div>شقق للبيع</div><div>مشروع الرمز</div>
+  <div>يبدأ من 400 ألف §</div><div>حي الحمراء ، جدة ، جدة</div>
+</a>
+<a href="/المشاريع-العقارية/شركة-الرمز-7/مشروع-المكاتب-72">
+  <div>مكاتب للبيع</div><div>مشروع المكاتب</div>
+  <div>يبدأ من 900 ألف §</div><div>حي الحمراء ، جدة ، جدة</div>
+</a>
+<a href="/المشاريع-العقارية/شركة-الرمز-7/مشروع-بلا-نوع-73">
+  <div>وحدات سكنية للبيع</div><div>مشروع بلا نوع</div>
+  <div>يبدأ من 500 ألف §</div><div>حي الحمراء ، جدة ، جدة</div>
+</a>
+</body></html>
+"""
+
+
+class _BlockedSession:
+    """The Cloudflare block page arrives as HTML with a 403 status."""
+
+    def fetch_html(self, url, timeout=None):
+        return {'html': '<title>You have been blocked | تم حظرك</title>',
+                'final_url': url, 'status': 403, 'error': ''}
+
+    def open_url(self, url):
+        return {'text': '', 'error': 'blocked'}
+
+
 class _PerPageSession(_Session):
     """A session whose project pages each carry their own address."""
 
@@ -325,6 +354,29 @@ class AqarScanTests(unittest.TestCase):
                                    ('سكني', 'إيجار')], limit=2)
         self.assertEqual(len(result['rows']), 2)
         self.assertEqual(len(session.opened), 2)
+
+    def test_unit_types_keep_matching_and_untyped_cards(self):
+        result = aqar_projects.scan(
+            _Session(html=_TYPED_CARDS_HTML), 'جدة',
+            pairs=[('سكني', 'بيع'), ('تجاري', 'بيع')],
+            unit_types=['شقة'], limit=4)
+        self.assertEqual([row['name'] for row in result['rows']],
+                         ['مشروع الرمز', 'مشروع بلا نوع'])
+        offices = aqar_projects.scan(
+            _Session(html=_TYPED_CARDS_HTML), 'جدة',
+            pairs=[('سكني', 'بيع'), ('تجاري', 'بيع')],
+            unit_types=['مكتب'], limit=4)
+        self.assertEqual([row['name'] for row in offices['rows']],
+                         ['مشروع المكاتب'])
+
+    def test_a_blocked_directory_is_an_error_not_an_empty_city(self):
+        catalog = aqar_projects.load_projects(_BlockedSession(), 'جدة')
+        self.assertEqual(catalog['error'], 'blocked')
+        self.assertEqual(catalog['cards'], [])
+        result = aqar_projects.scan(
+            _BlockedSession(), 'جدة', pairs=[('سكني', 'بيع')])
+        self.assertEqual(result['error'], 'blocked')
+        self.assertEqual(result['rows'], [])
 
     def test_an_english_offer_gets_an_english_row_note(self):
         result = aqar_projects.scan(

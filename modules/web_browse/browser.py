@@ -266,6 +266,15 @@ def _result(url):
     return {'url': url, 'final_url': url, 'title': '', 'text': '', 'error': None}
 
 
+def _is_aqar_host(url):
+    """True for aqar.fm and its subdomains — the www sibling does not exist."""
+    try:
+        host = (urlparse(str(url or '').strip()).hostname or '').lower().rstrip('.')
+    except Exception:
+        return False
+    return host == 'aqar.fm' or host.endswith('.aqar.fm')
+
+
 def _apex_www_fallback(url):
     """The www<->apex sibling of `url`, or None when it has no such form.
 
@@ -823,8 +832,21 @@ class BrowserWorker:
         """Navigate and return the page's raw HTML (links included).
 
         Booking's destination resolution needs the hrefs on a content page,
-        which the readable-text extraction strips. Never raises.
+        which the readable-text extraction strips. Never raises. A refused
+        status or a bot-wall page is an error: a portal's block page used to
+        parse as an empty directory with no error at all. aqar gets one
+        same-host retry because its WAF can refuse a cold first navigation,
+        and its www sibling does not resolve.
         """
+        result = self._fetch_html_once(url, timeout)
+        if result.get('error') == 'blocked' and _is_aqar_host(url):
+            _browser_log(f'[BROWSER] aqar fetch blocked, retrying: {url}')
+            time.sleep(1)
+            self._page = None
+            result = self._fetch_html_once(url, timeout)
+        return result
+
+    def _fetch_html_once(self, url, timeout):
         result = {'url': str(url or ''), 'final_url': '', 'html': '',
                   'status': None, 'error': ''}
         try:
@@ -850,6 +872,15 @@ class BrowserWorker:
             result['html'] = page.content() or ''
         except Exception as exc:
             result['error'] = _nav_reason(exc)
+            return result
+        status = result.get('status')
+        head = str(result.get('html') or '')[:8000]
+        if status is not None and status >= 400:
+            result['error'] = ('blocked' if status in (401, 403, 429)
+                               else f'http_{status}')
+        elif ('You have been blocked' in head or 'تم حظرك' in head
+              or 'Just a moment' in head or 'Checking your browser' in head):
+            result['error'] = 'blocked'
         return result
 
     def open_urls(self, urls, timeout=BOOKING_TIMEOUT):
@@ -954,10 +985,23 @@ class BrowserWorker:
                 return result
             result = self._open_url_once(page, url, timeout)
         if result.get('error') == 'http_403':
-            fallback = _apex_www_fallback(url)
-            if fallback and fallback != url:
-                _browser_log(f'[BROWSER] http_403, retrying sibling host: {fallback}')
-                result = self._open_url_once(page, fallback, timeout)
+            if _is_aqar_host(url):
+                # aqar has no www sibling; one fresh navigation on the same
+                # host clears its intermittent cold-navigation refusal.
+                _browser_log(f'[BROWSER] aqar http_403, retrying same host: {url}')
+                time.sleep(1)
+                self._page = None
+                try:
+                    page = self._ensure_page()
+                except Exception as exc:
+                    result['error'] = _launch_reason(exc)
+                    return result
+                result = self._open_url_once(page, url, timeout)
+            else:
+                fallback = _apex_www_fallback(url)
+                if fallback and fallback != url:
+                    _browser_log(f'[BROWSER] http_403, retrying sibling host: {fallback}')
+                    result = self._open_url_once(page, fallback, timeout)
         elif (result.get('error') == 'timeout'
               and (hotel_stay.is_booking_hotel_url(url)
                    or booking_search.is_booking_search_url(url))):

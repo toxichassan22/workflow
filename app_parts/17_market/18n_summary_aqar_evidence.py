@@ -159,18 +159,22 @@ def _summary_aqar_evidence(payload, session, deadline=None):
         return None
     district = _aqar_district(payload)
     readings = []
+    errors = []
     for page_spec in pages:
         if deadline is not None and time.time() >= float(deadline):
+            errors.append('deadline_exceeded')
             break
         opened = session.open_url(page_spec['url'])
         opened = opened if isinstance(opened, dict) else {}
         if opened.get('error'):
+            errors.append(str(opened.get('error') or 'failed'))
             print(f"[MARKET SUMMARY] aqar page failed {page_spec['url']}: "
                   f"{opened.get('error')}")
             continue
         page = getattr(session, '_page', None)
         cards = _aqar_cards(page, opened, page_spec['url'])
         if not cards:
+            errors.append('empty_page')
             continue
         district_cards = [card for card in cards
                           if district and (
@@ -187,7 +191,21 @@ def _summary_aqar_evidence(payload, session, deadline=None):
             'city_only': chosen is cards and bool(district),
         })
     if not readings:
-        return None
+        reason = next((item for item in errors
+                       if item not in ('empty_page', 'deadline_exceeded')), '')
+        reason = reason or (errors[0] if errors else 'no_pages')
+        city = str((payload or {}).get('city') or '').strip()
+        block = '\n'.join([
+            _AQAR_BLOCK_START,
+            'source: عقار aqar.fm',
+            f'scope: {city}' + (f' — حي {district}' if district else ''),
+            'note: تعذر قراءة إعلانات عقار لهذا النطاق؛ هذه فجوة تغطية '
+            'وليست سوقًا فارغًا. لا تُستنتج أسعار من غياب الإعلانات.',
+            f'coverage_gap: {reason}',
+            _AQAR_BLOCK_END,
+        ])
+        return {'readings': [], 'rows': 0, 'block': block,
+                'coverage_gap': reason}
     return {
         'readings': readings,
         'rows': sum(len(item['cards']) for item in readings),
@@ -247,6 +265,15 @@ def _summary_aqar_evidence_into(payload, session, evidence_pool,
     result = _summary_aqar_evidence(payload, session, deadline=deadline)
     if not result:
         return None
+    if result.get('coverage_gap'):
+        payload['_summaryAqarGap'] = {
+            'reason': result['coverage_gap'],
+            'pages': len(pages),
+        }
+        print(f"[MARKET SUMMARY] aqar coverage gap "
+              f"reason={result['coverage_gap']!r} pages={len(pages)}",
+              flush=True)
+        return result
     try:
         for reading in result['readings']:
             content = (result['block']

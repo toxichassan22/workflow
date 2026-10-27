@@ -127,6 +127,27 @@ class SummaryAqarEvidenceTests(unittest.TestCase):
                 {'city': 'جدة'}, Session(), deadline=time.time() + 30)
         self.assertIsNone(result)
 
+    def test_a_blocked_aqar_sample_is_a_coverage_gap(self):
+        module = self.module
+
+        class Session:
+            def open_url(self, url):
+                return {'error': 'blocked'}
+
+        pages = [('https://sa.aqar.fm/x', 'aqar.fm — فلل بيع — جدة')]
+        with patch.object(module.market_study, 'summary_activity_profile',
+                          return_value=self._profile()), \
+                patch.object(module.market_study, '_payload_operations',
+                             return_value={'بيع'}), \
+                patch.object(module.market_study, '_listing_urls',
+                             return_value=iter(pages)):
+            result = module._summary_aqar_evidence(
+                {'city': 'جدة'}, Session(), deadline=time.time() + 30)
+        self.assertIsNotNone(result)
+        self.assertEqual(result['rows'], 0)
+        self.assertEqual(result['coverage_gap'], 'blocked')
+        self.assertIn('تعذر', result['block'])
+
     def test_evidence_lands_in_the_pool_and_suppresses_the_search_job(self):
         module = self.module
         added = []

@@ -106,10 +106,6 @@
   display: none !important;
 }
 
-#section-market-study .market-hotel-stars-empty {
-  visibility: hidden;
-}
-
 #section-market-study .market-benchmark-picker {
   min-width: 145px;
 }

@@ -30,6 +30,58 @@ _UNITS_RE = re.compile(r'الوحدات\s*(\d{1,6})')
 _ADDRESS_RE = re.compile(r'(?:شارع[^،\n]*،\s*)?(حي\s+[^،\n]+)'
                          r'(?:\s*،\s*([^،\n]+))?')
 
+# Client-selected property kinds → the words aqar prints in the card's own
+# type line. A card that names no recognised category is kept (unknown), and a
+# card that names a different category is dropped instead of being guessed.
+_UNIT_TYPE_CATEGORY_TOKENS = {
+    'استوديو': ('شقق', 'شقة', 'وحدات سكنية'),
+    'شقة': ('شقق', 'شقة', 'وحدات سكنية'),
+    'شقة دوبلكس': ('شقق', 'شقة', 'وحدات سكنية'),
+    'بنتهاوس': ('شقق', 'شقة', 'وحدات سكنية'),
+    'دور مستقل': ('أدوار', 'دور', 'شقق'),
+    'ملحق سكني': ('أدوار', 'دور', 'شقق'),
+    'فيلا مستقلة': ('فلل', 'فيلا', 'بيت'),
+    'فيلا دوبلكس': ('فلل', 'فيلا', 'بيت'),
+    'تاون هاوس': ('فلل', 'فيلا', 'بيت'),
+    'توين هاوس': ('فلل', 'فيلا', 'بيت'),
+    'قصر': ('فلل', 'فيلا', 'بيت'),
+    'بيت شعبي / بيت عربي': ('فلل', 'فيلا', 'بيت'),
+    'عمارة سكنية': ('شقق', 'شقة', 'عمار', 'وحدات سكنية'),
+    'مجمع سكني': ('شقق', 'شقة', 'وحدات سكنية'),
+    'سكن موظفين': ('شقق', 'شقة', 'وحدات سكنية'),
+    'سكن عمال': ('شقق', 'شقة', 'وحدات سكنية'),
+    'مكتب': ('مكاتب', 'مكتب'),
+    'برج مكاتب': ('مكاتب', 'مكتب', 'برج'),
+    'محل تجاري': ('محلات', 'محل'),
+    'معرض تجاري': ('معارض', 'معرض', 'محلات', 'محل'),
+    'مركز تجاري': ('محلات', 'محل', 'مركز تجاري'),
+    'مستودع تجاري': ('مستودعات', 'مستودع'),
+}
+_ALL_UNIT_CATEGORY_TOKENS = {
+    token for tokens in _UNIT_TYPE_CATEGORY_TOKENS.values()
+    for token in tokens
+}
+
+
+def _selected_category_tokens(unit_types):
+    tokens = set()
+    for item in unit_types or []:
+        tokens.update(_UNIT_TYPE_CATEGORY_TOKENS.get(
+            _text(item), ()))
+    return tokens
+
+
+def _card_matches_unit_types(card, wanted_tokens):
+    """True when the card names a selected kind, or names no recognised kind."""
+    if not wanted_tokens:
+        return True
+    text = _text((card or {}).get('type_line'))
+    if not text:
+        return True
+    stated = {token for token in _ALL_UNIT_CATEGORY_TOKENS if token in text}
+    return not stated or bool(stated & wanted_tokens)
+
+
 _FLAGS = {'مميز', 'متاح', 'على الخارطة', 'وحدات جاهزة', 'جديد', 'عرض خاص'}
 _RESIDENTIAL_HINTS = ('شقق', 'شقة', 'فلل', 'فيلا', 'أدوار', 'دور', 'عمارات',
                       'عمارة', 'استوديو', 'منازل', 'سكني', 'وحدات سكنية')
@@ -462,14 +514,46 @@ def parse_project_links(html):
     return links
 
 
+def _page_error(page):
+    """The reason a fetched page is not evidence: transport, refusal or block.
+
+    ``fetch_html`` already reports a refused status, but older session doubles
+    and cached responses may only carry the status — a 403 block page used to
+    parse as an empty directory with no error at all.
+    """
+    page = page if isinstance(page, dict) else {}
+    error = str(page.get('error') or '').strip()
+    if error:
+        return error
+    try:
+        status = int(page.get('status') or 0)
+    except (TypeError, ValueError):
+        status = 0
+    if status >= 400:
+        return 'blocked' if status in (401, 403, 429) else f'http_{status}'
+    html = str(page.get('html') or '')
+    head = html[:8000]
+    if ('You have been blocked' in head or 'تم حظرك' in head
+            or 'Just a moment' in head or 'Checking your browser' in head):
+        return 'blocked'
+    return ''
+
+
 def load_projects(session, city):
     """The city's project directory: named project links plus price cards."""
-    page = session.fetch_html(build_projects_url(city), timeout=45)
+    url = build_projects_url(city)
+    page = session.fetch_html(url, timeout=45)
+    error = _page_error(page)
+    if error:
+        # One fresh navigation on the same host clears aqar's intermittent
+        # cold-navigation refusal; a real block still comes back as an error.
+        page = session.fetch_html(url, timeout=45)
+        error = _page_error(page)
     html = (page or {}).get('html') or ''
     return {
-        'links': parse_project_links(html),
-        'cards': parse_cards(html),
-        'error': str((page or {}).get('error') or ''),
+        'links': parse_project_links(html) if not error else [],
+        'cards': parse_cards(html) if not error else [],
+        'error': error,
     }
 
 
@@ -491,12 +575,15 @@ def project_for_link(session, link, offer_lang='ar', cards=()):
 
 
 def scan(session, city, district='', pairs=(), limit=12,
-         budget_seconds=90, progress=None, offer_lang='ar', districts=()):
+         budget_seconds=90, progress=None, offer_lang='ar', districts=(),
+         unit_types=()):
     """Read the city's projects and complete up to ``limit`` of them.
 
     ``pairs`` are the requested (project_type, operation) Arabic pairs;
-    an empty set reads every mapped project. A district scope keeps only
-    projects whose own address names one of the client's districts — the
+    an empty set reads every mapped project. ``unit_types`` narrows the cards
+    to the property kinds the client picked: a card naming a different kind is
+    dropped, one naming no recognised kind is kept. A district scope keeps
+    only projects whose own address names one of the client's districts — the
     card's address when it prints one, otherwise the project page's — and is
     never widened to another district.
     """
@@ -512,11 +599,16 @@ def scan(session, city, district='', pairs=(), limit=12,
         if text and text not in scope_districts:
             scope_districts.append(text)
     wanted_keys = {_district_key(item) for item in scope_districts if _district_key(item)}
+    wanted_unit_tokens = _selected_category_tokens(unit_types)
     picked = []
+    dropped_unit_types = 0
     for card in cards:
         if not card.get('project_type') or not card.get('operation'):
             continue
         if wanted and (card['project_type'], card['operation']) not in wanted:
+            continue
+        if not _card_matches_unit_types(card, wanted_unit_tokens):
+            dropped_unit_types += 1
             continue
         card_district = _district_key(card.get('district'))
         # A district scope never widens. A card that names a different
@@ -552,9 +644,13 @@ def scan(session, city, district='', pairs=(), limit=12,
         rows.append(row)
         report(24, f'قراءة مشروع «{card["name"]}» من عقار '
                    f'({len(rows)} من {min(len(picked), limit_value)})...')
+    if dropped_unit_types:
+        report(24, f'استُبعد {dropped_unit_types} مشروعًا من عقار لنوع عقار '
+                   f'مختلف عن المختار...')
     return {
         'cards': len(cards),
         'matched': len(rows),
+        'filtered_unit_types': dropped_unit_types,
         'rows': rows,
         'card_rows': cards,
         'project_links': catalog['links'],

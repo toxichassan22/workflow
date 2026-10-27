@@ -233,12 +233,12 @@ class AqarListingUrlTests(unittest.TestCase):
                                                unit_types)]
 
         # No kind selected keeps the whole set for the project kind.
-        self.assertEqual(slugs(()), ['فلل-للبيع', 'شقق-للبيع', 'أدوار-للبيع'])
+        self.assertEqual(slugs(()), ['فلل-للبيع', 'شقق-للبيع'])
         self.assertEqual(slugs(['فيلا مستقلة']), ['فلل-للبيع'])
-        self.assertEqual(slugs(['شقة', 'دور مستقل']),
-                         ['شقق-للبيع', 'أدوار-للبيع'])
-        self.assertEqual(slugs(['مكتب'], 'تجاري', 'إيجار'),
-                         ['مكاتب-للإيجار'])
+        self.assertEqual(slugs(['شقة', 'دور مستقل']), ['شقق-للبيع'])
+        # The rent path for offices answers 404 on aqar (measured 2026-10-27).
+        self.assertEqual(slugs(['مكتب'], 'تجاري', 'إيجار'), [])
+        self.assertEqual(slugs(['مكتب'], 'تجاري', 'بيع'), ['مكاتب-للبيع'])
 
     def test_the_plan_reads_the_chosen_property_kinds(self):
         plan = market_study.build_source_plan(

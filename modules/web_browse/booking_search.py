@@ -49,7 +49,7 @@ def is_booking_search_url(url):
 
 
 def build_search_url(city, query='', check_in=None, check_out=None,
-                     adults=2, children=0, rooms=1, currency='SAR', stars=None,
+                     adults=2, children=0, rooms=1, currency='SAR',
                      dest_id='', dest_type='city', district_id=''):
     """Booking search-results URL for a city, a destination id and filters.
 
@@ -81,8 +81,6 @@ def build_search_url(city, query='', check_in=None, check_out=None,
         params['dest_id'] = str(dest_id)
         params['dest_type'] = str(dest_type or 'city')
     filters = []
-    if stars not in (None, ''):
-        filters.append(f'class={stars}')
     if district_id not in (None, ''):
         filters.append(f'di={district_id}')
     if filters:

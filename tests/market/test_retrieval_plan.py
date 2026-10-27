@@ -195,6 +195,20 @@ class BuildSourcePlanTests(unittest.TestCase):
         decoded = [unquote(entry['url']) for entry in plan]
         self.assertTrue(any('مكاتب-' in u for u in decoded))
 
+    def test_invalid_aqar_category_operations_are_never_planned(self):
+        # Measured 2026-10-27 from staging: أدوار-للبيع/للإيجار,
+        # مكاتب-للإيجار and مستودعات-للإيجار answer 404.
+        payload = {'projectType': 'متعدد الاستخدامات',
+                   'projectComponents': 'سكني، مكاتب، مستودعات',
+                   'city': 'جدة'}
+        urls = [unquote(entry['url']) for entry in
+                market_study.build_source_plan(payload)
+                if entry['purpose'] == 'listing']
+        self.assertTrue(urls)
+        self.assertFalse(any('أدوار-' in url for url in urls))
+        self.assertFalse(any('مكاتب-للإيجار' in url for url in urls))
+        self.assertFalse(any('مستودعات-للإيجار' in url for url in urls))
+
     def test_sale_only_project_skips_rent_listings(self):
         payload = {'projectType': 'سكني', 'city': 'الرياض',
                    'components': [{'useType': 'residential',

@@ -6,16 +6,16 @@ a breakfast-included/flexible rate or a higher room category for the same
 area, which is why the same stay could be reported ~20% above the price the
 owner compares against.
 
-The owner's comparison basis is the **original pre-discount room price** for
-the stay, exactly as the page prints it. Booking prints a taxes line beside
-the room price; in the Saudi view that line is charged on top of the printed
-figure, while a session outside Saudi Arabia is served prices with the
-property's taxes already folded in — the line then reads «شامل الضرائب
-والرسوم» and states no amount. The owner's decision (2026-10-26) is that the
-folded figure is kept **as printed**: dividing it back out by a fixed stack
-put a number on the row that a client reading their own view never sees. The
-discounted current price stays an informational value. This module reads the
-live DOM instead of asking a model:
+The owner's comparison basis is the **original pre-discount room price with
+the property's taxes excluded**. Booking prints a taxes line beside the room
+price; in the Saudi view that line is charged on top of the printed figure, so
+the printed original already excludes it, while a session outside Saudi Arabia
+is served prices with the property's taxes folded in — the line then reads
+«شامل الضرائب والرسوم» and may state the amount. An amount the page states is
+taken back out (owner decision 2026-10-27); a folded figure with no stated
+amount is kept as printed because there is nothing to subtract. The
+discounted current price stays an informational value, never the row price.
+This module reads the live DOM instead of asking a model:
 
 - ``## BOOKING_RATE ##`` carries that original price, the room area, the
   current discounted price (informational), the taxes line and the rate policy.
@@ -633,7 +633,7 @@ def wait_and_extract(page, url='', adults=2, retries=5, delay_ms=1000):
     return None
 
 
-def _print_rate_audit(rate, rows, url='', stars_raw=''):
+def _print_rate_audit(rate, rows, url=''):
     """One audit line per property page, naming the DOM field behind each figure.
 
     A table price has to be traceable to the field it came from: the chosen
@@ -657,10 +657,7 @@ def _print_rate_audit(rate, rows, url='', stars_raw=''):
         'price=' + str(rate.get('price')),
         'current=' + str(rate.get('current_price')),
         'tax_included=' + str(bool(rate.get('tax_included'))),
-        'stars=' + str(rate.get('hotel_stars') or 0),
     ]
-    if stars_raw:
-        parts.append('stars_src=' + repr(str(stars_raw)[:160]))
     print(' '.join(parts), flush=True)
 
 
@@ -756,11 +753,7 @@ def extract_booking_rate(page, url='', adults=2):
     rate['source_url'] = (requested if 'booking.com/hotel/' in requested
                           else (final_url or requested))
     rate['page_title'] = str(data.get('title') or '')
-    stars, stars_raw = _read_stars(page)
-    if stars:
-        rate['hotel_stars'] = stars
-    _print_rate_audit(rate, rows, rate.get('source_url'),
-                      stars_raw='' if stars else stars_raw)
+    _print_rate_audit(rate, rows, rate.get('source_url'))
     return rate
 
 
@@ -797,10 +790,10 @@ def format_rate_block(rate):
         + _range_text(rate.get('area_from'), rate.get('area_to')),
         'room_type_count: ' + str(rate.get('room_count') or ''),
         'price_basis: original pre-discount room price for the stay, rounded to '
-        'whole riyals, exactly as the page prints it; when the view folds the '
-        "property's taxes into the figure it prints (tax_included), that "
-        'printed total is the row figure and is not divided back out; the '
-        'discounted current price stays informational',
+        "whole riyals; the property's taxes are excluded — a figure that folds "
+        'them in and states the amount has that amount removed, and a figure '
+        'with the taxes added on top already excludes them; the discounted '
+        'current price stays informational',
         BOOKING_RATE_END,
     ]
     return '\n'.join(lines)

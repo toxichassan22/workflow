@@ -67,28 +67,20 @@ def normalize_comparison_types(value):
             continue
         raw_operation = (item.get('operation') or item.get('operations')
                          or item.get('operationType'))
-        raw_stars = item.get('stars') or item.get('hotelStars') or item.get('hotel_stars')
         if kind == 'hotel':
-            for raw_star in _split_multi_values(raw_stars):
-                try:
-                    stars = int(str(raw_star).translate(
-                        str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789')).strip())
-                except (TypeError, ValueError):
-                    continue
-                if stars < 1 or stars > 5:
-                    continue
-                key = f'hotel:{stars}'
-                if key in seen:
-                    continue
-                seen.add(key)
-                normalized.append({
-                    'key': key, 'type': kind, 'base': kind,
-                    'operation': 'hotel_operation', 'stars': stars,
-                    'label': f'فندقي - {stars} نجوم',
-                    'label_en': f'{stars}-star hotel',
-                    'search': f'فنادق مصنفة {stars} نجوم',
-                    'names': [], 'explicit': True,
-                })
+            # Stars are not a competitor dimension (owner decision 2026-10-27):
+            # a stored star pick collapses to the single hotel axis instead of
+            # multiplying the table into one axis per class.
+            if 'hotel' in seen:
+                continue
+            seen.add('hotel')
+            normalized.append({
+                'key': 'hotel', 'type': kind, 'base': kind,
+                'operation': 'hotel_operation', 'stars': '',
+                'label': 'فندقي', 'label_en': 'Hotel',
+                'search': 'فنادق',
+                'names': [], 'explicit': True,
+            })
         else:
             for raw_choice in _split_multi_values(raw_operation):
                 operation = _fold_choice(raw_choice)
@@ -259,32 +251,10 @@ def competitor_matches_comparison_axis(row, axis):
         return False
     project_type = _fold_choice(row.get('project_type') or row.get('projectType'))
     if axis.get('type') == 'hotel':
-        if not any(token in project_type for token in ('فندقي', 'فندق', 'hotel', 'hospitality')):
-            return False
-        raw_stars = (row.get('hotel_stars') or row.get('hotelStars')
-                     or row.get('star_rating') or row.get('stars'))
-        if not raw_stars:
-            text = _fold_choice(' '.join(str(row.get(key) or '')
-                                         for key in ('name', 'notes', 'classification')))
-            match = re.search(r'(?<!\d)([1-5])\s*(?:نجوم|star)', text)
-            raw_stars = match.group(1) if match else ''
-        star_text = str(raw_stars or '').translate(
-            str.maketrans('٠١٢٣٤٥٦٧٨٩', '0123456789'))
-        star_match = re.search(r'(?<!\d)([1-5])(?!\d)', star_text)
-        try:
-            actual_stars = int(star_match.group(1)) if star_match else int(star_text.strip())
-        except (TypeError, ValueError):
-            # A hotel inside the client's scope whose class never reached the
-            # page is still a competitor of that scope (owner decision
-            # 2026-10-27); it is kept with an empty class, never guessed.
-            return True
-        axis_stars = str(axis.get('stars') or '').strip()
-        if not axis_stars:
-            return True
-        try:
-            return actual_stars == int(float(axis_stars))
-        except (TypeError, ValueError):
-            return True
+        # Hotel competitors are no longer classified by stars; every hotel
+        # inside the selected scope belongs to the hotel axis.
+        return any(token in project_type
+                   for token in ('فندقي', 'فندق', 'hotel', 'hospitality'))
     wanted_type = axis.get('type')
     if wanted_type == 'residential':
         type_match = any(token in project_type for token in ('سكني', 'residential', 'housing'))
@@ -405,10 +375,9 @@ def filter_and_cap_competitors(rows, axes, limit_per_axis=5, offer_lang='ar',
         row['benchmarks'] = [benchmark_axis_label(chosen, offer_lang)]
         row['comparison_type'] = chosen['type']
         row['comparison_operation'] = chosen['operation']
-        # The class column belongs to the row's own page: an unknown class
-        # stays empty instead of being relabelled with the selected one.
-        row['hotel_stars'] = (str(row.get('hotel_stars') or '').strip()
-                              if chosen['type'] == 'hotel' else '')
+        # Stars are gone from the competitor study; clearing here also removes
+        # values carried by older stored rows.
+        row['hotel_stars'] = ''
         counts[chosen['key']] += 1
         seen_names.add(name_key)
         accepted.append(row)

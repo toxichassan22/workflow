@@ -37,10 +37,10 @@
           const hotel = item.type === 'hotel';
           const typeLabel = item.type === 'hotel' ? 'فندقي' : item.type === 'residential' ? 'سكني' : 'تجاري';
           const operationLabel = item.operation === 'sale' ? 'بيع' : item.operation === 'rent' ? 'إيجار' : '';
-          const label = hotel ? typeLabel + ' - ' + item.stars + ' نجوم' : typeLabel + ' - ' + operationLabel;
-          const labelEn = hotel ? item.stars + '-star hotel' : item.type + ' ' + (item.operation === 'sale' ? 'for sale' : 'for rent');
-          return { key: item.type + ':' + (item.stars || item.operation), base: item.type,
-            type: item.type, stars: item.stars, operation: item.operation,
+          const label = hotel ? typeLabel : typeLabel + ' - ' + operationLabel;
+          const labelEn = hotel ? 'Hotel' : item.type + ' ' + (item.operation === 'sale' ? 'for sale' : 'for rent');
+          return { key: hotel ? 'hotel' : item.type + ':' + item.operation, base: item.type,
+            type: item.type, operation: item.operation,
             label, labelEn, names: [] };
         });
       }
@@ -380,14 +380,10 @@
         : '') +
       marketCompetitorVerificationWarningHtml(tr);
       const typeValue = marketTranslateCompetitorValue(row.project_type);
-      const starsValue = String(row.hotel_stars || row.hotelStars || '');
-      const isHotel = /فندق|فندقي|hotel|hospitality/i.test(typeValue);
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
         '<td data-field="logo_cell"></td>' +
         '<td><select data-field="project_type">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_PROJECT_TYPES_EN : MARKET_PROJECT_TYPES, marketTranslateCompetitorValue(row.project_type)) + '</select></td>' +
-        '<td' + marketHotelStarsCellAttributes(isHotel) + '><select data-field="hotel_stars">' +
-        marketSelectHtml(['1', '2', '3', '4', '5'], starsValue) + '</select></td>' +
         '<td><select data-field="classification">' + marketSelectHtml(marketProjectIsEnglish() ? MARKET_COMPETITOR_CLASSIFICATIONS_EN : MARKET_COMPETITOR_CLASSIFICATIONS, marketTranslateCompetitorValue(row.classification)) + '</select></td>' +
         '<td data-field="benchmarks_cell">' + benchmarksHtml + '</td>' +
         '<td data-field="area_cell"></td>' +
@@ -408,9 +404,7 @@
       renderCompetitorPriceInputs(tr, row);
       tr.querySelector('[data-field="project_type"]')?.addEventListener('change', event => {
         const value = String(event.target.value || '');
-        const starsCell = tr.querySelector('[data-hotel-stars-cell]');
         tr.dataset.projectType = value;
-        setMarketHotelStarsCellApplicable(starsCell, /فندق|فندقي|hotel|hospitality/i.test(value));
         syncMarketCompetitorTypeTabs();
         persistMarketStudyFromDom();
       });
@@ -503,7 +497,6 @@
         id: tr.dataset.competitorId,
         name: read('name'),
         project_type: read('project_type'),
-        hotel_stars: read('hotel_stars'),
         area_mode,
         area_sqm: area_mode === 'fixed' ? area_cache.area_sqm : '',
         area_from: area_mode === 'range' ? area_cache.area_from : '',

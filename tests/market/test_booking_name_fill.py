@@ -222,7 +222,7 @@ class BookingNameFillTests(unittest.TestCase):
         row = {'name': 'Alpha Hotel', 'project_type': 'فندقي'}
         with self.app.app_context():
             filled = module._fill_from_candidate_pages(
-                session, row, 'جدة', 'جدة Jeddah', ('4',), ['Alpha Hotel'])
+                session, row, 'جدة', 'جدة Jeddah', ['Alpha Hotel'])
         self.assertTrue(filled)
         self.assertEqual(session.urls, [canonical])
         self.assertEqual(row['price_from'], '400')
@@ -254,7 +254,7 @@ class BookingNameFillTests(unittest.TestCase):
                 [row], {'city': 'جدة'}, {}, tenant_id=None)
         self.assertEqual(filled, 1)
         self.assertEqual(row['source_url'], hotel_url)
-        self.assertEqual(row['hotel_stars'], '5')
+        self.assertEqual(row['hotel_stars'], '')
         self.assertEqual(row['status'], 'قائم')
         self.assertEqual(row['classification'], 'مباشر')
         name_url = self.module.booking_search.build_search_url('WA Hotel')
@@ -367,23 +367,22 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(build.call_count, 2)
         self.assertEqual(len(seen['catalog']), 2)
 
-    def test_booking_fill_carries_stars_status_and_classification(self):
+    def test_booking_fill_carries_status_and_classification_without_stars(self):
         row = {'name': 'فندق اختبار', 'project_type': 'فندقي'}
         rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 900.0,
                 'area_from': 4.0, 'area_to': 5.0, 'hotel_stars': 5,
                 'current_price': 550.0}
         self.module._apply_rate(
-            row, rate, 'https://www.booking.com/hotel/sa/x.html',
-            target_stars={'4'})
-        self.assertEqual(row['hotel_stars'], '5')
+            row, rate, 'https://www.booking.com/hotel/sa/x.html')
+        self.assertEqual(row['hotel_stars'], '')
         self.assertEqual(row['status'], 'قائم')
-        self.assertEqual(row['classification'], 'غير مباشر')
+        self.assertEqual(row['classification'], 'مباشر')
         self.assertEqual(row['area_from'], '')
         self.assertEqual(row['area_to'], '')
         self.assertIn('غير منطقية', row['notes'])
         self.assertEqual(row['price_from'], '600')
         self.assertEqual(row['price_to'], '900')
-        self.assertIn('5 نجوم', row['notes'])
+        self.assertNotIn('نجوم', row['notes'])
 
     def test_market_payload_backfills_project_location_from_the_draft(self):
         draft = {'draft_data': {
@@ -433,46 +432,22 @@ class BookingNameFillTests(unittest.TestCase):
         self.assertEqual(filled, 0)
         self.assertIn('موقع المشروع', rows[0]['notes'])
 
-    def test_booking_fill_says_when_booking_has_no_star_rating(self):
-        row = {'name': 'فندق بلا تصنيف', 'project_type': 'فندقي'}
-        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 900.0,
-                'area_from': 30.0, 'area_to': 40.0}
-        self.module._apply_rate(
-            row, rate, 'https://www.booking.com/hotel/sa/no-stars.html')
-        self.assertIn('لا يعرض Booking تصنيف نجوم', row['notes'])
-
-    def test_a_fresh_star_read_corrects_a_row_from_an_earlier_pass(self):
-        # Booking once answered five stars for a one-star hotel; the row kept
-        # the value, and because an old row value used to win, every later pass
-        # left it there. The page's own class now wins for a row this pipeline
-        # wrote.
+    def test_booking_fill_clears_a_star_value_from_an_old_row(self):
+        # Stars are gone from the competitor study; a stored value from an
+        # older draft is cleared when the row is filled again.
         row = {'name': 'فندق اختبار', 'project_type': 'فندقي',
                'row_source': 'ai', 'hotel_stars': '5'}
         rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0,
                 'hotel_stars': 1}
         self.module._apply_rate(row, rate, 'https://x')
-        self.assertEqual(row['hotel_stars'], '1')
+        self.assertEqual(row['hotel_stars'], '')
+        self.assertNotIn('نجوم', row['notes'])
 
-    def test_a_manual_row_keeps_the_class_its_owner_typed(self):
-        row = {'name': 'فندق اختبار', 'project_type': 'فندقي',
-               'row_source': 'manual', 'hotel_stars': '5'}
-        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0,
-                'hotel_stars': 1}
-        self.module._apply_rate(row, rate, 'https://x')
-        self.assertEqual(row['hotel_stars'], '5')
-
-    def test_a_page_that_states_no_class_leaves_the_row_value_alone(self):
-        row = {'name': 'فندق اختبار', 'project_type': 'فندقي',
-               'row_source': 'ai', 'hotel_stars': '4'}
-        rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0}
-        self.module._apply_rate(row, rate, 'https://x')
-        self.assertEqual(row['hotel_stars'], '4')
-
-    def test_booking_fill_classifies_a_matching_star_class_as_direct(self):
+    def test_booking_fill_keeps_area_and_classification(self):
         row = {'name': 'فندق اختبار', 'project_type': 'فندقي'}
         rate = {'price': 600.0, 'price_from': 600.0, 'price_to': 600.0,
                 'area_from': 30.0, 'area_to': 40.0, 'hotel_stars': 4}
-        self.module._apply_rate(row, rate, 'https://x', target_stars={'4', '5'})
+        self.module._apply_rate(row, rate, 'https://x')
         self.assertEqual(row['classification'], 'مباشر')
         self.assertEqual(row['area_from'], '30')
         self.assertEqual(row['area_to'], '40')

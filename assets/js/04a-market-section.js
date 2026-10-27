@@ -106,7 +106,7 @@
           <div class="table-wrap">
             <table id="marketCompetitorsTable">
               <thead><tr>
-                <th>اسم المشروع</th><th>الشعار</th><th>نوع المنافس</th><th>النجوم</th><th>التصنيف</th><th data-benchmarks-col>يُقاس على</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
+                <th>اسم المشروع</th><th>الشعار</th><th>نوع المنافس</th><th>التصنيف</th><th data-benchmarks-col>يُقاس على</th><th>المساحة م²</th><th>الحالة</th><th>المصدر</th>
                 <th>نوع العملية</th><th>نوع السعر</th><th>القيمة (ر.س)</th><th></th>
               </tr></thead>
               <tbody></tbody>
@@ -301,19 +301,16 @@
         }
         let row = byType.get(type);
         if (!row) {
-          row = { type, operation: [], stars: [] };
+          row = { type, operation: [] };
           byType.set(type, row);
           rows.push(row);
         }
-        if (type === 'hotel') {
-          row.stars = [...new Set(row.stars.concat(marketComparisonValues(
-            item.stars ?? item.hotelStars ?? item.hotel_stars, ['1', '2', '3', '4', '5'])))];
-        } else {
+        if (type !== 'hotel') {
           row.operation = [...new Set(row.operation.concat(marketComparisonValues(
             item.operation ?? item.operations ?? item.operationType, ['sale', 'rent'])))];
         }
       });
-      if (hasEmptyRow) rows.push({ type: '', operation: [], stars: [] });
+      if (hasEmptyRow) rows.push({ type: '', operation: [] });
       return rows;
     }
 
@@ -322,25 +319,21 @@
         .map(row => ({
           type: row.querySelector('[data-comparison-field="type"]')?.value || '',
           operation: Array.from(row.querySelectorAll('[data-comparison-field="operation"]'))
-            .filter(option => option.checked).map(option => option.value),
-          stars: Array.from(row.querySelectorAll('[data-comparison-field="stars"]'))
             .filter(option => option.checked).map(option => option.value)
         }));
     }
 
     function collectMarketComparisonTypes() {
       return readMarketComparisonRows().filter(row =>
-        row.type === 'hotel' ? row.stars.some(value => /^[1-5]$/.test(value))
-          : ['residential', 'commercial'].includes(row.type)
-            && row.operation.some(value => ['sale', 'rent'].includes(value))
+        row.type === 'hotel'
+          || (['residential', 'commercial'].includes(row.type)
+              && row.operation.some(value => ['sale', 'rent'].includes(value)))
       );
     }
 
     function marketComparisonTypeRowHtml(item = {}, occupiedTypes = []) {
       const type = ['hotel', 'residential', 'commercial'].includes(item.type) ? item.type : '';
       const operations = marketComparisonValues(item.operation ?? item.operations, ['sale', 'rent']);
-      const stars = marketComparisonValues(
-        item.stars ?? item.hotelStars ?? item.hotel_stars, ['1', '2', '3', '4', '5']);
       const typeOptions = [
         '<option value="">--</option>',
         '<option value="hotel"' + (type === 'hotel' ? ' selected' : '') + '>فندقي</option>',
@@ -356,14 +349,9 @@
         '<label><input type="checkbox" data-comparison-field="operation" value="' + value + '"' +
         (operations.includes(value) ? ' checked' : '') + '><span>' + label + '</span></label>'
       ).join('');
-      const starOptions = [1, 2, 3, 4, 5].map(value =>
-        '<label><input type="checkbox" data-comparison-field="stars" value="' + value + '"' +
-        (stars.includes(String(value)) ? ' checked' : '') + '><span>' + value + ' نجوم</span></label>'
-      ).join('');
       return '<div class="market-comparison-type-row" data-comparison-row>' +
         '<div><label>نوع المقارنة</label><select data-comparison-field="type">' + typeOptions + '</select></div>' +
         '<div data-comparison-operation' + (type === 'residential' || type === 'commercial' ? '' : ' hidden') + '><label>نوع العملية</label><div class="market-comparison-multi-options">' + operationOptions + '</div></div>' +
-        '<div data-comparison-stars' + (type === 'hotel' ? '' : ' hidden') + '><label>تصنيف الفندق</label><div class="market-comparison-multi-options">' + starOptions + '</div></div>' +
         '<button type="button" class="btn ghost small" data-remove-comparison-type>حذف</button>' +
         '</div>';
     }
@@ -433,17 +421,10 @@
     function syncMarketComparisonRow(row) {
       const type = row.querySelector('[data-comparison-field="type"]')?.value || '';
       const operation = row.querySelector('[data-comparison-operation]');
-      const stars = row.querySelector('[data-comparison-stars]');
       const isOperation = type === 'residential' || type === 'commercial';
-      const isHotel = type === 'hotel';
       if (operation) {
         operation.hidden = !isOperation;
         if (!isOperation) operation.querySelectorAll('[data-comparison-field="operation"]')
-          .forEach(option => { option.checked = false; });
-      }
-      if (stars) {
-        stars.hidden = !isHotel;
-        if (!isHotel) stars.querySelectorAll('[data-comparison-field="stars"]')
           .forEach(option => { option.checked = false; });
       }
     }

@@ -92,6 +92,19 @@ class BookingRateSelectionTests(unittest.TestCase):
         self.assertEqual(parsed['price_from'], 350.0)
         self.assertEqual(parsed['price_to'], 350.0)
 
+    def test_block_basis_states_that_taxes_are_excluded(self):
+        rate = {
+            'price': 340.0, 'current_price': 289.0, 'taxes': 52.0,
+            'tax_included': True, 'currency': 'SAR',
+            'price_from': 340.0, 'price_to': 900.0,
+        }
+        block = booking_rooms.format_rate_block(rate)
+        self.assertIn('price_before_discount: 340', block)
+        basis = next(line for line in block.splitlines()
+                     if line.startswith('price_basis:'))
+        self.assertIn('taxes', basis)
+        self.assertNotIn('not divided back out', basis)
+
     def test_arabic_room_name_and_area_are_parsed(self):
         rate = booking_rooms.select_cheapest_rate(
             [_row('100_200_2_2_0', 245, 350, area='35 م²',

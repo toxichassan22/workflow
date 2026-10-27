@@ -84,18 +84,6 @@
       domRows.forEach(row => { row.hidden = !visibleRows.has(row); });
     }
 
-    function marketHotelStarsCellAttributes(isHotel) {
-      return ' data-hotel-stars-cell' + (isHotel
-        ? '' : ' class="market-hotel-stars-empty" aria-hidden="true"');
-    }
-
-    function setMarketHotelStarsCellApplicable(cell, isHotel) {
-      if (!cell) return;
-      cell.classList.toggle('market-hotel-stars-empty', !isHotel);
-      if (isHotel) cell.removeAttribute('aria-hidden');
-      else cell.setAttribute('aria-hidden', 'true');
-    }
-
     function marketBenchmarkPickerHtml(axes, selectedValues) {
       const selected = Array.from(new Set((Array.isArray(selectedValues) ? selectedValues : [])
         .map(value => String(value || '').trim()).filter(Boolean)));

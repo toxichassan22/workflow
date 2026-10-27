@@ -111,9 +111,6 @@ def _is_hotel_row(row):
                  or (row or {}).get('project_type') or '').casefold()
     if any(token in folded for token in _HOTEL_TOKENS):
         return True
-    if str((row or {}).get('hotel_stars')
-           or (row or {}).get('stars') or '').strip():
-        return True
     return str((row or {}).get('price_type') or '').strip() in (
         'سعر الليلة', 'نطاق أسعار الغرف', 'متوسط سعر الغرفة ADR',
         'الإيراد لكل غرفة RevPAR')
@@ -259,22 +256,6 @@ def _sane_area(value):
     return number if _AREA_MIN_SQM <= number <= _AREA_MAX_SQM else None
 
 
-def _target_hotel_stars(payload):
-    """The hotel star classes the client selected, as strings."""
-    stars = set()
-    try:
-        axes = market_study.normalize_comparison_types(
-            (payload or {}).get('comparisonTypes')
-            or (payload or {}).get('comparison_types') or [])
-    except Exception:
-        axes = []
-    for axis in axes:
-        if (str(axis.get('type') or '') == 'hotel'
-                and str(axis.get('stars') or '').strip()):
-            stars.add(str(axis['stars']))
-    return stars
-
-
 def _resolve_booking_names(rows, payload, data=None, tenant_id=None):
     """One text call maps each typed hotel name to Booking's own Latin name.
 
@@ -353,7 +334,7 @@ def _page_identity(title, url, variants, city_terms=''):
                for variant in variants or [])
 
 
-def _apply_rate(row, rate, url, target_stars=()):
+def _apply_rate(row, rate, url):
     price_from = rate.get('price_from')
     price_to = rate.get('price_to')
     if price_from is None and price_to is None:
@@ -372,38 +353,20 @@ def _apply_rate(row, rate, url, target_stars=()):
     area_to = _sane_area(raw_area_to)
     if area_from is None or area_to is None:
         area_from = area_to = None
-    stars_value = str(rate.get('hotel_stars') or '').strip()
-    if not (stars_value.isdigit() and 1 <= int(stars_value) <= 5):
-        stars_value = ''
-    target = {str(item) for item in (target_stars or ()) if str(item).strip()}
-    row_stars = str(row.get('hotel_stars') or '').strip()
-    if stars_value and str(row.get('row_source') or '') != 'manual':
-        # The page's own class is the authority for a row this pipeline wrote:
-        # a value carried over from an earlier pass used to win, which kept a
-        # wrong class in place forever (five stars left on a one-star hotel).
-        # A row the client typed keeps the class its owner entered.
-        effective_stars = stars_value
-    else:
-        effective_stars = row_stars or stars_value
     stay_label = hotel_stay.stay_nights_label_ar()
     note = (
         f'نطاق أسعار الغرف مقابل {stay_label} على Booking '
         f"({booking_rooms.note_basis_ar(rate.get('tax_included'), rate.get('taxes'))}): "
         f'{_money(price_from)} – {_money(price_to)} ر.س'
         + (f'؛ المساحات {_money(area_from)} – {_money(area_to)} م²'
-           if area_from is not None else '')
-        + (f'؛ التصنيف {stars_value} نجوم' if stars_value
-           else '؛ لا يعرض Booking تصنيف نجوم لهذا الفندق'))
+           if area_from is not None else ''))
     if raw_area_from is not None and area_from is None:
         note += '؛ المساحة المقروءة غير منطقية فلم تُسجل'
     row.update({
         'project_type': row.get('project_type') or 'فندقي',
         'operation_type': row.get('operation_type') or 'تشغيل فندقي',
-        'hotel_stars': effective_stars,
-        'classification': row.get('classification') or (
-            'غير مباشر'
-            if target and effective_stars and effective_stars not in target
-            else 'مباشر'),
+        'hotel_stars': '',
+        'classification': row.get('classification') or 'مباشر',
         'status': row.get('status') or 'قائم',
         'price_type': 'نطاق أسعار الغرف',
         'price_value': '',
@@ -426,7 +389,6 @@ def _apply_rate(row, rate, url, target_stars=()):
             'price_to': [url],
             'area_from': [url] if area_from is not None else [],
             'area_to': [url] if area_to is not None else [],
-            'hotel_stars': [url] if stars_value else [],
         },
     })
 
@@ -464,7 +426,7 @@ def _title_matches(title, name, city_terms=''):
 
 
 def _fill_from_candidate_pages(session, row, city_ar, city_terms='',
-                               target_stars=(), variants=None):
+                               variants=None):
     """Open the searched Booking pages and accept the one whose own title, or
     whose search title together with Booking's URL slug, names the hotel.
 
@@ -526,7 +488,7 @@ def _fill_from_candidate_pages(session, row, city_ar, city_terms='',
         if isinstance(rate, dict) and rate.get('price') is not None:
             rate_seen = True
             if identity:
-                _apply_rate(row, rate, url, target_stars=target_stars)
+                _apply_rate(row, rate, url)
                 return True
     if identity_seen:
         row['notes'] = ('صفحة الفندق على Booking.com لا تُظهر أسعارًا '
@@ -681,7 +643,6 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
     lo, hi = band if isinstance(band, (tuple, list)) and len(band) == 2 else (12, 48)
     total = max(1, len(targets))
     catalog = list(catalog or [])
-    target_stars = _target_hotel_stars(payload)
     deadline = time.time() + float(budget or NAME_FILL_BUDGET_SECONDS)
     filled = [0]
     done = [0]
@@ -745,8 +706,7 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                 url = str((card or {}).get('url') or '').strip()
                 if not url:
                     if _fill_from_candidate_pages(
-                            session, row, city_ar, city_terms, target_stars,
-                            variants):
+                            session, row, city_ar, city_terms, variants):
                         with lock:
                             filled[0] += 1
                     else:
@@ -768,8 +728,7 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                               f'name={row.get("name")!r} url={url[:120]!r} '
                               f'title={title[:80]!r}', flush=True)
                         if _fill_from_candidate_pages(
-                                session, row, city_ar, city_terms,
-                                target_stars, variants):
+                                session, row, city_ar, city_terms, variants):
                             with lock:
                                 filled[0] += 1
                         else:
@@ -778,7 +737,7 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                                 'لم تُكتب بيانات.'))
                     elif (isinstance(rate, dict)
                           and rate.get('price') is not None):
-                        _apply_rate(row, rate, url, target_stars=target_stars)
+                        _apply_rate(row, rate, url)
                         with lock:
                             filled[0] += 1
                     else:
@@ -790,8 +749,7 @@ def _fill_rows(targets, payload, data, tenant_id, budget,
                                       if isinstance(retry, dict) else None)
                         if (isinstance(retry_rate, dict)
                                 and retry_rate.get('price') is not None):
-                            _apply_rate(row, retry_rate, url,
-                                        target_stars=target_stars)
+                            _apply_rate(row, retry_rate, url)
                             with lock:
                                 filled[0] += 1
                         else:

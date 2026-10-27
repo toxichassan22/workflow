@@ -47,6 +47,12 @@ def _start_aqar_projects_scan(payload, axes, report=None, deadline=None,
             if text and text not in districts:
                 districts.append(text)
     district = districts[0] if districts else ''
+    unit_types = []
+    picked_types = scope.get('unit_types') if isinstance(scope.get('unit_types'), list) else []
+    for item in picked_types:
+        text = str(item or '').strip()
+        if text and text not in unit_types:
+            unit_types.append(text)
     holder = {'rows': [], 'result': {}, 'error': ''}
 
     def _worker():
@@ -58,6 +64,7 @@ def _start_aqar_projects_scan(payload, axes, report=None, deadline=None,
                 result = aqar_projects.scan(
                     session, city, district=district, pairs=pairs,
                     districts=tuple(districts),
+                    unit_types=tuple(unit_types),
                     limit=_AQAR_PROJECT_LIMIT,
                     budget_seconds=_AQAR_SCAN_BUDGET_SECONDS,
                     progress=report, offer_lang=offer_lang)
@@ -78,7 +85,7 @@ def _start_aqar_projects_scan(payload, axes, report=None, deadline=None,
                               daemon=True)
     thread.start()
     return {'thread': thread, 'holder': holder, 'district': district,
-            'districts': districts}
+            'districts': districts, 'unit_types': unit_types}
 
 
 def _await_aqar_projects_scan(handle, timeout=60):
@@ -92,6 +99,8 @@ def _await_aqar_projects_scan(handle, timeout=60):
     result = holder.get('result') or {}
     print(f'[MARKET STUDY] aqar projects cards={result.get("cards", 0)} '
           f'matched={result.get("matched", 0)} rows={len(rows)} '
+          f'unit_types={result.get("filtered_unit_types", 0)} '
+          f'districts={handle.get("districts") or []!r} '
           f'error={holder.get("error") or result.get("error") or ""!r}',
           flush=True)
     return rows

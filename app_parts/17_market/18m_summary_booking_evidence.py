@@ -62,8 +62,7 @@ def _summary_booking_block(rows, note, payload):
         name = str(row.get('name') or '').strip()
         if not name:
             continue
-        stars = str(row.get('hotel_stars') or '').strip()
-        lines.append(f'[{index}] {name}' + (f' ({stars} نجوم)' if stars else ''))
+        lines.append(f'[{index}] {name}')
         lines.append(f'price_per_night_sar: {_summary_booking_price_text(row)}')
         area = _summary_booking_area_text(row)
         if area:
