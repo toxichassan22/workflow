@@ -52,6 +52,7 @@ FRONTEND_CSS_ORDER = (
     'project-form/05b_market_study_tabs.css',
     'project-form/06_visual_concept_plans.css',
     'project-form/07_section_change_history.css',
+    'project-form/08_live_collab.css',
 )
 FRONTEND_JS_ORDER = (
     '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',

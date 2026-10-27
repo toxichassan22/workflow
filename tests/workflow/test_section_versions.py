@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -329,6 +330,45 @@ class SectionVersionApiTests(unittest.TestCase):
         live = client.get('/api/project-draft', headers=self.headers()).get_json()['draft']
         self.assertEqual(live['draft_data'].get('project_name'), 'برج المشرق')
         self.assertNotEqual(second['id'], third['id'])
+
+    def test_restore_refuses_to_write_over_a_save_that_landed_meanwhile(self):
+        """The restore rebuilds a section from the draft it just read.
+
+        A save that lands in that window is the overwrite this workflow exists
+        to stop: the restore must answer a conflict instead of writing the
+        older state over the newer one.
+        """
+        client = self.app.test_client()
+        first = client.post('/api/project-draft/section-version',
+                            headers=self.headers(),
+                            json={'sectionKey': 'basic'}).get_json()['version']
+        client.post('/api/project-draft/section-version/decision', headers=self.headers(), json={
+            'versionId': first['id'], 'decision': 'approved'})
+        draft = client.get('/api/project-draft', headers=self.headers()).get_json()['draft']
+
+        original_save = db.save_project_draft
+        state = {'bumped': False}
+
+        def racy_save(*args, **kwargs):
+            # Another session saves between the route's read and its write.
+            if not state['bumped']:
+                state['bumped'] = True
+                conn = db.get_db()
+                conn.execute('UPDATE project_drafts SET revision = revision + 1 WHERE id = ?',
+                             (draft['id'],))
+                conn.commit()
+            return original_save(*args, **kwargs)
+
+        with mock.patch.object(db, 'save_project_draft', racy_save):
+            refused = client.post('/api/project-draft/section-version/restore',
+                                  headers=self.headers(), json={'versionId': first['id']})
+        self.assertEqual(refused.status_code, 409, refused.get_json())
+        self.assertEqual(refused.get_json()['error_code'], 'DRAFT_REVISION_CONFLICT')
+
+        history = client.get('/api/project-draft/section-versions?sectionKey=basic',
+                             headers=self.headers()).get_json()['versions']
+        self.assertEqual([item['version_number'] for item in history], [1],
+                         'a refused restore must not leave a version behind')
 
     def test_legacy_toggle_still_works_without_versions(self):
         client = self.app.test_client()

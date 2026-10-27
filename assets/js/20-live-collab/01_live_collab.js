@@ -24,26 +24,28 @@ const LIVE_COLLAB_HEARTBEAT_MS = 3000;
 const LIVE_COLLAB_SNAPSHOT_MS = 90000;
 const LIVE_COLLAB_SNAPSHOT_UPDATES = 120;
 const LIVE_COLLAB_PRESENCE_TTL_MS = 20000;
+// The server drops a presence row after 20 seconds. An open tab therefore has
+// to repeat "still here" while the person reads or thinks instead of typing,
+// or they vanish from the others' screen mid-session.
+const LIVE_COLLAB_PRESENCE_HEARTBEAT_MS = 10000;
 
 let liveCollabSession = null;
+let liveCollabClientIdValue = '';
 
 function liveCollabEnabled() {
   return typeof Y !== 'undefined' && Y && typeof Y.Doc === 'function';
 }
 
+// One identity per open page. This used to be kept in sessionStorage, but a
+// duplicated tab inherits that storage: both tabs then carried the same id,
+// presence excludes the caller by that id, and two windows of one account
+// could never see each other.
 function liveCollabClientId() {
-  const key = 'landloom_live_client_id';
-  try {
-    const stored = sessionStorage.getItem(key);
-    if (stored) return stored;
-    const created = (typeof crypto !== 'undefined' && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : ('client-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
-    sessionStorage.setItem(key, created);
-    return created;
-  } catch (e) {
-    return 'client-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
-  }
+  if (liveCollabClientIdValue) return liveCollabClientIdValue;
+  liveCollabClientIdValue = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : ('client-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  return liveCollabClientIdValue;
 }
 
 function liveCollabBytesToBase64(bytes) {
@@ -218,6 +220,9 @@ async function liveCollabLoadInitialState(session) {
   } catch (e) {
     liveCollabBindFields();
   }
+  // Announce this tab at once: "who has the file open" must not wait for the
+  // first keystroke.
+  liveCollabFlush(true);
   liveCollabSchedulePoll(LIVE_COLLAB_ACTIVE_POLL_MS);
 }
 
@@ -452,22 +457,74 @@ function liveCollabScheduleFlush() {
   }, LIVE_COLLAB_FLUSH_MS);
 }
 
+// A field the person is working in, whether or not it carries a CRDT text.
+// Numbers, dropdowns and dates are not live-synced (their value is not a text
+// being typed), but "who is on this field" still has to be visible.
+function liveCollabPresenceEligible(input) {
+  if (!input || !input.dataset || !input.dataset.key) return false;
+  const tag = (input.tagName || '').toUpperCase();
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (tag !== 'INPUT') return false;
+  const type = (input.type || 'text').toLowerCase();
+  return ['hidden', 'file', 'button', 'submit', 'reset', 'image'].indexOf(type) < 0;
+}
+
 function liveCollabCurrentPresence(session) {
   const active = typeof document !== 'undefined' ? document.activeElement : null;
   let fieldKey = '';
   let sectionKey = '';
   let caretStart = null;
   let caretEnd = null;
-  if (active && active.dataset && session.bindings.has(active.dataset.key)) {
+  if (active && session.bindings.has(active.dataset && active.dataset.key)) {
     fieldKey = active.dataset.key;
     caretStart = typeof active.selectionStart === 'number' ? active.selectionStart : null;
     caretEnd = typeof active.selectionEnd === 'number' ? active.selectionEnd : caretStart;
+  } else if (liveCollabPresenceEligible(active)) {
+    // The field is read by the form but has no text session (a number or a
+    // dropdown): report it so the others see which field this person is on.
+    fieldKey = active.dataset.key;
   }
-  if (active && typeof active.closest === 'function') {
+  if (fieldKey && active && typeof active.closest === 'function') {
     const section = active.closest('.tenant-form-section');
     if (section && section.dataset) sectionKey = section.dataset.section || '';
   }
   return { fieldKey, sectionKey, caretStart, caretEnd };
+}
+
+// The visible name of the field, so the rail says what the person is working
+// on instead of only which section they are in.
+function liveCollabFieldLabel(fieldKey) {
+  const key = String(fieldKey || '');
+  if (!key || typeof document === 'undefined' || !document.querySelector) return '';
+  let input = null;
+  try {
+    input = document.querySelector('#tenantProjectForm [data-key="'
+      + key.replace(/["\\]/g, '') + '"]');
+  } catch (e) {
+    input = null;
+  }
+  if (!input || !input.parentElement || !input.parentElement.querySelector) return '';
+  const label = input.parentElement.querySelector('label');
+  const text = label && label.textContent ? String(label.textContent).trim() : '';
+  return text.split('\n')[0].trim().slice(0, 60);
+}
+
+function liveCollabPresenceLine(item) {
+  const name = String((item && item.user_name) || '').trim();
+  if (!name) return '';
+  const field = liveCollabFieldLabel(item.field_key || '');
+  const section = field ? '' : liveCollabSectionLabel(item.section_key || '');
+  return [name, field || section].filter(Boolean).join(' — ');
+}
+
+// While the tab is on screen, repeat the presence so a name does not expire
+// just because its owner is reading. A hidden tab stops saying anything, which
+// is what "who has the file open right now" should mean.
+function liveCollabPresenceHeartbeatDue(session, now) {
+  if (!session || session.stopped) return false;
+  if (typeof document === 'undefined') return false;
+  if (document.visibilityState === 'hidden') return false;
+  return (Number(now) - (session.lastPresenceSentAt || 0)) >= LIVE_COLLAB_PRESENCE_HEARTBEAT_MS;
 }
 
 async function liveCollabFlush(forcePresence) {
@@ -605,6 +662,9 @@ async function liveCollabPoll() {
     session.pollInFlight = false;
   }
   if (session.stopped) return;
+  if (liveCollabPresenceHeartbeatDue(session, Date.now())) {
+    liveCollabFlush(true);
+  }
   if (hasMore) {
     liveCollabSchedulePoll(50);
     return;
@@ -666,10 +726,8 @@ function liveCollabRenderRail(entries) {
   }
   const lines = [];
   entries.forEach(item => {
-    const name = String(item.user_name || '').trim();
-    if (!name) return;
-    const label = liveCollabSectionLabel(item.section_key || '');
-    const line = label ? (name + ' — ' + label) : name;
+    const line = liveCollabPresenceLine(item);
+    if (!line) return;
     if (lines.indexOf(line) < 0) lines.push(line);
   });
   rail.textContent = lines.join('، ');

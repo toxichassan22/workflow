@@ -20,9 +20,35 @@ const moduleSource = fs.readFileSync(
 const hostEncoder = new TextEncoder();
 const hostDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
+// A page identity must never come from sessionStorage: a duplicated tab
+// inherits that storage, so both tabs looked like one editor and neither could
+// see the other. Touching it throws, and the client-id test fails loudly.
+function throwingSessionStorage() {
+  const refuse = () => {
+    throw new Error('the live client id must not be kept in sessionStorage');
+  };
+  return { getItem: refuse, setItem: refuse, removeItem: refuse };
+}
+
+function stubDocument() {
+  return {
+    visibilityState: 'visible',
+    activeElement: null,
+    hasFocus: () => true,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    getElementById: () => null,
+    createElement: () => ({ style: {}, appendChild() {}, classList: { add() {}, remove() {} } }),
+    body: { appendChild() {} },
+    addEventListener() {},
+  };
+}
+
 const context = {
   console, setTimeout, clearTimeout, btoa, atob,
   window: {},
+  sessionStorage: throwingSessionStorage(),
+  document: stubDocument(),
   __hostEncode: value => Array.from(hostEncoder.encode(value)),
   __hostDecode: bytes => hostDecoder.decode(Uint8Array.from(bytes || [])),
   __hostRandom: length => Array.from(require('node:crypto').randomBytes(length)),
@@ -77,8 +103,14 @@ testTextDiff();
 testCaretTransform();
 testFieldEligibility();
 testConcurrentTypingConverges();
+testClientIdIsPerPage();
+testPresenceCoversEveryEditableField();
+testPresenceFollowsTheFocusedField();
+testPresenceHeartbeatWhileTheTabIsOpen();
+testPresenceLineNamesTheField();
+testPresenceIsWiredIntoTheLoops();
 console.log('Live collaboration harness passed: bytes, diff, caret, field eligibility,'
-  + ' concurrent typing.');
+  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text.');
 
 function testRoundTripBytes() {
   const bytes = new Uint8Array([0, 1, 2, 250, 255]);
@@ -130,6 +162,112 @@ function testFieldEligibility() {
     readOnly: false,
     closest: () => ({ classList: { contains: () => false } }),
   }), false);
+}
+
+function loadPageContext() {
+  const page = {
+    console, setTimeout, clearTimeout, btoa, atob, window: {},
+    sessionStorage: throwingSessionStorage(),
+    document: stubDocument(),
+  };
+  vm.createContext(page);
+  vm.runInContext(moduleSource, page);
+  return page;
+}
+
+function testClientIdIsPerPage() {
+  const mine = context.liveCollabClientId();
+  assert.equal(context.liveCollabClientId(), mine,
+    'one page keeps one identity for as long as it is open');
+  assert.match(mine, /^[A-Za-z0-9_-]{8,80}$/, 'the server only accepts this shape');
+  const otherPage = loadPageContext();
+  assert.notEqual(otherPage.liveCollabClientId(), mine,
+    'a second tab of the same account is a different editor');
+}
+
+function testPresenceCoversEveryEditableField() {
+  const field = (tagName, type, key) => ({ tagName, type, dataset: key ? { key } : {} });
+  assert.equal(context.liveCollabPresenceEligible(field('INPUT', 'number', 'land_area')), true,
+    'a financial figure belongs in "who is on this field"');
+  assert.equal(context.liveCollabPresenceEligible(field('SELECT', undefined, 'project_type')), true);
+  assert.equal(context.liveCollabPresenceEligible(field('TEXTAREA', undefined, 'project_idea')), true);
+  assert.equal(context.liveCollabPresenceEligible(field('INPUT', 'text', 'project_name')), true);
+  assert.equal(context.liveCollabPresenceEligible(field('INPUT', 'hidden', 'secret')), false);
+  assert.equal(context.liveCollabPresenceEligible(field('INPUT', 'file', 'receipt')), false);
+  assert.equal(context.liveCollabPresenceEligible(field('INPUT', 'number', '')), false);
+  assert.equal(context.liveCollabPresenceEligible(null), false);
+}
+
+function testPresenceFollowsTheFocusedField() {
+  const session = { bindings: new Map(), stopped: false };
+  context.document.activeElement = {
+    tagName: 'SELECT',
+    dataset: { key: 'project_type' },
+    closest: () => ({ dataset: { section: 'basic' } }),
+  };
+  const dropdown = context.liveCollabCurrentPresence(session);
+  assert.equal(dropdown.fieldKey, 'project_type', 'a dropdown reports its own field');
+  assert.equal(dropdown.sectionKey, 'basic');
+  assert.equal(dropdown.caretStart, null, 'a dropdown has no caret to draw');
+
+  const input = {
+    tagName: 'INPUT', type: 'text', value: 'اسم', selectionStart: 2, selectionEnd: 4,
+    dataset: { key: 'project_name' },
+    closest: () => ({ dataset: { section: 'basic' } }),
+  };
+  session.bindings.set('project_name', { input });
+  context.document.activeElement = input;
+  const typing = context.liveCollabCurrentPresence(session);
+  assert.equal(typing.fieldKey, 'project_name');
+  assert.equal(typing.caretStart, 2);
+  assert.equal(typing.caretEnd, 4);
+
+  context.document.activeElement = null;
+  const idle = context.liveCollabCurrentPresence(session);
+  assert.equal(idle.fieldKey, '');
+  assert.equal(idle.sectionKey, '');
+}
+
+function testPresenceHeartbeatWhileTheTabIsOpen() {
+  const heartbeat = vm.runInContext('LIVE_COLLAB_PRESENCE_HEARTBEAT_MS', context);
+  const ttl = vm.runInContext('LIVE_COLLAB_PRESENCE_TTL_MS', context);
+  assert.ok(heartbeat < ttl, 'the heartbeat must fire before the presence expires');
+
+  const session = { stopped: false, lastPresenceSentAt: 1000 };
+  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 5000), false,
+    'a just-sent presence is not repeated');
+  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 11000), true,
+    'an open, idle tab has to say it is still here');
+
+  context.document.visibilityState = 'hidden';
+  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 11000), false,
+    'a hidden tab stops reporting');
+  context.document.visibilityState = 'visible';
+
+  assert.equal(context.liveCollabPresenceHeartbeatDue({ stopped: true }, 11000), false);
+  assert.equal(context.liveCollabPresenceHeartbeatDue(null, 11000), false);
+}
+
+function testPresenceLineNamesTheField() {
+  const originalQuery = context.document.querySelector;
+  context.document.querySelector = selector => (String(selector).indexOf('[data-key="project_name"]') >= 0
+    ? { parentElement: { querySelector: () => ({ textContent: ' اسم المشروع ' }) } }
+    : null);
+  assert.equal(context.liveCollabPresenceLine({
+    user_name: 'ليلى', field_key: 'project_name', section_key: 'basic',
+  }), 'ليلى — اسم المشروع', 'the rail names the field, not just the section');
+  assert.equal(context.liveCollabPresenceLine({ user_name: 'ليلى' }), 'ليلى',
+    'someone with no focused field is still named');
+  assert.equal(context.liveCollabPresenceLine({ user_name: '', field_key: 'project_name' }), '',
+    'an unnamed row draws nothing');
+  context.document.querySelector = originalQuery;
+}
+
+function testPresenceIsWiredIntoTheLoops() {
+  assert.ok(moduleSource.includes('liveCollabPresenceHeartbeatDue(session, Date.now())'),
+    'the poll has to repeat the presence on its own');
+  assert.ok(/liveCollabFlush\(true\);\s*\n\s*liveCollabSchedulePoll/.test(moduleSource),
+    'a freshly opened project announces its editor before the first keystroke');
 }
 
 function testConcurrentTypingConverges() {

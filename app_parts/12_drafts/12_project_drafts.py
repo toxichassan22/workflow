@@ -611,7 +611,18 @@ def api_restore_section_version():
         db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), live,
             None, draft.get('status') or 'draft', draft_id=draft['id'],
+            # The restore rebuilds the section from the draft it read a moment
+            # ago. A save that landed in between must stop it instead of being
+            # written over with the older state.
+            expected_revision=int(draft.get('revision') or 0),
         )
+    except db.DraftRevisionConflict as conflict:
+        return jsonify({
+            'error': 'تغيّرت المسودة أثناء الاسترجاع — أعد المحاولة',
+            'error_code': 'DRAFT_REVISION_CONFLICT',
+            'expectedRevision': conflict.expected_revision,
+            'currentRevision': conflict.current_revision,
+        }), 409
     except db.DraftLocked as locked:
         return _draft_locked_response(locked.status)
     except db.DraftOverwriteRefused:
