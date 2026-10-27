@@ -449,7 +449,7 @@ test('no browsed evidence is hidden as a warning while verification status stays
     verifyProviderError: result.competitors[0].verify_provider_error
   } };
 
-  assert.equal(context.marketCompetitorVerificationWarningHtml(row), '');
+  assert.ok(!source.includes('تعذر تشغيل بحث التحقق'));
   assert.equal(row.dataset.verifyState, 'search_not_run');
   assert.equal(row.dataset.verifyProviderError, 'browse_agent: no browsed evidence');
 
@@ -458,16 +458,6 @@ test('no browsed evidence is hidden as a warning while verification status stays
   assert.equal(inputs.marketCompetitorsNote.textContent, 'تم استبدال الجدول بـ 1 منافس');
   assert.ok(context.toasts.includes('تم استبدال جدول المنافسين بالنتيجة الجديدة'));
   assert.ok(!context.toasts.includes('اكتمل التحديث بنتيجة جزئية — التفاصيل موضحة أسفل الجدول'));
-});
-
-test('a real competitor verification timeout remains visible', async () => {
-  const { context } = fixture();
-  const row = { dataset: {
-    verifyState: 'search_not_run', verifyProviderError: 'deadline_exceeded'
-  } };
-  const warning = context.marketCompetitorVerificationWarningHtml(row);
-  assert.match(warning, /تعذر تشغيل بحث التحقق لهذا المنافس/);
-  assert.match(warning, /deadline_exceeded/);
 });
 
 test('a still-running poll result shows status text and keeps the memory', async () => {

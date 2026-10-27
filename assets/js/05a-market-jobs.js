@@ -236,8 +236,7 @@
         persistMarketStudyFromDom();
         const extra = res.expansionNote || res.notes || '';
         const conflictCount = Array.isArray(res.conflictWarnings) ? res.conflictWarnings.length : 0;
-        const onlyNoEvidenceVerifyFailure = marketCompetitorOnlyNoEvidenceVerifyFailure(res);
-        const showPartialStatus = Boolean(res.partial) && !onlyNoEvidenceVerifyFailure;
+        const showPartialStatus = Boolean(res.partial) && (Number(res.missingPriceCount) > 0 || Number(res.noEvidenceCount) > 0);
         const filledCount = Number(res.filledCount ?? res.updated ?? 0);
         const doneNote = resumed
           ? WFT('market.job_done_count', 'اكتمل تحديث المنافسين — {n} في الجدول', { n: (res.competitors || []).length })
@@ -247,11 +246,8 @@
         if (note) {
           note.textContent = doneNote +
             (conflictCount ? WFT('market.note_conflicts_kept', ' — تم الإبقاء على {n} قيمة حالية متعارضة', { n: conflictCount }) : '') +
-            (res.searchVerified === false ? WFT('market.note_search_not_run', ' — لم يعمل البحث في الويب؛ الروابط معروضة كغير موثقة للمراجعة') : '') +
             ((res.noEvidenceCount || 0) ? WFT('market.note_no_evidence', ' — {n} منافس لم تظهر أسماؤهم في نتائج البحث', { n: res.noEvidenceCount }) : '') +
-            ((res.searchNotRunCount && !onlyNoEvidenceVerifyFailure) ? WFT('market.note_search_failed', ' — تعذر تنفيذ البحث عن {n} منافس', { n: res.searchNotRunCount }) : '') +
             ((res.missingPriceCount || 0) ? WFT('market.note_missing_price', ' — {n} منافس بلا سعر موثق', { n: res.missingPriceCount }) : '') +
-            (res.providerError && !onlyNoEvidenceVerifyFailure ? WFT('market.note_provider_error', ' — خطأ مزود البحث: {err}', { err: res.providerError }) : '') +
             (extra ? ' — ' + extra : '');
         }
         toast(showPartialStatus

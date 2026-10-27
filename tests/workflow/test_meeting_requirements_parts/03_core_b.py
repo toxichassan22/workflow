@@ -387,29 +387,73 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         app_source = read_module_source('app.py')
         self.assertEqual(app_source.count("project_data['_map_marker_side'] = _generation_map_marker_side(images, project_data)"), 2)
 
-    def test_map_summary_structure_is_repaired_without_rejecting_the_slide(self):
+    def test_site_analysis_page_is_designed_without_a_model_call(self):
         engine = self.application_module.slide_engine
-        responses = iter([
-            '<div class="slide" style="background:#fff;color:#111"><img src="##MAP_OVERVIEW##"><p>ملخص الموقع</p></div>',
-        ])
-        prompts = []
+        calls = []
 
         def generated(_system, user_message, **_kwargs):
-            prompts.append(user_message)
-            return {'choices': [{'message': {'content': next(responses)}}]}
+            calls.append(user_message)
+            return {'choices': [{'message': {
+                'content': '<div class="slide" style="background:#fff;color:#111">'
+                           '<img src="##MAP_OVERVIEW##"><p>ملخص الموقع</p></div>'}}]}
 
+        project = {'site_analysis': 'ملخص الموقع الجغرافي المعتمد',
+                   '_map_marker_side': 'right'}
         html = engine.generate_single_slide(
             'system', {'title': 'ملخص الموقع', 'type': 'content', 'section_key': 'location',
                        'content_source': 'site_analysis', 'image_tokens': ['##MAP_OVERVIEW##']},
-            3, 5, {'primary_color': '#123456'}, generated,
-            project_data={'site_analysis': 'ملخص الموقع', '_map_marker_side': 'right'})
+            3, 5, {'primary_color': '#123456'}, generated, project_data=project)
+        # The approved reading is a designed page now — no model call, no spend,
+        # and no paragraph dropped onto a blank slide.
+        self.assertEqual(calls, [])
+        self.assertIn('data-location-page="site-analysis"', html)
+        self.assertIn('data-site-analysis-text="1"', html)
+        self.assertIn('data-map-caption="1"', html)
+        self.assertIn('##MAP_OVERVIEW##', html)
+        self.assertNotIn('data-map-summary-card', html)
+        # A page saved before this design still gets its map-summary structure repaired.
         repaired = engine.finalize_slide_html(
-            html, 'content', {'_map_marker_side': 'right'}, {'primary_color': '#123456'},
+            '<div class="slide"><img data-map-summary-background src="##MAP_OVERVIEW##">'
+            '<div data-map-summary-card>ملخص الموقع</div></div>',
+            'content', {'_map_marker_side': 'right'}, {'primary_color': '#123456'},
             map_placeholders={'##MAP_OVERVIEW##': '/uploads/maps/overview.png'},
             content_source='site_analysis')
         self.assertIn('data-map-summary-card', repaired)
         self.assertIn('data-map-summary-background', repaired)
-        self.assertEqual(len(prompts), 1)
+
+    def test_site_data_page_is_designed_without_a_model_call(self):
+        engine = self.application_module.slide_engine
+        calls = []
+
+        def generated(_system, user_message, **_kwargs):
+            calls.append(user_message)
+            return {'choices': [{'message': {'content': '<div class="slide"><p>خام</p></div>'}}]}
+
+        project = {
+            'project_name': 'مشروع النخيل', 'city': 'الرياض', 'district': 'حي الملقا',
+            'plot_number': '4521', 'approved_financial_area': '7012.5',
+            'location_lat': '24.71355', 'location_lng': '46.67529',
+            'main_roads': 'طريق الملك فهد، طريق الأمير تركي',
+            'nearby_landmarks_data': [
+                {'name': 'ميدان السارية', 'distance_km': 1.2},
+                {'name': 'بوليفارد الرياض', 'distance_km': 4.6},
+            ],
+            'city_landmarks_data': [{'name': 'مطار الملك خالد', 'distance_km': 22.4}],
+        }
+        html = engine.generate_single_slide(
+            'system', {'title': 'بيانات الموقع والإحداثيات', 'type': 'site_specs',
+                       'section_key': 'location', 'content_source': 'location_detail'},
+            4, 12, {'primary_color': '#005f78', 'accent_color': '#c59a58'}, generated,
+            project_data=project)
+        self.assertEqual(calls, [])
+        self.assertIn('data-location-page="site-specs"', html)
+        for value in ('الرياض', 'حي الملقا', '4521', '7,012.5',
+                      '24.71355 , 46.67529', 'طريق الملك فهد', 'ميدان السارية'):
+            self.assertIn(value, html)
+        # Two aligned cards and a facts strip — not one block of text.
+        self.assertEqual(html.count('data-location-card="1"'), 2)
+        self.assertEqual(html.count('data-location-metric="1"'), 3)
+        self.assertIn('<table', html)
 
     def test_swot_section_keeps_one_canonical_slide_and_adds_risk_register(self):
         engine = self.application_module.slide_engine

@@ -209,58 +209,10 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
     if _is_visual_concept_media_slide(slide):
         return _build_visual_concept_media_slide(slide, branding=branding)
     if str(content_source or '').startswith('site_analysis'):
-        analysis = _slide_source_data_note(slide, source)
-        if not analysis:
-            analysis = str(source.get('site_analysis') or '').strip()
-        paragraphs = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', analysis) if part.strip()]
-        if not paragraphs and analysis:
-            paragraphs = [p.strip() for p in analysis.splitlines() if p.strip()] or [analysis]
-
-        has_map = bool(tokens) or slide.get('requires_image') or '##MAP_OVERVIEW##' in str(slide.get('image_tokens') or [])
-        accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
-        if has_map:
-            p_html = ''.join(
-                f'<div style="font-size:13.5px;line-height:1.8;color:#1e293b;border-right:3px solid {accent};padding-right:14px;text-align:justify;">'
-                f'{html_lib.escape(p)}</div>'
-                for p in paragraphs
-            )
-            return (
-                f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;color:#172033;padding:68px 36px 44px;box-sizing:border-box;display:flex;flex-direction:column;">'
-                f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
-                f'<h2 style="font-size:26px;color:{primary};font-weight:800;margin:0;">{title}</h2>'
-                f'<div style="height:3px;width:60px;background:{accent};border-radius:2px;"></div>'
-                f'</div>'
-                f'<div style="display:grid;grid-template-columns:1.15fr 1fr;gap:24px;flex:1;min-height:0;">'
-                f'<div style="display:flex;flex-direction:column;justify-content:center;gap:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:24px;overflow:hidden;box-sizing:border-box;">'
-                f'{p_html}'
-                f'</div>'
-                f'<div style="border-radius:12px;overflow:hidden;border:1px solid #d9e2ec;background:#f1f5f9;display:flex;align-items:center;justify-content:center;">'
-                f'<img src="##MAP_OVERVIEW##" style="width:100%;height:100%;object-fit:contain;object-position:center center;">'
-                f'</div>'
-                f'</div>'
-                f'</div>'
-            )
-        else:
-            cards = []
-            for i, p in enumerate(paragraphs, 1):
-                cards.append(
-                    f'<div style="background:#ffffff;border:1px solid #e2e8f0;border-top:4px solid {accent};border-radius:12px;padding:22px;box-shadow:0 4px 12px rgba(0,0,0,0.03);display:flex;flex-direction:column;justify-content:flex-start;gap:10px;box-sizing:border-box;">'
-                    f'<div style="font-size:20px;font-weight:800;color:{primary};opacity:0.35;">{i:02d}</div>'
-                    f'<div style="font-size:13.5px;line-height:1.8;color:#1e293b;text-align:justify;">{html_lib.escape(p)}</div>'
-                    f'</div>'
-                )
-            grid_cols = '1fr 1fr' if len(cards) <= 2 else '1fr 1fr 1fr'
-            return (
-                f'<div class="slide" dir="{slide_dir}" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;color:#172033;padding:68px 36px 44px;box-sizing:border-box;display:flex;flex-direction:column;">'
-                f'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">'
-                f'<h2 style="font-size:26px;color:{primary};font-weight:800;margin:0;">{title}</h2>'
-                f'<div style="height:3px;width:60px;background:{accent};border-radius:2px;"></div>'
-                f'</div>'
-                f'<div style="display:grid;grid-template-columns:{grid_cols};gap:20px;flex:1;min-height:0;align-items:stretch;">'
-                f'{"".join(cards)}'
-                f'</div>'
-                f'</div>'
-            )
+        # The approved site reading gets a designed page: the reading beside
+        # the overview map and a facts strip, never a paragraph dropped on a
+        # blank slide.
+        return _build_location_summary_slide(slide, source, branding)
     if re.fullmatch(r'executive_content\.summary(?::\d+:\d+)?', content_source):
         return _build_executive_summary_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if content_source == 'executive_content.opportunity':
@@ -392,6 +344,10 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
             table_title='Nearby landmarks' if lang == OFFER_LANG_ENGLISH else 'المعالم القريبة',
             map_label='Landmarks map' if lang == OFFER_LANG_ENGLISH else 'خريطة المعالم',
         )
+    if slide_type == 'site_specs' or content_source == 'location_detail':
+        # The site data page: the approved location fields in a designed frame
+        # that matches the map pages beside it.
+        return _build_site_specs_slide(slide, source, branding)
     if tokens:
         columns = 1 if len(tokens) == 1 else len(tokens)
         captions = (slide or {}).get('captions') or (slide or {}).get('bullets') or []

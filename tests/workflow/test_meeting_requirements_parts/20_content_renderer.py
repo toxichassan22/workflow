@@ -67,6 +67,11 @@ class MeetingRequirementsTestsPart20(MeetingRequirementsTests):
             ('financial_report:0:0:1', 'financial', {}, None),
             ('timeline_table_data', 'timeline', {}, timeline_project),
             ('land_boundary_diagram', 'land', {}, None),
+            # The two location pages beside the maps: approved site fields and
+            # the approved site reading, drawn in the designed map frame.
+            ('location_detail', 'location', {}, None),
+            ('site_analysis', 'location', {}, None),
+            ('site_analysis:0:2', 'location', {}, None),
         ):
             slide = {'section_key': section, 'content_source': source}
             slide.update(extra)

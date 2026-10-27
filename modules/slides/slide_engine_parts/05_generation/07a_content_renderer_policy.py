@@ -52,6 +52,12 @@ DETERMINISTIC_CONTENT_SOURCES = (
     'land_and_building_summary',
     # The dated Gantt of the project timeline.
     'timeline_table_data',
+    # The location pages: the site data table and the approved site reading.
+    # They carry the fields and the text the client signed off, and they share
+    # one designed frame with the map pages — a model redrawing them shipped a
+    # paragraph or a bare key/value grid on a white slide.
+    'location_detail',
+    'site_analysis',
 )
 
 
@@ -93,6 +99,13 @@ def slide_content_renderer(slide, project_data=None):
     # 4. The maps, the plot boundary and the dated Gantt are drawn from the
     #    approved data, so the model can neither drop a map nor redraw a bar.
     if slide.get('type') in {'map_overview', 'map_landmarks', 'map_access', 'map_catchment'}:
+        return CONTENT_RENDERER_DETERMINISTIC
+    # The site-data page and the site-analysis summary are the two location
+    # pages beside the maps: approved fields and an approved reading, drawn in
+    # the same designed frame. A page sliced by paragraph range belongs here too.
+    if slide.get('type') == 'site_specs' or source == 'location_detail':
+        return CONTENT_RENDERER_DETERMINISTIC
+    if content_source_base(source) == 'site_analysis':
         return CONTENT_RENDERER_DETERMINISTIC
     if source == 'land_boundary_diagram':
         return CONTENT_RENDERER_DETERMINISTIC

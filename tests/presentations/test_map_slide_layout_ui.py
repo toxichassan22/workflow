@@ -45,6 +45,20 @@ class MapSlideLayoutUiTests(unittest.TestCase):
                 for index in range(1, 9)
             ],
         }
+        # The two pages beside the maps: the site-data table and the approved
+        # site reading. Both must land in the same designed frame.
+        cls.site_project = dict(cls.project)
+        cls.site_project.update({
+            'city': 'الرياض', 'district': 'حي الملقا', 'plot_number': '4521',
+            'approved_financial_area': '7012.5',
+            'location_lat': '24.71355', 'location_lng': '46.67529',
+            'site_analysis': (
+                'يقع المشروع في حي الملقا على محور حيوي يربط شمال الرياض بوسطها.\n\n'
+                'يتصل الموقع مباشرةً بطريق الملك فهد، وتسهّل شبكة الطرق الوصول إليه.\n\n'
+                'تحيط بالموقع معالم خدمية وترفيهية تدعم جاذبيته.\n\n'
+                'يمثل الموقع فرصة لتطوير متعدد الاستخدامات.'
+            ),
+        })
         cls._playwright = sync_playwright().start()
         cls.browser = cls._playwright.chromium.launch()
         cls.page = cls.browser.new_page(viewport={'width': 1280, 'height': 720})
@@ -131,6 +145,104 @@ class MapSlideLayoutUiTests(unittest.TestCase):
         self._assert_designed_map(metrics)
         # The table renders the same selected set as the map (up to seven).
         self.assertEqual(metrics['tableRows'], 7)
+
+    # ── The two location pages the map redesign left behind ─────────────────
+
+    def _render_location_page(self, slide, placeholders=None):
+        project = self.site_project
+        raw = self.engine._build_structured_fallback_slide(
+            slide, project, self.branding, 21, 80)
+        html = self.engine.finalize_slide_html(
+            raw, slide.get('type', 'content'), project, self.branding, slide_num=21,
+            slide_title=slide.get('title'), total_slides=80,
+            content_source=str(slide.get('content_source') or ''),
+            map_placeholders=placeholders or {})
+        self.page.set_content(
+            '<!doctype html><html><head><meta charset="utf-8">'
+            '<style>body{margin:0}</style></head><body>' + html + '</body></html>')
+        return self.page.evaluate(
+            """() => {
+                   const slide = document.querySelector('.slide');
+                   const R = element => element.getBoundingClientRect();
+                   const header = slide.querySelector('[data-slide-header]');
+                   const footer = slide.querySelector('[data-slide-footer]');
+                   const cards = Array.from(slide.querySelectorAll('[data-location-card]'));
+                   const cardBox = card => ({
+                       top: Math.round(R(card).top), bottom: Math.round(R(card).bottom),
+                       height: Math.round(R(card).height),
+                       clipped: card.scrollHeight - card.clientHeight,
+                   });
+                   const image = slide.querySelector('img[src^="data:image"]');
+                   const caption = slide.querySelector('[data-map-caption]');
+                   let contentBottom = 0;
+                   slide.querySelectorAll('*').forEach(element => {
+                       if (element.closest('[data-slide-header],[data-slide-footer]')) return;
+                       const rect = element.getBoundingClientRect();
+                       if (rect.height > 1) contentBottom = Math.max(contentBottom, rect.bottom);
+                   });
+                   return {
+                       cards: cards.map(cardBox),
+                       metrics: slide.querySelectorAll('[data-location-metric]').length,
+                       tableRows: slide.querySelectorAll('tbody tr').length,
+                       paragraphs: slide.querySelectorAll('[data-site-analysis-text]').length,
+                       caption: caption ? caption.innerText : '',
+                       imageFill: image
+                           ? Math.round(R(image).height - R(image.parentElement).height)
+                           : null,
+                       headerBottom: Math.round(R(header).bottom),
+                       footerTop: Math.round(R(footer).top),
+                       contentBottom: Math.round(contentBottom),
+                   };
+               }""")
+
+    def _assert_location_frame(self, metrics):
+        self.assertGreaterEqual(len(metrics['cards']), 1, metrics)
+        self.assertGreaterEqual(metrics['metrics'], 1, metrics)
+        # Content starts under the managed header and clears the footer.
+        self.assertGreaterEqual(metrics['cards'][0]['top'], metrics['headerBottom'] + 6, metrics)
+        self.assertLessEqual(metrics['contentBottom'], metrics['footerTop'] - 8, metrics)
+        # Nothing is clipped inside a card: the page is designed, not truncated.
+        for card in metrics['cards']:
+            self.assertLessEqual(card['clipped'], 1, card)
+
+    def test_site_data_page_is_a_designed_aligned_page(self):
+        metrics = self._render_location_page({
+            'title': 'بيانات الموقع والإحداثيات', 'type': 'site_specs',
+            'section_key': 'location', 'content_source': 'location_detail'})
+        self._assert_location_frame(metrics)
+        self.assertEqual(len(metrics['cards']), 2, metrics)
+        self.assertEqual(metrics['tableRows'], 5, metrics)
+        self.assertEqual(metrics['metrics'], 3, metrics)
+        # The field table and the surroundings card share one top and one bottom.
+        self.assertLessEqual(
+            abs(metrics['cards'][0]['top'] - metrics['cards'][1]['top']), 2, metrics)
+        self.assertLessEqual(
+            abs(metrics['cards'][0]['bottom'] - metrics['cards'][1]['bottom']), 4, metrics)
+
+    def test_site_analysis_page_pairs_the_reading_with_the_map(self):
+        metrics = self._render_location_page({
+            'title': 'ملخص الموقع الجغرافي', 'type': 'content', 'section_key': 'location',
+            'content_source': 'site_analysis', 'image_tokens': ['##MAP_OVERVIEW##'],
+            'requires_image': True}, placeholders={'##MAP_OVERVIEW##': self.map_uri})
+        self._assert_location_frame(metrics)
+        self.assertEqual(len(metrics['cards']), 2, metrics)
+        self.assertEqual(metrics['paragraphs'], 4, metrics)
+        self.assertEqual(metrics['metrics'], 3, metrics)
+        self.assertLessEqual(
+            abs(metrics['cards'][0]['top'] - metrics['cards'][1]['top']), 2, metrics)
+        self.assertLessEqual(
+            abs(metrics['cards'][0]['bottom'] - metrics['cards'][1]['bottom']), 4, metrics)
+        # The 16:9 map fills its wrapper, and the measurement date lands in the caption.
+        self.assertLessEqual(abs(metrics['imageFill']), 2, metrics)
+        self.assertIn('تم قياس زمن القيادة', metrics['caption'])
+
+    def test_site_analysis_continuation_page_keeps_the_frame(self):
+        metrics = self._render_location_page({
+            'title': 'ملخص الموقع الجغرافي', 'type': 'content', 'section_key': 'location',
+            'content_source': 'site_analysis:2:', 'image_tokens': []})
+        self._assert_location_frame(metrics)
+        self.assertEqual(len(metrics['cards']), 1, metrics)
+        self.assertEqual(metrics['paragraphs'], 2, metrics)
 
 
 if __name__ == '__main__':

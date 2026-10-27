@@ -456,18 +456,21 @@ def create_generation_job(tenant_id, approval_id=None, draft_id=None, presentati
         if existing:
             return dict(existing)
     job_id = str(uuid.uuid4())
+    now = _utcnow().isoformat()
     try:
         conn.execute(
             '''INSERT INTO generation_jobs
                (id, tenant_id, approval_id, draft_id, presentation_id, status, model,
                 template_version, schema_version, input_snapshot_json, estimated_cost_usd,
-                slides_total, correlation_id, idempotency_key, created_by, created_by_name)
-               VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                slides_total, correlation_id, idempotency_key, created_by, created_by_name,
+                created_at, heartbeat_at)
+               VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (job_id, str(tenant_id), approval_id, draft_id, presentation_id, model,
              template_version, schema_version,
              json.dumps(input_snapshot, ensure_ascii=False) if input_snapshot is not None else None,
              estimated_cost_usd, slides_total, correlation_id,
-             str(idempotency_key) if idempotency_key else None, created_by, created_by_name),
+             str(idempotency_key) if idempotency_key else None, created_by, created_by_name,
+             now, now),
         )
     except sqlite3.IntegrityError:
         raced = (_generation_job_by_idempotency(conn, tenant_id, approval_id, idempotency_key)
@@ -541,7 +544,7 @@ def sweep_stale_generation_jobs(tenant_id=None, timeout_minutes=None):
     limit = int(timeout_minutes or GENERATION_JOB_TIMEOUT_MINUTES)
     cutoff = (_utcnow() - timedelta(minutes=limit)).isoformat()
     clauses = ["status IN ('queued', 'running')",
-               "COALESCE(heartbeat_at, started_at, created_at) < ?"]
+               "replace(COALESCE(heartbeat_at, started_at, created_at), ' ', 'T') < ?"]
     params = [cutoff]
     if tenant_id:
         clauses.append('tenant_id = ?')
@@ -616,7 +619,7 @@ def recover_dead_generating_drafts(tenant_id=None, timeout_minutes=None, draft_i
             live_job = conn.execute(
                 """SELECT j.id FROM generation_jobs j
                    WHERE j.tenant_id = ? AND j.status IN ('queued', 'running')
-                     AND COALESCE(j.heartbeat_at, j.started_at, j.created_at) >= ?
+                     AND replace(COALESCE(j.heartbeat_at, j.started_at, j.created_at), ' ', 'T') >= ?
                      AND (j.draft_id = ? OR j.approval_id IN (
                          SELECT id FROM generation_approvals
                          WHERE tenant_id = ? AND draft_id = ?))
@@ -629,7 +632,7 @@ def recover_dead_generating_drafts(tenant_id=None, timeout_minutes=None, draft_i
                    WHERE tenant_id = ? AND draft_id = ? AND status = 'approved'
                    ORDER BY decided_at DESC LIMIT 1""",
                 (t_id, d_id)).fetchone()
-            if approval and str(approval['decided_at'] or '') >= cutoff:
+            if approval and str(approval['decided_at'] or '').replace(' ', 'T') >= cutoff:
                 # Still inside the grace the client needs to register its job.
                 continue
             # Stale job rows under this draft belong to the dead run: fail them

@@ -769,15 +769,6 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
                           + (f' في «{place}».' if place
                              else ' في النطاق المحدد.'))
         notes = f'{notes} — {empty_note}' if notes else empty_note
-    if not provider_error:
-        # The main call can succeed while every per-competitor verify hits a
-        # deterministic refusal (e.g. the tenant-key gate). Surface the row
-        # error at job level so the UI shows the real reason, not just counts.
-        verify_errors = [str(row.get('verify_provider_error') or '').strip()
-                         for row in merged if row.get('verify_provider_error')]
-        verify_errors = [err for err in verify_errors if err and err != 'empty_response']
-        if verify_errors:
-            provider_error = verify_errors[0]
     return {
         'success': True,
         'competitors': merged,

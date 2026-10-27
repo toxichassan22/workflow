@@ -490,6 +490,21 @@
             if (jobRes && jobRes.success && jobRes.job) window.currentGenerationJobId = jobRes.job.id;
           } catch (jobErr) { console.warn('Generation job register:', jobErr); }
         }
+        let heartbeatTimer = null;
+        function sendGenerationHeartbeat() {
+          if (generationStopped || generationFinished) return;
+          if (window.currentGenerationJobId) {
+            api('POST', '/api/generation-jobs/' + encodeURIComponent(window.currentGenerationJobId) + '/heartbeat', {
+              progress: Math.round(((tenantSlidesData || []).length / totalSlides) * 100),
+              slidesDone: (tenantSlidesData || []).length,
+              slidesTotal: totalSlides
+            }).catch(() => {});
+          }
+        }
+        if (window.currentGenerationJobId) {
+          sendGenerationHeartbeat();
+          heartbeatTimer = setInterval(sendGenerationHeartbeat, 15000);
+        }
         const pendingSlides = {};
         let launchIndex = startIndex;
         let inFlightCount = 0;
@@ -813,6 +828,10 @@
           setLiveGenBanner(false);
         }, 3500);
       } finally {
+        if (heartbeatTimer) {
+          clearInterval(heartbeatTimer);
+          heartbeatTimer = null;
+        }
         // Every exit above — a thrown validation, an early return, a dead
         // request — ends this client-driven run. Leaving with the gate still
         // open would hold the escrowed points and lock the draft in

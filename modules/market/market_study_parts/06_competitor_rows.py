@@ -6,9 +6,26 @@
 # namespace, so helpers here call the earlier parts' functions unchanged.
 # ---------------------------------------------------------------------------
 
+def _round_area_value(value):
+    """An area figure is saved rounded half-up to one decimal.
+
+    A source such as `١،٢٠٠.55` m² used to travel as-is and put a two-decimal
+    area beside one-decimal ones; the same owner rule that rounds calculated
+    fractional results in the study applies to these areas at the save step.
+    A non-numeric value is returned untouched.
+    """
+    from numeric_precision import round_half_up
+
+    text = _clean_numeric(value)
+    if not text or not re.fullmatch(r'-?\d+(?:\.\d+)?', text):
+        return text
+    rounded = round_half_up(text, 1)
+    return text if rounded is None else format(rounded.normalize(), 'f')
+
+
 def _competitor_price_in_sar(values, raw_currency, price_cache):
     """Return price values in SAR while preserving the printed source values."""
-    from numeric_precision import format_precise_number
+    from numeric_precision import format_precise_number, round_half_up
 
     amounts = {key: _clean_numeric(values.get(key)) for key in (
         'price_value', 'price_from', 'price_to')}
@@ -47,8 +64,11 @@ def _competitor_price_in_sar(values, raw_currency, price_cache):
             converted[key] = ''
             continue
         try:
+            # A converted price is still money: whole riyals, never a long
+            # float that the table would show digit by digit.
             converted[key] = format_precise_number(
-                Decimal(amount) * Decimal(str(rate)), grouped=False)
+                round_half_up(Decimal(amount) * Decimal(str(rate)), 0),
+                grouped=False)
         except (InvalidOperation, TypeError, ValueError):
             converted[key] = ''
     return converted, 'SAR', cache, ''
@@ -102,11 +122,11 @@ def normalize_competitor_row(row, fallback_source='ai', offer_lang='ar'):
     price_from = price_values['price_from']
     price_to = price_values['price_to']
     area_cache = row.get('area_cache') if isinstance(row.get('area_cache'), dict) else {}
-    area_sqm = _clean_numeric(_first_nonempty(
+    area_sqm = _round_area_value(_first_nonempty(
         row.get('area_sqm'), row.get('areaSqm'), row.get('area'), row.get('المساحة'), area_cache.get('area_sqm')))
-    area_from = _clean_numeric(_first_nonempty(
+    area_from = _round_area_value(_first_nonempty(
         row.get('area_from'), row.get('areaFrom'), row.get('المساحة من'), area_cache.get('area_from')))
-    area_to = _clean_numeric(_first_nonempty(
+    area_to = _round_area_value(_first_nonempty(
         row.get('area_to'), row.get('areaTo'), row.get('المساحة إلى'), area_cache.get('area_to')))
     requested_area_mode = _norm(row.get('area_mode') or row.get('areaMode'))
     area_mode = ('range' if requested_area_mode == 'range' else 'fixed'

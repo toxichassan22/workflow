@@ -422,7 +422,7 @@ class TextModuleTests(unittest.TestCase):
              'competitorScope': {'mode': 'district'},
              'comparisonTypes': [{'type': 'residential', 'operation': 'sale'}]},
             [], mode='generate')
-        self.assertIn('حي الأندلس في جدة', prompt)
+        self.assertIn('حي الأندلس في مدينة جدة', prompt)
         self.assertIn('لا تستخدم المسافة بالكيلومتر لتوسيع النطاق', prompt)
         self.assertIn('انسخ المدينة كما وردت في بيانات المشروع دون ترجمة', prompt)
         self.assertNotIn('competitorRadius', prompt)

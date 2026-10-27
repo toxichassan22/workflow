@@ -119,14 +119,3 @@
     function marketCompetitorVerificationErrorIsNoEvidence(providerError) {
       return String(providerError || '').trim() === 'browse_agent: no browsed evidence';
     }
-
-    function marketCompetitorVerificationWarningHtml(tr) {
-      const providerError = String(tr.dataset.verifyProviderError || '').trim();
-      if (marketCompetitorVerificationErrorIsNoEvidence(providerError)) return '';
-      return (tr.dataset.verifyState === 'search_not_run'
-        ? '<div style="color:#b91c1c;margin-top:4px">تعذر تشغيل بحث التحقق لهذا المنافس — لم يرجع مزود البحث أي صفحة.</div>'
-        : '') +
-        (providerError
-          ? '<div style="color:#b91c1c;margin-top:4px;font-size:0.85em">' + escapeHtml(WFT('market.provider_detail', 'تفاصيل المزود: {err}', { err: providerError })) + '</div>'
-          : '');
-    }

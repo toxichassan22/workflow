@@ -377,8 +377,7 @@
         : '') +
       (tr.dataset.noSearchEvidence
         ? '<div style="color:#b91c1c;margin-top:4px">لم يظهر اسم هذا المنافس في أي صفحة من نتائج البحث — الاسم غير موثق.</div>'
-        : '') +
-      marketCompetitorVerificationWarningHtml(tr);
+        : '');
       const typeValue = marketTranslateCompetitorValue(row.project_type);
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(row.name || '') + '</textarea></td>' +
