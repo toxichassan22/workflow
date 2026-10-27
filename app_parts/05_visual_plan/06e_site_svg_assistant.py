@@ -94,7 +94,7 @@ def _visual_plan_site_reusable_checkpoints(previous, signature):
 
 def _visual_plan_site_call(system_prompt, user_prompt, data=None,
                            max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS,
-                           reasoning_effort='max'):
+                           reasoning_effort=TEXT_REASONING_EFFORT):
     timeout = _visual_plan_job_call_timeout(1200)
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=max_tokens,
@@ -491,7 +491,7 @@ def _visual_plan_site_ai_design_scene(data, packet, contract, assistant_state=No
 
     parsed, _tokens = _visual_plan_site_call(
         system_prompt, json.dumps(design_context, ensure_ascii=False),
-        data=data, max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS, reasoning_effort='max')
+        data=data, max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS, reasoning_effort=TEXT_REASONING_EFFORT)
     if (parsed.get('ready') is False or parsed.get('conflict')) and not parsed.get('svgCode'):
         return {'assistantDecision': parsed}
 

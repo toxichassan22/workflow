@@ -788,7 +788,7 @@ def api_site_analysis():
             def _primary_call(max_tokens):
                 return call_text_chat(
                     system_prompt, prompt, max_tokens=max_tokens,
-                    reasoning_effort='max', usage_ctx=_usage_ctx('site', data))
+                    reasoning_effort=TEXT_REASONING_EFFORT, usage_ctx=_usage_ctx('site', data))
 
             analysis = _analysis_text(
                 _primary_call(SITE_ANALYSIS_MAX_TOKENS), 'SITE-ANALYSIS', _primary_call)

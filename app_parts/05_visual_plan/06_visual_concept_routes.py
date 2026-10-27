@@ -232,7 +232,7 @@ def api_visual_concept_plans_distribution():
     try:
         response = call_openrouter_chat(
             system_prompt, user_prompt, temperature=None, max_tokens=8000,
-            model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='max',
+            model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort=TEXT_REASONING_EFFORT,
             response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
         result = parse_json_object(_get_chat_response_text(response))
     except Exception:
@@ -337,7 +337,7 @@ def api_visual_concept_plans_distribution_check():
         try:
             response = call_openrouter_chat(
                 system_prompt, user_prompt, temperature=None, max_tokens=5000,
-                model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort='max',
+                model=VISUAL_PLAN_DISTRIBUTION_MODEL, reasoning_effort=TEXT_REASONING_EFFORT,
                 response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
             parsed = parse_json_object(_get_chat_response_text(response))
         except Exception:
