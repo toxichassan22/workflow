@@ -1172,7 +1172,7 @@ LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'
 LAND_ANALYSIS_TRUNCATION_CEILING = int(os.environ.get('LAND_ANALYSIS_TRUNCATION_CEILING', '20000'))
 # Gemini 3.6 Flash accepts text, images, and files and is the primary model
 # for all text/analysis workflows, including land and croquis extraction.
-LAND_ANALYSIS_MODEL = GEMINI_TEXT_MODEL
+LAND_ANALYSIS_MODEL = VISION_MODEL
 
 _AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
 _TRANSIENT_PROVIDER_RE = re.compile(r'\(HTTP 5\d\d\)')

@@ -422,7 +422,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
         self.assertIs(result, response)
         self.assertEqual(captured['model'], module._SUMMARY_AGGREGATOR_MODEL)
         self.assertEqual(captured['model'], 'anthropic/claude-sonnet-5.5')
-        self.assertIsNone(captured.get('reasoning_effort'))
+        self.assertEqual(captured.get('reasoning_effort'), module.TEXT_REASONING_EFFORT)
         self.assertEqual(captured['max_tokens'], 66000)
         self.assertEqual(captured['usage_ctx']['tenant_id'], 't1')
         annotations = result['choices'][0]['message']['annotations']

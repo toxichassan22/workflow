@@ -17,8 +17,8 @@ Written against the contracts in ``docs/plans/market stude/plan.md``: module
 helpers live in ``market_study`` (part ``04_summary_chat.py``) and the
 executors in the app namespace (part ``18f_summary_chat.py``). Zero network —
 the text model, the browse agent and the URL probe are mocked; the chat model
-defaults to ``GEMINI_TEXT_MODEL`` (Gemini 4 Argon) with ``MARKET_CHAT_MODEL``
-as the owner override. The client never picks an axis: the model detects it
+defaults to ``GEMINI_TEXT_MODEL`` (the primary text model) with
+``MARKET_CHAT_MODEL`` as the owner override. The client never picks an axis: the model detects it
 and echoes it back, and an ambiguous message returns a clarification question
 instead of an edit.
 
@@ -519,7 +519,7 @@ class SummaryChatApiTests(unittest.TestCase):
         self.assertEqual(result['reply'], 'لا أستطيع تنفيذ ذلك')
         self.assertIsNone(result['proposal'])
 
-    def test_missing_chat_model_env_defaults_to_argon(self):
+    def test_missing_chat_model_env_defaults_to_the_text_model(self):
         module = self.application_module
         captured = {}
 

@@ -49,7 +49,7 @@ def api_market_study_competitor_logo():
             _usage_ctx('market', data),
             search_provider='searxng',
             search_budget=3, max_steps=8, max_tokens=1600,
-            reasoning_effort='low')
+            reasoning_effort=TEXT_REASONING_EFFORT)
         provider_error = _chat_error_message(response) if response.get('error') else ''
         parsed, parse_error = _parse_market_model_json(response)
         discovered_official = str(parsed.get('official_url') or parsed.get('logo_source_url') or '').strip()
@@ -76,7 +76,7 @@ def api_market_study_competitor_logo():
             _usage_ctx('market', data),
             search_provider='searxng',
             search_budget=2, max_steps=6, max_tokens=1200,
-            reasoning_effort='low')
+            reasoning_effort=TEXT_REASONING_EFFORT)
         provider_error = _chat_error_message(response) if response.get('error') else ''
         parsed, parse_error = _parse_market_model_json(response)
         if parse_error:

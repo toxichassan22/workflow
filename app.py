@@ -387,11 +387,15 @@ REQUIRE_TENANT_OPENROUTER_KEY = (
     (os.environ.get('REQUIRE_TENANT_OPENROUTER_KEY') or '').strip() == '1'
     and bool(OPENROUTER_MANAGEMENT_KEY)
 )
-GEMINI_TEXT_MODEL = "google/gemini-4-argon"
+# Text/analysis runs on Sonnet 5.5 at max reasoning. Argon stays the vision
+# model (image/document reading) until the owner picks a better one.
+VISION_MODEL = "google/gemini-4-argon"
+GEMINI_TEXT_MODEL = "anthropic/claude-sonnet-5.5"
+TEXT_REASONING_EFFORT = 'max'
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
 # The plans workflow (verify, boundary, distribution, notes, scene) runs its own
-# text model — default argon, overridable without touching the slide model.
+# text model — default the primary text model, overridable without touching the slide model.
 VISUAL_PLAN_TEXT_MODEL = os.environ.get('VISUAL_PLAN_TEXT_MODEL') or GEMINI_TEXT_MODEL
 # The floor-distribution model sits apart from the rest of the plans workflow:
 # distributing components over buildings and floors is a spatial decision, not a
@@ -413,7 +417,7 @@ print(f"[CONFIG] Visual plan distribution model: {VISUAL_PLAN_DISTRIBUTION_MODEL
 # adopted model is image-only and rejects /chat/completions.
 IMAGE_MODEL = os.environ.get('IMAGE_MODEL', 'openai/gpt-image-2.5-sunburst')
 VISUAL_CONCEPT_IMAGE_MODEL = os.environ.get('VISUAL_CONCEPT_IMAGE_MODEL', IMAGE_MODEL)
-PLAN_SITE_MODEL = os.environ.get('PLAN_SITE_MODEL', 'google/gemini-4-argon')
+PLAN_SITE_MODEL = os.environ.get('PLAN_SITE_MODEL', GEMINI_TEXT_MODEL)
 SITE_ANALYSIS_MAX_TOKENS = int(os.environ.get('SITE_ANALYSIS_MAX_TOKENS', '6000'))
 EXECUTIVE_CONTENT_MAX_TOKENS = int(os.environ.get('EXECUTIVE_CONTENT_MAX_TOKENS', '32000'))
 EXECUTIVE_SUMMARY_MAX_TOKENS = int(os.environ.get('EXECUTIVE_SUMMARY_MAX_TOKENS', '65536'))

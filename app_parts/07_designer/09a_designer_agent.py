@@ -479,10 +479,12 @@ def _designer_agent_plan(ctx, session=None):
     errors = []
     for _round in range(_AGENT_TOOL_ROUNDS):
         try:
+            planner_vision = bool(ctx.get('user_image_refs'))
             response = call_openrouter_messages(
                 messages, tools=_DESIGNER_AGENT_TOOLS,
                 response_format=_AGENT_PLAN_SCHEMA,
-                model=DESIGNER_AGENT_PLANNER_MODEL,
+                model=VISION_MODEL if planner_vision else DESIGNER_AGENT_PLANNER_MODEL,
+                reasoning_effort=None if planner_vision else TEXT_REASONING_EFFORT,
                 max_tokens=DESIGNER_PLANNER_MAX_TOKENS + 3000,
                 temperature=0.3, timeout=180,
                 usage_ctx=_agent_usage_ctx(ctx))

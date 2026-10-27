@@ -57,7 +57,7 @@ def api_generate_executive_content():
                 response = run_control.raise_if_cancelled(call_text_chat_stream(
                     system_prompt, prompt, temperature=0.2,
                     max_tokens=cap,
-                    reasoning_effort='low',
+                    reasoning_effort=TEXT_REASONING_EFFORT,
                     response_format={'type': 'json_object'},
                     usage_ctx=_usage_ctx('executive', data),
                 ))
@@ -93,7 +93,7 @@ def api_generate_executive_content():
                     temperature=0.2,
                     max_tokens=cap,
                     model=LUNA_TEXT_MODEL,
-                    reasoning_effort='low',
+                    reasoning_effort=TEXT_REASONING_EFFORT,
                     usage_ctx=_usage_ctx('executive', data),
                     response_format={'type': 'json_object'},
                 )

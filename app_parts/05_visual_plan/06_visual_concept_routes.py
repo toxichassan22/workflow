@@ -68,7 +68,7 @@ def api_visual_concept_plans_verify():
     try:
         response = call_openrouter_chat(
             system_prompt, user_prompt, temperature=None, max_tokens=8000,
-            model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium',
+            model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort=TEXT_REASONING_EFFORT,
             response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
         result = parse_json_object(_get_chat_response_text(response))
     except Exception:
@@ -128,7 +128,7 @@ def api_visual_concept_plans_boundary():
         try:
             response = call_openrouter_chat(
                 system_prompt, user_prompt, temperature=None, max_tokens=4000,
-                model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium',
+                model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort=TEXT_REASONING_EFFORT,
                 response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
             fatal = _ai_fatal_error_dict(response)
             if fatal is not None:
@@ -460,7 +460,7 @@ def api_visual_concept_prompt():
             'prompt': prompt,
             'reply': reply,
             'referenceCount': len(references),
-            'model': GEMINI_TEXT_MODEL,
+            'model': VISION_MODEL if references else GEMINI_TEXT_MODEL,
         })
     except Exception as exc:
         app.logger.exception('Visual concept prompt failed')

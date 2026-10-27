@@ -266,7 +266,7 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
         return None
     if not _has_any_openrouter_key(vision_ctx) or not image_path or not os.path.isfile(image_path):
         return None
-    site_attempt_id = _begin_ai_attempt_record(vision_ctx, GEMINI_TEXT_MODEL)
+    site_attempt_id = _begin_ai_attempt_record(vision_ctx, VISION_MODEL)
     try:
         from reference_analyzer import encode_image_to_base64
         from PIL import Image
@@ -284,7 +284,7 @@ def _estimate_site_polygon_from_satellite(image_path, center_lat, center_lng, zo
             f'{OPENROUTER_BASE}/chat/completions',
             headers=_openrouter_headers(vision_ctx, title='Real Estate Proposal Generator - Site Boundary'),
             json={
-                'model': GEMINI_TEXT_MODEL,
+                'model': VISION_MODEL,
                 'messages': [{'role': 'user', 'content': [
                     {'type': 'text', 'text': prompt},
                     {'type': 'image_url', 'image_url': {'url': image_uri}},

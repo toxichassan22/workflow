@@ -62,6 +62,8 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
     if run_control.run_is_cancelled(usage_ctx):
         return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
+    if reasoning_effort is None and model_name == GEMINI_TEXT_MODEL:
+        reasoning_effort = TEXT_REASONING_EFFORT
     headers = _openrouter_headers(usage_ctx, force_platform=_force_platform)
     user_message_content = user_content
     if image_references:
@@ -270,6 +272,8 @@ def call_openrouter_chat_stream(system_prompt, user_content, temperature=0.7, ma
     if run_control.run_is_cancelled(usage_ctx):
         return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
+    if reasoning_effort is None and model_name == GEMINI_TEXT_MODEL:
+        reasoning_effort = TEXT_REASONING_EFFORT
     headers = _openrouter_headers(usage_ctx, force_platform=_force_platform)
     user_message_content = user_content
     if image_references:

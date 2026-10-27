@@ -216,6 +216,7 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
     turn_prompt = market_study.build_summary_chat_turn_prompt(
         payload, axis, message, history, state)
     res = call_text_chat(system_prompt, turn_prompt, max_tokens=4000,
+                         reasoning_effort=TEXT_REASONING_EFFORT,
                          response_format={'type': 'json_object'},
                          model=chat_model, usage_ctx=usage_ctx)
     provider_error = _chat_error_message(res) if res.get('error') else ''
@@ -262,7 +263,7 @@ def _execute_market_summary_chat(data, tenant_id=None, progress=None):
             local_tools=True, search_provider='searxng', search_budget=3,
             max_steps=_SUMMARY_CHAT_MAX_STEPS,
             max_tokens=_SUMMARY_CHAT_RESEARCH_MAX_OUTPUT_TOKENS,
-            reasoning_effort='low',
+            reasoning_effort=TEXT_REASONING_EFFORT,
             on_event=_market_agent_progress(report, 46, 68,
                                             'بحث الويب عن المحور'))
         research_error = (_chat_error_message(research_res)
@@ -380,6 +381,7 @@ def _execute_market_summary_consolidate(data, tenant_id=None, progress=None):
     report(40, 'جاري إعادة توليد المخرجات المعلّمة...')
     prompt = market_study.build_summary_consolidate_prompt(state, stale_keys, offer_lang)
     res = call_text_chat(system_prompt, prompt, max_tokens=6000,
+                         reasoning_effort=TEXT_REASONING_EFFORT,
                          response_format={'type': 'json_object'},
                          model=chat_model, usage_ctx=usage_ctx)
     provider_error = _chat_error_message(res) if res.get('error') else ''

@@ -673,7 +673,7 @@ def _native_search_fallback(system_prompt, prompt, usage_ctx, evidence_pool,
             local_tools=False,
             plugins=[{'id': 'web', 'max_results': 5}],
             search_budget=search_budget, max_steps=max_steps,
-            max_tokens=14000, reasoning_effort='low')
+            max_tokens=14000, reasoning_effort=TEXT_REASONING_EFFORT)
     except Exception as exc:
         print(f'[MARKET STUDY] native search fallback failed: {exc}',
               flush=True)
@@ -728,7 +728,7 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
                 evidence_pool=evidence_pool, deadline=deadline,
                 session=session,
                 search_budget=search_budget, max_steps=max_steps,
-                max_tokens=14000, reasoning_effort='low',
+                max_tokens=14000, reasoning_effort=TEXT_REASONING_EFFORT,
                 on_event=_market_agent_progress(report, lo, hi, label))
     except Exception as exc:
         return {
@@ -921,7 +921,7 @@ def _run_expansion_scan_task(task, payload, existing, mode, offer_lang,
                 evidence_pool=evidence_pool, deadline=deadline,
                 session=session,
                 search_budget=search_budget, max_steps=max_steps,
-                max_tokens=14000, reasoning_effort='low',
+                max_tokens=14000, reasoning_effort=TEXT_REASONING_EFFORT,
                 on_event=_market_agent_progress(report, lo, hi,
                                                 task.get('label') or 'بحث إضافي'))
     except Exception as exc:

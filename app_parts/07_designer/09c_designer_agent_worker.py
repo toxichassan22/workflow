@@ -152,9 +152,12 @@ def _agent_worker_call(ctx, user_content, *, slide_type='content', facts='',
             ctx, slide_type, facts, style_brief)},
         {'role': 'user', 'content': user_content},
     ]
+    worker_vision = isinstance(user_content, list) and any(
+        isinstance(part, dict) and part.get('type') == 'image_url' for part in user_content)
     response = call_openrouter_messages(
         messages, response_format=_AGENT_WORKER_SCHEMA,
-        model=DESIGNER_AGENT_WORKER_MODEL,
+        model=VISION_MODEL if worker_vision else DESIGNER_AGENT_WORKER_MODEL,
+        reasoning_effort=None if worker_vision else TEXT_REASONING_EFFORT,
         max_tokens=max_tokens, temperature=temperature, timeout=300,
         usage_ctx=_agent_usage_ctx(ctx))
     result = openrouter_response_message(response, 'DESIGNER-WORKER')
@@ -288,7 +291,7 @@ def _agent_worker_call_element(ctx, slide, index, instruction, selected,
         [{'role': 'system', 'content': system},
          {'role': 'user', 'content': user_text}],
         response_format=_AGENT_ELEMENT_SCHEMA,
-        model=DESIGNER_AGENT_WORKER_MODEL,
+        model=DESIGNER_AGENT_WORKER_MODEL, reasoning_effort=TEXT_REASONING_EFFORT,
         max_tokens=DESIGNER_EDIT_MAX_TOKENS, temperature=0.2, timeout=300,
         usage_ctx=_agent_usage_ctx(ctx))
     result = openrouter_response_message(response, 'DESIGNER-WORKER-ELEMENT')
@@ -572,6 +575,7 @@ def _agent_worker_restructure(ctx, sources, target, instruction, feedback=''):
         response = call_openrouter_messages(
             [{'role': 'system', 'content': system}, {'role': 'user', 'content': user}],
             response_format=_AGENT_WORKER_SCHEMA, model=DESIGNER_AGENT_WORKER_MODEL,
+            reasoning_effort=TEXT_REASONING_EFFORT,
             max_tokens=DESIGNER_EDIT_MAX_TOKENS * 2, temperature=0.35,
             usage_ctx=_agent_usage_ctx(ctx))
         result = openrouter_response_message(response, 'DESIGNER-RESTRUCTURE')
@@ -591,6 +595,7 @@ def _agent_worker_restructure(ctx, sources, target, instruction, feedback=''):
             response = call_openrouter_messages(
                 [{'role': 'system', 'content': part_system}, {'role': 'user', 'content': user}],
                 response_format=_AGENT_WORKER_SCHEMA, model=DESIGNER_AGENT_WORKER_MODEL,
+                reasoning_effort=TEXT_REASONING_EFFORT,
                 max_tokens=DESIGNER_EDIT_MAX_TOKENS, temperature=0.35,
                 usage_ctx=_agent_usage_ctx(ctx))
             result = openrouter_response_message(response, 'DESIGNER-RESTRUCTURE')

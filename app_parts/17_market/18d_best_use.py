@@ -341,11 +341,14 @@ def _best_use_execute(draft, data, kind, job=None):
     generation_version = prior_version + 1 if isinstance(prior_version, int) and not isinstance(prior_version, bool) else 1
     for attempt in range(4):
         try:
+            vision = bool(map_references)
             response = call_text_chat(system, prompt + feedback,
                                       max_tokens=8000 if kind == 'generate' or revise else 3000,
-                                      timeout=120, reasoning_effort='low', response_format={'type': 'json_object'},
+                                      timeout=120,
+                                      reasoning_effort='low' if (vision or kind != 'chat') else TEXT_REASONING_EFFORT,
+                                      response_format={'type': 'json_object'},
                                       image_references=map_references,
-                                      model=GEMINI_TEXT_MODEL if kind == 'chat' else SLIDE_TEXT_MODEL,
+                                      model=VISION_MODEL if vision else (GEMINI_TEXT_MODEL if kind == 'chat' else SLIDE_TEXT_MODEL),
                                       usage_ctx=_usage_ctx('best_use', data, draft_id=draft['id']))
             parsed = _best_use_provider_result(response)
             raw = parsed.get('proposal') if revise else parsed

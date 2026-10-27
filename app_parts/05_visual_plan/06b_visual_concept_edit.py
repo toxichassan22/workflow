@@ -113,7 +113,8 @@ def _visual_concept_edit_clarity(slot_id, facts, instruction, base_image, usage_
     try:
         response = call_openrouter_chat(
             system_prompt, user_prompt, temperature=None, max_tokens=1200,
-            model=GEMINI_TEXT_MODEL, reasoning_effort='low',
+            model=VISION_MODEL if (base_image or extra_images) else GEMINI_TEXT_MODEL,
+            reasoning_effort='low' if (base_image or extra_images) else TEXT_REASONING_EFFORT,
             response_format={'type': 'json_object'},
             image_references=([base_image] + list(extra_images or [])) if base_image else None,
             usage_ctx=usage_ctx or _usage_ctx('image'))

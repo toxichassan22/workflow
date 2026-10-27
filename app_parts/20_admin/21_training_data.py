@@ -127,7 +127,7 @@ def api_upload_training_image():
             analysis_text = 'The image was stored, but automatic analysis is unavailable because the AI key is not configured.'
         else:
             vision_payload = {
-                "model": LUNA_TEXT_MODEL,
+                "model": VISION_MODEL,
                 "messages": [{
                     "role": "user",
                     "content": [
@@ -147,7 +147,7 @@ def api_upload_training_image():
                 title=f"Real Estate Proposal Generator - Tenant Training ({g.tenant_id[:8]})")
             import requests as _req
             training_attempt_id = _begin_ai_attempt_record(
-                _usage_ctx('training_chat', tenant_id=g.tenant_id), LUNA_TEXT_MODEL)
+                _usage_ctx('training_chat', tenant_id=g.tenant_id), VISION_MODEL)
             try:
                 resp = _req.post("https://openrouter.ai/api/v1/chat/completions",
                                headers=vision_headers, json=vision_payload, timeout=60)
@@ -506,7 +506,8 @@ def api_training_chat():
         # This agent changes the company's settings, so it runs on the strong model with real
         # reasoning instead of the fast text model, and with room to plan several tool calls.
         response = call_text_chat(system_prompt, user_prompt, max_tokens=6000,
-                                 model=GEMINI_TEXT_MODEL, reasoning_effort='medium',
+                                 model=VISION_MODEL if attachment_images else GEMINI_TEXT_MODEL,
+                                 reasoning_effort='medium' if attachment_images else TEXT_REASONING_EFFORT,
                                  image_references=attachment_images or None,
                                  usage_ctx=_usage_ctx('training_chat', data))
         reply = extract_chat_content(response, 'SUPER-AGENT')

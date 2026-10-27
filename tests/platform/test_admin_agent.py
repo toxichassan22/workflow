@@ -363,10 +363,10 @@ class AdminAgentTests(unittest.TestCase):
         self.assertIn('Coverage ratio is 45 percent', captured['system'])
         self.assertIn('اشتراطات.pdf', captured['system'])
         self.assertEqual(captured['kwargs']['image_references'], [{'data_uri': image_uri}])
-        # This agent changes company settings, so it runs on the reasoning model.
-        self.assertEqual(captured['kwargs']['model'], self.application_module.SLIDE_TEXT_MODEL)
+        # An attached image routes the same agent turn to the vision model.
+        self.assertEqual(captured['kwargs']['model'], self.application_module.VISION_MODEL)
         self.assertEqual(captured['kwargs']['reasoning_effort'], 'medium')
-        self.assertEqual(self.application_module.SLIDE_TEXT_MODEL, 'openai/gpt-6.1-sol')
+        self.assertEqual(self.application_module.VISION_MODEL, 'google/gemini-4-argon')
 
     def test_agent_prompt_states_every_new_capability(self):
         app_source = read_module_source('app.py')

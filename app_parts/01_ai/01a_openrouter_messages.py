@@ -32,6 +32,8 @@ def call_openrouter_messages(messages, *, tools=None, tool_choice=None,
     if run_control.run_is_cancelled(usage_ctx):
         return run_control.cancelled_response()
     model_name = model or GEMINI_TEXT_MODEL
+    if reasoning_effort is None and model_name == GEMINI_TEXT_MODEL:
+        reasoning_effort = TEXT_REASONING_EFFORT
     headers = _openrouter_headers(usage_ctx, force_platform=_force_platform)
     payload = {
         "model": model_name,

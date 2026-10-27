@@ -397,7 +397,7 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         usage_ctx,
         search_provider='searxng',
         evidence_pool=evidence_pool, deadline=deadline,
-        session=session, reasoning_effort='low', on_event=on_event)
+        session=session, reasoning_effort=TEXT_REASONING_EFFORT, on_event=on_event)
     last_error = _chat_error_message(response)
     search_ran_any = False
     if response.get('error') is None:

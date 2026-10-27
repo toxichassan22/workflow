@@ -388,7 +388,7 @@ def _visual_plan_explain_layout_failure(error, contract, program, data, model_ke
     )
     response = call_openrouter_chat(
         system_prompt, json.dumps(facts, ensure_ascii=False), temperature=None, max_tokens=2000,
-        model=GEMINI_TEXT_MODEL, reasoning_effort='low',
+        model=GEMINI_TEXT_MODEL, reasoning_effort=TEXT_REASONING_EFFORT,
         timeout=_visual_plan_job_call_timeout(180),
         response_format={'type': 'json_object'}, usage_ctx=_usage_ctx('image', data))
     fatal = _ai_fatal_error_dict(response)
@@ -509,7 +509,8 @@ def _visual_plan_create_scene(data, context=None):
     for attempt in range(2):
         response = call_openrouter_chat(
             system_prompt, user_prompt + feedback, temperature=None, max_tokens=cap,
-            model=GEMINI_TEXT_MODEL, reasoning_effort='medium',
+            model=VISION_MODEL if references else GEMINI_TEXT_MODEL,
+            reasoning_effort='medium' if references else TEXT_REASONING_EFFORT,
             timeout=_visual_plan_job_call_timeout(1200),
             response_format={'type': 'json_object'},
             image_references=references or None, usage_ctx=_usage_ctx('image', data))
@@ -743,10 +744,9 @@ def _visual_plan_render_site_svg(prompt, contract, data, base_image='', extra_re
         + 'The attached outline is the true surveyed parcel boundary — trace it exactly and '
         'generate only the buildings, entries and open areas the prompt describes as raw standalone SVG markup, nothing else.')
 
-    # Stage three keeps data interpretation, chat, SVG authoring and SVG edits
-    # on the same owner-selected Argon model. A separate PLAN_SITE_MODEL
-    # override used to allow the drawing call to drift from the planning chat.
-    model = GEMINI_TEXT_MODEL
+    # The drawing reads the parcel outline and the current approved image, so
+    # it stays on the vision model; a text-only call follows the text model.
+    model = VISION_MODEL if references else GEMINI_TEXT_MODEL
     usage_ctx = _usage_ctx('image', data)
 
     try:
@@ -761,7 +761,8 @@ def _visual_plan_render_site_svg(prompt, contract, data, base_image='', extra_re
 
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=65536,
-        model=model, reasoning_effort='high', timeout=_visual_plan_job_call_timeout(1200),
+        model=model, reasoning_effort='high' if references else TEXT_REASONING_EFFORT,
+        timeout=_visual_plan_job_call_timeout(1200),
         image_references=references or None, usage_ctx=usage_ctx)
 
     if isinstance(response, dict) and response.get('error'):
@@ -921,7 +922,9 @@ def _visual_plan_edit_scene(data, slot_id):
                    + '\nCURRENT REQUEST:\n' + instruction)
     response = call_openrouter_chat(
         system_prompt, user_prompt, temperature=None, max_tokens=4000,
-        model=VISUAL_PLAN_TEXT_MODEL, reasoning_effort='medium', response_format={'type': 'json_object'},
+        model=VISION_MODEL if references else VISUAL_PLAN_TEXT_MODEL,
+        reasoning_effort='medium' if references else TEXT_REASONING_EFFORT,
+        response_format={'type': 'json_object'},
         timeout=_visual_plan_job_call_timeout(300),
         image_references=references or None, usage_ctx=_usage_ctx('image', data))
     fatal = _ai_fatal_error_dict(response)

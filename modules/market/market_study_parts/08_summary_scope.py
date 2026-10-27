@@ -138,7 +138,7 @@ def _summary_scope_block(payload, offer_lang=None):
 def build_summary_user_prompt(payload, competitors, current_summary=None,
                               current_sources=None, current_swot=None,
                               offer_lang=None, retrieved_evidence=None):
-    """Final Argon synthesis brief: project-activity-scoped, evidence-only prose."""
+    """Final Sonnet synthesis brief: project-activity-scoped, evidence-only prose."""
     en = offer_lang == 'en'
     today = date.today().isoformat()
     keys = [item['key'] for item in SUMMARY_SECTIONS]

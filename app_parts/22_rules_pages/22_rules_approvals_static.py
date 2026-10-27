@@ -791,6 +791,7 @@ def health():
         body.update({
             'slide_vision': dict(_SLIDE_VISION_STATE) or _deployed_vision_status(),
             'model': GEMINI_TEXT_MODEL,
+            'vision_model': VISION_MODEL,
             'image_model': IMAGE_MODEL,
             'designer_agent': DESIGNER_AGENT,
             'designer_agent_planner_model': DESIGNER_AGENT_PLANNER_MODEL if DESIGNER_AGENT else None,
