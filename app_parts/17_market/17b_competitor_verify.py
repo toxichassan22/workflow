@@ -44,9 +44,11 @@ def _browse_agent_call(system_prompt, user_content, usage_ctx=None, model=None,
     The task model itself drives the loop — it decides the searches and which
     pages to open, the headless-Chromium workers execute them, and every page
     actually read rides back as a url_citation annotation. Returns the agent's
-    OpenRouter-shaped reply or an ``{'error': ...}`` dict; never raises — a
-    caller reports the failure as search_not_run instead of falling back to a
-    paid search layer (there is none left). ``agent_kwargs`` (search_budget,
+    OpenRouter-shaped reply or an ``{'error': ...}`` dict; never raises. When
+    the local search layer never ran (a blocked/CAPTCHA search engine), the
+    competitor scan makes one owner-ordered provider-native fallback on
+    MARKET_STUDY_MODEL; a search that ran and returned zero does not.
+    ``agent_kwargs`` (search_budget,
     max_steps, max_tokens, reasoning_effort) pass straight through to
     run_browse_agent, and so do the job-scoped ``evidence_pool``/``deadline``/
     ``session`` — once the agent signature carries them.

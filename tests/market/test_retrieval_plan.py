@@ -195,6 +195,27 @@ class BuildSourcePlanTests(unittest.TestCase):
         decoded = [unquote(entry['url']) for entry in plan]
         self.assertTrue(any('مكاتب-' in u for u in decoded))
 
+    def test_aqar_district_pages_are_planned_with_the_learned_region(self):
+        urls = [url for url, _label in market_study._listing_urls(
+            ['سكني'], {'بيع'}, 'جدة',
+            districts=('حي الفيصلية',),
+            district_regions={'الفيصليه': 'شمال-جدة'})]
+        decoded = [unquote(url) for url in urls]
+        self.assertIn(
+            'https://sa.aqar.fm/عقارات/جدة/شمال-جدة/حي-الفيصلية',
+            decoded)
+
+    def test_normalize_aqar_listing_url_keeps_a_district_page(self):
+        district_url = ('https://sa.aqar.fm/عقارات/جدة/شمال-جدة/'
+                        'حي-الفيصلية')
+        self.assertEqual(
+            market_study.normalize_aqar_listing_url(district_url),
+            district_url)
+        bare = 'https://sa.aqar.fm/شقق-للبيع/جدة/الفيصلية'
+        self.assertEqual(
+            market_study.normalize_aqar_listing_url(bare),
+            'https://sa.aqar.fm/شقق-للبيع/جدة')
+
     def test_invalid_aqar_category_operations_are_never_planned(self):
         # Measured 2026-10-27 from staging: أدوار-للبيع/للإيجار,
         # مكاتب-للإيجار and مستودعات-للإيجار answer 404.

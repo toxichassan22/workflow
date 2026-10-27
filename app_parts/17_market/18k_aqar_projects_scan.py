@@ -3,9 +3,11 @@ known-sources plan. Each owns its thread and never blocks the scans."""
 
 import os
 import threading
+import time
 
 
 _AQAR_PROJECT_LIMIT = int(os.environ.get('AQAR_PROJECT_LIMIT') or 12)
+_AQAR_LISTING_LIMIT = int(os.environ.get('AQAR_LISTING_LIMIT') or 8)
 _AQAR_SCAN_BUDGET_SECONDS = float(
     os.environ.get('AQAR_SCAN_BUDGET_SECONDS') or 90)
 
@@ -61,15 +63,50 @@ def _start_aqar_projects_scan(payload, axes, report=None, deadline=None,
             with _worker_app_context():
                 import aqar_projects
                 session = _market_browser_session()
+                cache_path = (os.path.join(
+                    UPLOADS_DIR, aqar_projects.REGION_CACHE_FILE_NAME)
+                    if UPLOADS_DIR else '')
+                started = time.time()
+                regions = aqar_projects.learn_district_regions(
+                    session, city, cache_path=cache_path)
+                listing = aqar_projects.scan_district_listings(
+                    session, city, districts=tuple(districts),
+                    district_regions=regions, unit_types=tuple(unit_types),
+                    pairs=pairs, limit=_AQAR_LISTING_LIMIT,
+                    budget_seconds=max(
+                        20, _AQAR_SCAN_BUDGET_SECONDS / 2),
+                    progress=report, offer_lang=offer_lang)
+                listing_rows = list((listing or {}).get('rows') or [])
+                # The listing pass is the coverage path for a district whose
+                # named-project directory is empty; it is quick, so it runs
+                # first and survives a timeout on the slower project reads.
+                holder['rows'] = listing_rows
+                remaining_budget = max(
+                    20, _AQAR_SCAN_BUDGET_SECONDS - (time.time() - started))
                 result = aqar_projects.scan(
                     session, city, district=district, pairs=pairs,
                     districts=tuple(districts),
                     unit_types=tuple(unit_types),
                     limit=_AQAR_PROJECT_LIMIT,
-                    budget_seconds=_AQAR_SCAN_BUDGET_SECONDS,
+                    budget_seconds=remaining_budget,
                     progress=report, offer_lang=offer_lang)
-                holder['result'] = result if isinstance(result, dict) else {}
-                holder['rows'] = list(holder['result'].get('rows') or [])
+                result = result if isinstance(result, dict) else {}
+                named_rows = list(result.get('rows') or [])
+                named_keys = {
+                    aqar_projects._district_key(row.get('name'))
+                    for row in named_rows if row.get('name')
+                }
+                merged = named_rows + [
+                    row for row in listing_rows
+                    if aqar_projects._district_key(row.get('name'))
+                    not in named_keys
+                ]
+                result['listing_matched'] = len(listing_rows)
+                result['listing_pages'] = (listing or {}).get('pages', 0)
+                result['listing_error'] = (listing or {}).get('error', '')
+                result['regions'] = regions
+                holder['result'] = result
+                holder['rows'] = merged
         except Exception as exc:
             holder['error'] = str(exc)
             print(f'[MARKET STUDY] aqar projects scan failed: {exc}',
@@ -98,7 +135,8 @@ def _await_aqar_projects_scan(handle, timeout=60):
     rows = holder.get('rows') or []
     result = holder.get('result') or {}
     print(f'[MARKET STUDY] aqar projects cards={result.get("cards", 0)} '
-          f'matched={result.get("matched", 0)} rows={len(rows)} '
+          f'matched={result.get("matched", 0)} '
+          f'listings={result.get("listing_matched", 0)} rows={len(rows)} '
           f'unit_types={result.get("filtered_unit_types", 0)} '
           f'districts={handle.get("districts") or []!r} '
           f'error={holder.get("error") or result.get("error") or ""!r}',

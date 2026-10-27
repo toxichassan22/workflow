@@ -141,7 +141,8 @@ class _Fixture:
     citation_pages = [(_CITED_PAGE, 'تقرير إيجار',
                        'مؤشر سوق الإيجار للربع الثالث')]
 
-    def fake_build_plan(self, payload, offer_lang='ar', market_wide=False):
+    def fake_build_plan(self, payload, offer_lang='ar', market_wide=False,
+                        district_regions=None):
         self.events.append('build_plan')
         return [{'purpose': 'rent-index', 'url': _POOL_PAGE, 'tier': 1,
                  'needs_browser': False, 'label': 'مؤشر الإيجار'}]

@@ -259,10 +259,47 @@ def _payload_source_kinds(payload):
     return kinds
 
 
-def _listing_urls(kinds, ops, city, unit_types=()):
-    """City-scoped aqar.fm listing pages — the current asking-price stock a
-    resident actually sees. aqar is a bot-walled SPA, so callers always emit
-    these needs_browser=True.
+def _aqar_region_for(district, district_regions):
+    """The learned region slug for a district, matching its folded forms."""
+    if not isinstance(district_regions, dict) or not district_regions:
+        return ''
+    candidates = (
+        _norm(district),
+        _norm(district).replace('حي ', '', 1),
+        _fold_choice(district),
+        _fold_choice(district).replace('حي ', '', 1),
+    )
+    for candidate in candidates:
+        if candidate in district_regions:
+            return district_regions[candidate]
+    folded = _fold_choice(district).replace('حي ', '', 1)
+    for key, value in district_regions.items():
+        if _fold_choice(key).replace('حي ', '', 1) == folded:
+            return value
+    return ''
+
+
+def _aqar_district_url(city, district, region, category='عقارات'):
+    district_text = _norm(district)
+    if district_text.startswith('حي '):
+        district_text = district_text[3:].strip()
+    district_slug = 'حي-' + '-'.join(district_text.split())
+    region_slug = '-'.join(_norm(region).replace('_', ' ').split())
+    return (f'https://sa.aqar.fm/{quote(str(category or "عقارات"))}/'
+            f'{quote(_norm(city))}/{quote(region_slug)}/'
+            f'{quote(district_slug)}')
+
+
+def _listing_urls(kinds, ops, city, unit_types=(), districts=(),
+                  district_regions=None):
+    """City- and district-scoped aqar.fm listing pages — the current asking
+    price stock a resident actually sees. aqar is a bot-walled SPA, so callers
+    always emit these needs_browser=True.
+
+    A district page needs aqar's own region segment
+    (`/عقارات/جدة/شمال-جدة/حي-الفيصلية`); a bare `/city/district` redirects to
+    the national page. The region is learned from the city's ad links by
+    ``aqar_projects.learn_district_regions``.
 
     An explicit property kind from the client narrows the categories to the
     ones that carry it; nothing selected keeps the whole project-kind list."""
@@ -288,13 +325,18 @@ def _listing_urls(kinds, ops, city, unit_types=()):
                 continue
             yield (f'https://sa.aqar.fm/{quote(cat + ("-للإيجار" if rent else "-للبيع"))}/{quote(city)}',
                    f'aqar.fm — {cat} {op} — {city}')
+    for district in districts or []:
+        region = _aqar_region_for(district, district_regions)
+        if not region:
+            continue
+        yield (_aqar_district_url(city, district, region),
+               f'aqar.fm — إعلانات حي {district} — {city}')
 
 
-# aqar has no route that puts a district after the city: a
-# `/فلل-للبيع/جدة/الاندلس` link answers 404 or redirects to the national page
-# and teaches the run that the district has no projects. Only an advertised
-# unit's numeric id may follow the city, so a district-shaped segment is
-# dropped and the city page — which aqar does serve — is used instead.
+# A bare `/category/city/<district>` link redirects to the national page; only
+# the four-segment `/category/city/<region>/حي-<district>` shape is a real
+# district page. This normalizer therefore drops only the bare shape and
+# leaves the region+district page untouched.
 _AQAR_HOSTS = {'aqar.fm', 'sa.aqar.fm'}
 _AQAR_PROJECTS_PATH = '/المشاريع-العقارية'
 _AQAR_CITY_PATH_RE = re.compile(r'^/([^/]+)/([^/]+)/([^/]+)/?$')
@@ -325,7 +367,8 @@ def normalize_aqar_listing_url(url):
                        parsed.query, ''))
 
 
-def build_source_plan(payload, offer_lang='ar', market_wide=False):
+def build_source_plan(payload, offer_lang='ar', market_wide=False,
+                      district_regions=None):
     """Ordered [{purpose, url, tier, needs_browser, label}] fetch plan.
 
     Known sources first: the portal dataset pages that actually expose the
@@ -391,6 +434,12 @@ def build_source_plan(payload, offer_lang='ar', market_wide=False):
     explicit_scope = bool(normalize_comparison_types(
         payload.get('comparisonTypes') if 'comparisonTypes' in payload
         else payload.get('comparison_types')))
+    competitor_scope = normalize_competitor_scope(
+        payload.get('competitorScope') or payload.get('competitor_scope'))
+    competitor_districts = []
+    if not market_wide and competitor_scope.get('mode') == 'district':
+        competitor_districts = competitor_scope_districts(
+            competitor_scope, payload.get('district'))
     if market_wide:
         ops = {'بيع', 'إيجار'}
         kinds = list(TYPE_SOURCE_PRIORITY)
@@ -409,9 +458,9 @@ def build_source_plan(payload, offer_lang='ar', market_wide=False):
              label=f'المؤشرات العقارية — صفحة المدينة — {city}', needs_browser=True)
         for url, label in _listing_urls(
                 kinds, ops, city,
-                competitor_scope_unit_types(normalize_competitor_scope(
-                    payload.get('competitorScope')
-                    or payload.get('competitor_scope')))):
+                competitor_scope_unit_types(competitor_scope),
+                districts=(competitor_districts if not market_wide else ()),
+                district_regions=district_regions):
             _add(url, 'listing', label=label, needs_browser=True)
 
     entries.sort(key=lambda item: item['tier'])   # stable — catalog order survives inside a tier

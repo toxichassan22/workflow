@@ -8,9 +8,11 @@ with the desktop UA (never a plain HTTP call).
 """
 
 import html as html_module
+import json
+import os
 import re
 import time
-from urllib.parse import unquote, urljoin, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 import booking_search
 from numeric_precision import format_precise_number
@@ -357,6 +359,340 @@ def listing_page_names(title, text, name, city=''):
     folded = booking_search.normalize_label(
         f'{title} {str(text or "")[:2000]}')
     return all(token in folded for token in wanted)
+
+
+REGION_CACHE_FILE_NAME = '.aqar_district_regions.json'
+_CITY_REGION_GUESSES = {
+    'جدة': ('شمال-جدة', 'جنوب-جدة', 'شرق-جدة', 'غرب-جدة', 'وسط-جدة'),
+    'الرياض': ('شمال-الرياض', 'جنوب-الرياض', 'شرق-الرياض', 'غرب-الرياض',
+               'وسط-الرياض'),
+    'الدمام': ('شمال-الدمام', 'جنوب-الدمام', 'شرق-الدمام', 'غرب-الدمام',
+               'وسط-الدمام'),
+}
+_LISTING_PRICE_RE = re.compile(
+    r'([\d٠-٩][\d,،٬.٠-٩]*)\s*(ألف|مليون)?\s*(?:§|ريال)')
+_LISTING_AREA_RE = re.compile(
+    r'([\d٠-٩][\d,،٬.٠-٩]*)\s*(?:م²|م2|متر مربع)')
+_LISTING_DISTRICT_RE = re.compile(r'حي\s+([^,،]+)')
+_LISTING_BUILDING_RE = re.compile(
+    r'(مشروع|برج|أبراج|مجمع|كمبوند|عمارة|فندق)\s+([^,،\n–\-]+)')
+# Names and notes are user-facing: no emoji, pictograph or bullet glyph.
+_LISTING_GLYPH_RE = re.compile(
+    '[\U0001F000-\U0001FAFF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D'
+    '\u2022\u25AA\u25AB\u25FD\u25FE\u25CF]')
+_RESIDENTIAL_LISTING_HINTS = (
+    'شقة', 'شقق', 'فيلا', 'فلل', 'دور', 'أدوار', 'استوديو', 'بيت', 'عمارة',
+    'سكني', 'وحدات سكنية')
+_COMMERCIAL_LISTING_HINTS = (
+    'مكتب', 'مكاتب', 'محل', 'محلات', 'معرض', 'معارض', 'مستودع', 'مستودعات',
+    'تجاري')
+_LAND_LISTING_HINTS = ('أرض', 'أراضي', 'ارض')
+
+
+def _district_slug(value):
+    text = str(value or '').strip()
+    if text.startswith('حي '):
+        text = text[3:].strip()
+    return 'حي-' + '-'.join(text.split())
+
+
+def _region_slug(value):
+    return '-'.join(str(value or '').strip().replace('_', ' ').split())
+
+
+def build_district_url(city, district, region, category='عقارات'):
+    """Aqar's district listing page: /category/city/region/حي-district."""
+    return (f'{BASE}/{quote(str(category or "عقارات"))}/'
+            f'{quote(str(city or "").strip())}/'
+            f'{quote(_region_slug(region))}/'
+            f'{quote(_district_slug(district))}')
+
+
+def _listing_link_parts(url):
+    """(category, city, region, district, slug) from an aqar ad URL."""
+    segments = [unquote(part) for part in
+                urlsplit(str(url or '')).path.strip('/').split('/') if part]
+    if len(segments) < 4 or not segments[3].startswith('حي'):
+        return None
+    district = segments[3][2:].lstrip('-').replace('-', ' ').strip()
+    return segments[0], segments[1], segments[2], district, segments[4:]
+
+
+def _listing_text(value):
+    text = _LISTING_GLYPH_RE.sub(' ', str(value or ''))
+    return ' '.join(text.replace('\u00a0', ' ').split())
+
+
+def _listing_amount(value, unit=''):
+    text = _normalize_digits(value).replace(',', '').replace('،', '').replace('٬', '')
+    try:
+        number = float(text)
+    except (TypeError, ValueError):
+        return None
+    if unit == 'ألف':
+        number *= 1000
+    elif unit == 'مليون':
+        number *= 1000000
+    if number <= 0 or number > 1e12:
+        return None
+    return int(number) if number.is_integer() else number
+
+
+def _listing_project_type(*values):
+    text = ' '.join(str(value or '') for value in values)
+    if any(hint in text for hint in _COMMERCIAL_LISTING_HINTS):
+        return 'تجاري'
+    if any(hint in text for hint in _RESIDENTIAL_LISTING_HINTS):
+        return 'سكني'
+    return ''
+
+
+def _listing_operation(*values):
+    text = ' '.join(str(value or '') for value in values)
+    if 'للإيجار' in text or 'للايجار' in text or 'إيجار' in text:
+        return 'إيجار'
+    if 'للبيع' in text or 'بيع' in text:
+        return 'بيع'
+    return ''
+
+
+def parse_listing_cards(html, city=''):
+    """Ad cards on a district listing page, named and priced.
+
+    The ad's own text is the only evidence: its asking price, its unit area
+    and its district. A named building/project in the description becomes the
+    row name; otherwise the first descriptive phrase does.
+    """
+    cards = []
+    seen = set()
+    for link in parse_listing_links(html):
+        parts = _listing_link_parts(link.get('url'))
+        if not parts:
+            continue
+        category, card_city, region, district, _rest = parts
+        url = str(link.get('url') or '').strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        text = _listing_text(link.get('text'))
+        if not text:
+            continue
+        price_match = _LISTING_PRICE_RE.search(text)
+        if not price_match or _listing_amount(
+                price_match.group(1), price_match.group(2) or '') is None:
+            continue
+        price = _listing_amount(price_match.group(1),
+                                price_match.group(2) or '')
+        leading = text[:price_match.start()].strip(' ,،-–—')
+        tail = text[price_match.end():]
+        area_match = _LISTING_AREA_RE.search(tail)
+        area = _listing_amount(area_match.group(1)) if area_match else None
+        basis = ('سنوي' if 'سنوي' in tail[:50]
+                 else ('شهري' if 'شهري' in tail[:50] else ''))
+        building = _LISTING_BUILDING_RE.search(tail)
+        if building:
+            name = ' '.join(building.group(0).split())[:80]
+        else:
+            name = re.split(r'[,،]', leading, 1)[0].strip()[:80]
+        name = name.strip(' *-–—:،,.')
+        if not name:
+            continue
+        operation = _listing_operation(category, text)
+        project_type = _listing_project_type(category, text)
+        is_land = any(hint in category or hint in text
+                      for hint in _LAND_LISTING_HINTS)
+        cards.append({
+            'name': name,
+            'url': url,
+            'category': category,
+            'city': card_city or city,
+            'region': region,
+            'district': district,
+            'project_type': project_type,
+            'operation': operation,
+            'price': price,
+            'price_basis': basis,
+            'area_sqm': area,
+            'is_land': is_land,
+            'type_line': f'{leading} {tail[:240]}',
+            'text': text,
+        })
+    return cards
+
+
+def listing_row(card, requested_district='', offer_lang='ar'):
+    """One competitor row from an advertised unit, priced as an asking price."""
+    price_type = ('سعر الوحدة' if card.get('operation') == 'بيع' else
+                  'إيجار الوحدة السنوي' if card.get('price_basis') == 'سنوي'
+                  else 'إيجار الوحدة الشهري')
+    area = card.get('area_sqm')
+    url = str(card.get('url') or '')
+    district = str(requested_district or card.get('district') or '').strip()
+    city = str(card.get('city') or '').strip()
+    if offer_lang == 'en':
+        notes = ('Asking price from an aqar advertisement; it is not a '
+                 'completed transaction.')
+    else:
+        notes = 'سعر طلب من إعلان عقار — ليس صفقة منفذة.'
+        if card.get('operation') == 'إيجار' and card.get('price_basis'):
+            notes += f' الإيجار {card["price_basis"]}.'
+    return {
+        'name': card.get('name') or '',
+        'project_type': card.get('project_type') or '',
+        'operation_type': card.get('operation') or '',
+        'classification': 'مباشر',
+        'status': 'قائم',
+        'city': city,
+        'district': district,
+        'benchmarks': [],
+        'source': 'عقار',
+        'source_url': url,
+        'source_urls': [url],
+        'price_type': price_type,
+        'price_value': str(card.get('price') or ''),
+        'price_currency': 'SAR',
+        'area_mode': 'fixed' if area else '',
+        'area_sqm': str(area) if area else '',
+        'row_source': 'aqar_listing',
+        'verify_state': 'verified',
+        'notes': notes,
+        'field_sources': {
+            'name': [url],
+            'price_value': [url],
+            'area_sqm': [url] if area else [],
+        },
+    }
+
+
+def learn_district_regions(session, city, cache_path=''):
+    """district key → aqar region slug, learned from the city's ad links.
+
+    The city page's ads already carry `/category/city/region/حي-district`, so
+    one page read maps every district seen there. The map is cached per city.
+    """
+    city = str(city or '').strip()
+    if not city or session is None:
+        return {}
+    cache = {}
+    if cache_path and os.path.isfile(cache_path):
+        try:
+            with open(cache_path, encoding='utf-8') as handle:
+                cache = json.load(handle) or {}
+        except (OSError, ValueError):
+            cache = {}
+    cities = cache.get('cities') if isinstance(cache.get('cities'), dict) else {}
+    city_key = _district_key(city)
+    learned = dict(cities.get(city_key) or {})
+    urls = [
+        f'{BASE}/{quote("عقارات")}/{quote(city)}',
+        f'{BASE}/{quote("شقق-للبيع")}/{quote(city)}',
+    ]
+    for url in urls:
+        page = session.fetch_html(url, timeout=45)
+        if _page_error(page):
+            continue
+        for link in parse_listing_links((page or {}).get('html') or ''):
+            parts = _listing_link_parts(link.get('url'))
+            if not parts:
+                continue
+            _category, _city, region, district, _rest = parts
+            key = _district_key(district)
+            if key and region:
+                learned[key] = region
+        if learned:
+            break
+    if learned:
+        cities[city_key] = learned
+        cache['cities'] = cities
+        if cache_path:
+            try:
+                parent = os.path.dirname(cache_path)
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                with open(cache_path, 'w', encoding='utf-8') as handle:
+                    json.dump(cache, handle, ensure_ascii=False)
+            except OSError:
+                pass
+    return learned
+
+
+def scan_district_listings(session, city, districts=(), district_regions=None,
+                           unit_types=(), pairs=(), limit=12,
+                           budget_seconds=90, progress=None, offer_lang='ar'):
+    """Read the selected districts' aqar ad pages into competitor rows.
+
+    This is the coverage path that does not depend on aqar's named-project
+    directory, which can be empty for a district that still has active ads.
+    """
+    report = progress if callable(progress) else (lambda *_args: None)
+    city = str(city or '').strip()
+    wanted_districts = []
+    for item in districts or []:
+        text = str(item or '').strip()
+        if text and text not in wanted_districts:
+            wanted_districts.append(text)
+    if not city or not wanted_districts:
+        return {'pages': 0, 'rows': [], 'error': '', 'regions': {}}
+    wanted_pairs = {tuple(pair) for pair in pairs or []}
+    wanted_tokens = _selected_category_tokens(unit_types)
+    start = time.time()
+    rows = []
+    errors = []
+    pages_read = 0
+    regions = dict(district_regions or {})
+    for district in wanted_districts:
+        if len(rows) >= max(1, int(limit or 1)):
+            break
+        if time.time() - start > float(budget_seconds or 90):
+            errors.append('deadline_exceeded')
+            break
+        key = _district_key(district)
+        candidates = [regions[key]] if regions.get(key) else []
+        candidates.extend(_CITY_REGION_GUESSES.get(city, ()))
+        candidates = [region for region in candidates if region]
+        seen_regions = set()
+        for region in candidates:
+            if not region or region in seen_regions:
+                continue
+            seen_regions.add(region)
+            url = build_district_url(city, district, region)
+            page = session.fetch_html(url, timeout=45)
+            error = _page_error(page)
+            if error:
+                errors.append(error)
+                continue
+            final_url = str((page or {}).get('final_url') or url)
+            if _district_slug(district) not in unquote(final_url):
+                continue
+            pages_read += 1
+            regions[key] = region
+            report(24, f'قراءة إعلانات حي {district} من عقار '
+                       f'({len(rows)} من {limit})...')
+            for card in parse_listing_cards(
+                    (page or {}).get('html') or '', city=city):
+                if len(rows) >= max(1, int(limit or 1)):
+                    break
+                if card.get('is_land'):
+                    continue
+                if wanted_pairs and (
+                        card.get('project_type'), card.get('operation')
+                ) not in wanted_pairs:
+                    continue
+                if not _card_matches_unit_types(
+                        {'type_line': card.get('type_line')}, wanted_tokens):
+                    continue
+                if not card.get('project_type') or not card.get('operation'):
+                    continue
+                rows.append(listing_row(
+                    card, requested_district=district,
+                    offer_lang=offer_lang))
+            break
+    return {
+        'pages': pages_read,
+        'rows': rows,
+        'error': '; '.join(dict.fromkeys(errors))[:400],
+        'regions': regions,
+    }
 
 
 def match_project_link(links, name, city=''):

@@ -3,6 +3,7 @@
 import sys
 import unittest
 from pathlib import Path
+from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[2]
 _WEB_BROWSE = ROOT / 'modules' / 'web_browse'
@@ -130,6 +131,42 @@ _TYPED_CARDS_HTML = """
 </a>
 </body></html>
 """
+
+
+_DISTRICT_HTML = """
+<html><body>
+<a href="/شقق-للبيع/جدة/شمال-جدة/حي-الفيصلية/شارع-أبو-حامد-6893517">
+  <div>شقة للبيع في شارع أبو حامد, حي الفيصلية, مدينة جدة, منطقة مكة المكرمة</div>
+  <div>580,000 § ريال</div><div>144م²</div>
+  <div>شقة فاخرة 4 غرف للبيع في حي الفيصلية بموقع مميز.</div>
+</a>
+<a href="/مكتب-تجاري-للإيجار/جدة/شمال-جدة/حي-الفيصلية/برج-مرمر-6868163">
+  <div>مكتب تجاري للإيجار في شارع الأمير محمد بن عبدالعزيز, حي الفيصلية, مدينة جدة, منطقة مكة المكرمة</div>
+  <div>36,000 § ريال / سنوي</div><div>226م²</div>
+  <div>مكتب مجهز للإيجار في برج مرمر – شارع التحلية</div>
+</a>
+<a href="/أراضي-للبيع/جدة/شمال-جدة/حي-الفيصلية/أرض-6800000">
+  <div>أرض للبيع في حي الفيصلية, مدينة جدة</div>
+  <div>2,500,000 § ريال</div><div>600م²</div>
+</a>
+</body></html>
+"""
+
+
+class _DistrictSession:
+    def __init__(self, html=_DISTRICT_HTML):
+        self.html = html
+        self.urls = []
+
+    def fetch_html(self, url, timeout=None):
+        self.urls.append(url)
+        decoded = unquote(url)
+        if ('عقارات/جدة' in decoded or 'شقق-للبيع/جدة' in decoded
+                or 'حي-الفيصلية' in decoded):
+            return {'html': self.html, 'final_url': url,
+                    'status': 200, 'error': ''}
+        return {'html': '', 'final_url': 'https://sa.aqar.fm/عقارات',
+                'status': 200, 'error': ''}
 
 
 class _BlockedSession:
@@ -377,6 +414,76 @@ class AqarScanTests(unittest.TestCase):
             _BlockedSession(), 'جدة', pairs=[('سكني', 'بيع')])
         self.assertEqual(result['error'], 'blocked')
         self.assertEqual(result['rows'], [])
+
+    def test_district_regions_are_learned_from_the_city_ads(self):
+        session = _DistrictSession()
+        regions = aqar_projects.learn_district_regions(
+            session, 'جدة', cache_path='')
+        key = aqar_projects._district_key('الفيصلية')
+        self.assertEqual(regions.get(key), 'شمال-جدة')
+        self.assertTrue(any('عقارات/جدة' in unquote(url)
+                            for url in session.urls))
+
+    def test_district_listing_cards_become_competitor_rows(self):
+        session = _DistrictSession()
+        result = aqar_projects.scan_district_listings(
+            session, 'جدة', districts=('حي الفيصلية',),
+            district_regions={aqar_projects._district_key('الفيصلية'):
+                              'شمال-جدة'},
+            pairs=[('سكني', 'بيع')], limit=5)
+        self.assertEqual([row['name'] for row in result['rows']],
+                         ['شقة للبيع في شارع أبو حامد'])
+        row = result['rows'][0]
+        self.assertEqual(row['price_value'], '580000')
+        self.assertEqual(row['price_type'], 'سعر الوحدة')
+        self.assertEqual(row['area_sqm'], '144')
+        self.assertEqual(row['district'], 'حي الفيصلية')
+        self.assertEqual(row['source'], 'عقار')
+        self.assertEqual(row['row_source'], 'aqar_listing')
+        self.assertIn('إعلان عقار', row['notes'])
+        self.assertEqual(result['pages'], 1)
+
+    def test_listing_card_uses_the_building_name_and_annual_rent(self):
+        result = aqar_projects.scan_district_listings(
+            _DistrictSession(), 'جدة', districts=('حي الفيصلية',),
+            district_regions={aqar_projects._district_key('الفيصلية'):
+                              'شمال-جدة'},
+            unit_types=['مكتب'], pairs=[('تجاري', 'إيجار')], limit=5)
+        self.assertEqual([row['name'] for row in result['rows']],
+                         ['برج مرمر'])
+        row = result['rows'][0]
+        self.assertEqual(row['price_type'], 'إيجار الوحدة السنوي')
+        self.assertIn('سنوي', row['notes'])
+
+    def test_listing_scan_skips_land_and_honours_the_unit_type(self):
+        apartments = aqar_projects.scan_district_listings(
+            _DistrictSession(), 'جدة', districts=('حي الفيصلية',),
+            district_regions={aqar_projects._district_key('الفيصلية'):
+                              'شمال-جدة'},
+            unit_types=['شقة'],
+            pairs=[('سكني', 'بيع'), ('تجاري', 'إيجار')], limit=5)
+        self.assertEqual([row['name'] for row in apartments['rows']],
+                         ['شقة للبيع في شارع أبو حامد'])
+        self.assertFalse(any('أرض' in row['name']
+                             for row in apartments['rows']))
+
+    def test_a_listing_page_that_redirected_away_is_not_read(self):
+        class Redirected(_DistrictSession):
+            def fetch_html(self, url, timeout=None):
+                return {'html': self.html,
+                        'final_url': 'https://sa.aqar.fm/عقارات',
+                        'status': 200, 'error': ''}
+
+        result = aqar_projects.scan_district_listings(
+            Redirected(), 'جدة', districts=('حي الفيصلية',),
+            district_regions={}, pairs=[('سكني', 'بيع')], limit=5)
+        self.assertEqual(result['rows'], [])
+        self.assertEqual(result['pages'], 0)
+
+    def test_district_url_carries_the_region(self):
+        url = aqar_projects.build_district_url(
+            'جدة', 'حي الفيصلية', 'شمال-جدة')
+        self.assertIn('/جدة/شمال-جدة/حي-الفيصلية', unquote(url))
 
     def test_an_english_offer_gets_an_english_row_note(self):
         result = aqar_projects.scan(

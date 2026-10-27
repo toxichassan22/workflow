@@ -651,6 +651,49 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
                 pass
 
 
+def _native_fallback_needed(result):
+    """True when the local search layer never ran; a searched empty market is
+    a real answer and must not trigger the paid fallback."""
+    if not isinstance(result, dict):
+        return True
+    if result.get('search_ran'):
+        return False
+    return True
+
+
+def _native_search_fallback(system_prompt, prompt, usage_ctx, evidence_pool,
+                            deadline, search_budget=3, max_steps=6):
+    """One provider-native OpenRouter web search when the browser search layer
+    is blocked. The owner ordered this fallback for genuinely refused search
+    engines; it runs on MARKET_STUDY_MODEL, never a model of its own."""
+    try:
+        response = _browse_agent_call(
+            system_prompt, prompt, usage_ctx,
+            evidence_pool=evidence_pool, deadline=deadline,
+            local_tools=False,
+            plugins=[{'id': 'web', 'max_results': 5}],
+            search_budget=search_budget, max_steps=max_steps,
+            max_tokens=14000, reasoning_effort='low')
+    except Exception as exc:
+        print(f'[MARKET STUDY] native search fallback failed: {exc}',
+              flush=True)
+        return None
+    if not isinstance(response, dict) or response.get('error'):
+        return None
+    parsed, parse_error = _parse_market_model_json(response)
+    rows = (parsed or {}).get('competitors')
+    if not isinstance(rows, list) or not rows:
+        return None
+    return {
+        'task': None,
+        'reply': response,
+        'parsed': parsed,
+        'parse_error': '',
+        'provider_error': '',
+        'search_ran': bool(_market_search_ran(response)),
+    }
+
+
 def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
                                 tenant_id, data, evidence_pool, deadline,
                                 system_prompt, report, band, search_budget,
@@ -701,7 +744,7 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
     provider_error = _chat_error_message(response) if isinstance(response, dict) and response.get('error') else ''
     parsed, parse_error = (_parse_market_model_json(response)
                            if isinstance(response, dict) else ({}, 'empty_response'))
-    return {
+    result = {
         'task': task,
         'reply': response if isinstance(response, dict) else None,
         'parsed': parsed if isinstance(parsed, dict) else {},
@@ -709,6 +752,18 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
         'provider_error': provider_error or '',
         'search_ran': bool(isinstance(response, dict) and _market_search_ran(response)),
     }
+    if (str(task.get('kind') or '') != 'fill'
+            and _native_fallback_needed(result)):
+        fallback = _native_search_fallback(
+            system_prompt, prompt,
+            _usage_ctx('market', data, tenant_id=tenant_id),
+            evidence_pool, deadline, search_budget=3, max_steps=6)
+        if fallback and fallback.get('parsed', {}).get('competitors'):
+            fallback['task'] = task
+            print(f'[MARKET STUDY] native search fallback used for '
+                  f'{task.get("label") or "scan"}', flush=True)
+            result = fallback
+    return result
 
 
 def _run_scan_tasks(tasks, payload, existing, mode, offer_lang, tenant_id,
@@ -883,7 +938,7 @@ def _run_expansion_scan_task(task, payload, existing, mode, offer_lang,
     provider_error = _chat_error_message(response) if isinstance(response, dict) and response.get('error') else ''
     parsed, parse_error = (_parse_market_model_json(response)
                            if isinstance(response, dict) else ({}, 'empty_response'))
-    return {
+    result = {
         'task': task,
         'reply': response if isinstance(response, dict) else None,
         'parsed': parsed if isinstance(parsed, dict) else {},
@@ -891,6 +946,17 @@ def _run_expansion_scan_task(task, payload, existing, mode, offer_lang,
         'provider_error': provider_error or '',
         'search_ran': bool(isinstance(response, dict) and _market_search_ran(response)),
     }
+    if _native_fallback_needed(result):
+        fallback = _native_search_fallback(
+            system_prompt, prompt,
+            _usage_ctx('market', data, tenant_id=tenant_id),
+            evidence_pool, deadline, search_budget=3, max_steps=6)
+        if fallback and fallback.get('parsed', {}).get('competitors'):
+            fallback['task'] = task
+            print(f'[MARKET STUDY] native search fallback used for '
+                  f'{task.get("label") or "expansion"}', flush=True)
+            result = fallback
+    return result
 
 
 def _run_parallel_expansions(tasks, payload, existing, mode, offer_lang,

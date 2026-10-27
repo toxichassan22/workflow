@@ -273,8 +273,24 @@ def _run_market_source_plan(payload, offer_lang='ar', evidence_pool=None,
     run = getattr(market_study, 'run_source_plan', None)
     if not callable(build) or not callable(run):
         return
+    district_regions = None
+    if not market_wide and session is not None:
+        try:
+            import aqar_projects
+            city = str((payload or {}).get('city') or '').strip()
+            cache_path = (os.path.join(
+                UPLOADS_DIR, aqar_projects.REGION_CACHE_FILE_NAME)
+                if UPLOADS_DIR else '')
+            district_regions = aqar_projects.learn_district_regions(
+                session, city, cache_path=cache_path)
+            if district_regions:
+                print(f'[MARKET STUDY] aqar district regions learned='
+                      f'{len(district_regions)}', flush=True)
+        except Exception as exc:
+            print(f'[MARKET STUDY] aqar district regions skipped: {exc}')
     try:
-        plan = build(payload, offer_lang=offer_lang, market_wide=market_wide)
+        plan = build(payload, offer_lang=offer_lang, market_wide=market_wide,
+                     district_regions=district_regions)
     except Exception as exc:
         print(f'[MARKET STUDY] source plan build failed: {exc}')
         return
@@ -451,7 +467,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         payload, existing, mode, offer_lang, tenant_id, data,
         evidence_pool, deadline, system_prompt, report, band=(22, 40))
     _await_source_plan(source_thread)
-    aqar_rows = _await_aqar_projects_scan(aqar_handle, timeout=60)
+    aqar_rows = _await_aqar_projects_scan(aqar_handle, timeout=110)
     aggregate = _aggregate_scan_results(scan_results)
     provider_error = aggregate['provider_error']
     if not aggregate['usable'] and not aqar_rows:
