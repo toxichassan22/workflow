@@ -323,6 +323,9 @@
 
     function projectModeFlags() { const mode = val('unitRevenueMode') || 'mixed'; return { mode, sales: mode === 'sale' || mode === 'mixed', rental: mode === 'rental' || mode === 'mixed', anyRevenue: mode !== 'nonRevenue' } }
     function syncProjectYearBounds(totalYears, developmentYears) {
+      // A sensitivity scenario may shorten the study temporarily; clamping here would
+      // overwrite the client's own year inputs permanently instead of for the scenario.
+      if (window.__sensitivityRunning) return;
       ['salesStartYear', 'landContributionYear', 'saleExitYear', 'operatingExitYear', 'roiEndYear', 'irrEndYear', 'fundFeeStartYear', 'fundFeeEndYear', 'performanceCrystallizationYear', 'graceStartYear'].forEach(id => { const el = document.getElementById(id); if (!el) return; el.max = String(totalYears); const raw = String(el.value ?? '').trim(); if (raw === '') return; const n = parseNumber(raw); if (n > totalYears) el.value = String(totalYears); if (n < 1) el.value = '1' });
       document.querySelectorAll('#scheduleTable tbody tr').forEach(tr => { const year = parseNumber(tr.dataset.stageYear || 1); if (year > developmentYears) tr.dataset.stageYear = String(developmentYears) });
     }
@@ -712,7 +715,7 @@
         if (feeYearFraction > 0) { let managementBase = 0; if (fundFeeBase === 'fundCapital') managementBase = fundCapitalInput; else if (fundFeeBase === 'investedCapital') managementBase = Math.max(cumulativeInvestedCapital + landInKindContribution, fundCapitalInput); else if (fundFeeBase === 'nav') managementBase = fundNavInput; else if (fundFeeBase === 'projectCost') managementBase = projectCost; const growthYears = Math.max(0, year - Math.ceil(fundFeeStartYear)); fundManagementFee = (fundFeeBase === 'fixed' ? fundFixedAnnualFee : managementBase * fundManagementRate) * Math.pow(1 + fundFeeGrowthRate / 100, growthYears) * feeYearFraction; }
         totalFundManagementFees += fundManagementFee;
 
-        let additionalFundFees = 0; fundAdditionalFeeRows.forEach(row => { const active = fundFeesOn && (row.recurrence === 'annual' ? (year >= row.startYear && year <= row.endYear) : (year === row.startYear)); if (!active) return; const amount = calculateFundAdditionalFee(row.method, row.value, { fundCapital: fundCapitalInput, projectCost, exitValue: saleExitGrossAnnual + operatingExitGrossAnnual, profit: unlevered }); row.total += amount; additionalFundFees += amount; });
+        let additionalFundFees = 0; fundAdditionalFeeRows.forEach(row => { const active = fundFeesOn && (row.recurrence === 'annual' ? (year >= row.startYear && year <= row.endYear) : (year === row.startYear)); if (!active) return; const amount = calculateFundAdditionalFee(row.method, row.value, { fundCapital: fundCapitalInput, projectCost, financeBase: financeBaseAmount, exitValue: saleExitGrossAnnual + operatingExitGrossAnnual, profit: unlevered }); row.total += amount; additionalFundFees += amount; });
         totalAdditionalFundFees += additionalFundFees;
 
         const beforeFundExitFee = unlevered + draw - fee - interest - repayment - fundManagementFee - additionalFundFees;

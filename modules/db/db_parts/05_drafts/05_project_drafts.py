@@ -204,7 +204,7 @@ class DraftRevisionConflict(Exception):
 DRAFT_BOOKKEEPING_KEYS = {
     'draftId', 'draft_id', 'pageDrafts', 'sectionStatuses',
     'map_styles', 'map_type', 'calculate_landmark_driving', 'site_analysis_approved',
-    'designerChat', 'presentation_scope',
+    'designerChat', 'presentation_scope', 'parkingChat',
 }
 
 # Below this many stored fields a draft is still being started, and blanking it can be a real
@@ -1264,7 +1264,7 @@ GENERATION_INPUT_EXCLUDED_KEYS = {
     'access_road_label_sizes', 'catchment_label_positions',
     # Working/chat state that does not feed the generation prompts.
     'designerChat', 'designerChatSessions', 'chatHistory', 'draftHistory',
-    'tenantArchiveCache', 'best_use_data', 'best_use_chat',
+    'tenantArchiveCache', 'best_use_data', 'best_use_chat', 'parkingChat',
     # Identity/bookkeeping fields the client round-trips.
     'draftId', 'draft_id', 'schema_version', 'sectionStatuses',
     # Transient UI state, view parameters and client-side mirrors.

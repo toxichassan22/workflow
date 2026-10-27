@@ -85,6 +85,66 @@ class FinancialParkingApiTests(unittest.TestCase):
             'draftId': self.draft_id, 'planId': plan['id'], 'approved': approved,
             'expectedRevision': self.draft()['revision']})
 
+    def chat(self, message='ليه الفندق كده؟', payload=None):
+        body = {'draftId': self.draft_id, 'message': message, 'history': [], 'memory': '',
+                'expectedRevision': self.draft()['revision']}
+        with patch.object(self.application, 'call_text_chat', return_value={
+                'choices': [{'message': {'content': json.dumps(
+                    payload or {'answer': 'الاشتراط يوضح الأساس.', 'rules': None},
+                    ensure_ascii=False)}}]}) as provider:
+            response = self.client.post('/api/financial-study/parking/chat', headers=self.headers, json=body)
+        return response, provider
+
+    def stored_plan(self):
+        model = self.draft()['draft_data']['financial_study_model']
+        return financial_parking.parking_object(model.get('parkingPlan'))
+
+    def test_chat_explains_without_touching_the_plan(self):
+        response, _ = self.suggest()
+        plan = response['financialModel']['parkingPlan']
+        chat_response, provider = self.chat()
+        self.assertEqual(chat_response.status_code, 200, chat_response.get_json())
+        body = chat_response.get_json()
+        self.assertTrue(body['success'])
+        self.assertFalse(body['changed'])
+        self.assertEqual(body['answer'], 'الاشتراط يوضح الأساس.')
+        self.assertNotIn('financialModel', body)
+        self.assertEqual(provider.call_args.kwargs['usage_ctx']['draft_id'], self.draft_id)
+        self.assertEqual(self.stored_plan()['id'], plan['id'])
+
+    def test_chat_revision_rebuilds_the_plan_deterministically(self):
+        self.project['regulatory_constraints'] = (
+            'السكني: موقف واحد لكل وحدة. التجاري: موقف واحد لكل 50 م² من المساحة المبنية. '
+            'وموقف واحد لكل 25 م² من المساحة المبنية.')
+        self.assertEqual(self.save_draft(self.project).status_code, 200)
+        response, _ = self.suggest()
+        plan = response['financialModel']['parkingPlan']
+        self.assertEqual(plan['requiredSpaces'], 130)
+        revised = copy.deepcopy(self.rules['rules'])
+        revised[1].update(per=25, sourceQuote='وموقف واحد لكل 25 م² من المساحة المبنية')
+        chat_response, _ = self.chat(payload={'answer': 'تم تعديل أساس التجاري.', 'rules': revised})
+        body = chat_response.get_json()
+        self.assertEqual(chat_response.status_code, 200, body)
+        self.assertTrue(body['changed'])
+        new_plan = body['financialModel']['parkingPlan']
+        self.assertNotEqual(new_plan['id'], plan['id'])
+        self.assertEqual(new_plan['requiredSpaces'], 160, new_plan['missing'])
+        self.assertFalse(new_plan['approved'])
+        self.assertEqual(self.stored_plan()['id'], new_plan['id'])
+
+    def test_chat_cannot_write_a_rate_the_regulations_do_not_document(self):
+        self.suggest()
+        invented = copy.deepcopy(self.rules['rules'])
+        invented[1].update(per=12, sourceQuote='التجاري: موقف واحد لكل 12 م² من المساحة المبنية.')
+        chat_response, _ = self.chat(payload={'answer': 'تم', 'rules': invented})
+        body = chat_response.get_json()
+        self.assertEqual(chat_response.status_code, 200, body)
+        plan = body['financialModel']['parkingPlan']
+        self.assertTrue(body['changed'])
+        self.assertIsNone(plan['requiredSpaces'])
+        self.assertFalse(plan['canApply'])
+        self.assertTrue(any('محلات تجارية' in note for note in plan['missing']))
+
     def test_suggestion_uses_scoped_saved_inputs_but_applies_nothing_before_approval(self):
         response, provider = self.suggest(projectData={'regulatory_constraints': 'موقف لكل 1 م²'})
         plan = response['financialModel']['parkingPlan']

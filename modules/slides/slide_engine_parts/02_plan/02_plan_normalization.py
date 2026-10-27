@@ -1460,7 +1460,7 @@ PROMPT_COVERED_ELSEWHERE = {
 # verbatim turns back as facts re-injects values the project has since replaced.
 PROMPT_PREVIOUS_OUTPUT = {'tenantSlidesData', 'pageDrafts', 'slides', 'slidesData',
                         'designerChat', 'designerChatSessions', 'chatHistory',
-                        'best_use_chat', 'presentation_scope'}
+                        'best_use_chat', 'parkingChat', 'presentation_scope'}
 
 # Machine artefacts of the land analysis and the map pipeline: the facts they produced are already
 # in the visible land and location fields.

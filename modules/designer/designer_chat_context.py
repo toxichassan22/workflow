@@ -20,7 +20,7 @@ from collections.abc import Mapping
 # project facts. Apply ONLY at project root.
 PROJECT_BOOKKEEPING_KEYS = frozenset({
     'tenantSlidesData', 'slides', 'slidesData', 'pageDrafts', 'tenantSlidePlan',
-    'designerChat', 'designerChatSessions', 'chatHistory', 'best_use_chat',
+    'designerChat', 'designerChatSessions', 'chatHistory', 'best_use_chat', 'parkingChat',
     'draftHistory', 'tenantArchiveCache', 'slide_generation_checkpoint',
     'presentation_scope', 'schema_version', 'draftId', 'draft_id',
 })

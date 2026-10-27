@@ -16,7 +16,7 @@ DRAFT_COPY_STRIPPED_KEYS = {
     # optional section on the copy.
     'best_use_data', 'best_use_chat',
     # Designer/chat working state of the source file.
-    'designerChat', 'designerChatSessions', 'chatHistory',
+    'designerChat', 'designerChatSessions', 'chatHistory', 'parkingChat',
     # Identity fields that must not point back at the source draft.
     'draftId', 'draft_id',
     # Approval flags stamped on generated analysis.

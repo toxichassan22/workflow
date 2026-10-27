@@ -56,6 +56,65 @@
 .financial-parking [hidden] {
   display: none !important;
 }
+.financial-parking-chat {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border, #DCE3EB);
+  display: grid;
+  gap: 10px;
+}
+.financial-parking-chat h4 {
+  margin: 0;
+}
+.financial-parking-chat-log {
+  max-height: 280px;
+  overflow-y: auto;
+  display: grid;
+  gap: 8px;
+  padding: 4px;
+}
+.financial-parking-chat-log:empty {
+  display: none;
+}
+.financial-parking-chat-message {
+  padding: 8px 12px;
+  border-radius: 10px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  font-size: 13px;
+  max-width: 92%;
+}
+.financial-parking-chat-message.user {
+  margin-inline-start: auto;
+  background: var(--teal-soft, #DFF6FB);
+  color: var(--navy, #07182C);
+}
+.financial-parking-chat-message.assistant {
+  margin-inline-end: auto;
+  background: #F4F7FA;
+  color: var(--navy, #07182C);
+}
+.financial-parking-chat-compose {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+}
+.financial-parking-chat-compose textarea {
+  flex: 1;
+  min-height: 46px;
+  resize: vertical;
+  border: 1px solid var(--border, #DCE3EB);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font: inherit;
+  color: inherit;
+}
+.financial-parking-chat-compose button {
+  flex: 0 0 auto;
+}
+.financial-parking-chat .tenant-hint {
+  min-height: 16px;
+}
 @media (max-width: 680px) {
   .financial-parking {
     padding: 12px;

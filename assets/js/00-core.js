@@ -527,7 +527,7 @@
       'survey_coordinates', 'directions_table', 'parcels', 'conflicts', 'warnings',
       'extraction_diagnostics', 'document_processing', 'land_document_processing',
       'document_summary', 'source_priority', 'company_branding',
-      'location_polygon', 'designerChat', 'presentation_scope', 'best_use_data', 'best_use_chat'
+      'location_polygon', 'designerChat', 'presentation_scope', 'best_use_data', 'best_use_chat', 'parkingChat'
     ];
 
     // Mirrors slide_engine.financial_study_has_real_input(). The financial section is rendered for

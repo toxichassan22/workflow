@@ -1,4 +1,5 @@
     let financialParkingBusy = false;
+    let financialParkingChatBusy = false;
     let financialParkingRequestTask = null;
     let financialParkingLastInvalidation = '';
 
@@ -121,6 +122,15 @@
           <div class="table-wrap"><table id="parkingRequirementsTable"><thead><tr><th>المكون</th><th>طريقة الاحتساب</th><th>الكمية المعتمدة</th><th>عدد المواقف المطلوبة</th><th>الاشتراط الموثق</th></tr></thead><tbody></tbody></table></div>
           <div class="financial-parking-notes"><div id="financialParkingNotesWrap"><label for="financialParkingNotes">ملاحظات اقتراح المواقف</label><textarea id="financialParkingNotes" readonly rows="4"></textarea></div></div>
         </div>
+        <div class="financial-parking-chat" id="financialParkingChat">
+          <h4>محادثة الاقتراح</h4>
+          <div id="financialParkingChatLog" class="financial-parking-chat-log" role="log" aria-live="polite"></div>
+          <div class="financial-parking-chat-compose">
+            <textarea id="financialParkingChatInput" rows="2" placeholder="رسالتك" oninput="event.stopPropagation()"></textarea>
+            <button type="button" id="financialParkingChatSend" class="btn ghost" onclick="sendFinancialParkingChat()">إرسال</button>
+          </div>
+          <div id="financialParkingChatStatus" class="tenant-hint" role="status" aria-live="polite"></div>
+        </div>
       </section>`;
     }
 
@@ -159,7 +169,7 @@
       const presentationMode = typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation';
       const sectionLocked = tenantProjectSectionStatuses['section-financial-calc'] === 'approved';
       const suggest = document.getElementById('financialParkingSuggest');
-      if (suggest) suggest.disabled = financialParkingBusy || presentationMode || sectionLocked;
+      if (suggest) suggest.disabled = financialParkingBusy || financialParkingChatBusy || presentationMode || sectionLocked;
       const details = document.getElementById('financialParkingDetails');
       if (details) details.hidden = (!plan.id && !financialParkingBusy) || plan.approved === true;
       panel.classList?.toggle('busy', financialParkingBusy);
@@ -190,13 +200,13 @@
       const discard = document.getElementById('financialParkingDiscard');
       if (discard) {
         discard.hidden = !plan.id;
-        discard.disabled = financialParkingBusy || presentationMode || sectionLocked;
+        discard.disabled = financialParkingBusy || financialParkingChatBusy || presentationMode || sectionLocked;
       }
       const approve = document.getElementById('financialParkingApprove');
       if (approve) {
         approve.hidden = !plan.id;
         approve.textContent = financialParkingText(plan.approved ? 'إلغاء اعتماد اقتراح المواقف' : 'اعتماد اقتراح المواقف');
-        approve.disabled = financialParkingBusy || presentationMode || (!plan.approved && (!plan.canApply || stale));
+        approve.disabled = financialParkingBusy || financialParkingChatBusy || presentationMode || (!plan.approved && (!plan.canApply || stale));
       }
       document.querySelectorAll('#componentsTable tbody tr').forEach(row => {
         const parking = row.querySelector('[data-field="useType"] select')?.value === 'parking';
@@ -214,6 +224,7 @@
         if (Object.keys(updates).length && typeof applySectionStatuses === 'function') applySectionStatuses(updates);
       }
       if (typeof refreshDynamicI18n === 'function') refreshDynamicI18n(panel);
+      renderFinancialParkingChat();
     }
 
     function hydrateFinancialParkingPlan(model) {
@@ -307,6 +318,80 @@
     function discardFinancialParking() {
       if (typeof confirm === 'function' && !confirm(financialParkingText('حذف اقتراح المواقف ومكوناته المولدة؟'))) return Promise.resolve(false);
       return runFinancialParkingAction('discard');
+    }
+
+    function financialParkingChatState() {
+      const stored = financialParkingObject(tenantProjectData.parkingChat);
+      const messages = Array.isArray(stored.messages)
+        ? stored.messages.filter(message => message && String(message.content || '').trim())
+          .map(message => ({ role: message.role === 'user' ? 'user' : 'assistant', content: String(message.content) }))
+        : [];
+      return { messages, memory: String(stored.memory || '') };
+    }
+
+    function renderFinancialParkingChat() {
+      const log = document.getElementById('financialParkingChatLog');
+      if (log) {
+        const { messages } = financialParkingChatState();
+        log.innerHTML = messages.map(message => '<div class="financial-parking-chat-message ' + message.role + '">'
+          + escapeHtml(message.content) + '</div>').join('');
+        log.scrollTop = log.scrollHeight;
+      }
+      const sectionLocked = typeof tenantProjectSectionStatuses !== 'undefined'
+        && tenantProjectSectionStatuses['section-financial-calc'] === 'approved';
+      const presentationMode = typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation';
+      const input = document.getElementById('financialParkingChatInput');
+      const send = document.getElementById('financialParkingChatSend');
+      if (input) input.disabled = financialParkingChatBusy || sectionLocked || presentationMode;
+      if (send) send.disabled = financialParkingChatBusy || financialParkingBusy || sectionLocked || presentationMode;
+      const status = document.getElementById('financialParkingChatStatus');
+      if (status) status.textContent = financialParkingChatBusy ? 'جاري الرد...' : '';
+    }
+
+    async function sendFinancialParkingChat() {
+      if (financialParkingChatBusy) return false;
+      const input = document.getElementById('financialParkingChatInput');
+      const message = String(input?.value || '').trim();
+      if (!message) return false;
+      if (typeof tenantProjectSectionStatuses !== 'undefined'
+          && tenantProjectSectionStatuses['section-financial-calc'] === 'approved') return false;
+      if (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation') return false;
+      const state = financialParkingChatState();
+      const history = state.messages.slice(-40);
+      const workspace = tenantProjectData;
+      financialParkingChatBusy = true;
+      renderFinancialParkingChat();
+      try {
+        if (!(await saveProjectAsDraft(true, false))) return false;
+        if (tenantProjectData !== workspace) return false;
+        const draftId = tenantProjectData.draftId;
+        const snapshot = financialParkingStable(financialParkingSnapshot());
+        const response = await parkingApi('POST', '/api/financial-study/parking/chat', {
+          draftId, expectedRevision: tenantDraftRevision, planId: financialParkingPlan().id || '',
+          message, history, memory: state.memory
+        }, 180000);
+        if (!response?.success) {
+          toast(financialParkingText(response?.error || 'تعذر الرد على المحادثة.'));
+          return false;
+        }
+        state.messages.push({ role: 'user', content: message }, { role: 'assistant', content: String(response.answer || '') });
+        state.memory = String(response.memory || '');
+        tenantProjectData.parkingChat = state;
+        if (input) input.value = '';
+        if (response.financialModel) {
+          const fresh = financialParkingReceive(response, snapshot, draftId);
+          if (!fresh) toast(financialParkingText('تغيّرت البيانات الحالية أثناء إعداد اقتراح المواقف؛ لم تُستبدل مدخلاتك.'));
+        } else {
+          triggerAutoSaveDraft();
+        }
+        return true;
+      } catch (error) {
+        toast(financialParkingText('تعذر الرد على المحادثة.'));
+        return false;
+      } finally {
+        financialParkingChatBusy = false;
+        renderFinancialParking();
+      }
     }
 
     document.addEventListener('wf:lang', () => renderFinancialParking());

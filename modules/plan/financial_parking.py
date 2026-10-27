@@ -126,7 +126,8 @@ def _number_in_quote(number, quote):
     if number in values:
         return True
     if number == 1:
-        return bool(re.search(r'\bموقف(?:ا)?\b|لكل\s+(?:وحدة|غرفة|شقة|فيلا)|one|per\s+(?:unit|room)', normalized))
+        return bool(re.search(
+            r'موقف(?:ا)?(?![\u0621-\u064a])|لكل\s+(?:وحدة|غرفة|شقة|فيلا)|one|per\s+(?:unit|room)', normalized))
     return number == 2 and bool(re.search(r'موقفان|موقفين|اثنان|اثنين|غرفتين|وحدتين|two', normalized))
 
 
@@ -153,7 +154,7 @@ def _rule_spaces(rule, component, snapshot, source_texts):
         return None
     normalized = _quote_text(quote)
     unit_rate = bool(re.search(
-        r'لكل\s+(?:وحدة|وحدتين|وحدات|شقة|شقتين|شقق|غرفة|غرفتين|غرف|فيلا|فيلتين|مسكن|مساكن)'
+        r'لكل\s+(?:\d+\s*)?(?:وحدة|وحدتين|وحدات|شقة|شقتين|شقق|غرفة|غرفتين|غرف|فيلا|فيلتين|مسكن|مساكن)'
         r'|per\s+(?:unit|apartment|room|dwelling|villa)', normalized))
     area_word = bool(re.search(r'م\s*2|متر|مساحة|sqm|square|\bm2\b|area', normalized))
     if basis == 'units' and not unit_rate:
@@ -239,6 +240,13 @@ def _quote_rate_numbers(quote):
     return numbers
 
 
+_QUOTE_SEGMENT_SPLIT = re.compile(r'(?<!\d)[.!؟\n]|\.(?!\d)|؛')
+
+
+def _quote_segments(quote):
+    return [segment for segment in _QUOTE_SEGMENT_SPLIT.split(_quote_text(quote)) if segment.strip()]
+
+
 def _verified_rate_numbers(item):
     numbers = set()
     for key in ('spacesPer', 'per', 'fixedSpaces', 'threshold'):
@@ -251,37 +259,71 @@ def _verified_rate_numbers(item):
     return numbers
 
 
-def _drop_misattributed_quotes(staged):
-    """Drop a rule whose quote carries another component's distinctive rate.
-
-    Each requirement row must document its own component's clause: when one
-    quote pastes several components' clauses, the digits of a foreign rate
-    (an area rate such as 25/50/150 that is not this rule's own) give it away.
-    Small shared counts (1, 2) are exempt — a shared «whichever is more»
-    sentence stays with every alternative of its own component. The existing
-    verified/calculated count mismatch then routes the component to the
-    documented-missing path instead of showing everyone's text as its own."""
+def _component_rate_sets(staged):
     rate_sets = {}
     for component, _selected, _calculated, verified in staged:
         own_rates = set()
         for item in verified:
             own_rates |= {rate for rate in _verified_rate_numbers(item) if rate > 2}
         rate_sets[component['id']] = own_rates
+    return rate_sets
+
+
+def _drop_misattributed_quotes(staged):
+    """Drop a rule whose quote documents another component's clause.
+
+    A pasted blob of several uses still convicts the rule: a foreign
+    distinctive rate sitting in a quote segment that carries none of this
+    component's own rates belongs to another use. A shared regulation sentence
+    that lists several uses keeps the rule — the hotel clause that ends with
+    the halls' 35 m² carries both rates in one segment, so neither component
+    loses its documented rule to the other."""
+    rate_sets = _component_rate_sets(staged)
     filtered = []
     for component, selected, calculated, verified in staged:
+        own = rate_sets[component['id']]
         foreign = set()
         for other_id, rates in rate_sets.items():
             if other_id != component['id']:
                 foreign |= rates
+        foreign -= own
         kept = []
         for item in verified:
-            own = _verified_rate_numbers(item)
-            digits = _quote_rate_numbers(item.get('sourceQuote'))
-            if any(number > 2 and number not in own and number in foreign for number in digits):
+            segments = [_quote_rate_numbers(segment) for segment in _quote_segments(item.get('sourceQuote'))]
+            documented = any(numbers & own for numbers in segments)
+            suspect = [numbers for numbers in segments if not numbers & own] if documented else segments
+            if any(number > 2 and number not in own and number in foreign
+                   for numbers in suspect for number in numbers):
                 continue
             kept.append(item)
         filtered.append((component, selected, calculated, kept))
     return filtered
+
+
+_ALTERNATIVE_CLAUSE = re.compile(r'أيهما\s*(?:أكثر|أقل)|whichever\s+is\s+(?:greater|less|higher|lower)')
+
+
+def _incomplete_alternatives(component_id, verified, rate_sets):
+    """One rule does not document an «أيهما أكثر» clause — it names two
+    alternatives. A marker sharing its segment with another use's rates belongs
+    to that other clause and never convicts this component."""
+    own = rate_sets.get(component_id) or set()
+    foreign = set()
+    for other_id, rates in rate_sets.items():
+        if other_id != component_id:
+            foreign |= rates
+    foreign -= own
+    marked = 0
+    for item in verified:
+        for segment in _quote_segments(item.get('sourceQuote')):
+            if not _ALTERNATIVE_CLAUSE.search(segment):
+                continue
+            numbers = _quote_rate_numbers(segment)
+            if any(number > 2 and number not in own and number in foreign for number in numbers):
+                continue
+            marked += 1
+            break
+    return 0 < marked < 2
 
 
 def _requirement_notes(requirements, required, allocated):
@@ -401,13 +443,17 @@ def build_parking_plan(project, response, plan_id):
         calculated = [_rule_spaces(rule, component, snapshot, source_texts) for rule in selected]
         verified = [item for item in calculated if item is not None]
         staged.append((component, selected, calculated, verified))
-    for component, selected, calculated, verified in _drop_misattributed_quotes(staged):
+    filtered = _drop_misattributed_quotes(staged)
+    rate_sets = _component_rate_sets(filtered)
+    for component, selected, calculated, verified in filtered:
         label = component['name'] or component['id']
         computable = [item for item in verified if item['spaces'] is not None]
         summing = bool(selected) and all(rule.get('combination') == 'sum' for rule in selected)
         combined, first = None, verified[0] if verified else {}
         if not calculated or len(verified) != len(calculated):
             missing.append('اشتراط المواقف أو أساس حسابه غير موثق للمكون: ' + label)
+        elif _incomplete_alternatives(component['id'], verified, rate_sets):
+            missing.append('اشتراط المواقف يذكر بديلين ولم يُوثّقا معًا للمكون: ' + label)
         elif not computable or summing and len(computable) != len(verified):
             missing.append('كمية أساس اشتراط المواقف غير متوفرة للمكون: ' + label)
         else:
@@ -434,6 +480,7 @@ def build_parking_plan(project, response, plan_id):
     required = sum(item['spaces'] or 0 for item in requirements)
     plan = {'id': plan_id, 'approved': False, 'sourceSnapshot': snapshot,
             'sourceHash': parking_snapshot_hash(snapshot), 'requirements': requirements,
+            'sourceRules': copy.deepcopy(rules),
             'missing': missing, 'requiredSpaces': required if not missing else None,
             'areaPerSpace': area_per_space, 'areaIsEstimate': not area_documented,
             'areaSourceQuote': area_quote if area_documented else '',
@@ -448,6 +495,20 @@ def build_parking_plan(project, response, plan_id):
     if missing:
         plan['components'] = []
     return plan
+
+
+def parking_plan_signature(plan):
+    """What the client sees, without the plan id: a chat revision that changes
+    nothing must keep the current approval instead of silently resetting it."""
+    plan = parking_object(plan)
+    return json.dumps({
+        'requiredSpaces': plan.get('requiredSpaces'),
+        'canApply': plan.get('canApply'),
+        'missing': plan.get('missing') or [],
+        'requirements': [[row.get('componentId'), row.get('spaces'), row.get('quantity'),
+                          row.get('basis'), row.get('summary')]
+                         for row in plan.get('requirements') or []],
+    }, ensure_ascii=False, sort_keys=True)
 
 
 def remove_parking_plan(model):

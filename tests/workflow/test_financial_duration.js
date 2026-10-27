@@ -1,8 +1,8 @@
 'use strict';
 
-// The development duration is a timeline fact, not an assumption: section 14 shows
-// the exact calendar span (3 years and 6 months is 3.5) and every sensitivity
-// scenario keeps that same value instead of editing or rounding it.
+// The development duration's BASE is a timeline fact, not an assumption: section 14
+// shows the exact calendar span (3 years and 6 months is 3.5). The متحفظ/متفائل
+// columns stay client-editable like every other variable and drive the scenarios.
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -46,7 +46,7 @@ test('the financial mirror stores the exact duration, never a rounded bucket', (
   assert.ok(!timelineSource.includes('Math.ceil((period.end.ms - period.start.ms)'));
 });
 
-test('adding the duration variable pins it to the timeline value', () => {
+test('adding the duration variable pulls the base from the timeline and leaves both scenarios editable', () => {
   const rows = {
     length: 0,
     querySelectorAll: () => [],
@@ -64,13 +64,41 @@ test('adding the duration variable pins it to the timeline value', () => {
   });
   context.addSensitivityVariable({ key: 'developmentYears', low: 99, high: 1, silent: true });
   const html = rows.last.innerHTML;
-  assert.equal((html.match(/data-value="3\.5"/g) || []).length, 2, html);
-  assert.equal((html.match(/3 سنوات و6 شهر/g) || []).length, 3, html);
-  assert.ok(!html.includes('oninput'), html);
-  assert.ok(html.includes('قيمة ثابتة من الجدول الزمني'), html);
+  assert.equal((html.match(/<input type="number"/g) || []).length, 2, html);
+  assert.equal((html.match(/min="1" step="0.5"/g) || []).length, 2, html);
+  assert.ok(html.includes('data-field="low"') && html.includes('data-field="high"'), html);
+  assert.ok(html.includes('value="99"') && html.includes('value="1"'), html);
+  assert.equal((html.match(/3 سنوات و6 شهر/g) || []).length, 1, html);
+  assert.equal((html.match(/oninput="renderSensitivity\(\)"/g) || []).length, 2, html);
+  assert.ok(html.includes('قيمة فعلية — الأساسي من الجدول الزمني'), html);
+  assert.ok(!html.includes('sensitivity-fixed-duration'), html);
 });
 
-test('every sensitivity scenario skips the development duration', () => {
-  assert.ok(reportSource.includes("if (!regVar || regVar.key === 'developmentYears') return"));
-  assert.ok(reportSource.includes("const fixed = key === 'developmentYears'"));
+test('the duration defaults lean the right way and scenarios apply the entered duration', () => {
+  const rows = {
+    length: 0,
+    querySelectorAll: () => [],
+    appendChild(row) { rows.length += 1; rows.last = row; }
+  };
+  const context = browserContext({
+    document: {
+      addEventListener() {},
+      getElementById: id => id === 'developmentYears' ? { value: '3.5' }
+        : id === 'developmentDurationText' ? { value: '3 سنوات و6 شهر' } : null,
+      querySelector: selector => selector === '#sensitivityAssumptionsTable tbody' ? rows : null,
+      querySelectorAll: () => [],
+      createElement: () => ({ dataset: {}, innerHTML: '', querySelector: () => null, querySelectorAll: () => [] })
+    }
+  });
+  context.addSensitivityVariable({ key: 'developmentYears', silent: true });
+  const html = rows.last.innerHTML;
+  // متحفظ is the longer duration, متفائل the shorter one.
+  assert.ok(/data-field="low"><input[^>]*value="4\.5"/.test(html), html);
+  assert.ok(/data-field="high"><input[^>]*value="2\.5"/.test(html), html);
+  assert.ok(!reportSource.includes("regVar.key === 'developmentYears') return"));
+  assert.ok(reportSource.includes("else if (s.kind === 'delay') s.el.value = String(Math.max(1, target))"));
+});
+
+test('a duration scenario cannot overwrite the stored year bounds', () => {
+  assert.match(calcSource, /function syncProjectYearBounds\([^)]*\) \{(?:\s*\/\/[^\n]*\n)+\s*if \(window\.__sensitivityRunning\) return;/);
 });

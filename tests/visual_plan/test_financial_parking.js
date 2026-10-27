@@ -28,10 +28,16 @@ function fixture() {
       financial_study_model: { inputs: { landArea: 5000, coverageRate: 60,
         builtUpAreaAbove: 16500, basementArea: 600 }, dynamicRows: { components: [] } } },
     tenantProjectSectionStatuses: {}, tenantDraftRevision: 1, tenantProjectMode: 'draft',
+    setTenantDraftRevision(revision) { context.tenantDraftRevision = revision; },
     tenantPresentationId: null, dirty: false, toasts: [], requests: [],
     document: {
       addEventListener() {},
-      getElementById: id => id === 'componentsTable' ? table : inputs[id] || null,
+      getElementById: id => id === 'componentsTable' ? table
+        : id === 'financialParkingChatLog' ? chat.log
+        : id === 'financialParkingChatInput' ? chat.input
+        : id === 'financialParkingChatSend' ? chat.send
+        : id === 'financialParkingChatStatus' ? chat.status
+        : inputs[id] || null,
       querySelector: selector => {
         if (selector === '#componentsTable tbody') return body;
         if (selector === '#componentsTable') return table;
@@ -52,6 +58,8 @@ function fixture() {
   });
   const table = { closest: () => ({ classList: classes() }) };
   const body = { appendChild: row => rows.push(row) };
+  const chat = { log: { innerHTML: '', scrollTop: 0, scrollHeight: 0 }, input: field(''),
+    send: { disabled: false }, status: { textContent: '' } };
   vm.runInContext(source, context);
   context.calculateAll = () => {};
   const realAddComponent = context.addComponent;
@@ -78,7 +86,7 @@ function fixture() {
       name: 'مواقف السيارات — البدروم', useType: 'parking', parkingLocation: 'basement',
       units: 130, unitArea: 30, builtArea: 3900, revenueArea: 0, investmentModel: 'nonRevenue',
       parkingPlanId: 'plan-1', floorRange: 'بدروم 1-2' }] });
-  return { context, rows, inputs, add, snapshot, proposal, realAddComponent };
+  return { context, rows, inputs, add, snapshot, proposal, realAddComponent, chat };
 }
 
 async function until(predicate) {
@@ -471,4 +479,42 @@ test('financial parking panel is excluded from collected report for PDF and deck
   const headings = report.parts.filter(p => p.type === 'heading').map(p => p.text);
   assert.equal(headings.includes('المواقف المقترحة'), false);
   assert.equal(headings.includes('1. ملخص المشروع'), true);
+});
+
+test('the chat sends the conversation and rebuilds the proposal from the returned rules', async () => {
+  const f = fixture();
+  const plan = f.proposal(false);
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  const calls = [];
+  f.context.api = async (method, url, body) => {
+    calls.push({ method, url, body: plain(body) });
+    return { success: true, answer: 'الصالات لها 35 م² في الاشتراط.', memory: 'digest', changed: true,
+      draftId: 'draft-1', revision: 2, sectionStatuses: {},
+      financialModel: { inputs: { basementArea: 600 }, dynamicRows: { components: [] },
+        parkingPlan: { ...plan, id: 'plan-2', requiredSpaces: 160 } } };
+  };
+  f.chat.input.value = 'اعتبر الصالات 35 م²';
+  const result = await f.context.sendFinancialParkingChat();
+  assert.equal(result, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /parking\/chat/);
+  assert.equal(calls[0].body.message, 'اعتبر الصالات 35 م²');
+  assert.deepEqual(calls[0].body.history, []);
+  assert.equal(f.chat.input.value, '');
+  assert.equal(f.context.tenantProjectData.parkingChat.messages.length, 2);
+  assert.equal(f.context.tenantProjectData.parkingChat.messages[1].content, 'الصالات لها 35 م² في الاشتراط.');
+  assert.equal(f.context.tenantProjectData.parkingChat.memory, 'digest');
+  assert.equal(f.context.tenantProjectData.financial_study_model.parkingPlan.id, 'plan-2');
+});
+
+test('an explanation-only chat answer leaves the stored plan untouched', async () => {
+  const f = fixture();
+  const plan = f.proposal(false);
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  f.context.api = async () => ({ success: true, answer: 'لأن الاشتراط نص على ذلك.', memory: '', changed: false,
+    draftId: 'draft-1', revision: 1, planId: 'plan-1' });
+  f.chat.input.value = 'ليه؟';
+  assert.equal(await f.context.sendFinancialParkingChat(), true);
+  assert.equal(f.context.tenantProjectData.financial_study_model.parkingPlan.id, 'plan-1');
+  assert.equal(f.context.tenantProjectData.parkingChat.messages.length, 2);
 });

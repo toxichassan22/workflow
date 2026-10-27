@@ -258,6 +258,70 @@ class FinancialParkingTests(unittest.TestCase):
         self.assertTrue(any('شقق سكنية' in note for note in plan['missing']))
         self.assertEqual(plan['requirements'][1]['spaces'], 30)
 
+    def test_a_shared_sentence_keeps_the_hotel_and_halls_rules(self):
+        clause = ('توفير المواقف إلزامي وفق المعايير: موقف لكل 25 م² من مسطحات المحلات والمعارض والمكاتب '
+                  'والمطاعم، وموقف لكل وحدة سكنية أو لكل 150 م² شقق سكنية أيهما أكثر، وبالنسبة للفنادق '
+                  'موقف لكل غرفة لأول 40 غرفة وموقف لكل غرفتين لما زاد وموقف لكل 35 م² للصالات')
+        self.project['regulatory_constraints'] = clause
+        self.project['financial_study_model']['dynamicRows']['components'] = [
+            {'id': 'retail', 'name': 'المعارض التجارية', 'useType': 'retail',
+             'units': 12, 'builtArea': 2520, 'revenueArea': 2520},
+            {'id': 'hotel', 'name': 'الفندق', 'useType': 'hospitality',
+             'units': 337, 'builtArea': 16500, 'revenueArea': 10800},
+            {'id': 'hall', 'name': 'صالات الافراح للفندق', 'useType': 'hospitality',
+             'units': 1, 'builtArea': 1000, 'revenueArea': 1000},
+        ]
+        self.rules = {'rules': [
+            {'componentId': 'retail', 'basis': 'builtArea', 'spaces': 1, 'per': 25,
+             'sourceQuote': 'موقف لكل 25 م² من مسطحات المحلات والمعارض والمكاتب والمطاعم'},
+            {'componentId': 'hotel', 'basis': 'units', 'spaces': 1, 'per': 2,
+             'fixedSpaces': 40, 'threshold': 40, 'sourceQuote': clause},
+            {'componentId': 'hall', 'basis': 'builtArea', 'spaces': 1, 'per': 35,
+             'sourceQuote': clause},
+        ]}
+        plan = self.build()
+        self.assertTrue(plan['canApply'], plan['missing'])
+        spaces = {row['name']: row['spaces'] for row in plan['requirements']}
+        self.assertEqual(spaces['الفندق'], 189)
+        self.assertEqual(spaces['صالات الافراح للفندق'], 29)
+        self.assertEqual(spaces['المعارض التجارية'], 101)
+        self.assertEqual(plan['requiredSpaces'], 319)
+
+    def test_a_whichever_clause_needs_both_alternatives_documented(self):
+        self._apartments_clause('وموقف لكل وحدة سكنية أو لكل 150 م² شقق سكنية أيهما أكثر')
+        self.rules['rules'] = [rule for rule in self.rules['rules'] if rule['basis'] == 'units']
+        plan = self.build()
+        self.assertFalse(plan['canApply'])
+        self.assertIsNone(plan['requirements'][0]['spaces'])
+        self.assertTrue(any('بديلين' in note for note in plan['missing']))
+
+    def test_a_unit_rate_with_a_count_before_its_noun_is_documented(self):
+        self.project['regulatory_constraints'] = (
+            'السكني: موقف لكل 4 شقق سكنية. '
+            'التجاري: موقف واحد لكل 50 م² من المساحة المبنية.')
+        self.rules = {'rules': [
+            {'componentId': 'housing', 'basis': 'units', 'spaces': 1, 'per': 4,
+             'sourceQuote': 'السكني: موقف لكل 4 شقق سكنية.'},
+            {'componentId': 'retail', 'basis': 'builtArea', 'spaces': 1, 'per': 50,
+             'sourceQuote': 'التجاري: موقف واحد لكل 50 م² من المساحة المبنية.'},
+        ]}
+        plan = self.build()
+        self.assertTrue(plan['canApply'], plan['missing'])
+        self.assertEqual(plan['requirements'][0]['spaces'], 25)
+
+    def test_a_waw_prefixed_quote_still_documents_one_space(self):
+        self.project['regulatory_constraints'] += ' وموقف واحد لكل 25 م² من المساحة المبنية.'
+        self.rules['rules'][1].update(per=25, sourceQuote='وموقف واحد لكل 25 م² من المساحة المبنية')
+        plan = self.build()
+        self.assertTrue(plan['canApply'], plan['missing'])
+        self.assertEqual(plan['requirements'][1]['spaces'], 60)
+
+    def test_the_plan_keeps_the_raw_rules_and_a_signature_without_its_id(self):
+        plan = self.build()
+        self.assertEqual(plan['sourceRules'], self.rules['rules'])
+        self.assertEqual(financial_parking.parking_plan_signature(plan),
+                         financial_parking.parking_plan_signature(dict(plan, id='another-plan')))
+
     def test_pasted_regulations_blob_quote_is_rejected(self):
         self.project['regulatory_constraints'] = (
             'التجاري: موقف واحد لكل 50 م² من المساحة المبنية. '
