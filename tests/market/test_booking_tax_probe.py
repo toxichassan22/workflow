@@ -121,6 +121,42 @@ class BookingPageDumpTests(unittest.TestCase):
         """A runtime dump never lands loose at the repo root."""
         self.assertTrue(dump.DEFAULT_OUT.startswith('sandbox/'))
 
+    def test_a_page_stating_every_tax_proves_a_net_price(self):
+        verdict = dump.net_basis_verdict([
+            {'block_id': '1_2_2_0', 'price_attr': '298',
+             'taxes_text': '+53 SAR taxes and fees', 'taxes_raw': '53.1781'},
+            {'block_id': '1_2_2_1', 'price_attr': '350',
+             'taxes_text': '+63 SAR taxes and fees', 'taxes_raw': '62.56'},
+        ])
+        self.assertEqual(verdict['rows'], 2)
+        self.assertEqual(verdict['stated'], 2)
+        self.assertEqual(verdict['folded'], 0)
+        self.assertTrue(verdict['net'])
+
+    def test_a_folded_page_cannot_prove_a_net_price(self):
+        """The European view: one figure, «includes», nothing to remove."""
+        verdict = dump.net_basis_verdict([
+            {'block_id': '1_2_2_0', 'price_attr': '351',
+             'taxes_text': 'شامل الضرائب والرسوم', 'taxes_raw': ''},
+        ])
+        self.assertEqual(verdict['folded'], 1)
+        self.assertFalse(verdict['net'])
+
+    def test_one_folded_row_fails_the_whole_view(self):
+        """A single row without a stated tax must not pass as a net price."""
+        verdict = dump.net_basis_verdict([
+            {'block_id': '1_2_2_0', 'price_attr': '298',
+             'taxes_text': '+53 SAR taxes and fees'},
+            {'block_id': '1_2_2_1', 'price_attr': '351',
+             'taxes_text': 'شامل الضرائب والرسوم'},
+        ])
+        self.assertEqual(verdict['stated'], 1)
+        self.assertEqual(verdict['folded'], 1)
+        self.assertFalse(verdict['net'])
+
+    def test_an_empty_page_is_not_a_net_price(self):
+        self.assertFalse(dump.net_basis_verdict([])['net'])
+
 
 _spec = importlib.util.spec_from_file_location(
     'booking_pos_matrix', ROOT / 'scripts' / 'booking_pos_matrix.py')

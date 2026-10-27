@@ -82,6 +82,26 @@ def tax_evidence(html, limit=3):
     return {'bytes': len(text), 'counts': counts, 'snippets': snippets}
 
 
+def net_basis_verdict(rows):
+    """Whether these rows prove a net price — the basis the study stores.
+
+    A row proves it only when the page states a tax amount beside the printed
+    figure. Every row has to state one: a view that folds the taxes into a
+    single figure leaves nothing to remove, and a run that quietly mixed the
+    two bases would put a total next to a room price in the same table.
+    """
+    normalized = [booking_rooms.normalize_rate_row(row) for row in rows or []
+                  if isinstance(row, dict)]
+    priced = [row for row in normalized if row.get('price')]
+    stated = [row for row in priced if row.get('taxes')]
+    return {
+        'rows': len(priced),
+        'stated': len(stated),
+        'folded': len(priced) - len(stated),
+        'net': bool(priced) and len(stated) == len(priced),
+    }
+
+
 def main():
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -92,6 +112,8 @@ def main():
     parser.add_argument('--out', default=DEFAULT_OUT)
     parser.add_argument('--report-only', action='store_true',
                         help='print the evidence report, write no files')
+    parser.add_argument('--require-net', action='store_true',
+                        help='exit non-zero unless every row states its tax')
     args = parser.parse_args()
     url = hotel_stay.with_booking_stay_params(args.url)
     out = Path(args.out)
@@ -111,6 +133,9 @@ def main():
 
         rendered = page.content()
         rows = page.evaluate(booking_rooms.BOOKING_RATE_JS)
+        verdict = net_basis_verdict(
+            (rows or {}).get('rows') if isinstance(rows, dict) else rows)
+        print('net basis: ' + json.dumps(verdict))
         raw = ''
         try:
             response = page.request.get(url, timeout=60000)
@@ -128,6 +153,16 @@ def main():
             raw_report = tax_evidence(raw)
             print('raw: bytes=%d counts=%s'
                   % (raw_report['bytes'], json.dumps(raw_report['counts'])))
+
+        if args.require_net:
+            if not verdict['net']:
+                print('FAIL: this view folds the taxes in and states no amount, '
+                      'so no net price can be stored from it. Point '
+                      'BROWSER_WS_ENDPOINT at a browser in a market that shows '
+                      'the taxes separately.')
+                return 1
+            print('PASS: every row states its tax amount; the net price is '
+                  'provable from this view.')
 
         if args.report_only:
             return 0
