@@ -694,6 +694,7 @@ def api_generate_slide_single():
     if not branding:
         return jsonify({'error': 'Branding not configured'}), 400
     _prepare_generation_logo_context(project_data, branding, g.tenant_id)
+    watermark_requested = data.get('watermark') is True
     project_data['_map_marker_side'] = _generation_map_marker_side(images, project_data)
 
     # Map generation is explicit. A single-slide request may reuse supplied
@@ -830,6 +831,7 @@ def api_generate_slide_single():
         total_slides=total,
         content_source=slide.get('content_source'),
     )
+    html = _generation_watermark_html(html, branding, watermark_requested)
 
     return jsonify({
         'success': True,

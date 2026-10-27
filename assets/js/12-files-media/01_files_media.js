@@ -531,6 +531,9 @@
       // pre-save fails the save function already said why, and the run stops.
       if (!(await saveProjectAsDraft(true, false))) return;
 
+      const watermarkChoice = await askGenerationWatermarkPreference();
+      if (watermarkChoice === null) return;
+
       if (!(await preparePresentationGenerationTarget('section:' + sectionKey))) return;
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
       const presentationTitle = projectName + ' - ' + resolvedLabel;
@@ -585,6 +588,7 @@
         sectionKey,
         sectionLabel: resolvedLabel,
         presentationTitle,
+        watermark: watermarkChoice,
         financialValidated: sectionKey === 'section-financial-calc',
         markDraftDirty: false,
         approvalGranted: true
@@ -834,6 +838,9 @@
       resetDesignerChatForNewPresentation();
       if (!(await saveProjectAsDraft(true, false))) return;
 
+      const watermarkChoice = await askGenerationWatermarkPreference();
+      if (watermarkChoice === null) return;
+
       // Gate 2 (t14 + d04): Preflight generation approval, cost estimate and atomic points reservation
       const gateApproved = await showGenerationApprovalModal({
         draftId: tenantProjectData.draftId || tenantProjectData.draft_id,
@@ -883,7 +890,7 @@
           return;
         }
 
-        await generateTenantSlides({ approvalGranted: true });
+        await generateTenantSlides({ approvalGranted: true, watermark: watermarkChoice });
       } catch (generationError) {
         // A throw anywhere after approval must still close the gate: the hold
         // stays escrowed and the draft stays 'generating' until it settles.

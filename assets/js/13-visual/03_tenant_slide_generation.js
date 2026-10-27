@@ -50,6 +50,7 @@
         presentationTitle: options.presentationTitle || tenantPresentationTitle || '',
         financialValidated: !!options.financialValidated,
         markDraftDirty: options.markDraftDirty !== false,
+        watermark: options.watermark === true,
       };
     }
 
@@ -99,6 +100,113 @@
       await generateTenantSlides({
         ...(checkpoint.options || {}),
         resume: true,
+      });
+    }
+
+    function showGenerationNoticeAboveModals(message, duration = 5200) {
+      // The approval modal opens at z-index 10000, above the default toast (99),
+      // so the watermark reminder would be hidden behind it.
+      const element = document.getElementById('toast');
+      if (!element) { toast(message, duration); return; }
+      const previousZ = element.style.zIndex;
+      element.style.zIndex = '10001';
+      toast(message, duration);
+      setTimeout(() => { element.style.zIndex = previousZ; }, duration + 100);
+    }
+
+    async function askGenerationWatermarkPreference() {
+      let branding = tenantBranding;
+      if (!branding) {
+        try {
+          const data = await api('GET', '/api/branding');
+          if (data && data.success && data.branding) {
+            branding = data.branding;
+            tenantBranding = branding;
+          }
+        } catch (error) {
+          console.warn('Watermark branding load:', error);
+        }
+      }
+      const watermarkPath = String((branding && branding.watermark_path) || '').trim();
+      const canManageWatermark = typeof hasPermission === 'function'
+        && hasPermission('company_settings');
+      return new Promise(resolve => {
+        const modal = document.createElement('div');
+        modal.id = 'generationWatermarkModal';
+        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+        const question = watermarkPath
+          ? WFT('gen.watermark_question', 'هل تريد إضافة العلامة المائية المرفوعة في إعدادات الشركة إلى كل شرائح العرض؟')
+          : WFT('gen.watermark_missing_notice', 'لا توجد علامة مائية مرفوعة للشركة.');
+        const hint = !watermarkPath && canManageWatermark
+          ? '<p style="margin:0 0 16px;color:#64748b;font-size:12px;">'
+            + WFT('gen.watermark_missing_hint', 'العلامة المائية متاحة في إعدادات الهوية.') + '</p>'
+          : (!watermarkPath
+            ? '<p style="margin:0 0 16px;color:#64748b;font-size:12px;">'
+              + WFT('gen.watermark_missing_admin', 'يضيفها مدير الشركة.') + '</p>'
+            : '');
+        let buttons = '';
+        if (watermarkPath) {
+          buttons =
+            '<button type="button" class="btn ghost" id="genWatermarkCancelBtn" style="padding:8px 18px;">'
+            + WFT('gen.watermark_cancel', 'إلغاء') + '</button>'
+            + '<button type="button" class="btn ghost" id="genWatermarkWithoutBtn" style="padding:8px 18px;">'
+            + WFT('gen.watermark_without', 'بدون علامة مائية') + '</button>'
+            + '<button type="button" class="btn primary" id="genWatermarkAddBtn" style="padding:8px 20px;">'
+            + WFT('gen.watermark_add', 'إضافة العلامة المائية') + '</button>';
+        } else if (canManageWatermark) {
+          buttons =
+            '<button type="button" class="btn ghost" id="genWatermarkCancelBtn" style="padding:8px 18px;">'
+            + WFT('gen.watermark_cancel', 'إلغاء') + '</button>'
+            + '<button type="button" class="btn ghost" id="genWatermarkWithoutBtn" style="padding:8px 18px;">'
+            + WFT('gen.watermark_continue_without', 'متابعة بدون علامة مائية') + '</button>'
+            + '<button type="button" class="btn primary" id="genWatermarkAddBtn" style="padding:8px 20px;">'
+            + WFT('gen.watermark_add', 'إضافة العلامة المائية') + '</button>';
+        } else {
+          buttons =
+            '<button type="button" class="btn ghost" id="genWatermarkCancelBtn" style="padding:8px 18px;">'
+            + WFT('gen.watermark_cancel', 'إلغاء') + '</button>'
+            + '<button type="button" class="btn primary" id="genWatermarkWithoutBtn" style="padding:8px 20px;">'
+            + WFT('gen.watermark_continue_without', 'متابعة بدون علامة مائية') + '</button>';
+        }
+        modal.innerHTML =
+          '<div style="background:#fff;border-radius:16px;max-width:500px;width:100%;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">'
+          + '<h3 style="margin:0 0 8px;color:#07182C;font-size:18px;">'
+          + WFT('gen.watermark_title', 'العلامة المائية') + '</h3>'
+          + '<p style="margin:0 0 12px;color:#475569;font-size:13px;line-height:1.7;">' + question + '</p>'
+          + hint
+          + '<div style="display:flex;gap:10px;justify-content:flex-end;align-items:center;">'
+          + buttons + '</div></div>';
+        document.body.appendChild(modal);
+        const close = value => {
+          if (modal.parentNode) modal.parentNode.removeChild(modal);
+          resolve(value);
+        };
+        const cancelBtn = modal.querySelector('#genWatermarkCancelBtn');
+        if (cancelBtn) cancelBtn.onclick = () => close(null);
+        const withoutBtn = modal.querySelector('#genWatermarkWithoutBtn');
+        if (withoutBtn) withoutBtn.onclick = () => {
+          close(false);
+          showGenerationNoticeAboveModals(watermarkPath
+            ? WFT('gen.watermark_skipped_notice', 'لم تُضف علامة مائية إلى هذا العرض. العلامة المائية متاحة في إعدادات الهوية.')
+            : WFT('gen.watermark_missing_notice', 'لا توجد علامة مائية مرفوعة للشركة.'));
+        };
+        const addBtn = modal.querySelector('#genWatermarkAddBtn');
+        if (addBtn) addBtn.onclick = async () => {
+          if (watermarkPath) { close(true); return; }
+          close(null);
+          toast(WFT('gen.watermark_missing_notice', 'لا توجد علامة مائية مرفوعة للشركة.'), 4200);
+          try {
+            await openTenantSettings();
+          } catch (error) {
+            showTenantPage('tenantSettingsPage');
+          }
+          const preview = document.getElementById('settingsWatermarkPreview');
+          if (preview && preview.scrollIntoView) {
+            preview.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          }
+          const upload = document.getElementById('settingsWatermarkUploadButton');
+          if (upload) upload.focus();
+        };
       });
     }
 
@@ -220,6 +328,7 @@
       resetTenantGenerationStop();
       try {
         const sectionKey = String(options.sectionKey || '');
+        const runWatermark = options.watermark === true;
         const totalSlides = (tenantSlidePlan.slides || []).length;
         if (!totalSlides) { toast('لا توجد شرائح في الخطة'); return; }
 
@@ -448,6 +557,7 @@
             _slideNum: (i + 1),
             _totalSlides: totalSlides
           };
+          genPayload.watermark = runWatermark;
           if (tenantPresentationId) genPayload.presentationId = tenantPresentationId;
           return genPayload;
         }

@@ -332,6 +332,10 @@
         toast('لا توجد شرائح لهذا القسم داخل العرض');
         return false;
       }
+      // A regenerated section keeps the deck watermark only when every slide it
+      // replaces already showed it; a manual one-slide mark never spreads.
+      const deckHadWatermark = targetIndexes.every(
+        index => isWatermarkVisible(tenantSlidesData[index] && tenantSlidesData[index].html));
       const targetNumbers = targetIndexes.map(index => index + 1).join('، ');
       if (sectionKey === 'financial' && typeof validateFinancialStudyBeforeProceed === 'function'
         && !(await validateFinancialStudyBeforeProceed())) return false;
@@ -357,12 +361,10 @@
           const planSlide = { ...plannedSlides[position] };
           setLiveGenBanner(true, WFT('gen.regenerating_section', 'إعادة توليد قسم {section}', { section: wfTr(sectionLabel) }),
             WFT('gen.slide_of_total', 'الشريحة {n} من {total}', { n: position + 1, total: plannedSlides.length }), 20 + Math.round((position / plannedSlides.length) * 65));
-          replacements.push({
-            slide: await generateTenantSlideFromSnapshot(
-              planSlide, firstIndex + position, projectedTotal, generationImages, {})
-          });
-          // Regenerated section slides start without a watermark; the user
-          // enables it per slide from the edit toolbar.
+          const generated = await generateTenantSlideFromSnapshot(
+            planSlide, firstIndex + position, projectedTotal, generationImages, {});
+          if (deckHadWatermark) generated.html = applyDeckWatermarkToHtml(generated.html);
+          replacements.push({ slide: generated });
         }
 
         const targetSet = new Set(targetIndexes);
