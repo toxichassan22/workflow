@@ -81,8 +81,10 @@ class MeetingRequirementsTestsPart12(MeetingRequirementsTests):
         self.assertEqual(specs['far'], '4')
         self.assertEqual(specs['computed_total_built_area'], 4000)
         self.assertEqual(specs['computed_coverage_area'], 510)
-        self.assertEqual(specs['computed_repeated_floors_area'], 3490)
-        self.assertEqual(specs['computed_typical_floor_area'], 3490 / 18)
+        # 35% typical-floor coverage = 350 m² per floor over 17 repeated
+        # floors above the ground floor.
+        self.assertEqual(specs['computed_typical_floor_area'], 350)
+        self.assertEqual(specs['computed_repeated_floors_area'], 350 * 17)
         self.assertTrue(engine._has_land_specs_data({'approved_floor_count': 18}))
 
         note = engine._slide_source_data_note(
@@ -92,13 +94,13 @@ class MeetingRequirementsTestsPart12(MeetingRequirementsTests):
         self.assertEqual(payload['approved_floor_count'], '18')
         self.assertEqual(payload['computed_total_built_area'], 4000)
         self.assertEqual(payload['computed_coverage_area'], 510)
-        self.assertEqual(payload['computed_repeated_floors_area'], 3490)
-        self.assertEqual(payload['computed_typical_floor_area'], 3490 / 18)
+        self.assertEqual(payload['computed_typical_floor_area'], 350)
+        self.assertEqual(payload['computed_repeated_floors_area'], 350 * 17)
 
         slide = engine._build_land_specs_slide({'title': 'مواصفات الأرض'}, project)
         for expected in (
                 '51%', '35%', 'الأدوار المعتمدة', '18', 'سكني تجاري',
-                '4,000 م²', '510 م²', '3,490 م²', '193.88888888888889 م²'):
+                '4,000 م²', '510 م²', '5,950 م²', '350 م²'):
             self.assertIn(expected, slide)
 
     def test_plans_distribution_prompt_carries_project_idea(self):

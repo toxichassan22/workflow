@@ -56,6 +56,9 @@
   gap: 10px;
   margin: 16px 0;
 }
+.best-use-metrics[hidden] {
+  display: none;
+}
 .best-use-metrics > div {
   display: grid;
   gap: 8px;

@@ -860,6 +860,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "designer.edit_dropped": "لم يتم تطبيق التعديل لأن النتيجة أسقطت {dropped} من {total} شريحة.",
   "maps.land_photos_max": "يمكن رفع {n} صور كحد أقصى للأرض",
   "maps.landmark_pick_on": "تم تفعيل تحديد موقع المعلم على {map}",
+  "maps.land_capacity_exceeded": "مجموع مساحة الأدوار المتكررة ({repeated} م²) مع مساحة البناء ({building} م²) يتجاوز إجمالي مسطحات البناء ({total} م²) بمقدار {excess} م²",
   "exec.generated": "تم توليد {label}",
   "exec.completed": "اكتمل {label}",
   "market.conflict_vs": "{src}: {incoming} مقابل {existing}",

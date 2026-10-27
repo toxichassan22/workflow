@@ -860,6 +860,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "designer.edit_dropped": "The edit was not applied because the result dropped {dropped} of {total} slides.",
   "maps.land_photos_max": "You can upload up to {n} land photos",
   "maps.landmark_pick_on": "Landmark pin placement enabled on {map}",
+  "maps.land_capacity_exceeded": "Repeated floors area ({repeated} m²) plus the building footprint ({building} m²) exceeds the total built area ({total} m²) by {excess} m²",
   "exec.generated": "{label} generated",
   "exec.completed": "{label} completed",
   "market.conflict_vs": "{src}: {incoming} vs {existing}",

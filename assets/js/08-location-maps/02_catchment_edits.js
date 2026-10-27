@@ -320,113 +320,6 @@
       document.querySelectorAll('#tenantProjectForm [data-key]').forEach(updateClientEnteredLandFieldState);
     }
 
-    const LAND_COMPUTED_SOURCE_KEYS = new Set(['approved_financial_area', 'approved_floor_area_ratio', 'approved_coverage_ratio', 'approved_typical_floor_coverage', 'approved_floor_count']);
-    const LAND_REPEAT_FLOOR_COUNT = 18;
-
-    function formatLandComputedArea(value) {
-      const number = Number(value);
-      if (!Number.isFinite(number)) return '—';
-      let text = String(number);
-      if (/[eE]/.test(text)) {
-        const [mantissa, exponentText] = text.toLowerCase().split('e');
-        const exponent = Number(exponentText);
-        const sign = mantissa.startsWith('-') ? '-' : '';
-        const unsigned = sign ? mantissa.slice(1) : mantissa;
-        const [whole, fraction = ''] = unsigned.split('.');
-        const digits = whole + fraction;
-        const decimalIndex = whole.length + exponent;
-        text = decimalIndex <= 0
-          ? sign + '0.' + '0'.repeat(-decimalIndex) + digits
-          : decimalIndex >= digits.length
-            ? sign + digits + '0'.repeat(decimalIndex - digits.length)
-            : sign + digits.slice(0, decimalIndex) + '.' + digits.slice(decimalIndex);
-      }
-      const sign = text.startsWith('-') ? '-' : '';
-      const unsigned = sign ? text.slice(1) : text;
-      const [whole, fraction] = unsigned.split('.');
-      const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-      return sign + grouped + (fraction ? '.' + fraction : '');
-    }
-
-    function landApprovedNumber(key) {
-      const input = document.querySelector('#tenantProjectForm [data-key="' + key + '"]');
-      const parsed = typeof parseNumber === 'function'
-        ? parseNumber(String(input?.value ?? tenantProjectData?.[key] ?? ''))
-        : Number(String(input?.value ?? tenantProjectData?.[key] ?? '').replace(/,/g, ''));
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-    }
-
-    function landCapacityExceeded(source = null) {
-      // Mandatory: repeated floors area plus building footprint must not
-      // exceed the total built area (approved area × FAR).
-      const num = typeof source === 'function' ? source : landApprovedNumber;
-      const area = num('approved_financial_area');
-      const total = area * num('approved_floor_area_ratio');
-      if (!(area > 0) || !(total > 0)) return false;
-      const repeated = area * num('approved_typical_floor_coverage') / 100 * num('approved_floor_count');
-      const building = area * num('approved_coverage_ratio') / 100;
-      return repeated + building > total + 1e-6;
-    }
-
-    function updateLandComputedMetrics() {
-      const box = document.getElementById('landComputedMetrics');
-      if (!box) return;
-      const area = landApprovedNumber('approved_financial_area');
-      const format = value => value > 0
-        ? formatLandComputedArea(value)
-        : '—';
-      const setMetric = (id, value) => {
-        const el = document.getElementById(id);
-        if (el) el.textContent = format(value);
-        return value > 0;
-      };
-      const totalBuiltArea = area * landApprovedNumber('approved_floor_area_ratio');
-      const buildingArea = area * landApprovedNumber('approved_coverage_ratio') / 100;
-      const hasRemainingArea = totalBuiltArea > 0 && buildingArea > 0;
-      const repeatedFloorsArea = hasRemainingArea ? Math.max(totalBuiltArea - buildingArea, 0) : 0;
-      const hasAny = setMetric('computedTotalBuiltArea', totalBuiltArea)
-        | setMetric('computedCoverageArea', buildingArea)
-        | setMetric('computedRepeatedFloorsArea', repeatedFloorsArea)
-        | setMetric('computedTypicalFloorArea', repeatedFloorsArea / LAND_REPEAT_FLOOR_COUNT);
-      const exceeded = landCapacityExceeded();
-      box.classList.toggle('land-metrics-violated', exceeded);
-      const note = document.getElementById('landComputedCapNote');
-      if (note) {
-        note.textContent = exceeded
-          ? 'مجموع مساحة الأدوار المتكررة مع مساحة البناء يتجاوز إجمالي مسطحات البناء'
-          : '';
-        note.hidden = !exceeded;
-      }
-      box.hidden = !hasAny;
-    }
-
-    function validateLandCroquisClientFields() {
-      const fieldSpecs = [
-        { key: 'approved_floor_count', label: 'الأدوار المعتمدة', message: 'يرجى إدخال عدد الأدوار المعتمدة للمشروع وفقًا للاشتراطات التنظيمية.' },
-        { key: 'approved_coverage_ratio', label: 'تغطية البناء (%)', message: 'يرجى إدخال نسبة تغطية البناء المعتمدة للأرض وفقًا للاشتراطات التنظيمية.' },
-        { key: 'approved_floor_area_ratio', label: 'معامل مسطح البناء المعتمد (FAR)', message: 'يرجى إدخال معامل مسطح البناء المعتمد للمشروع وفقًا للاشتراطات التنظيمية.' },
-        { key: 'approved_typical_floor_coverage', label: 'التغطية للطوابق المتكررة (%)', message: 'يرجى إدخال نسبة التغطية المعتمدة للطوابق المتكررة وفقًا للاشتراطات التنظيمية.' },
-        { key: 'approved_financial_area', label: 'المساحة المعتمدة للدراسة المالية (م²)', message: 'يرجى إدخال إجمالي المساحة البنائية المعتمدة التي ستُبنى عليها حسابات الدراسة المالية.' }
-      ];
-      const errors = [];
-      for (const spec of fieldSpecs) {
-        const input = document.querySelector('#tenantProjectForm [data-key="' + spec.key + '"]');
-        const val = input ? String(input.value ?? '').trim() : '';
-        const numVal = parseFloat(val.replace(/,/g, ''));
-        if (!val || isNaN(numVal) || numVal <= 0) {
-          errors.push(spec);
-        }
-      }
-      if (!errors.length && landCapacityExceeded()) {
-        errors.push({
-          key: 'approved_typical_floor_coverage',
-          label: 'مساحة الأدوار المتكررة',
-          message: 'مجموع مساحة الأدوار المتكررة مع مساحة البناء يتجاوز إجمالي مسطحات البناء.'
-        });
-      }
-      return errors;
-    }
-
     function tenantProjectFieldLabel(field) {
       let lbl = field.fieldLabel;
       if (field.fieldKey === 'main_roads') lbl = 'الطرق الرئيسية المحيطة';
@@ -864,25 +757,7 @@
         });
 
         if (sectionKey === 'land_croquis') {
-          const computedMetricsField = document.createElement('div');
-          computedMetricsField.className = 'tenant-field full';
-          computedMetricsField.innerHTML =
-            '<div id="landComputedMetrics" class="best-use-metrics" hidden>' +
-            '<div><span data-ar-text="إجمالي مسطحات البناء (م²)">إجمالي مسطحات البناء (م²)</span><strong id="computedTotalBuiltArea">—</strong></div>' +
-            '<div><span data-ar-text="مساحة البناء (م²)">مساحة البناء (م²)</span><strong id="computedCoverageArea">—</strong></div>' +
-            '<div><span data-ar-text="مساحة الأدوار المتكررة (م²)">مساحة الأدوار المتكررة (م²)</span><strong id="computedRepeatedFloorsArea">—</strong></div>' +
-            '<div><span data-ar-text="مساحة الدور (م²)">مساحة الدور (م²)</span><strong id="computedTypicalFloorArea">—</strong></div>' +
-            '</div>' +
-            '<p id="landComputedCapNote" class="land-cap-warning" hidden></p>';
-          sectionDiv.appendChild(computedMetricsField);
-          // Derived read-only metrics: total built area = approved area × FAR,
-          // building footprint and repeated-floor totals from the coverages,
-          // plus a mandatory capacity check (repeated + footprint <= total).
-          const recompute = event => {
-            if (LAND_COMPUTED_SOURCE_KEYS.has(event.target?.dataset?.key)) updateLandComputedMetrics();
-          };
-          sectionDiv.addEventListener('input', recompute);
-          sectionDiv.addEventListener('change', recompute);
+          mountLandComputedMetrics(sectionDiv);
 
           const analysisResultsField = document.createElement('div');
           analysisResultsField.className = 'tenant-field full';

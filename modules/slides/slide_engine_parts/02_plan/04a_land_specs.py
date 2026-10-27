@@ -1,7 +1,5 @@
 """Land specification extraction and rendering."""
 
-LAND_SPEC_REPEATED_FLOOR_COUNT = 18
-
 
 def _land_specs_number_text(value):
     if value in (None, '', '—'):
@@ -106,15 +104,20 @@ def _extract_land_specs_data(project_data):
     area_number = _financial_number(land_area)
     far_number = _financial_number(far)
     coverage_number = _financial_number(approved_coverage)
+    typical_coverage_number = _financial_number(approved_typical_coverage)
+    floor_count_number = _financial_number(approved_floor_count)
     total_built_area = area_number * far_number if area_number > 0 and far_number > 0 else None
     coverage_area = area_number * coverage_number / 100 if area_number > 0 and coverage_number > 0 else None
-    repeated_floors_area = (
-        max(total_built_area - coverage_area, 0)
-        if total_built_area is not None and coverage_area is not None else None
-    )
     typical_floor_area = (
-        repeated_floors_area / LAND_SPEC_REPEATED_FLOOR_COUNT
-        if repeated_floors_area is not None else None
+        area_number * typical_coverage_number / 100
+        if area_number > 0 and typical_coverage_number > 0 else None
+    )
+    # The approved floor count includes the ground floor, so the repeated
+    # floors are the floors above it.
+    repeated_floors = max(floor_count_number - 1, 0)
+    repeated_floors_area = (
+        typical_floor_area * repeated_floors
+        if typical_floor_area is not None and floor_count_number > 0 else None
     )
     setbacks = _val('setbacks', 'building_setbacks', fallback='حسب كود البناء والاشتراطات البلدية')
     max_floors = _val('max_floors_height', 'max_floors', 'max_height', 'floors_allowed')
