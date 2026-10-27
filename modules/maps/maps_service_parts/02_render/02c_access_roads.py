@@ -52,16 +52,33 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 road_data = json.loads(road_data)
             except (TypeError, ValueError):
                 road_data = []
-        manual_road_keys = {
+        # A path the client cleared stays cleared: the road name keeps its table
+        # row, but neither discovery nor stored geometry may draw it again.
+        cleared_road_keys = {
             _road_name_key(item.get('name')) for item in (road_data if isinstance(road_data, list) else [])
-            if isinstance(item, dict) and item.get('row_source') == 'manual'
+            if isinstance(item, dict) and item.get('path_cleared') and _road_name_key(item.get('name'))
         }
-        discoverable_road_names = [name for name in approved_road_names if _road_name_key(name) not in manual_road_keys]
 
-        # A stored road name translated for an English deck never matches the
-        # name Google returns, so matching runs on the original-script alias
-        # (name_src, kept at collection time) while the drawn label stays the
-        # approved display name.
+        # Manual geometry is already reviewed by the user, but its label must still
+        # match a normalized main-road name. The provided point sequence is kept intact.
+        road_route_mapping = [
+            (points, name) for points, name in _approved_manual_road_paths(
+                (project_data or {}).get('manual_road_paths'), approved_road_names
+            ) if _road_name_key(name) not in cleared_road_keys
+        ]
+        seen_road_keys = {name for _, name in road_route_mapping}
+
+        def _road_already_drawn(name):
+            return any(is_same_road_name(name, accepted) for accepted in seen_road_keys)
+
+        # A typed road is still an approved road. Excluding every manual row from
+        # discovery left the map with no path whenever the client entered the road
+        # names by hand; only an existing drawn path (manual or stored) or a
+        # deliberately cleared one keeps a road out of discovery.
+        discoverable_road_names = [
+            name for name in approved_road_names
+            if _road_name_key(name) not in cleared_road_keys and not _road_already_drawn(name)
+        ]
         discoverable_aliases = []
         display_by_alias = {}
         for name in discoverable_road_names:
@@ -75,20 +92,6 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                     break
             discoverable_aliases.append(alias)
             display_by_alias[alias] = name
-
-        # Manual geometry is already reviewed by the user, but its label must still
-        # match a normalized main-road name. The provided point sequence is kept intact.
-        road_route_mapping = _approved_manual_road_paths(
-            (project_data or {}).get('manual_road_paths'), approved_road_names
-        )
-        seen_road_keys = {name for _, name in road_route_mapping}
-        if not allow_discovery:
-            for stored_path in _approved_manual_road_paths(
-                (project_data or {}).get('access_roads_data'), approved_road_names
-            ):
-                if not any(is_same_road_name(stored_path[1], accepted) for accepted in seen_road_keys):
-                    road_route_mapping.append(stored_path)
-                    seen_road_keys.add(stored_path[1])
         label_positions = (project_data or {}).get('access_road_label_positions') or {}
         if isinstance(label_positions, str):
             try:
@@ -161,7 +164,7 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
         probe_points = access_probe_points(route_origin_lat, route_origin_lng)
         targeted_probes = []
         for item in road_data if isinstance(road_data, list) else []:
-            if not isinstance(item, dict) or item.get('row_source') == 'manual':
+            if not isinstance(item, dict):
                 continue
             expected_name = match_known_road_name(item.get('name'), discoverable_road_names)
             try:
@@ -205,6 +208,14 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 # deck still draws under the approved label instead of dropping
                 # the road. Arabic keeps the strict name check.
                 matched = match_known_road_name(discovered_name, [expected_alias or expected_name])
+                if not matched and road_lang != 'en':
+                    # Directions names the road the drive runs along, which is
+                    # not always the road it ends on. Check the destination's
+                    # own road name before dropping an approved road.
+                    destination_name = _google_reverse_geocode_road(
+                        dest_lat, dest_lng, tenant_id=tenant_id, language=road_lang)
+                    matched = bool(destination_name and match_known_road_name(
+                        destination_name, [expected_alias or expected_name]))
                 approved_name = expected_name if (matched or road_lang == 'en') else None
             else:
                 matched_alias = match_known_road_name(discovered_name, discoverable_aliases)
@@ -246,6 +257,19 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
                 continue
             seen_road_keys.add(result[1])
             road_route_mapping.append((result[0], result[1]))
+
+        # Geometry the map already drew is the last resort: a regeneration must
+        # not erase a road Google could not locate this time, and a recompose
+        # without provider calls draws exactly what the stored render carried.
+        for stored_path in _approved_manual_road_paths(
+            (project_data or {}).get('access_roads_data'), approved_road_names
+        ):
+            if _road_name_key(stored_path[1]) in cleared_road_keys:
+                continue
+            if any(is_same_road_name(stored_path[1], accepted) for accepted in seen_road_keys):
+                continue
+            seen_road_keys.add(stored_path[1])
+            road_route_mapping.append(stored_path)
         print(f"[ACCESS ROADS] labels: {[name for _, name in road_route_mapping]}")
 
         # 3. Draw routes and labels. Highlights first, names last so the gold
@@ -354,7 +378,9 @@ def _draw_access_roads(image_path, center_lat, center_lng, zoom, scale=2, projec
             return rendered_roads
 
         # Never invent a schematic road grid when there is no approved geometry.
-        print("[ACCESS ROADS] No approved road route available; leaving the base map unchanged")
+        print(f"[ACCESS ROADS] No approved road route available (approved={len(approved_road_names)}, "
+              f"cleared={len(cleared_road_keys)}, discovery={'on' if allow_discovery else 'off'}); "
+              "leaving the base map unchanged")
         return False
     except Exception as e:
         print(f"[DRAW ACCESS ROADS ERROR] {e}")

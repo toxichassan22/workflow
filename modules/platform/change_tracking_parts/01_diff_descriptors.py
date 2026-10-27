@@ -402,6 +402,7 @@ BLOB_KEY_LABELS = {
     'imageUrl': 'الصورة', 'approvedImageUrl': 'الصورة المعتمدة',
     'caption': 'التسمية', 'mode': 'النمط', 'sourceFileName': 'الملف المرفوع',
     'styleReferenceNames': 'الصور المرجعية',
+    'path_cleared': 'إخفاء مسار الطريق', 'path_width_scale': 'سمك مسار الطريق',
 }
 
 # Stored enum codes read back as the same Arabic words the form shows.
@@ -419,4 +420,5 @@ BLOB_VALUE_LABELS = {
     'east': 'شرق', 'west': 'غرب', 'approved': 'معتمد', 'pending': 'قيد المراجعة',
     'draft': 'مسودة', 'ai': 'الذكاء الاصطناعي', 'user': 'يدوي',
     'upload': 'رفع ملف', 'replaced': 'استُبدلت',
+    'True': 'نعم', 'False': 'لا', 'true': 'نعم', 'false': 'لا',
 }

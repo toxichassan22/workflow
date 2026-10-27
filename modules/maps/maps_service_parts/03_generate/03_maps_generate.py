@@ -371,6 +371,37 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
     centers = {}
     zooms = {}
     access_roads = []
+    # A recompose must never erase a road the stored render already carries: the
+    # client payload can be stale or omit the geometry entirely (a renamed row, a
+    # page opened before the last generation response landed), and redrawing from
+    # that payload alone replaced the drawn map with a blank one.
+    stored_roads = []
+    for row in by_type.values():
+        try:
+            row_metadata = json.loads(row.get('metadata_json') or '{}')
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        for item in row_metadata.get('access_roads') or []:
+            if isinstance(item, dict) and item.get('name') and isinstance(item.get('points'), list):
+                stored_roads.append(item)
+    compose_data = dict(project_data or {})
+    payload_roads = compose_data.get('access_roads_data')
+    if isinstance(payload_roads, str):
+        try:
+            payload_roads = json.loads(payload_roads)
+        except (TypeError, ValueError):
+            payload_roads = []
+    merged_roads = []
+    merged_keys = set()
+    for item in list(payload_roads or []) + stored_roads:
+        if not isinstance(item, dict):
+            continue
+        key = _road_name_key(item.get('name'))
+        if not key or key in merged_keys:
+            continue
+        merged_keys.add(key)
+        merged_roads.append(item)
+    compose_data['access_roads_data'] = merged_roads
     for editable_type in ('access_editable', 'access_satellite_editable', 'access_roadmap_editable'):
         editable = by_type.get(editable_type)
         if not editable:
@@ -387,7 +418,7 @@ def _recompose_access_map(project_data, tenant_id, effective_id, draft_id=None):
         final_path = _unique_map_path(tenant_id, effective_id, final_type)
         shutil.copyfile(editable['file_path'], final_path)
         rendered_roads = _draw_access_roads(
-            final_path, center_lat, center_lng, zoom, scale=2, project_data=project_data,
+            final_path, center_lat, center_lng, zoom, scale=2, project_data=compose_data,
             tenant_id=tenant_id, origin_lat=lat, origin_lng=lng, allow_discovery=False
         ) or []
         if not _overlay_markers(

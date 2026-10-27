@@ -275,8 +275,7 @@
           tenantCreativeImages.map_placeholders = { ...(tenantCreativeImages.map_placeholders || {}), ...(data.placeholders || {}) };
           mergeRecomposeMapFrame('access', data);
           if (typeof noteInteractiveBakedFrame === 'function') noteInteractiveBakedFrame('access', data.zooms?.access, data.centers?.access);
-          tenantProjectData.access_roads_data = Array.isArray(data.accessRoads) ? data.accessRoads : tenantProjectData.access_roads_data || [];
-          tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
+          tenantProjectData.access_roads_data = mergeAccessRoadsResponse(data.accessRoads);
           const positions = { ...(tenantProjectData.access_road_label_positions || {}) };
           const sizes = { ...(tenantProjectData.access_road_label_sizes || {}) };
           tenantProjectData.access_roads_data.forEach(road => {
@@ -729,14 +728,20 @@
         if (![mx, my, lx, ly].every(Number.isFinite) || Math.abs(lx - mx) + Math.abs(ly - my) < 0.4) return '';
         return '<line class="map-place-link-line' + mapPlaceLinkClass(pair[0], item.name) + '" data-' + pair[0] + '-link="' + escapeHtml(item.name) + '" x1="' + mx.toFixed(3) + '%" y1="' + my.toFixed(3) + '%" x2="' + lx.toFixed(3) + '%" y2="' + ly.toFixed(3) + '%"></line>';
       }).join('');
-      // Vertex dots mark the path being sketched for the selected road —
-      // clicks append to it until اعتماد commits the session.
-      const sketchPoints = tenantRoadEditMode && tenantRoadEditSelectedIndex >= 0
-        ? (tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]?.points || [])
-        : [];
-      const roadPointMarkup = sketchPoints.map(point => {
+      // Vertex dots mark the selected road's path — the sketched one, or the
+      // drawn/discovered one it can be refined from. Dragging a dot edits that
+      // point; clicks still append to the path until اعتماد commits it.
+      const selectedRoadRow = tenantRoadEditMode && tenantRoadEditSelectedIndex >= 0
+        ? tenantRoadEditDraft?.rows?.[tenantRoadEditSelectedIndex]
+        : null;
+      const sketchedPoints = Array.isArray(selectedRoadRow?.points) && selectedRoadRow.points.length >= 2
+        ? selectedRoadRow.points : null;
+      const selectedRoadPath = sketchedPoints || (selectedRoadRow
+        ? (roadPaths.find(path => accessRoadNameKey(path.name) === accessRoadNameKey(selectedRoadRow.name))?.points || [])
+        : []);
+      const roadPointMarkup = selectedRoadPath.map((point, index) => {
         const [x, y] = toPoint(point).split(',');
-        return '<circle cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45"></circle>';
+        return '<circle class="map-road-vertex" data-road-vertex="' + index + '" cx="' + x + '%" cy="' + y + '%" r="1.15" fill="#fff" stroke="#6B1C23" stroke-width="0.45" onpointerdown="startAccessRoadVertexDrag(event,' + index + ')"></circle>';
       }).join('');
       overlay.innerHTML = boundaryMarkup + roadMarkup + linkLineMarkup + roadPointMarkup;
       if (showRoads) renderAccessRoadLabels(roadPaths, toPoint, true);

@@ -295,6 +295,38 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         select_body = index_source.split('function selectAccessRoadEdit(value)', 1)[1][:800]
         self.assertIn('syncAccessRoadPathWidthSlider()', select_body)
 
+    def test_a_deleted_road_path_stays_deleted_and_a_drawn_path_is_editable(self):
+        """Owner report: the roads map sometimes does not draw the route on its
+        own, and even when it does the path cannot be edited or deleted. The
+        deletion must survive a save and a regeneration, and the drawn path
+        must be refineable instead of only replaceable."""
+        source = read_frontend_text()
+        serialize_body = source.split('function serializeLocationTable(key)', 1)[1][:7000]
+        self.assertIn('path_cleared', serialize_body)
+        self.assertIn('clearedByKey', serialize_body)
+        confirm_body = source.split('async function confirmAccessRoadEdits()', 1)[1] \
+            .split('function cancelAccessRoadEdits()', 1)[0]
+        self.assertIn('path_cleared: true', confirm_body)
+        # A cleared path keeps its geometry for استعادة المسار; the server skips
+        # it because the row carries path_cleared.
+        self.assertNotIn('clearedRoadKeys', confirm_body)
+        self.assertIn('function restoreAccessRoadPath()', source)
+        self.assertIn('استعادة المسار', source)
+        self.assertIn('function startAccessRoadVertexDrag(event, index)', source)
+        overlay_body = source.split('function renderTenantMapPolygonOverlay()', 1)[1]
+        self.assertIn('startAccessRoadVertexDrag(event,', overlay_body)
+        geometry_body = source.split('function accessRoadGeometry()', 1)[1].split('function mergeAccessRoadsResponse', 1)[0]
+        self.assertIn('path_cleared', geometry_body)
+        self.assertIn('pathCleared', geometry_body)
+        # A recompose response never wipes the stored geometry of a cleared or
+        # unredrawn road.
+        self.assertIn('function mergeAccessRoadsResponse(returnedAccessRoads)', source)
+        for call_site in (source.split('function applyAccessMapEdits()', 1)[1][:2500],
+                          source.split('async function regenerateMapPreviewOnce(', 1)[1][:7000]):
+            self.assertIn('mergeAccessRoadsResponse(data.accessRoads)', call_site)
+        # The cleared/healed flags reach the server on the map payload.
+        self.assertIn("'main_roads_data'", source.split('const MAP_PAYLOAD_FIELDS', 1)[1][:2500])
+
     def test_land_analysis_is_persisted_but_not_shown_as_a_review_panel(self):
         """The conflicts/parcels panels were removed; the payload must still be saved because
         the directions table falls back to parcels[0].directions on reload."""

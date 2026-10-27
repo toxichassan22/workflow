@@ -227,7 +227,10 @@ def discover_nearby_roads(center_lat, center_lng, tenant_id=None, origin_lat=Non
         roads.append(road)
         if len(roads) >= max(1, int(max_results)):
             break
-    _discovery_cache_put(tenant_id, roads_key, roads, ttl_days=30)
+    # An empty sweep is a provider failure, not a fact about the site — caching
+    # it would leave the site with no discoverable roads for the whole TTL.
+    if roads:
+        _discovery_cache_put(tenant_id, roads_key, roads, ttl_days=30)
     return roads
 
 
@@ -314,9 +317,7 @@ def _approved_manual_road_paths(value, approved_names):
     if not isinstance(value, list):
         return []
 
-    approved_by_key = {
-        _road_name_key(name): name for name in approved_names or [] if _road_name_key(name)
-    }
+    approved_names = approved_names or []
     paths = []
     for item in value:
         if not isinstance(item, dict):
@@ -324,7 +325,10 @@ def _approved_manual_road_paths(value, approved_names):
         normalized_names = normalize_access_road_names([item.get('name')])
         if len(normalized_names) != 1:
             continue
-        approved_name = approved_by_key.get(_road_name_key(normalized_names[0]))
+        # A stored name can differ from the approved label by the prefix, a
+        # compound split, or a rename in the table; the geometry belongs to the
+        # same road either way, so match it like discovery does.
+        approved_name = match_known_road_name(normalized_names[0], approved_names)
         if not approved_name:
             continue
         points = []

@@ -659,6 +659,8 @@
           // Road width is stored on main_roads_data rows only (no table column),
           // so a parse of the structured mirror must not silently drop it.
           if (key === 'main_roads' && item && item.path_width_scale !== undefined && item.path_width_scale !== null && item.path_width_scale !== '') row.path_width_scale = Number(item.path_width_scale) || 0.55;
+          // A path the client deleted is a persisted choice, not a session flag.
+          if (key === 'main_roads' && item && item.path_cleared) row.path_cleared = true;
           if (key === 'main_roads' && item && item.original_name) row.original_name = item.original_name;
           return row;
         }).filter(r => r.name);
@@ -770,15 +772,22 @@
         // The roads table has no width column — the value lives on the stored
         // main_roads_data rows only, so re-serializing from the DOM must carry
         // it over by road name or every save wipes the access-map thickness.
+        // The same applies to path_cleared: deleting a path must survive a save.
         const widthByKey = new Map();
+        const clearedByKey = new Map();
         (Array.isArray(tenantProjectData.main_roads_data) ? tenantProjectData.main_roads_data : []).forEach(item => {
           const rawKey = (typeof accessRoadNameKey === 'function' ? accessRoadNameKey(item?.name) : String(item?.name || '').trim().toLowerCase());
-          if (rawKey && item?.path_width_scale !== undefined && item?.path_width_scale !== null && item?.path_width_scale !== '') widthByKey.set(rawKey, Number(item.path_width_scale) || 0.55);
+          if (!rawKey) return;
+          if (item?.path_width_scale !== undefined && item?.path_width_scale !== null && item?.path_width_scale !== '') widthByKey.set(rawKey, Number(item.path_width_scale) || 0.55);
+          if (item?.path_cleared) clearedByKey.set(rawKey, true);
         });
         tenantProjectData.main_roads_data = structuredRows.map(row => {
           const rawKey = (typeof accessRoadNameKey === 'function' ? accessRoadNameKey(row?.name) : String(row?.name || '').trim().toLowerCase());
-          const kept = widthByKey.get(rawKey);
-          return kept !== undefined ? { ...row, path_width_scale: kept } : row;
+          let next = row;
+          const keptWidth = widthByKey.get(rawKey);
+          if (keptWidth !== undefined) next = { ...next, path_width_scale: keptWidth };
+          if (clearedByKey.get(rawKey)) next = { ...next, path_cleared: true };
+          return next;
         });
       } else if (key === 'nearby_landmarks') {
         tenantNearbyLandmarks = structuredRows;

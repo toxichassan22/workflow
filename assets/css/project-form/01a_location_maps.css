@@ -359,6 +359,15 @@
       stroke-width: var(--map-road-path-width, .495cqw);
     }
 
+    .map-road-vertex {
+      pointer-events: auto;
+      cursor: grab;
+    }
+
+    .map-road-vertex:active {
+      cursor: grabbing;
+    }
+
     polyline.map-road-path-selected,
     polyline.map-place-linked {
       stroke: #ffb020;

@@ -963,8 +963,7 @@
           tenantProjectData.landmark_label_positions = positions;
         }
         if (mapType === 'access') {
-          tenantProjectData.access_roads_data = Array.isArray(data.accessRoads) ? data.accessRoads : [];
-          tenantCreativeImages.map_access_roads = tenantProjectData.access_roads_data;
+          mergeAccessRoadsResponse(data.accessRoads);
           const positions = { ...(tenantProjectData.access_road_label_positions || {}) };
           const sizes = { ...(tenantProjectData.access_road_label_sizes || {}) };
           tenantProjectData.access_roads_data.forEach(road => {

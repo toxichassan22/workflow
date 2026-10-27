@@ -88,11 +88,14 @@ class MapPreviewParityTests(unittest.TestCase):
         self.assertLessEqual(text[3], pill[3])
 
     def test_road_stroke_scales_with_image_width(self):
+        # The base width is a per-road setting now (default 0.55); pin it to 1.0
+        # so this test measures the image-width scaling it is about.
         for size in ((2560, 1440), (750, 422)):
             with self.subTest(size=size):
                 self.base(size)
                 maps._draw_access_roads(self.path, 24, 46, 14, project_data={
                     'main_roads': 'طريق الملك فهد',
+                    'main_roads_data': [{'name': 'طريق الملك فهد', 'path_width_scale': 1.0}],
                     'manual_road_paths': [{'name': 'طريق الملك فهد', 'points': [[24, 45.99], [24, 46.01]]}]
                 }, allow_discovery=False)
                 with Image.open(self.path) as image:
@@ -264,6 +267,36 @@ class MapRecomposeParityTests(unittest.TestCase):
                 self.assertIn('error', result)
                 update.assert_not_called()
 
+    def test_access_recompose_keeps_stored_roads_when_the_payload_has_none(self):
+        """A table edit recompose used to redraw the access map from the client
+        payload alone; when that payload carried no geometry the freshly drawn
+        roads were replaced by a blank map and their metadata was erased."""
+        stored = [{'name': 'طريق الملك فهد', 'points': [[24.0, 45.99], [24.0, 46.01]],
+                   'label_point': [24.0, 46.0], 'path_width_scale': 0.55}]
+        metadata = {'lat': 24, 'lng': 46, 'center_lat': 24, 'center_lng': 46, 'zoom': 14,
+                    'access_roads': stored,
+                    'map_label_version': maps.MAP_LABEL_RENDER_VERSION,
+                    'map_highlight_version': maps.MAP_HIGHLIGHT_RENDER_VERSION}
+        result, update, _, _ = self.recompose(
+            'access', self.row('access', metadata), {'main_roads': 'طريق الملك فهد'})
+        self.assertNotIn('error', result)
+        self.assertEqual([road['name'] for road in result['access_roads']], ['طريق الملك فهد'])
+        self.assertEqual(update.call_args.args[-1]['access_roads'][0]['name'], 'طريق الملك فهد')
+
+    def test_access_recompose_does_not_resurrect_a_cleared_road_path(self):
+        stored = [{'name': 'طريق الملك فهد', 'points': [[24.0, 45.99], [24.0, 46.01]]}]
+        metadata = {'lat': 24, 'lng': 46, 'center_lat': 24, 'center_lng': 46, 'zoom': 14,
+                    'access_roads': stored,
+                    'map_label_version': maps.MAP_LABEL_RENDER_VERSION,
+                    'map_highlight_version': maps.MAP_HIGHLIGHT_RENDER_VERSION}
+        result, update, _, _ = self.recompose('access', self.row('access', metadata), {
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد', 'path_cleared': True}],
+        })
+        self.assertNotIn('error', result)
+        self.assertEqual(result['access_roads'], [])
+        self.assertEqual(update.call_args.args[-1]['access_roads'], [])
+
     def test_fixed_maps_keep_metadata_landmarks_when_the_client_has_no_resolved_items(self):
         for map_type, key in (('catchment', 'catchment_landmarks'), ('landmarks', 'landmark_map_items')):
             with self.subTest(map_type=map_type):
@@ -273,6 +306,125 @@ class MapRecomposeParityTests(unittest.TestCase):
                 self.assertEqual([row['name'] for row in result[key]], ['mall'])
                 if map_type == 'landmarks':
                     self.assertEqual(result['zooms'][map_type], maps.catchment_frame_fit(24, 46, 0, [item])[0])
+
+
+class AccessRoadDiscoveryTests(unittest.TestCase):
+    """The roads map must draw every approved road it can locate.
+
+    Three separate faults made it come back without a single path: a manually
+    typed row was excluded from discovery, stored geometry was ignored while
+    discovery was allowed, and a road renamed in the table lost the geometry
+    already drawn for it.
+    """
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.path = str(Path(self.temp.name) / 'map.png')
+        Image.new('RGB', (2560, 1440), (80, 100, 120)).save(self.path)
+
+    def route(self, summary='طريق الملك فهد'):
+        return {'coords': [(24.0, 45.99), (24.0, 46.01)], 'summary': summary,
+                'distance_meters': 1500.0, 'distance_km': 1.5, 'duration_min': 3.0}
+
+    def draw(self, project, **kwargs):
+        options = {'allow_discovery': True, 'tenant_id': 'tenant-test', **kwargs}
+        return maps._draw_access_roads(self.path, 24, 46, 14, project_data=project, **options)
+
+    def test_a_manually_typed_road_is_discovered_instead_of_skipped(self):
+        project = {
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد', 'row_source': 'manual'}],
+        }
+        with patch.object(maps, '_snap_to_roads', return_value=None), \
+                patch.object(maps, '_google_directions_route', return_value=self.route()) as directions, \
+                patch.object(maps, 'find_place_near', return_value={'lat': 24.0, 'lng': 46.005}):
+            rendered = self.draw(project)
+        self.assertEqual([road['name'] for road in rendered], ['طريق الملك فهد'])
+        self.assertTrue(directions.called)
+
+    def test_a_road_with_a_drawn_path_is_not_replaced_by_discovery(self):
+        project = {
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد', 'row_source': 'manual'}],
+            'manual_road_paths': [{'name': 'طريق الملك فهد',
+                                   'points': [[24.0, 45.99], [24.0, 45.995]]}],
+        }
+        with patch.object(maps, '_snap_to_roads', return_value=None), \
+                patch.object(maps, '_google_directions_route', return_value=self.route()) as directions, \
+                patch.object(maps, 'find_place_near', return_value={'lat': 24.0, 'lng': 46.005}):
+            rendered = self.draw(project)
+        self.assertEqual([road['name'] for road in rendered], ['طريق الملك فهد'])
+        self.assertEqual(rendered[0]['points'], [[24.0, 45.99], [24.0, 45.995]])
+        self.assertFalse(directions.called)
+
+    def test_a_cleared_road_path_is_not_redrawn_on_regeneration(self):
+        path = [[24.0, 45.99], [24.0, 46.01]]
+        project = {
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد', 'path_cleared': True}],
+            'manual_road_paths': [{'name': 'طريق الملك فهد', 'points': path}],
+            'access_roads_data': [{'name': 'طريق الملك فهد', 'points': path}],
+        }
+        with patch.object(maps, '_snap_to_roads', return_value=None), \
+                patch.object(maps, '_google_directions_route', return_value=self.route()), \
+                patch.object(maps, 'find_place_near', return_value={'lat': 24.0, 'lng': 46.005}):
+            rendered = self.draw(project)
+        self.assertFalse(rendered)
+
+    def test_stored_geometry_survives_a_regeneration_without_discovery(self):
+        project = {
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد'}],
+            'access_roads_data': [{'name': 'طريق الملك فهد',
+                                   'points': [[24.0, 45.99], [24.0, 46.01]]}],
+        }
+        with patch.object(maps, '_snap_to_roads', return_value=None), \
+                patch.object(maps, '_google_directions_route', return_value=None), \
+                patch.object(maps, 'find_place_near', return_value=None):
+            rendered = self.draw(project)
+        self.assertEqual([road['name'] for road in rendered], ['طريق الملك فهد'])
+
+    def test_a_renamed_road_keeps_its_stored_geometry(self):
+        approved = maps._approved_manual_road_paths(
+            [{'name': 'الخرج القديم', 'points': [[24.0, 45.99], [24.0, 46.01]]}],
+            ['طريق الخرج القديم'])
+        self.assertEqual([name for _, name in approved], ['طريق الخرج القديم'])
+
+    def test_the_destination_road_name_verifies_an_unrelated_route_summary(self):
+        project = {
+            'main_roads': 'طريق الملك فهد',
+            'main_roads_data': [{'name': 'طريق الملك فهد', 'lat': 24.0, 'lng': 46.005}],
+        }
+        with patch.object(maps, '_snap_to_roads', return_value=None), \
+                patch.object(maps, '_google_directions_route', return_value=self.route('طريق آخر')), \
+                patch.object(maps, '_google_reverse_geocode_road', return_value='طريق الملك فهد'), \
+                patch.object(maps, 'find_place_near', return_value=None):
+            rendered = self.draw(project)
+        self.assertEqual([road['name'] for road in rendered], ['طريق الملك فهد'])
+
+
+class RoadDiscoveryCacheTests(unittest.TestCase):
+    def test_an_empty_discovery_is_not_cached(self):
+        """One provider failure used to poison a site's road list for 30 days."""
+        with patch.object(maps, '_discovery_cache_get', return_value=None), \
+                patch.object(maps, '_discovery_cache_put') as cache_put, \
+                patch.object(maps, '_snap_to_roads', return_value=None), \
+                patch.object(maps, '_google_directions_route', return_value=None):
+            roads = maps.discover_nearby_roads(24, 46, tenant_id='tenant-test')
+        self.assertEqual(roads, [])
+        cache_put.assert_not_called()
+
+    def test_a_found_discovery_is_still_cached(self):
+        route = {'coords': [(24.0, 45.99), (24.0, 46.01)], 'summary': 'طريق الملك فهد',
+                 'distance_meters': 1500.0, 'distance_km': 1.5, 'duration_min': 3.0}
+        with patch.object(maps, '_discovery_cache_get', return_value=None), \
+                patch.object(maps, '_discovery_cache_put') as cache_put, \
+                patch.object(maps, '_snap_to_roads', return_value=None), \
+                patch.object(maps, '_google_directions_route', return_value=route):
+            roads = maps.discover_nearby_roads(24, 46, tenant_id='tenant-test')
+        self.assertEqual([road['name'] for road in roads], ['طريق الملك فهد'])
+        cache_put.assert_called_once()
 
 
 def render_browser_fixture(map_type):

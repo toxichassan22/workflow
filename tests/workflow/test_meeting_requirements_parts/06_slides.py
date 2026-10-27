@@ -1464,14 +1464,19 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
     def test_access_road_names_are_drawn_above_highlights(self):
         source = read_module_source('maps_service.py')
         index_source = read_frontend_text()
-        self.assertIn("ACCESS_ROADS_RENDER_VERSION = 'v14-draggable-road-labels'", source)
+        # The marker must exist and match the module constant; a pinned literal
+        # here goes stale on every renderer change without testing anything.
+        self.assertIn(
+            "ACCESS_ROADS_RENDER_VERSION = '"
+            + self.application_module.maps_service.ACCESS_ROADS_RENDER_VERSION + "'",
+            source)
         self.assertIn("def bundled_arabic_overlay_font_path():", source)
         self.assertIn("def _strip_arabic_diacritics(text):", source)
         self.assertIn("def _arabic_reshaper_without_ligatures():", source)
         self.assertIn("configuration['support_ligatures'] = False", source)
         self.assertIn('from bidi.algorithm import get_display', source)
         self.assertIn("'language': 'ar'", source)
-        overlay_font = ROOT / 'fonts' / 'arabic-overlay.bin'
+        overlay_font = ROOT / 'modules' / 'maps' / 'fonts' / 'arabic-overlay.bin'
         self.assertGreater(overlay_font.stat().st_size, 10000)
         self.assertEqual(overlay_font.read_bytes()[:4], b'\x00\x01\x00\x00')
         self.assertIn("'feature:road|element:labels|visibility:off'", source)
@@ -1481,7 +1486,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('candidates = preferred_candidates or visible_candidates', source)
         self.assertIn('ly1 = offset_point[1] - label_half_height', source)
         self.assertLess(
-            source.index('draw.line(segment, fill=gold_color, width=max(1, round(9 * unit))'),
+            source.index('draw.line(segment, fill=gold_color, width=max(1, round(9 * unit * path_width_scale))'),
             source.index('_draw_road_label(labels_overlay')
         )
         self.assertIn('function withCacheBust(url)', index_source)
