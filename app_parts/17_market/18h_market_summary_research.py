@@ -1,4 +1,4 @@
-"""Parallel, evidence-first research and Sonnet synthesis for market summaries."""
+"""Parallel, evidence-first research and model synthesis for market summaries."""
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import quote
@@ -63,7 +63,7 @@ _SUMMARY_RESEARCH_SEARCH_BUDGET = 1000
 _SUMMARY_RESEARCHER_MODEL = 'anthropic/claude-haiku-5.5'
 _SUMMARY_RESEARCH_MAX_OUTPUT_TOKENS = 66000
 _SUMMARY_AGGREGATOR_MAX_OUTPUT_TOKENS = 66000
-_SUMMARY_AGGREGATOR_MODEL = (os.environ.get('SUMMARY_AGGREGATOR_MODEL') or 'anthropic/claude-sonnet-5.5').strip()
+_SUMMARY_AGGREGATOR_MODEL = (os.environ.get('SUMMARY_AGGREGATOR_MODEL') or 'openai/gpt-6.1-sol').strip()
 _SUMMARY_AGGREGATOR_REASONING_EFFORT = (
     (os.environ.get('SUMMARY_AGGREGATOR_REASONING_EFFORT') or '').strip() or TEXT_REASONING_EFFORT)
 try:

@@ -1,7 +1,7 @@
-"""Text runs on Sonnet 5.5 at max reasoning; Argon is the vision model only.
+"""Text runs on GPT-6.1-sol at max reasoning; Argon is the vision model only.
 
 Owner rule (2026-10-27): every text/analysis call answers on
-``anthropic/claude-sonnet-5.5`` with ``reasoning_effort='max'``.
+``openai/gpt-6.1-sol`` with ``reasoning_effort='max'``.
 ``google/gemini-4-argon`` stays only on calls that actually send an image or a
 scanned document (site polygon, land analysis, visual-concept references,
 map references, attached images) until a better vision model is chosen.
@@ -43,8 +43,8 @@ def _chat_payload():
 
 class ModelConstantTests(unittest.TestCase):
 
-    def test_text_model_is_sonnet_5_5_at_max_effort(self):
-        self.assertEqual(application.GEMINI_TEXT_MODEL, 'anthropic/claude-sonnet-5.5')
+    def test_text_model_is_sol_6_1_at_max_effort(self):
+        self.assertEqual(application.GEMINI_TEXT_MODEL, 'openai/gpt-6.1-sol')
         self.assertEqual(application.TEXT_REASONING_EFFORT, 'max')
         self.assertEqual(application.LUNA_TEXT_MODEL, application.GEMINI_TEXT_MODEL)
         self.assertEqual(application.VISUAL_PLAN_TEXT_MODEL, application.GEMINI_TEXT_MODEL)
