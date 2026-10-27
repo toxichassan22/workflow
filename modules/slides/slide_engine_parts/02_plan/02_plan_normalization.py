@@ -1,5 +1,37 @@
 
 
+# One designed reading page holds about this much prose before the card would
+# clip, so a shorter reading stays on a single page instead of arriving as two
+# half-empty cards.
+_SITE_ANALYSIS_PAGE_CHARS = 780
+
+
+def _site_analysis_page_ranges(blocks):
+    """Split the approved reading into balanced page slices.
+
+    The blocks are the ones the page builder renders, so every slice selects
+    exactly what the plan measured. A reading that fits one page is not
+    paginated at all, and a longer one divides into balanced pages: the old
+    half/full cut left the last page carrying a stray line.
+    """
+    total = sum(len(str(block or '')) + 1 for block in blocks)
+    if total <= _SITE_ANALYSIS_PAGE_CHARS:
+        return [(0, None)]
+    page_count = max(2, math.ceil(total / _SITE_ANALYSIS_PAGE_CHARS))
+    target = total / page_count
+    ranges = []
+    start = 0
+    used = 0
+    for index, block in enumerate(blocks):
+        used += len(str(block or '')) + 1
+        if (used >= target and len(ranges) < page_count - 1
+                and index + 1 < len(blocks)):
+            ranges.append((start, index + 1))
+            start = index + 1
+            used = 0
+    ranges.append((start, None))
+    return ranges
+
 def _ensure_required_plan_content(groups, project_data=None, images=None, tenant_id=None, offer_lang=None):
     source = project_data if isinstance(project_data, dict) else {}
     lang = resolve_offer_lang(source, offer_lang)
@@ -741,39 +773,35 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         summary_style = 'map' if summary_tokens else 'text'
 
         if section_key == 'location' and content_source == 'site_analysis':
-            paragraphs = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', value) if part.strip()]
-            if not paragraphs:
-                paragraphs = [p.strip() for p in value.splitlines() if p.strip()] or [value]
-            if len(paragraphs) >= 3 or len(value) > 600:
-                half = max(1, math.ceil(len(paragraphs) / 2))
-                slide_1 = {
-                    'title': title,
-                    'type': 'content',
-                    'design_style': summary_style,
-                    'content_density': 'medium',
-                    'requires_image': bool(summary_tokens),
-                    'content_source': f'site_analysis:0:{half}',
-                    'image_tokens': summary_tokens,
-                    'bullets': [],
-                    'section_key': 'location',
-                }
-                slide_2 = {
-                    'title': title,
-                    'type': 'content',
-                    'design_style': 'editorial',
-                    'content_density': 'medium',
-                    'requires_image': False,
-                    'content_source': f'site_analysis:{half}:',
-                    'image_tokens': [],
-                    'bullets': [],
-                    'section_key': 'location',
-                }
+            # The page builder breaks a long paragraph into sentence blocks, so
+            # the split must count the same blocks — otherwise one page carries
+            # the whole reading and the next one is empty.
+            blocks = _site_analysis_blocks(value)
+            if not blocks:
+                blocks = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', value) if part.strip()] or [value]
+            ranges = _site_analysis_page_ranges(blocks)
+            if len(ranges) > 1:
+                pages = []
+                for page_index, (start, end) in enumerate(ranges):
+                    first = page_index == 0
+                    pages.append({
+                        'title': title,
+                        'type': 'content',
+                        'design_style': summary_style if first else 'editorial',
+                        'content_density': 'medium',
+                        'requires_image': bool(summary_tokens) and first,
+                        'content_source': 'site_analysis:%d:%s' % (
+                            start, '' if end is None else end),
+                        'image_tokens': summary_tokens if first else [],
+                        'bullets': [],
+                        'section_key': 'location',
+                    })
                 groups['location'] = [
                     s for s in groups.get('location', [])
                     if not str(s.get('content_source') or '').startswith('site_analysis')
                     and not summary_match(str(s.get('title') or ''))
                 ]
-                groups['location'].extend([slide_1, slide_2])
+                groups['location'].extend(pages)
                 continue
 
         existing = next((slide for slide in groups.get(section_key, [])

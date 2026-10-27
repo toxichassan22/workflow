@@ -194,11 +194,19 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         project = {
             'project_name': 'مشروع النخيل',
             'site_analysis': (
-                'يتميز موقع المشروع بموقع استراتيجي في قلب المدينة بالقرب من أهم المحاور.\n\n'
-                'يتصل الموقع مباشرة بطرق شريانية سريعة تسهل حركة الدخول والخروج وانسيابية المرور.\n\n'
-                'تحيط بالمشروع كثافة سكانية عالية وقوة شرائية متميزة تدعم نجاح المشروع التجاري.\n\n'
-                'تتوافر في محيط الموقع كافة خدمات البنية التحتية والمرافق الحكومية والترفيهية.\n\n'
-                'يمثل الموقع فرصة استثمارية واعدة للتطوير العقاري المتعدد الاستخدامات.'
+                'يتميز موقع المشروع بموقع استراتيجي في قلب المدينة بالقرب من أهم المحاور '
+                'الرئيسية والطرق السريعة التي تربط أطراف المدينة بمركزها التجاري والإداري.\n\n'
+                'يتصل الموقع مباشرة بطرق شريانية سريعة تسهل حركة الدخول والخروج، وتخدم '
+                'المداخل المتعددة الحركة اليومية للزوار والمستخدمين على مدار الساعة.\n\n'
+                'تحيط بالمشروع كثافة سكانية عالية وقوة شرائية متميزة تدعم نجاح المشروع '
+                'التجاري، وترفع الطلب على الواجهات التجارية المطلة على المحور الرئيسي.\n\n'
+                'تتوافر في محيط الموقع كافة خدمات البنية التحتية والمرافق الحكومية والترفيهية '
+                'والمدارس والمراكز الصحية على مسافات قريبة تخدم سكان المشروع.\n\n'
+                'يمثل الموقع فرصة استثمارية واعدة للتطوير العقاري المتعدد الاستخدامات، '
+                'ويحقق عائداً متوازناً بين الاستخدام السكني والتجاري في نطاق واحد متكامل.\n\n'
+                'وتدعم الكثافة السكانية المحيطة المشروع على المدى الطويل، إذ تنمو أحياء '
+                'الجوار بمعدل يتجاوز متوسط المدينة وتتزايد معها الحاجة إلى الخدمات القريبة '
+                'والواجهات التجارية التي يقدمها المشروع لمحيطه المباشر.'
             ),
         }
         plan = engine.normalize_presentation_plan(
@@ -236,6 +244,43 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
             project_data=project)
         self.assertNotIn('##MAP_OVERVIEW##', html2)
         self.assertNotIn('data-map-summary-card', html2)
+
+    def test_a_normal_site_reading_stays_on_one_designed_page(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع النخيل',
+            'site_analysis': (
+                'يقع المشروع في حي الملقا على محور حيوي يربط شمال الرياض بوسطها، ما يمنحه '
+                'موقعاً استراتيجياً لخدمة الطلب السكني والتجاري.\n\n'
+                'يتصل الموقع مباشرةً بطريق الملك فهد، وتسهم شبكة الطرق المحيطة في سهولة '
+                'الوصول إليه من مناطق النطاق الجغرافي كافة.\n\n'
+                'تحيط بالموقع معالم خدمية وترفيهية تدعم جاذبيته، وتتوافر فيه البنية التحتية '
+                'والمرافق الحكومية والمدارس والمراكز الصحية.\n\n'
+                'يمثل الموقع فرصة لتطوير متعدد الاستخدامات يستفيد من كثافة الطلب القائمة، '
+                'ويحقق عائداً متوازناً.'
+            ),
+        }
+        plan = engine.normalize_presentation_plan(
+            {'slides': [
+                {'title': 'الغلاف', 'type': 'cover', 'section_key': 'cover'},
+                {'title': 'ملخص الموقع الجغرافي', 'type': 'content', 'section_key': 'location',
+                 'content_source': 'site_analysis'},
+                {'title': 'الخاتمة', 'type': 'closing', 'section_key': 'closing'},
+            ]},
+            project,
+            {},
+        )
+        site_slides = [s for s in plan['slides']
+                       if str(s.get('content_source', '')).startswith('site_analysis')]
+        # A reading that fits one card is not cut into two half-empty pages.
+        self.assertEqual(len(site_slides), 1, site_slides)
+        self.assertEqual(site_slides[0]['content_source'], 'site_analysis')
+        html = engine.generate_single_slide(
+            'system', site_slides[0], 2, 4,
+            {'primary_color': '#005f78', 'accent_color': '#c59a58'},
+            lambda *_args, **_kwargs: self.fail('site_analysis must be deterministic fallback'),
+            project_data=project)
+        self.assertEqual(html.count('data-site-analysis-text="1"'), 4)
 
     def test_boundary_diagram_is_deterministic_and_does_not_call_model(self):
         engine = self.application_module.slide_engine
@@ -447,8 +492,9 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
             project_data=project)
         self.assertEqual(calls, [])
         self.assertIn('data-location-page="site-specs"', html)
+        self.assertIn('data-location-coordinates="1"', html)
         for value in ('الرياض', 'حي الملقا', '4521', '7,012.5',
-                      '24.71355 , 46.67529', 'طريق الملك فهد', 'ميدان السارية'):
+                      '24.71355, 46.67529', 'طريق الملك فهد', 'ميدان السارية'):
             self.assertIn(value, html)
         # Two aligned cards and a facts strip — not one block of text.
         self.assertEqual(html.count('data-location-card="1"'), 2)

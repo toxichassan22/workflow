@@ -185,6 +185,26 @@ class MapSlideLayoutUiTests(unittest.TestCase):
                        metrics: slide.querySelectorAll('[data-location-metric]').length,
                        tableRows: slide.querySelectorAll('tbody tr').length,
                        paragraphs: slide.querySelectorAll('[data-site-analysis-text]').length,
+                       // The reading block as it actually renders: how tall it is
+                       // and at what size, so "text thrown on a slide" fails.
+                       readingHeight: (() => {
+                           const items = Array.from(
+                               slide.querySelectorAll('[data-site-analysis-text]'));
+                           if (!items.length) return 0;
+                           const top = R(items[0]).top;
+                           return Math.round(R(items[items.length - 1]).bottom - top);
+                       })(),
+                       readingFont: (() => {
+                           const item = slide.querySelector('[data-site-analysis-text]');
+                           return item ? parseFloat(getComputedStyle(item).fontSize) : 0;
+                       })(),
+                       readingWidth: (() => {
+                           const item = slide.querySelector('[data-site-analysis-text]');
+                           return item ? Math.round(R(item).width) : 0;
+                       })(),
+                       coordinates: slide.querySelector('[data-location-coordinates]')
+                           ? slide.querySelector('[data-location-coordinates]').innerText
+                           : '',
                        caption: caption ? caption.innerText : '',
                        imageFill: image
                            ? Math.round(R(image).height - R(image.parentElement).height)
@@ -211,7 +231,10 @@ class MapSlideLayoutUiTests(unittest.TestCase):
             'section_key': 'location', 'content_source': 'location_detail'})
         self._assert_location_frame(metrics)
         self.assertEqual(len(metrics['cards']), 2, metrics)
-        self.assertEqual(metrics['tableRows'], 5, metrics)
+        # The coordinates lead the card as a figure, so the field list carries the
+        # four remaining values.
+        self.assertEqual(metrics['tableRows'], 4, metrics)
+        self.assertTrue(metrics['coordinates'].startswith('24.71355'), metrics)
         self.assertEqual(metrics['metrics'], 3, metrics)
         # The field table and the surroundings card share one top and one bottom.
         self.assertLessEqual(
@@ -235,30 +258,50 @@ class MapSlideLayoutUiTests(unittest.TestCase):
         # The 16:9 map fills its wrapper, and the measurement date lands in the caption.
         self.assertLessEqual(abs(metrics['imageFill']), 2, metrics)
         self.assertIn('تم قياس زمن القيادة', metrics['caption'])
+        # The reading is a column of readable prose, not a caption strip run
+        # across the whole slide: real type, a real reading measure, and enough
+        # of the card filled that it does not float in empty space.
+        self.assertGreaterEqual(metrics['readingFont'], 14.0, metrics)
+        self.assertLessEqual(metrics['readingWidth'], 620, metrics)
+        self.assertGreaterEqual(metrics['readingHeight'], 130, metrics)
 
-    def test_a_single_long_reading_is_columned_without_clipping(self):
+    def test_a_single_long_reading_is_paged_without_clipping(self):
         long_text = ' '.join(
             'يقع المشروع على محور حيوي يربط شمال المدينة بوسطها ويمنحه موقعاً استراتيجياً '
             'لخدمة الطلب القائم على الخدمات والمرافق المحيطة به.' for _ in range(26))
-        metrics = self._render_location_page({
-            'title': 'ملخص الموقع الجغرافي', 'type': 'content', 'section_key': 'location',
-            'content_source': 'site_analysis', 'image_tokens': ['##MAP_OVERVIEW##'],
-            'requires_image': True},
-            placeholders={'##MAP_OVERVIEW##': self.map_uri},
-            project=dict(self.site_project, site_analysis=long_text))
-        self._assert_location_frame(metrics)
-        # A paragraph that runs long is broken at sentence boundaries and set in
-        # columns, so the approved wording still fits the card whole.
-        self.assertGreaterEqual(metrics['paragraphs'], 2, metrics)
-        self.assertEqual(len(metrics['cards']), 2, metrics)
+        project = dict(self.site_project, site_analysis=long_text)
+        plan = self.engine.normalize_presentation_plan({'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'ملخص الموقع الجغرافي', 'type': 'content', 'section_key': 'location',
+             'content_source': 'site_analysis'},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}, project, {'##MAP_OVERVIEW##': self.map_uri})
+        pages = [slide for slide in plan['slides']
+                 if str(slide.get('content_source') or '').startswith('site_analysis')]
+        # One flowing paragraph is broken into page-sized blocks, so the reading
+        # is paged instead of shipped as one overflowing page and an empty one.
+        self.assertGreaterEqual(len(pages), 2, pages)
+        for page in pages:
+            metrics = self._render_location_page(
+                page, placeholders={'##MAP_OVERVIEW##': self.map_uri}, project=project)
+            self._assert_location_frame(metrics)
+            self.assertGreaterEqual(metrics['paragraphs'], 1, metrics)
 
     def test_site_analysis_continuation_page_keeps_the_frame(self):
         metrics = self._render_location_page({
             'title': 'ملخص الموقع الجغرافي', 'type': 'content', 'section_key': 'location',
             'content_source': 'site_analysis:2:', 'image_tokens': []})
         self._assert_location_frame(metrics)
-        self.assertEqual(len(metrics['cards']), 1, metrics)
+        # The map's place is taken by the approved surroundings, so a
+        # continuation page is a designed pair of cards, not one half-empty card.
+        self.assertEqual(len(metrics['cards']), 2, metrics)
         self.assertEqual(metrics['paragraphs'], 2, metrics)
+        self.assertLessEqual(
+            abs(metrics['cards'][0]['top'] - metrics['cards'][1]['top']), 2, metrics)
+        self.assertLessEqual(
+            abs(metrics['cards'][0]['bottom'] - metrics['cards'][1]['bottom']), 4, metrics)
+        self.assertGreaterEqual(
+            metrics['cards'][0]['height'], 380, metrics)
 
 
 if __name__ == '__main__':

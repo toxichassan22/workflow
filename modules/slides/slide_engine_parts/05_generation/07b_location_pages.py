@@ -71,7 +71,7 @@ def _location_area_text(source, en=False):
 def _location_coordinates_text(source):
     lat = str((source or {}).get('location_lat') or '').strip()
     lng = str((source or {}).get('location_lng') or '').strip()
-    coordinates = ' , '.join(part for part in (lat, lng) if part)
+    coordinates = ', '.join(part for part in (lat, lng) if part)
     return coordinates
 
 
@@ -214,13 +214,28 @@ def _build_site_specs_slide(slide, project_data, branding=None):
     coordinates = _location_coordinates_text(source)
     fetched_at = str(source.get('location_data_fetched_at') or '').strip()
 
+    # The coordinates are the anchor of a site page, so they lead the card as a
+    # figure instead of sitting in the middle of a uniform field list.
+    hero_html = ''
+    if coordinates:
+        hero_html = (
+            '<div style="flex:0 0 auto;padding:17px 18px 16px;border-bottom:1px solid #e2e8f0;'
+            'display:flex;flex-direction:column;gap:6px;background:#ffffff;">'
+            '<div style="font-size:10.5px;font-weight:700;color:#64748b;">'
+            f'{html_lib.escape("Approved coordinates" if en else "الإحداثيات المعتمدة")}</div>'
+            f'<div data-location-coordinates="1" dir="ltr" style="font-size:23px;font-weight:800;'
+            f'color:{primary};line-height:1.2;letter-spacing:.4px;text-align:right;'
+            'font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;'
+            f'text-overflow:ellipsis;">{html_lib.escape(coordinates)}</div>'
+            f'<div style="height:2px;width:46px;background:{accent};border-radius:2px;margin-top:2px;"></div>'
+            '</div>')
+
     rows = []
     for label, value in (
         ('City' if en else 'المدينة', city),
         ('District' if en else 'الحي', district),
         ('Plot / Plan number' if en else 'المخطط / القطعة', plot),
         ('Area' if en else 'المساحة', area),
-        ('Coordinates' if en else 'الإحداثيات', coordinates),
     ):
         if value:
             rows.append((label, value))
@@ -252,6 +267,7 @@ def _build_site_specs_slide(slide, project_data, branding=None):
         'border:1px solid #d9e2ec;border-radius:14px;overflow:hidden;background:#fff;">'
         + _location_card_header(
             'Site specification' if en else 'بيانات الموقع', table_badge, primary)
+        + hero_html
         # `flex:1` on a div that wraps a table is stripped by the table
         # readability pass, so the rows are given the height directly and the
         # gap under the last row never ships.
@@ -329,50 +345,130 @@ def _build_site_specs_slide(slide, project_data, branding=None):
         primary, accent, en, kind='site-specs')
 
 
-def _site_analysis_paragraphs(slide, source):
-    """The approved site analysis, sliced to this page's paragraph range."""
-    raw = str((source or {}).get('site_analysis') or '').strip()
+def _site_analysis_blocks(value):
+    """The approved reading cut into page-sized blocks: paragraphs, then sentences.
+
+    The analysis is written as flowing prose, so one paragraph can run past a
+    card. Breaking it at sentence boundaries is layout only — the approved
+    wording is untouched — and the plan counts blocks with this same function so
+    a page range always selects the slice the plan measured.
+    """
+    raw = str(value or '').strip()
     if not raw:
         return []
     paragraphs = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', raw) if part.strip()]
     if not paragraphs:
         paragraphs = [part.strip() for part in raw.splitlines() if part.strip()] or [raw]
+    blocks = []
+    for paragraph in paragraphs:
+        if len(paragraph) > 700:
+            blocks.extend(_exec_text_chunks(paragraph, target=520) or [paragraph])
+        else:
+            blocks.append(paragraph)
+    return blocks
+
+
+def _site_analysis_paragraphs(slide, source):
+    """The approved site analysis, sliced to this page's block range."""
+    blocks = _site_analysis_blocks((source or {}).get('site_analysis'))
     match = re.fullmatch(
         r'site_analysis:(\d*):(\d*)',
         str((slide or {}).get('content_source') or '').strip())
-    if match:
-        start = int(match.group(1)) if match.group(1) else 0
-        end = int(match.group(2)) if match.group(2) else len(paragraphs)
-        paragraphs = paragraphs[start:end]
-    # The analysis is written as flowing prose, so one paragraph can run past
-    # what a card holds. Breaking it at sentence boundaries is layout only: the
-    # approved wording is untouched.
-    laid_out = []
-    for paragraph in paragraphs:
-        if len(paragraph) > 700:
-            laid_out.extend(_exec_text_chunks(paragraph, target=520) or [paragraph])
-        else:
-            laid_out.append(paragraph)
-    return laid_out
+    if not match:
+        return blocks
+    start = int(match.group(1)) if match.group(1) else 0
+    end = int(match.group(2)) if match.group(2) else len(blocks)
+    return blocks[start:end]
+
+# The reading is prose, so its type is chosen to fill the card instead of
+# shrinking to a caption — four short lines floating in the middle of a tall
+# card is the "content thrown on a slide" look this page replaces.
+_SITE_ANALYSIS_COLUMN_CHARS = 76
+_SITE_ANALYSIS_PARAGRAPH_GAP = 12
+_SITE_ANALYSIS_READING_PX = 300
 
 
-def _site_analysis_text_style(paragraphs, has_map):
-    """Text size for the space the card actually has, so nothing is clipped."""
+def _site_analysis_text_style(paragraphs):
+    """Type size that fills the reading card without clipping it."""
     length = len(' '.join(paragraphs))
-    if length <= 520:
-        font, line_height = 14.5, 1.9
-    elif length <= 820:
-        font, line_height = 13.2, 1.85
-    elif length <= 1180:
-        font, line_height = 12.2, 1.8
-    else:
-        font, line_height = 11.4, 1.75
-    columns = length > (900 if has_map else 1200)
-    return font, line_height, columns
+    lines = max(1, math.ceil(length / _SITE_ANALYSIS_COLUMN_CHARS))
+    gaps = max(0, len(paragraphs) - 1) * _SITE_ANALYSIS_PARAGRAPH_GAP
+    for font, line_height in ((15.0, 1.95), (14.2, 1.92), (13.4, 1.88),
+                              (12.6, 1.84), (11.8, 1.8), (11.0, 1.76)):
+        if lines * font * line_height + gaps <= _SITE_ANALYSIS_READING_PX:
+            return font, line_height
+    return 10.4, 1.72
+
+
+def _location_context_rows(value, en=False, limit=4):
+    """(name, distance) rows from an approved landmark table."""
+    structured = value
+    rows = _approved_landmark_rows(structured) if isinstance(structured, (list, str)) else []
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        name = str(row.get('name') or row.get('title') or '').strip()
+        if not name:
+            continue
+        distance = str(row.get('distance_km') or row.get('distance') or '').strip()
+        if distance and not re.search(r'[^\d.,\s-]', distance):
+            distance += ' km' if en else ' كم'
+        out.append((name, distance))
+    if not out:
+        out = [(name, '') for name in _location_names(value)]
+    return out[:limit]
+
+
+def _location_context_card(source, primary, en=False, limit=6):
+    """The corridors and landmarks the reading refers to, listed beside it.
+
+    A continuation page has no map, and an empty half-page reads as missing
+    content. This card carries the approved surroundings as rows, so the page
+    keeps the two-card rhythm of the map page without inventing anything.
+    """
+    source = source or {}
+    rows = [(name, 'Corridor' if en else 'محور رئيسي')
+            for name in _location_road_names(source)[:2]]
+    remaining = max(0, limit - len(rows))
+    if remaining:
+        rows.extend(_location_context_rows(
+            source.get('nearby_landmarks_data'), en, limit=min(3, remaining)))
+    remaining = max(0, limit - len(rows))
+    if remaining:
+        rows.extend(_location_context_rows(
+            source.get('city_landmarks_data'), en, limit=remaining))
+    if not rows:
+        return ''
+    body = ''.join(
+        '<div style="display:flex;align-items:baseline;justify-content:space-between;'
+        'gap:14px;padding:11px 2px;min-width:0;'
+        + ('border-bottom:1px solid #eef2f6;' if index < len(rows) - 1 else '')
+        + '">'
+        '<div style="font-size:12.5px;font-weight:700;color:#334155;min-width:0;'
+        'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'
+        + html_lib.escape(name) + '</div>'
+        + (f'<div style="font-size:10.5px;color:#64748b;white-space:nowrap;">'
+           + _location_bidi(meta) + '</div>' if meta else '')
+        + '</div>'
+        for index, (name, meta) in enumerate(rows)
+    )
+    return (
+        '<div data-location-card="1" style="display:flex;flex-direction:column;min-width:0;'
+        'min-height:0;border:1px solid #d9e2ec;border-radius:14px;overflow:hidden;'
+        'background:#fff;">'
+        + _location_card_header(
+            'Surroundings & access' if en else 'المحيط والوصول', '', primary)
+        + '<div style="flex:1;min-height:0;overflow:hidden;padding:6px 18px;">' + body + '</div>'
+        + '</div>')
 
 
 def _build_location_summary_slide(slide, project_data, branding=None):
-    """The site-analysis page: the approved reading beside the overview map."""
+    """The site-analysis page: the approved reading beside the overview map.
+
+    A reading longer than one card continues on the same frame with the
+    surroundings card in the map's place, so both pages read as a pair.
+    """
     source = project_data if isinstance(project_data, dict) else {}
     en = resolve_offer_lang(source) == OFFER_LANG_ENGLISH
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
@@ -386,15 +482,16 @@ def _build_location_summary_slide(slide, project_data, branding=None):
         (token for token in tokens if token.upper().startswith('##MAP_')), '')
     has_map = bool(map_token)
 
-    font, line_height, columns = _site_analysis_text_style(paragraphs, has_map)
+    font, line_height = _site_analysis_text_style(paragraphs)
     if paragraphs:
         text_body = ''.join(
             '<div data-site-analysis-text="1" style="font-size:' + str(font) + 'px;'
             f'line-height:{line_height};color:#334155;text-align:justify;'
-            f'border-inline-start:3px solid {accent};padding-inline-start:14px;'
-            'margin-bottom:10px;word-break:break-word;">'
+            + ('' if index == len(paragraphs) - 1
+               else f'margin-bottom:{_SITE_ANALYSIS_PARAGRAPH_GAP}px;')
+            + 'word-break:break-word;">'
             + html_lib.escape(paragraph) + '</div>'
-            for paragraph in paragraphs
+            for index, paragraph in enumerate(paragraphs)
         )
     else:
         text_body = (
@@ -408,12 +505,14 @@ def _build_location_summary_slide(slide, project_data, branding=None):
         'border:1px solid #d9e2ec;border-radius:14px;overflow:hidden;background:#fff;">'
         + _location_card_header(
             'Site reading' if en else 'القراءة التحليلية للموقع', '', primary)
-        + '<div style="flex:1;min-height:0;overflow:hidden;padding:18px 20px;'
-        + ('column-count:2;column-gap:28px;' if columns
-           else 'display:flex;flex-direction:column;justify-content:center;')
-        + f'">{text_body}</div>'
-        # A page without the map still owns the caption slot, so the measurement
-        # date stays inside the frame instead of floating over the facts strip.
+        # One accent rule marks the reading column, and it is only as tall as
+        # the text beside it: a rule down an empty card edge reads as a bug.
+        + '<div style="flex:1;min-height:0;overflow:hidden;padding:18px 22px;'
+        'display:flex;flex-direction:column;justify-content:center;">'
+        + f'<div style="border-inline-start:3px solid {accent};padding-inline-start:18px;">'
+        + f'{text_body}</div></div>'
+        # A page without the map still owns the caption slot, so the
+        # measurement date stays inside the frame.
         + ('' if has_map else (
             '<div data-map-caption="1" style="height:36px;flex:0 0 auto;display:flex;'
             'align-items:center;padding:0 16px;background:#f8fafc;border-top:1px solid #e2e8f0;'
@@ -436,11 +535,12 @@ def _build_location_summary_slide(slide, project_data, branding=None):
         # The card never covers the marker the map image already carries.
         marker_side = str(source.get('_map_marker_side') or 'right').strip().lower()
         columns_html = (text_card + map_card) if marker_side == 'left' else (map_card + text_card)
-        body = (
-            '<div style="display:grid;grid-template-columns:1.08fr 1fr;gap:24px;align-items:stretch;'
-            'min-height:0;">' + columns_html + '</div>')
     else:
-        body = '<div style="display:flex;min-width:0;min-height:0;flex:1;">' + text_card + '</div>'
+        context_card = _location_context_card(source, primary, en)
+        columns_html = text_card + context_card
+    body = (
+        '<div style="display:grid;grid-template-columns:1.08fr 1fr;gap:24px;align-items:stretch;'
+        'min-height:388px;">' + columns_html + '</div>')
 
     nearest, count = _location_landmark_row_metrics(
         source, 'nearby_landmarks_data', 'nearby_landmarks')
@@ -457,7 +557,8 @@ def _build_location_summary_slide(slide, project_data, branding=None):
         metrics = [
             ('Coordinates' if en else 'الإحداثيات',
              _location_coordinates_text(source), ''),
-            ('Main corridors' if en else 'المحاور الرئيسية', str(len(_location_road_names(source)))
+            ('Main corridors' if en else 'المحاور الرئيسية',
+             str(len(_location_road_names(source)))
              if _location_road_names(source) else '', ''),
         ]
 
