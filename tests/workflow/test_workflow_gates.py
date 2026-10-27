@@ -172,6 +172,34 @@ class WorkflowGateDbTests(unittest.TestCase):
         draft = db.get_project_draft_by_id('tenant-1', 'draft-1')
         self.assertNotEqual(draft['status'], 'generating')
 
+    def test_fresh_job_with_space_format_timestamp_is_not_swept_as_stale(self):
+        """A fresh job whose created_at has SQLite space format (e.g. 'YYYY-MM-DD HH:MM:SS')
+        and no heartbeat yet must never be prematurely swept as stale by ASCII comparison."""
+        approval = db.create_generation_approval(
+            'tenant-1', 'draft-1', self._estimate(points=25000), 'user-1', 'User One')
+        db.decide_generation_approval(
+            'tenant-1', approval['id'], 'approved', 'user-2', 'Approver')
+        job = db.create_generation_job(
+            'tenant-1', approval_id=approval['id'], draft_id='draft-1',
+            slides_total=8, created_by='user-1')
+        self.assertTrue(job.get('heartbeat_at'))
+        self.assertIn('T', job['created_at'])
+
+        # Simulate legacy space-format timestamp (as produced by SQLite datetime('now'))
+        recent_space = db._utcnow().strftime('%Y-%m-%d %H:%M:%S')
+        conn = db.get_db()
+        conn.execute(
+            "UPDATE generation_jobs SET created_at = ?, heartbeat_at = NULL, started_at = NULL WHERE id = ?",
+            (recent_space, job['id']))
+        conn.commit()
+
+        # The fresh job must NOT be swept as stale
+        swept = db.sweep_stale_generation_jobs('tenant-1', timeout_minutes=30)
+        self.assertEqual(swept, 0)
+        current = db.get_generation_job(job['id'])
+        self.assertEqual(current['status'], 'queued')
+        self.assertIsNone(current['error'])
+
     def test_dead_generating_draft_recovers_and_unlocks(self):
         """A run that dies before its job row exists must not lock the draft
         forever: the dead-run sweep releases the hold and returns the draft to
