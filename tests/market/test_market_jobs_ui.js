@@ -555,6 +555,45 @@ test('a credit-stopped summary keeps its job and can resume that same job', asyn
   assert.equal(postCount(context, JOB_ENDPOINT('job-summary-credit') + '/resume'), 1);
 });
 
+test('generate starts a fresh summary instead of echoing a settled job failure', async () => {
+  const { context, inputs } = fixture();
+  context.collectMarketSummaryScope = () => ({ cities: [{ name: 'جدة', districts: [] }] });
+  const state = context.getMarketStudyState();
+  state.activeMarketJobs = { summary: 'job-stale' };
+  context.setMarketStudyState(state);
+  const staleError = 'رصيد الشركة المسجل يغطي التقدير المبدئي لهذه العملية: '
+    + '1.00 دولار (نحو 3.75 نقطة)، لكن مفتاح مزود الذكاء الاصطناعي رفض الطلب.';
+  context.nextApi = (method, endpoint) => {
+    if (method === 'GET') {
+      assert.equal(endpoint, JOB_ENDPOINT('job-stale'));
+      return {
+        success: false, status: 'failed', canResume: true,
+        failureReason: 'insufficient_credit', error: staleError
+      };
+    }
+    if (method === 'POST') {
+      assert.equal(endpoint, '/api/market-study/summary');
+      return { success: true, jobId: 'job-fresh', status: 'queued' };
+    }
+    return {};
+  };
+  context.pollMarketStudyJob = async jobId => {
+    assert.equal(jobId, 'job-fresh');
+    return {
+      success: true, status: 'completed',
+      summary: { market_definition: 'تعريف جديد' }, swot: {}, sources: []
+    };
+  };
+  await context.runMarketSummaryJob();
+  assert.equal(postCount(context, '/api/market-study/summary'), 1);
+  assert.equal(postCount(context, JOB_ENDPOINT('job-stale') + '/resume'), 0);
+  assert.equal(inputs.marketResumeSummaryBtn.hidden, true);
+  assert.doesNotMatch(inputs.marketSummaryFailure.textContent, /1\.00 دولار/);
+  assert.ok(!context.toasts.some(text => /1\.00 دولار/.test(text)));
+  assert.match(inputs.marketSummaryCompare.innerHTML, /تعريف جديد/);
+  assert.equal(context.rememberedMarketJob('summary'), '');
+});
+
 test('the saved resume action returns after reopening the market section', async () => {
   const { context, inputs } = fixture();
   const state = context.getMarketStudyState();

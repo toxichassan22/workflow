@@ -358,6 +358,14 @@
         const currentOneBlock = String(priorState.one_block_summary || '').trim();
         let res = await resumeMarketJob('summary', onProgress,
           () => { if (fail) fail.textContent = marketJobResumedText(); });
+        if (res && res.failureReason) {
+          // A settled remembered job is not this click's result: generate
+          // starts a fresh run; continuing its saved evidence stays on the
+          // deliberate resume action.
+          rememberMarketJob('summary', '');
+          setMarketSummaryResumeAvailable(false);
+          res = null;
+        }
         if (!res) {
           const payload = collectMarketStudyRequestPayload();
           res = await api('POST', '/api/market-study/summary', payload);
