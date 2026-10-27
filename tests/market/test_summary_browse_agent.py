@@ -711,7 +711,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
             payload, aviation_group, ['booking.com'], 'جدة')
         check_in = market_study.date.fromordinal(
             market_study.date.today().toordinal() + 14)
-        check_out = market_study.date.fromordinal(check_in.toordinal() + 2)
+        check_out = market_study.date.fromordinal(check_in.toordinal() + 1)
         self.assertIn('https://www.booking.com/', booking_prompt)
         self.assertIn(check_in.isoformat(), booking_prompt)
         self.assertIn(check_out.isoformat(), booking_prompt)

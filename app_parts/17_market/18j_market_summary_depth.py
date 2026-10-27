@@ -58,6 +58,11 @@ def build_summary_research_jobs(payload, source_map, scope_activities_selected,
         for district, city in locations:
             for group in _SUMMARY_RESEARCH_GROUPS:
                 for host in source_map.get(group['key']) or []:
+                    if host == 'booking.com' and (payload or {}).get(
+                            '_summaryBookingSample'):
+                        # The deterministic Booking scan already supplied the
+                        # room sample; provider search cannot read its table.
+                        continue
                     if scope_activities_selected and not market_study._host_in(
                             host, allowed_activity_hosts):
                         continue

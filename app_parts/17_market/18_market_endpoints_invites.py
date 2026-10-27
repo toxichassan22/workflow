@@ -839,10 +839,11 @@ def _run_market_summary(data, tenant_id=None, progress=None,
                             deadline=deadline, report=report)
     # Dispatch independent browser tasks for the selected activity and
     # geography; each researcher opens only its assigned relevant sources.
-    research = _run_market_summary_research(
+    research = _run_market_summary_research_with_booking(
         payload, usage_ctx, evidence_pool, deadline, report=report,
         offer_lang=offer_lang, resume_state=resume_state,
-        checkpoint=checkpoint, trace_writer=trace_writer)
+        checkpoint=checkpoint, trace_writer=trace_writer,
+        data=data, tenant_id=tenant_id)
     if not research.get('success'):
         fatal = next((_ai_fatal_error_dict(item.get('result') or {})
                       for item in research.get('outcomes') or []
