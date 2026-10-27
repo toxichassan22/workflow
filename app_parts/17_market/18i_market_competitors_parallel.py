@@ -253,7 +253,7 @@ def _booking_empty_note(search, *, destination, matched_district,
 
 
 def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
-                        deadline=None):
+                        deadline=None, session=None):
     """Deterministic hotel discovery from Booking search + property pages.
 
     No model decides which hotel page to open: the project city is resolved to
@@ -284,7 +284,12 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
     if _market_deadline_hit(deadline):
         return _booking_scan_result(
             task, [], [], 'deadline_exceeded', search_ran=False)
-    session = _market_browser_session(search_provider='searxng')
+    owns_session = session is None
+    if owns_session:
+        session = _market_browser_session(search_provider='searxng')
+    if session is None:
+        return _booking_scan_result(
+            task, [], [], 'browser_unavailable', search_ran=False)
     rows = []
     citations = []
     try:
@@ -714,10 +719,11 @@ def _booking_hotel_scan(task, payload, data, tenant_id=None, offer_lang='ar',
             + (f' — منها {priced_count} بسعر ومساحة.' if rows else '.'))
         return _booking_scan_result(task, rows, citations, note, search_ran=True)
     finally:
-        try:
-            session.close()
-        except Exception:
-            pass
+        if owns_session:
+            try:
+                session.close()
+            except Exception:
+                pass
 
 
 def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,

@@ -51,6 +51,8 @@ def _summary_booking_block(rows, note, payload):
         f'scope: {scope}',
         f'stay: {check_in.isoformat()} → {check_out.isoformat()} '
         f'(غرفة واحدة، بالغان، {hotel_stay.stay_nights_label_ar()}، SAR)',
+        'priority: هذه عينة أسعار الغرف الحتمية المعتمدة لهذه الإقامة — '
+        'استخدم أرقامها في محور الضيافة ولا تستبدلها بتقدير.',
     ]
     if note:
         lines.append(f'scan_note: {note}')
@@ -96,7 +98,8 @@ def _summary_booking_citation_pages(scan, limit=5):
     return pages
 
 
-def _summary_booking_evidence(payload, data, tenant_id, deadline=None):
+def _summary_booking_evidence(payload, data, tenant_id, deadline=None,
+                              session=None):
     """One city/district Booking scan for the whole summary, or None.
 
     Only a scan that actually read a rate produces evidence; a blocked or empty
@@ -107,7 +110,8 @@ def _summary_booking_evidence(payload, data, tenant_id, deadline=None):
     task = {'axis': {'label': 'فندقي', 'base': 'hospitality', 'stars': ''}}
     try:
         scan = _booking_hotel_scan(
-            task, payload, data, tenant_id=tenant_id, deadline=deadline)
+            task, payload, data, tenant_id=tenant_id, deadline=deadline,
+            session=session)
     except Exception as exc:
         print(f'[MARKET SUMMARY] booking sample failed: {exc}')
         return None
@@ -131,13 +135,14 @@ def _summary_booking_evidence(payload, data, tenant_id, deadline=None):
 
 
 def _summary_booking_evidence_into(payload, data, tenant_id, evidence_pool,
-                                   deadline=None, report=None):
+                                   deadline=None, report=None, session=None):
     """Store the deterministic Booking sample in the summary evidence pool."""
     if evidence_pool is None or not _summary_booking_selected(payload):
         return None
     report = report if callable(report) else (lambda *_args: None)
     report(22, 'جاري قراءة أسعار الغرف من Booking.com لإقامة محددة...')
-    result = _summary_booking_evidence(payload, data, tenant_id, deadline=deadline)
+    result = _summary_booking_evidence(
+        payload, data, tenant_id, deadline=deadline, session=session)
     if not result:
         return None
     try:
@@ -178,11 +183,18 @@ def _run_market_summary_research_with_booking(payload, usage_ctx, evidence_pool,
     does not grow.
     """
     if _summary_deterministic_stage_allowed():
-        _summary_booking_evidence_into(
+        deterministic = []
+        booking = _summary_booking_evidence_into(
             payload, data or {}, tenant_id, evidence_pool,
-            deadline=deadline, report=kwargs.get('report'))
-        _summary_aqar_evidence_into(
+            deadline=deadline, report=kwargs.get('report'), session=session)
+        if booking:
+            deterministic.append(booking['block'])
+        aqar = _summary_aqar_evidence_into(
             payload, session, evidence_pool,
             deadline=deadline, report=kwargs.get('report'))
+        if aqar:
+            deterministic.append(aqar['block'])
+        if deterministic:
+            payload['_summaryDeterministicEvidence'] = '\n\n'.join(deterministic)
     return _run_market_summary_research(
         payload, usage_ctx, evidence_pool, deadline, **kwargs)

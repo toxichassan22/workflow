@@ -100,6 +100,25 @@ class SummaryBookingEvidenceTests(unittest.TestCase):
                 {'city': 'جدة'}, {}, 'tenant-1', deadline=time.time() + 30)
         self.assertIsNone(result)
 
+    def test_the_scan_reuses_the_summary_browser_session(self):
+        module = self.module
+        captured = {}
+
+        def fake_scan(task, payload, data, tenant_id=None, offer_lang='ar',
+                      deadline=None, session=None):
+            captured['session'] = session
+            return self._scan_reply()
+
+        marker = object()
+        with patch.object(module.market_study, 'summary_activity_profile',
+                          return_value={'kinds': {'hospitality'}}), \
+                patch.object(module, '_booking_hotel_scan',
+                             side_effect=fake_scan):
+            module._summary_booking_evidence(
+                {'city': 'جدة'}, {}, 'tenant-1', deadline=time.time() + 30,
+                session=marker)
+        self.assertIs(captured['session'], marker)
+
     def test_evidence_lands_in_the_pool_and_suppresses_the_search_job(self):
         module = self.module
         payload = {'city': 'جدة', 'district': 'الحمراء'}

@@ -863,8 +863,11 @@ def _run_market_summary(data, tenant_id=None, progress=None,
         evidence_pool, offer_lang=offer_lang)
     researcher_block = json.dumps(research.get('reports') or [],
                                   ensure_ascii=False, indent=2, default=str)
+    deterministic_evidence = str(
+        payload.get('_summaryDeterministicEvidence') or '').strip()
     evidence_block = '\n\n'.join(part for part in
-                                  (retrieved_evidence, researcher_block) if part)
+                                  (deterministic_evidence, retrieved_evidence,
+                                   researcher_block) if part)
     user_prompt = market_study.build_summary_user_prompt(
         payload, competitors, current_summary, current_sources=current_sources, current_swot=current_swot,
         offer_lang=offer_lang, retrieved_evidence=evidence_block,

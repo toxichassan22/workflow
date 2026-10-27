@@ -204,6 +204,8 @@ def _summary_aqar_block(readings, payload):
         f'scope: {city}' + (f' — حي {district}' if district else ''),
         'note: إعلانات طلب معروضة (أسعار مطلوبة) وليست صفقات منفذة؛ '
         'السعر كما يظهر في الإعلان، والبيع والإيجار منفصلان.',
+        'priority: هذه عينة الإعلانات الحتمية المعتمدة لمدينة المشروع — '
+        'استخدم أسعارها وأحياءها في محاور العرض والطلب والتسعير.',
     ]
     index = 0
     for reading in readings:
