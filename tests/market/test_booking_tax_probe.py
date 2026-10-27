@@ -76,6 +76,53 @@ class BookingTaxProbeTests(unittest.TestCase):
 
 
 _spec = importlib.util.spec_from_file_location(
+    'booking_page_dump', ROOT / 'scripts' / 'booking_page_dump.py')
+dump = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(dump)
+
+_PRE_TAX_HTML = (
+    '<tr data-block-id="1"><td><div class="bui-price-display__value">'
+    '303 SAR</div><div class="prd-taxes-and-fees-under-price" '
+    'data-excl-charges-raw="54.2417">+54 SAR taxes and fees</div></td></tr>')
+_FOLDED_HTML = (
+    '<tr><td><div class="prd-taxes-and-fees-under-price" '
+    'data-excl-charges-raw="">Includes taxes and fees</div></td></tr>')
+
+
+class BookingPageDumpTests(unittest.TestCase):
+    """The dump has to report what the page says, not what we expect.
+
+    The whole point of dumping the page from the server is to settle whether a
+    stored figure came from the markup or from our reading of it, so the
+    evidence report must surface the stated tax amount when there is one and
+    stay empty when the page folds the taxes in.
+    """
+
+    def test_evidence_reports_a_stated_tax_amount(self):
+        report = dump.tax_evidence(_PRE_TAX_HTML)
+        self.assertEqual(report['counts']['data-excl-charges-raw'], 1)
+        self.assertEqual(report['counts']['data-hotel-rounded-price'], 0)
+        self.assertTrue(report['snippets']['data-excl-charges-raw'])
+        self.assertIn('54.2417', report['snippets']['data-excl-charges-raw'][0])
+
+    def test_evidence_reports_a_folded_page_as_folded(self):
+        report = dump.tax_evidence(_FOLDED_HTML)
+        self.assertEqual(report['counts']['Includes taxes'], 1)
+        self.assertIn('data-excl-charges-raw', report['snippets'])
+        self.assertIn('data-excl-charges-raw=""', report['snippets'][
+            'data-excl-charges-raw'][0])
+
+    def test_evidence_is_empty_for_an_empty_page(self):
+        report = dump.tax_evidence('')
+        self.assertEqual(report['bytes'], 0)
+        self.assertEqual(set(report['counts'].values()), {0})
+
+    def test_default_dump_path_is_filed_under_sandbox(self):
+        """A runtime dump never lands loose at the repo root."""
+        self.assertTrue(dump.DEFAULT_OUT.startswith('sandbox/'))
+
+
+_spec = importlib.util.spec_from_file_location(
     'booking_pos_matrix', ROOT / 'scripts' / 'booking_pos_matrix.py')
 matrix = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(matrix)
