@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -94,18 +95,78 @@ class DraftCommitStoreTests(unittest.TestCase):
 
         self.assertEqual(len(db.list_draft_commits('tenant-1', 'draft-1')), before)
 
-    def test_a_value_too_large_to_keep_is_named_not_stored(self):
-        """An inline image is not copied into the history, and it is reported."""
+    def test_a_large_value_is_stored_compressed_and_restored_exactly(self):
+        """The study model and the market data are restorable, not skipped."""
         self.save({'project_name': 'برج المشرق'})
         first = db.list_draft_commits('tenant-1', 'draft-1')[0]
-        huge = 'x' * (db.DRAFT_COMMIT_MAX_VALUE_BYTES + 10)
-        self.save({'project_name': 'برج المشرق', 'tenantCreativeImages': huge})
+        huge = {'inputs': {'landArea': 7012.1, 'note': 'س' * (db.DRAFT_COMMIT_MAX_VALUE_BYTES + 50)},
+                'rows': [{'id': index, 'value': 'x' * 40} for index in range(200)]}
+        self.save({'project_name': 'برج المشرق', 'financial_study_model': huge})
+
+        newest = db.list_draft_commits('tenant-1', 'draft-1')[0]
+        self.assertNotIn('financial_study_model', newest['skipped_keys'])
+        self.assertIn('financial_study_model', newest['changed_keys'])
+        state, meta = db.draft_state_at_commit('tenant-1', 'draft-1', newest['id'])
+        self.assertEqual(state['financial_study_model'], huge)
+        self.assertNotIn('financial_study_model', meta['skipped_keys'])
+        older, _older_meta = db.draft_state_at_commit('tenant-1', 'draft-1', first['id'])
+        self.assertNotIn('financial_study_model', older)
+
+    def test_a_value_above_the_storage_cap_is_named_not_stored(self):
+        """A value too large even compressed is reported, never pretended kept."""
+        self.save({'project_name': 'برج المشرق'})
+        first = db.list_draft_commits('tenant-1', 'draft-1')[0]
+        huge = os.urandom(4000).hex()
+        with patch.object(db, 'DRAFT_COMMIT_MAX_VALUE_BYTES', 16), \
+             patch.object(db, 'DRAFT_COMMIT_MAX_STORED_BYTES', 512):
+            self.save({'project_name': 'برج المشرق', 'tenantCreativeImages': huge})
 
         newest = db.list_draft_commits('tenant-1', 'draft-1')[0]
         self.assertIn('tenantCreativeImages', newest['skipped_keys'])
         self.assertNotIn('tenantCreativeImages', newest['changed_keys'])
         _state, meta = db.draft_state_at_commit('tenant-1', 'draft-1', first['id'])
         self.assertIn('tenantCreativeImages', meta['skipped_keys'])
+
+    def test_a_checkpoint_save_keeps_the_keys_its_snapshot_omits(self):
+        """A generation checkpoint is a delta, not a replacement of the file."""
+        self.save({'project_name': 'برج المشرق', 'city': 'الرياض',
+                   'allowed_uses': 'سكني', 'financial_study_model': {'inputs': {'landArea': 900}}})
+        self.save({'project_name': 'برج المشرق', 'tenantSlidesData': [{'html': '<div></div>'}]},
+                  allow_generating=True, expected_revision=1)
+
+        stored = db.get_project_draft_by_id('tenant-1', 'draft-1')['draft_data']
+        self.assertEqual(stored['city'], 'الرياض')
+        self.assertEqual(stored['allowed_uses'], 'سكني')
+        self.assertEqual(stored['financial_study_model'], {'inputs': {'landArea': 900}})
+        self.assertEqual(len(stored['tenantSlidesData']), 1)
+
+    def test_a_payload_without_the_stored_project_name_is_refused(self):
+        """A blank new workspace can never land on a named project file."""
+        self.save({'project_name': 'برج المشرق', 'city': 'الرياض', 'project_type': 'سكني'})
+        before = len(db.list_draft_commits('tenant-1', 'draft-1'))
+
+        with self.assertRaises(db.DraftOverwriteRefused) as caught:
+            self.save({'project_name': '', 'project_idea': 'فكرة جديدة', 'city': '',
+                       'project_type': '', 'location_lat': ''}, expected_revision=1)
+        self.assertEqual(caught.exception.reason, 'nameless')
+        self.assertEqual(len(db.list_draft_commits('tenant-1', 'draft-1')), before)
+        self.assertEqual(db.get_project_draft_by_id('tenant-1', 'draft-1')['draft_data']['city'], 'الرياض')
+
+    def test_a_blank_field_the_client_did_not_clear_keeps_its_stored_value(self):
+        """Only a field the client names as cleared may lose its stored value."""
+        self.save({'project_name': 'برج المشرق', 'city': 'الرياض', 'allowed_uses': 'سكني'})
+        # A half-loaded workspace: the name survives, but two sections arrive blank.
+        self.save({'project_name': 'برج المشرق', 'city': '', 'allowed_uses': ''},
+                  expected_revision=1, clear_keys=[])
+        stored = db.get_project_draft_by_id('tenant-1', 'draft-1')['draft_data']
+        self.assertEqual(stored['city'], 'الرياض')
+        self.assertEqual(stored['allowed_uses'], 'سكني')
+
+        # The client explicitly cleared the city: that one is really cleared.
+        self.save({'project_name': 'برج المشرق', 'city': '', 'allowed_uses': 'سكني'},
+                  expected_revision=1, clear_keys=['city'])
+        stored = db.get_project_draft_by_id('tenant-1', 'draft-1')['draft_data']
+        self.assertEqual(stored['city'], '')
 
     def test_the_table_arrives_on_an_existing_database(self):
         """A table added after the first install must exist on old databases."""
@@ -116,6 +177,19 @@ class DraftCommitStoreTests(unittest.TestCase):
 
         self.save({'project_name': 'برج المشرق'})
         self.assertEqual(len(db.list_draft_commits('tenant-1', 'draft-1')), 1)
+
+    def test_an_unnamed_save_cannot_reach_a_different_project(self):
+        """The unnamed-save fallback never replaces one project with another."""
+        self.save({'project_name': 'برج المشرق', 'city': 'الرياض'})
+        with self.assertRaises(db.DraftOverwriteRefused) as caught:
+            db.save_project_draft('tenant-1', 'user-1',
+                                  {'project_name': 'مشروع آخر', 'city': 'جدة',
+                                   'project_type': 'تجاري', 'project_idea': 'فكرة أخرى'},
+                                  {}, 'draft')
+        self.assertEqual(caught.exception.reason, 'different_project')
+        stored = db.get_project_draft_by_id('tenant-1', 'draft-1')['draft_data']
+        self.assertEqual(stored['project_name'], 'برج المشرق')
+        self.assertEqual(stored['city'], 'الرياض')
 
     def test_another_tenant_reads_nothing(self):
         """The history is tenant-scoped like every other draft read."""
@@ -183,6 +257,7 @@ class DraftVersionApiTests(unittest.TestCase):
         changed['project_name'] = 'برج المشرق الثاني'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
 
         listed = client.get(f"/api/project-draft/{draft['id']}/commits", headers=self.headers())
@@ -204,6 +279,7 @@ class DraftVersionApiTests(unittest.TestCase):
         changed['project_name'] = 'اسم أحدث'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
 
         restored = client.post(f"/api/project-draft/{draft['id']}/commits/{first['id']}/restore",
@@ -244,6 +320,7 @@ class DraftVersionApiTests(unittest.TestCase):
         changed['project_name'] = 'برج المشرق الثاني'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
 
         commits = client.get(f"/api/project-draft/{draft['id']}/commits",
@@ -256,6 +333,34 @@ class DraftVersionApiTests(unittest.TestCase):
         self.assertEqual(changes[0]['key'], 'project_name')
         self.assertEqual(changes[0]['from'], 'برج المشرق')
         self.assertEqual(changes[0]['to'], 'برج المشرق الثاني')
+
+    def test_a_save_that_does_not_name_its_revision_is_refused(self):
+        """A full-payload save without its base revision is the wipe's shape."""
+        client = self.app.test_client()
+        draft = self.draft(client)
+        changed = dict(draft['draft_data'])
+        changed['project_name'] = 'اسم بلا إصدار'
+
+        refused = client.post('/api/project-draft', headers=self.headers(), json={
+            'draftId': draft['id'], 'draftData': changed,
+            'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
+        self.assertEqual(refused.status_code, 409, refused.get_json())
+        self.assertEqual(refused.get_json()['error_code'], 'DRAFT_REVISION_REQUIRED')
+        self.assertEqual(self.draft(client)['draft_data']['project_name'], 'برج المشرق')
+
+    def test_a_blank_workspace_save_is_refused_over_a_named_project(self):
+        """The blank payload that erased real files is rejected at the route."""
+        client = self.app.test_client()
+        draft = self.draft(client)
+        refused = client.post('/api/project-draft', headers=self.headers(), json={
+            'draftId': draft['id'],
+            'draftData': {'project_name': '', 'project_idea': 'فكرة جديدة',
+                          'city': '', 'project_type': ''},
+            'expectedRevision': draft['revision'],
+            'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
+        self.assertEqual(refused.status_code, 409, refused.get_json())
+        self.assertEqual(refused.get_json()['error_code'], 'DRAFT_BLANK_PROJECT_OVERWRITE')
+        self.assertEqual(self.draft(client)['draft_data']['project_name'], 'برج المشرق')
 
 
 if __name__ == '__main__':

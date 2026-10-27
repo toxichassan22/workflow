@@ -215,11 +215,15 @@ DRAFT_EMPTY_OVERWRITE_FLOOR = 3
 class DraftOverwriteRefused(Exception):
     """Raised instead of blanking a stored draft that still holds project content."""
 
-    def __init__(self, draft_id, stored_keys, incoming_keys):
+    def __init__(self, draft_id, stored_keys, incoming_keys, reason='empty'):
         super().__init__(f'Refusing to empty project draft {draft_id}')
         self.draft_id = draft_id
         self.stored_keys = stored_keys
         self.incoming_keys = incoming_keys
+        # 'empty': nothing recognisable arrived. 'nameless': the payload is a
+        # fresh workspace whose project name is gone while the stored file has
+        # one — the signature of a blank-project save landing on a real file.
+        self.reason = reason
 
 
 def _has_content(value):
@@ -235,6 +239,17 @@ def _has_content(value):
     if isinstance(value, (list, tuple, set)):
         return any(_has_content(item) for item in value)
     return True
+
+
+def _is_blank_value(value):
+    """An empty value a save may carry: '', None, [] or a dict with no content."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, (list, tuple, set, dict)):
+        return not _has_content(value)
+    return False
 
 
 def _draft_content_keys(payload):
@@ -282,7 +297,7 @@ def _clear_draft_approval_fields(conn, draft_id):
 
 def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, status='draft',
                        draft_id=None, allow_generating=False, expected_revision=None,
-                       existing_row=None):
+                       existing_row=None, clear_keys=None):
     """Save one unified draft per tenant actor without losing section approvals.
 
     ``user_id`` is an actor identifier.  Company administrators use a stable
@@ -299,6 +314,7 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
     reset below may move it, and new drafts always start as ``draft``.
     """
     conn = get_db()
+    named_draft_id = draft_id or (existing_row.get('id') if isinstance(existing_row, dict) else None)
     if existing_row is not None:
         # The route already hydrated this row for permission and history
         # checks — re-reading it would parse a multi-megabyte draft_data twice.
@@ -384,13 +400,79 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         old_data.pop('draftId', None)
         old_data.pop('draft_id', None)
 
-        # A save that would leave the row with no project content at all is never a real edit:
-        # emptying a project file is DELETE /api/project-draft/<id>.  Writing it used to answer
-        # success, which is how a saved project could appear to empty itself with no error.
+        # A save names the fields the client actually cleared. A blank value it
+        # does NOT name is a missing section, not an instruction to erase: that
+        # is how a half-loaded workspace used to wipe a client's land, location,
+        # financial and market data in one save.
+        clear_set = None
+        if isinstance(clear_keys, (list, tuple, set)):
+            clear_set = {str(key) for key in clear_keys}
+
+        # A generation checkpoint carries the workspace snapshot taken when the
+        # run started. Writing it as a whole file deleted every key the snapshot
+        # did not mention (a slim or older payload erased whole sections). It is
+        # a delta over the stored file: keys it carries win, keys it omits stay.
+        if allow_generating:
+            merged_data = {**old_data, **save_data}
+            merged_data.pop('draftId', None)
+            merged_data.pop('draft_id', None)
+            save_data = merged_data
+
+        stored_name = str(old_data.get('project_name') or old_data.get('projectName') or '').strip()
+        incoming_name = str(save_data.get('project_name') or save_data.get('projectName') or '').strip()
         stored_content = _draft_content_keys(old_data)
         incoming_content = _draft_content_keys(save_data)
         if len(stored_content) >= DRAFT_EMPTY_OVERWRITE_FLOOR and not incoming_content:
             raise DraftOverwriteRefused(existing['id'], sorted(stored_content), sorted(save_data))
+        # A payload that OMITS the name is a partial save (fill-forward below
+        # keeps the stored one). A payload that carries it BLANK is a fresh
+        # workspace — the shape that overwrote real files — unless the client
+        # explicitly reports that the user cleared the field.
+        name_present = 'project_name' in save_data or 'projectName' in save_data
+        if stored_name and name_present and not incoming_name \
+                and (clear_set is None or 'project_name' not in clear_set):
+            raise DraftOverwriteRefused(
+                existing['id'], sorted(stored_content),
+                sorted(save_data), reason='nameless')
+        if stored_name and not named_draft_id and incoming_name                 and incoming_name != stored_name                 and len(incoming_content) >= DRAFT_EMPTY_OVERWRITE_FLOOR:
+            # An unnamed save lands on the actor's newest draft. A full payload
+            # naming a different project would replace one project with another;
+            # a small legacy autosave (a rename) is still accepted.
+            raise DraftOverwriteRefused(
+                existing['id'], sorted(stored_content),
+                sorted(save_data), reason='different_project')
+
+        # Fill forward: omitted keys always keep their stored value, and a blank
+        # value the client did not name in clearKeys keeps it too. A section that
+        # merely failed to load can never erase the file.
+        filled_back = {}
+        for key, old_value in old_data.items():
+            if key in ('draftId', 'draft_id') or key in (clear_set or ()):
+                continue
+            if _is_blank_value(old_value):
+                continue
+            if key not in save_data:
+                filled_back[key] = old_value
+            elif clear_set is not None and _is_blank_value(save_data.get(key)):
+                filled_back[key] = old_value
+        if filled_back:
+            save_data = {**save_data, **filled_back}
+            print(f'[DRAFT SAVE] Kept {len(filled_back)} stored value(s) the payload left blank: '
+                  f'{sorted(filled_back)[:12]}')
+
+        # Metrics follow the payload that will actually be written.
+        draft_json = json.dumps(save_data, ensure_ascii=False)
+        data_bytes = len(draft_json.encode('utf-8'))
+        title = str(save_data.get('project_name') or save_data.get('projectName')
+                    or save_data.get('name') or 'مسودة مشروع بدون عنوان').strip()[:200]
+        creative = save_data.get('tenantCreativeImages') if isinstance(
+            save_data.get('tenantCreativeImages'), dict) else {}
+        has_slides = 1 if isinstance(save_data.get('tenantSlidesData'), list) \
+            and save_data.get('tenantSlidesData') else 0
+        has_maps = 1 if isinstance(creative.get('map_placeholders'), dict) \
+            and any(creative.get('map_placeholders').values()) else 0
+
+        incoming_content = _draft_content_keys(save_data)
         if stored_content and len(incoming_content) * 2 < len(stored_content):
             print(f'[DRAFT SAVE] Draft {existing["id"]} shrank from {len(stored_content)} to '
                   f'{len(incoming_content)} filled fields, '

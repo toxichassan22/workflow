@@ -188,28 +188,34 @@ class ExplorationApiTests(unittest.TestCase):
 
     def test_general_draft_save_cannot_forge_exploration_or_its_mode(self):
         state, _ = self.concepts()
-        data = copy.deepcopy(self.draft()['draft_data'])
+        draft = self.draft()
+        data = copy.deepcopy(draft['draft_data'])
         data['best_use_mode'] = 'guided'
         data['best_use_explore_data']['concepts'].update(approved=True, items=[])
-        response = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': data})
+        response = self.client.post('/api/project-draft', headers=self.headers,
+                                    json={'draftData': data, 'expectedRevision': draft['revision']})
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(self.draft()['draft_data']['best_use_explore_data'], state)
         self.assertEqual(self.draft()['draft_data']['best_use_mode'], 'explore')
 
     def test_basic_market_and_guided_state_changes_do_not_invalidate_exploration(self):
         state, _ = self.concepts()
-        data = copy.deepcopy(self.draft()['draft_data'])
+        draft = self.draft()
+        data = copy.deepcopy(draft['draft_data'])
         data.update(project_type='["تجاري"]', project_idea='فكرة أخرى', market_study_data={'summary': 'سوق آخر'},
                     best_use_data={'id': 'forged-guided', 'approved': True})
-        self.client.post('/api/project-draft', headers=self.headers, json={'draftData': data})
+        self.client.post('/api/project-draft', headers=self.headers,
+                         json={'draftData': data, 'expectedRevision': draft['revision']})
         self.assertEqual(self.draft()['draft_data']['best_use_explore_data'], state)
         self.assertTrue(workflow.current(self.draft()['draft_data'], 'concepts'))
 
     def test_land_change_invalidates_all_artifacts_and_their_approvals(self):
         self.floors()
-        data = copy.deepcopy(self.draft()['draft_data'])
+        draft = self.draft()
+        data = copy.deepcopy(draft['draft_data'])
         data['approved_floor_area_ratio'] = 3
-        response = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': data})
+        response = self.client.post('/api/project-draft', headers=self.headers,
+                                    json={'draftData': data, 'expectedRevision': draft['revision']})
         self.assertEqual(response.status_code, 200, response.get_json())
         state = self.draft()['draft_data']['best_use_explore_data']
         self.assertTrue(all(state[name]['inputsChanged'] for name in workflow.ARTIFACTS))

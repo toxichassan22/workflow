@@ -111,6 +111,7 @@ class DraftLiveStateApiTests(unittest.TestCase):
         changed['project_idea'] = 'فكرة'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': revision,
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
 
         after = client.get(f"/api/project-draft/{draft['id']}/state?since={revision}",
@@ -128,6 +129,7 @@ class DraftLiveStateApiTests(unittest.TestCase):
         branch_draft_id = created['branchDraftId']
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': branch_draft_id,
+            'expectedRevision': branch['branch_revision'],
             'draftData': {'project_name': 'برج المشرق', 'city': 'الرياض', 'project_type': 'سكني',
                           'city_code': 'RUH'},
             'sectionStatuses': {'basic': 'draft'}, 'status': 'draft'})
@@ -174,6 +176,7 @@ class DraftLiveStateApiTests(unittest.TestCase):
         changed['project_idea'] = 'فكرة'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': revision,
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
 
         after = client.get(f"/api/project-draft/{draft['id']}/state?since={revision}",

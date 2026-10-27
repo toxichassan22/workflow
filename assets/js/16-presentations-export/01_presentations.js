@@ -235,6 +235,9 @@
         tenantPresentationTitle = '';
         tenantProjectMode = 'draft';
         tenantProjectData = { ...draftData, draftId: draftData.draftId || draft.id || draftId };
+        // The baseline a later save compares against when deciding whether a
+        // blank field is a deliberate clear or a section that never loaded.
+        tenantDraftLoadedSnapshot = JSON.parse(JSON.stringify(tenantProjectData));
         tenantSlidesData = Array.isArray(draftData.tenantSlidesData) ? draftData.tenantSlidesData : [];
         tenantSlideGenerationCheckpoint = draftData.slide_generation_checkpoint || null;
         tenantSlidePlan = recoverTenantSlidePlan(tenantProjectData, tenantSlidesData);

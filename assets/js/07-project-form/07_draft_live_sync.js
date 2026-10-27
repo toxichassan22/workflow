@@ -182,6 +182,11 @@
           tenantDraftRevision = incomingRev;
           draftLiveSyncRevision = incomingRev;
         }
+        // The applied remote state is the new baseline for "did the user clear
+        // this field, or did it merely not load?".
+        if (typeof tenantProjectData !== 'undefined' && tenantProjectData) {
+          tenantDraftLoadedSnapshot = JSON.parse(JSON.stringify(tenantProjectData));
+        }
 
         if (typeof document !== 'undefined' && document.getElementById) {
           const badge = document.getElementById('draftSyncBadge');

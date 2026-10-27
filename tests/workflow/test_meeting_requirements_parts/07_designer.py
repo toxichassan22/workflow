@@ -203,6 +203,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         })
         response = client.post('/api/project-draft', headers=headers, json={
             'draftId': draft_id,
+            'expectedRevision': 1,
             'draftData': {**base, 'team_selection': {
                 'excluded': [engineer_id],
                 'roles': {developer_id: 'مهندس استشاري'},
@@ -529,7 +530,7 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertTrue(saved.get_json()['success'], saved.get_json())
         client.post('/api/project-draft', headers=headers, json={'draftData': {
             'draftId': 'history-draft', 'project_name': 'THE VIEW 2', 'city': 'جدة', 'district': 'الشاطئ',
-        }})
+        }, 'expectedRevision': 1})
         client.post('/api/project-draft/section-status', headers=headers, json={
             'draftId': 'history-draft', 'sectionKey': 'basic', 'sectionStatus': 'approved',
         })
@@ -1228,12 +1229,13 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         stored = client.get('/api/project-draft/' + draft_id, headers=headers).get_json()['draft']['draft_data']
         self.assertEqual(stored['tenantSlidesData'][0]['html'], old_html)
 
+        revision = client.get('/api/project-draft/' + draft_id, headers=headers).get_json()['draft']['revision']
         saved = client.post('/api/project-draft', headers=headers, json={'draftData': {
             'draftId': draft_id,
             'project_name': 'مشروع التصميم',
             'tenantSlidesData': reply['slidesData'],
             'designerChat': {'messages': reply['chatHistory']},
-        }})
+        }, 'expectedRevision': revision})
         self.assertTrue(saved.get_json()['success'], saved.get_json())
         stored = client.get('/api/project-draft/' + draft_id, headers=headers).get_json()['draft']['draft_data']
         self.assertEqual(stored['tenantSlidesData'][0]['html'], new_html)

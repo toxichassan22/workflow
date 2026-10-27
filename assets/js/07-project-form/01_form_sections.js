@@ -184,6 +184,7 @@
       tenantPresentationTitle = '';
       tenantProjectMode = 'new';
       tenantProjectData = { draftId: crypto.randomUUID(), project_language: projectLanguage };
+      tenantDraftLoadedSnapshot = {};
       tenantVisualConceptState = null;
       tenantSlidesData = [];
       tenantSlidePlan = null;

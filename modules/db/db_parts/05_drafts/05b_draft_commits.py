@@ -11,9 +11,11 @@ git revert: nothing is ever thrown away.
 
 Two rules keep the store honest:
 
-* A value too large to store (an inline image, a slide deck) is skipped and
-  named in ``skipped_keys``. Replaying keeps the current value for it, so a
-  restore never invents content it could not read.
+* A large value is stored compressed, so the study model, the market data and
+  the visual concept remain fully restorable. Only a value that stays above
+  the storage cap after compression is skipped and named in ``skipped_keys``;
+  replaying keeps the current value for it, and the restore reports it instead
+  of pretending it came back.
 * The slides payload is never committed: slides carry their own revision
   history inside ``presentations`` and must not be resumed across engine
   versions.
@@ -22,14 +24,20 @@ The commit is written AFTER the save succeeded, so a refused write (locked
 draft, empty overwrite, revision conflict) leaves no commit behind.
 """
 
+import base64
 import hashlib
+import zlib
 
-# A single value above this size is not worth a history row: it is an inline
-# image or a slide deck, and the file it belongs to is stored separately.
-DRAFT_COMMIT_MAX_VALUE_BYTES = 32768
+# A value above this size is compressed before it enters the history. The old
+# rule skipped it outright, so the study model, the market data and the visual
+# concept — the parts a client spends months filling — were never restorable.
+DRAFT_COMMIT_MAX_VALUE_BYTES = 32 * 1024
+# The size a stored value may reach after compression. Above it the value is
+# skipped and reported, never silently pretended to have been kept.
+DRAFT_COMMIT_MAX_STORED_BYTES = 4 * 1024 * 1024
 # The whole patch of one commit is capped as well, so one save cannot fill
 # the database with megabytes of history.
-DRAFT_COMMIT_MAX_PATCH_BYTES = 262144
+DRAFT_COMMIT_MAX_PATCH_BYTES = 16 * 1024 * 1024
 # Payloads with their own version history stay out of the commit store.
 DRAFT_COMMIT_EXCLUDED_KEYS = ('tenantSlidesData',)
 # Marker stored instead of a value that did not exist in that version.
@@ -37,6 +45,9 @@ DRAFT_COMMIT_DELETED = '__draft_commit_deleted__'
 # A skipped value has no stored content, so its hash stands in for it. The
 # digest of a real value can never equal this marker.
 DRAFT_COMMIT_ABSENT_DIGEST = '__absent__'
+# Envelope of a compressed value. Commits written before compression hold the
+# value itself, and decoding leaves those untouched.
+DRAFT_COMMIT_ZIP_KEY = '__draft_commit_zip__'
 
 
 def _draft_commit_digest(value):
@@ -51,12 +62,33 @@ def _draft_commit_json(value):
         return ''
 
 
+def _draft_commit_encode(value):
+    """Store a large value compressed, so the history keeps ALL of it."""
+    encoded = _draft_commit_json(value)
+    if len(encoded.encode('utf-8')) <= DRAFT_COMMIT_MAX_VALUE_BYTES:
+        return value
+    packed = base64.b64encode(zlib.compress(encoded.encode('utf-8'), 6)).decode('ascii')
+    return {DRAFT_COMMIT_ZIP_KEY: packed}
+
+
+def _draft_commit_decode(value):
+    """Read a stored value, compressed or plain."""
+    if isinstance(value, dict) and set(value) == {DRAFT_COMMIT_ZIP_KEY}:
+        try:
+            raw = zlib.decompress(base64.b64decode(str(value[DRAFT_COMMIT_ZIP_KEY]).encode('ascii')))
+            return json.loads(raw.decode('utf-8'))
+        except (ValueError, zlib.error, KeyError, TypeError):
+            return value
+    return value
+
+
 def _draft_commit_is_deleted(value):
     return isinstance(value, dict) and bool(value.get(DRAFT_COMMIT_DELETED))
 
 
 def _draft_commit_apply(state, key, value):
     """Write one historic value into a rebuilt payload."""
+    value = _draft_commit_decode(value)
     if _draft_commit_is_deleted(value):
         state.pop(key, None)
     else:
@@ -80,7 +112,7 @@ def draft_commit_patch(old_data, new_data):
 
     Returns ``(patch, skipped)``: the patch maps every changed top-level key
     to its previous and its new value, and ``skipped`` names the keys whose
-    value was too large to keep.
+    value could not be stored even compressed.
     """
     before = old_data if isinstance(old_data, dict) else {}
     after = new_data if isinstance(new_data, dict) else {}
@@ -94,18 +126,18 @@ def draft_commit_patch(old_data, new_data):
         new_value = after.get(key)
         if old_value == new_value:
             continue
-        encoded = _draft_commit_json(new_value)
-        if len(encoded.encode('utf-8')) > DRAFT_COMMIT_MAX_VALUE_BYTES:
+        stored_old = _draft_commit_encode(old_value) if key in before else {DRAFT_COMMIT_DELETED: True}
+        stored_new = _draft_commit_encode(new_value) if key in after else {DRAFT_COMMIT_DELETED: True}
+        size = (len(_draft_commit_json(stored_old).encode('utf-8'))
+                + len(_draft_commit_json(stored_new).encode('utf-8')))
+        if size > DRAFT_COMMIT_MAX_STORED_BYTES:
             skipped.append(key)
             continue
-        total += len(encoded.encode('utf-8'))
+        total += size
         if total > DRAFT_COMMIT_MAX_PATCH_BYTES:
             skipped.append(key)
             continue
-        patch[key] = {
-            'from': old_value if key in before else {DRAFT_COMMIT_DELETED: True},
-            'to': new_value if key in after else {DRAFT_COMMIT_DELETED: True},
-        }
+        patch[key] = {'from': stored_old, 'to': stored_new}
     return patch, skipped
 
 
@@ -170,7 +202,14 @@ def get_draft_commit(tenant_id, draft_id, commit_id):
     item['changed_keys'] = _draft_commit_json_list(item.get('changed_keys'))
     item['skipped_keys'] = _draft_commit_json_list(item.get('skipped_keys'))
     item['skipped_digests'] = _json_object(item.get('skipped_digests'))
-    item['patch'] = _json_object(item.get('patch'))
+    patch = _json_object(item.get('patch'))
+    item['patch'] = {
+        key: {
+            'from': _draft_commit_decode((change or {}).get('from')),
+            'to': _draft_commit_decode((change or {}).get('to')),
+        }
+        for key, change in patch.items()
+    }
     return item
 
 

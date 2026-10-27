@@ -274,6 +274,7 @@ class SectionVersionApiTests(unittest.TestCase):
         changed['project_name'] = 'برج المشرق المعدل'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
         stale = client.post('/api/project-draft/request-approval', headers=self.headers(), json={})
         self.assertEqual(stale.status_code, 400, stale.get_json())
@@ -303,6 +304,7 @@ class SectionVersionApiTests(unittest.TestCase):
         changed['project_name'] = 'اسم أحدث'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
         second = client.post('/api/project-draft/section-version',
                              headers=self.headers(), json={'sectionKey': 'basic'}).get_json()['version']
@@ -347,14 +349,17 @@ class SectionVersionApiTests(unittest.TestCase):
         changed['project_type'] = ''
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
         blocked = client.post('/api/project-draft/section-version',
                               headers=self.headers(), json={'sectionKey': 'basic'})
         self.assertEqual(blocked.status_code, 400, blocked.get_json())
         self.assertEqual(blocked.get_json().get('error_code'), 'SECTION_VERSION_INCOMPLETE')
         changed['project_type'] = 'سكني'
+        revision = client.get('/api/project-draft', headers=self.headers()).get_json()['draft']['revision']
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': revision,
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
         allowed = client.post('/api/project-draft/section-version',
                               headers=self.headers(), json={'sectionKey': 'basic'})
@@ -391,6 +396,7 @@ class SectionVersionApiTests(unittest.TestCase):
         changed['project_name'] = 'اسم معدل بعد الاعتماد'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': {'basic': 'draft', 'land_croquis': 'draft'}, 'status': 'draft'})
         blocked = client.post('/api/project-draft/section-status', headers=self.headers(), json={
             'sectionKey': 'basic', 'sectionStatus': 'approved'})
@@ -450,6 +456,7 @@ class SectionVersionApiTests(unittest.TestCase):
         saved = client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'],
             'draftData': save_data,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'],
             'status': 'draft',
         })
@@ -459,9 +466,11 @@ class SectionVersionApiTests(unittest.TestCase):
 
         # 4. Now modify an ACTUAL field of basic section: approval SHOULD void to 'draft'
         save_data['project_name'] = 'اسم معدل بالكامل'
+        revision = client.get('/api/project-draft', headers=self.headers()).get_json()['draft']['revision']
         saved_after_edit = client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'],
             'draftData': save_data,
+            'expectedRevision': revision,
             'sectionStatuses': {'basic': 'approved'},
             'status': 'draft',
         })
@@ -542,6 +551,7 @@ class SectionVersionDiffApiTests(unittest.TestCase):
         changed['project_name'] = 'برج المقارنة الثاني'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': changed,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
         second = self._send_and_decide(client, decision=None)
 

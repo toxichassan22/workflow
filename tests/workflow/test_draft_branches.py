@@ -212,6 +212,7 @@ class DraftBranchApiTests(unittest.TestCase):
         # The branch works on its own copy.
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': branch_draft_id,
+            'expectedRevision': branch['branch_revision'],
             'draftData': {'project_name': 'برج المشرق', 'city': 'الرياض', 'project_type': 'سكني',
                           'city_code': 'RUH'},
             'sectionStatuses': {'basic': 'draft'}, 'status': 'draft'})
@@ -243,10 +244,12 @@ class DraftBranchApiTests(unittest.TestCase):
 
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'],
+            'expectedRevision': draft['revision'],
             'draftData': {'project_name': 'اسم المشروع', 'city': 'الرياض', 'project_type': 'سكني'},
             'sectionStatuses': {'basic': 'draft'}, 'status': 'draft'})
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': branch_draft_id,
+            'expectedRevision': branch['branch_revision'],
             'draftData': {'project_name': 'اسم الفرع', 'city': 'الرياض', 'project_type': 'سكني'},
             'sectionStatuses': {'basic': 'draft'}, 'status': 'draft'})
 

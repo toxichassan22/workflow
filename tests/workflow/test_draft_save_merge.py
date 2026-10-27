@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -131,12 +132,13 @@ class DraftSaveMergeDbTests(unittest.TestCase):
         tells the merge that this side did not touch it."""
         large_old = {'blob': 'x' * 40000}
         large_new = {'blob': 'y' * 40000}
-        base_revision = self._save_large_value(large_old)
-        # The other side saves a newer financial study.
-        db.save_project_draft('tenant-1', 'user-2',
-                              {'project_name': 'برج المشرق', 'city': 'الرياض',
-                               'project_type': 'سكني', 'financial_study_model': large_new},
-                              {'basic': 'draft'}, 'draft', draft_id='draft-1')
+        with patch.object(db, 'DRAFT_COMMIT_MAX_STORED_BYTES', 100):
+            base_revision = self._save_large_value(large_old)
+            # The other side saves a newer financial study.
+            db.save_project_draft('tenant-1', 'user-2',
+                                  {'project_name': 'برج المشرق', 'city': 'الرياض',
+                                   'project_type': 'سكني', 'financial_study_model': large_new},
+                                  {'basic': 'draft'}, 'draft', draft_id='draft-1')
         # This side only changed the city; its financial model is the older one.
         incoming = {'project_name': 'برج المشرق', 'city': 'جدة',
                     'project_type': 'سكني', 'financial_study_model': large_old}
@@ -153,11 +155,12 @@ class DraftSaveMergeDbTests(unittest.TestCase):
         large_old = {'blob': 'x' * 40000}
         large_other = {'blob': 'y' * 40000}
         large_mine = {'blob': 'z' * 40000}
-        base_revision = self._save_large_value(large_old)
-        db.save_project_draft('tenant-1', 'user-2',
-                              {'project_name': 'برج المشرق', 'city': 'الرياض',
-                               'project_type': 'سكني', 'financial_study_model': large_other},
-                              {'basic': 'draft'}, 'draft', draft_id='draft-1')
+        with patch.object(db, 'DRAFT_COMMIT_MAX_STORED_BYTES', 100):
+            base_revision = self._save_large_value(large_old)
+            db.save_project_draft('tenant-1', 'user-2',
+                                  {'project_name': 'برج المشرق', 'city': 'الرياض',
+                                   'project_type': 'سكني', 'financial_study_model': large_other},
+                                  {'basic': 'draft'}, 'draft', draft_id='draft-1')
         incoming = {'project_name': 'برج المشرق', 'city': 'الرياض',
                     'project_type': 'سكني', 'financial_study_model': large_mine}
 
@@ -168,7 +171,8 @@ class DraftSaveMergeDbTests(unittest.TestCase):
 
     def test_the_rebuilt_base_reports_the_digest_of_a_skipped_value(self):
         large_old = {'blob': 'x' * 40000}
-        base_revision = self._save_large_value(large_old)
+        with patch.object(db, 'DRAFT_COMMIT_MAX_STORED_BYTES', 100):
+            base_revision = self._save_large_value(large_old)
         commit = db.draft_commit_at_or_before_revision('tenant-1', 'draft-1', base_revision)
         _state, meta = db.draft_state_at_commit('tenant-1', 'draft-1', commit)
         self.assertIn('financial_study_model', meta['unverified_keys'])
@@ -230,6 +234,7 @@ class DraftSaveMergeApiTests(unittest.TestCase):
         other['project_idea'] = 'فكرة الزميل'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': other,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
 
         mine = dict(draft['draft_data'])
@@ -261,6 +266,7 @@ class DraftSaveMergeApiTests(unittest.TestCase):
         other['project_name'] = 'اسم الزميل'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': other,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
 
         mine = dict(draft['draft_data'])
@@ -291,6 +297,7 @@ class DraftSaveMergeApiTests(unittest.TestCase):
         other['project_idea'] = 'فكرة الزميل'
         client.post('/api/project-draft', headers=self.headers(), json={
             'draftId': draft['id'], 'draftData': other,
+            'expectedRevision': draft['revision'],
             'sectionStatuses': draft['section_statuses'], 'status': 'draft'})
 
         mine = dict(draft['draft_data'])
@@ -335,6 +342,24 @@ class DraftMergeClientWiringTests(unittest.TestCase):
             encoding='utf-8')
         self.assertIn('if (editing && !options.force)', live)
         self.assertIn('hydrateTenantProjectForm(draftData)', live)
+
+    def test_the_save_reports_the_fields_the_user_actually_cleared(self):
+        """A blank field the client did not name as cleared must keep its value."""
+        self.assertIn('clearKeys: payloadClearKeys', self.source)
+        self.assertIn('tenantDraftLoadedSnapshot', self.source)
+        start = self.source.index('if (!slideCheckpoint && typeof document')
+        snippet = self.source[start:start + 800]
+        self.assertIn("querySelectorAll('#tenantProjectForm [data-key]')", snippet)
+        self.assertIn('input.offsetParent', snippet)
+        self.assertIn('isBlankDraftValue(loaded[key])', snippet)
+
+    def test_a_conflict_never_offers_to_overwrite_the_newer_copy(self):
+        """The destructive 'save over the newer version' path is gone."""
+        self.assertNotIn('draft.conflict_confirm', self.source)
+        self.assertIn("resp.error_code === 'DRAFT_REVISION_REQUIRED'", self.source)
+
+    def test_the_checkpoint_write_names_its_own_draft(self):
+        self.assertIn('data.draftId = data.draftId || tenantProjectData.draftId', self.source)
 
 
 if __name__ == '__main__':

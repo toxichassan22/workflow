@@ -63,6 +63,9 @@
           '</div>' +
           '<div class="change-log-summary">' + escapeHtml(changed) + '</div>' +
           '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">' +
+            '<button type="button" class="btn small ghost" onclick="previewDraftVersion(\'' + commit.id + '\')">' +
+              WFT('draft_versions.preview', 'معاينة التغييرات') +
+            '</button>' +
             '<button type="button" class="btn small ghost" onclick="restoreDraftVersion(\'' + commit.id + '\')">' +
               WFT('draft_versions.restore', 'استرجاع') +
             '</button>' +
@@ -111,9 +114,74 @@
           toast(WFT('draft_versions.restore_failed', 'تعذر استرجاع النسخة'));
           return;
         }
-        toast(WFT('draft_versions.restored', 'تم استرجاع النسخة'));
+        const unrestored = Array.isArray(data.unrestoredKeys) ? data.unrestoredKeys : [];
+        if (unrestored.length) {
+          // A field the history could not rebuild is named, not glossed over.
+          toast(WFT('draft_versions.restored_partial',
+            'تم الاسترجاع، لكن {n} حقلًا لم يكن محفوظًا في هذه النسخة: {keys}',
+            { n: unrestored.length, keys: unrestored.slice(0, 5).join('، ') }));
+        } else {
+          toast(WFT('draft_versions.restored', 'تم استرجاع النسخة'));
+        }
+        // The open workspace is reloaded, so the screen shows the restored file
+        // instead of keeping the pre-restore copy under it.
+        if (typeof openProjectDraftById === 'function') {
+          await openProjectDraftById(draftVersionDraftId);
+        }
         await showDraftVersions(draftVersionDraftId);
       } catch (error) {
         toast(WFT('draft_versions.restore_failed', 'تعذر استرجاع النسخة'));
+      }
+    }
+
+    function draftVersionValuePreview(value) {
+      if (value === null || value === undefined) return '—';
+      let text;
+      try { text = typeof value === 'string' ? value : JSON.stringify(value); }
+      catch (error) { text = String(value); }
+      text = String(text || '').replace(/\s+/g, ' ').trim();
+      return text.length > 160 ? text.slice(0, 160) + '…' : (text || '—');
+    }
+
+    async function previewDraftVersion(commitId) {
+      if (!draftVersionDraftId) return;
+      const overlay = document.getElementById('draftVersionsPage');
+      if (!overlay) return;
+      let box = overlay.querySelector('#draftVersionPreview');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'draftVersionPreview';
+        const body = overlay.querySelector('#draftVersionsBody');
+        if (!body) return;
+        body.parentNode.insertBefore(box, body);
+      }
+      box.innerHTML = '<p class="tenant-hint">' + WFT('common.loading', 'جاري التحميل...') + '</p>';
+      try {
+        const data = await api('GET',
+          '/api/project-draft/' + encodeURIComponent(draftVersionDraftId) +
+          '/commits/' + encodeURIComponent(commitId));
+        if (!data || !data.success) {
+          box.innerHTML = '<p class="tenant-hint">' + escapeHtml((data && data.error) || WFT('common.error', 'حدث خطأ')) + '</p>';
+          return;
+        }
+        const commit = data.commit || {};
+        const changes = Array.isArray(commit.changes) ? commit.changes : [];
+        box.innerHTML = '<div class="change-log-entry">' +
+          '<div class="change-log-head">' +
+            '<span class="change-log-badge badge-manual">' + escapeHtml(draftVersionStamp(commit.created_at)) + '</span>' +
+            '<span class="change-log-action">' + escapeHtml(commit.author_name || commit.author_id || '—') + '</span>' +
+            '<button type="button" class="btn small ghost" onclick="document.getElementById(\'draftVersionPreview\').remove()">' +
+              WFT('common.close', 'إغلاق') + '</button>' +
+          '</div>' +
+          (changes.length
+            ? changes.map(change => '<div class="change-log-summary">' +
+                '<strong>' + escapeHtml(change.label || change.key) + '</strong>' +
+                '<div class="tenant-hint">' + escapeHtml(draftVersionValuePreview(change.from)) + '</div>' +
+                '<div>' + escapeHtml(draftVersionValuePreview(change.to)) + '</div>' +
+              '</div>').join('')
+            : '<p class="tenant-hint">' + WFT('draft_versions.no_changes', 'لا توجد تغييرات مسجلة') + '</p>') +
+        '</div>';
+      } catch (error) {
+        box.innerHTML = '<p class="tenant-hint">' + WFT('common.error', 'حدث خطأ') + '</p>';
       }
     }

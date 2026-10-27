@@ -61,6 +61,13 @@ class FinancialParkingApiTests(unittest.TestCase):
         self.billing_settlement.start()
         self.addCleanup(self.billing_settlement.stop)
 
+    def save_draft(self, payload, statuses=None):
+        """A full-payload save names the revision it was built on (CAS)."""
+        body = {'draftData': payload, 'expectedRevision': self.draft()['revision']}
+        if statuses is not None:
+            body['sectionStatuses'] = statuses
+        return self.client.post('/api/project-draft', headers=self.headers, json=body)
+
     def draft(self):
         with self.app.app_context():
             return db.get_project_draft_by_id(self.tenant, self.draft_id)
@@ -120,7 +127,7 @@ class FinancialParkingApiTests(unittest.TestCase):
         edited = copy.deepcopy(plan['components'][0])
         edited.update(units=edited['units'] + 7, notes='ملاحظة العميل')
         payload['financial_study_model']['dynamicRows']['components'].append(edited)
-        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        saved = self.save_draft(payload)
         self.assertEqual(saved.status_code, 200, saved.get_json())
         approved = self.approve(plan)
         self.assertEqual(approved.status_code, 200, approved.get_json())
@@ -138,13 +145,13 @@ class FinancialParkingApiTests(unittest.TestCase):
                    if row.get('parkingPlanId')]
         parking[0]['units'] += 5
         parking[0]['notes'] = 'تعديل العميل'
-        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        saved = self.save_draft(payload)
         self.assertEqual(saved.status_code, 200, saved.get_json())
         draft = self.draft()
         self.assertTrue(draft['draft_data']['financial_study_model']['parkingPlan']['approved'])
         self.assertIsNone(financial_parking.parking_plan_error(draft['draft_data']))
         parking[0]['parkingPlanId'] = 'forged-plan'
-        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        saved = self.save_draft(payload)
         self.assertEqual(saved.status_code, 200, saved.get_json())
         draft = self.draft()
         self.assertFalse(draft['draft_data']['financial_study_model']['parkingPlan']['approved'])
@@ -169,8 +176,7 @@ class FinancialParkingApiTests(unittest.TestCase):
         model['parkingPlan']['requiredSpaces'] = 1
         payload = copy.deepcopy(self.draft()['draft_data'])
         payload['financial_study_model'] = model
-        saved = self.client.post('/api/project-draft', headers=self.headers, json={
-            'draftData': payload, 'sectionStatuses': {'section-financial-calc': 'approved'}})
+        saved = self.save_draft(payload, {'section-financial-calc': 'approved'})
         self.assertEqual(saved.status_code, 200, saved.get_json())
         stored = self.draft()
         plan = stored['draft_data']['financial_study_model']['parkingPlan']
@@ -187,7 +193,7 @@ class FinancialParkingApiTests(unittest.TestCase):
                 'section-financial-calc': 'approved', 'section-visual-concept': 'approved'})
         payload = copy.deepcopy(self.draft()['draft_data'])
         payload['financial_study_model']['dynamicRows']['components'][0]['units'] = 120
-        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        saved = self.save_draft(payload)
         self.assertEqual(saved.status_code, 200, saved.get_json())
         draft = self.draft()
         self.assertFalse(draft['draft_data']['financial_study_model']['parkingPlan']['approved'])
@@ -302,7 +308,7 @@ class FinancialParkingApiTests(unittest.TestCase):
         self.suggest()
         payload = copy.deepcopy(self.draft()['draft_data'])
         payload.pop('financial_study_model')
-        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        saved = self.save_draft(payload)
         self.assertEqual(saved.status_code, 200, saved.get_json())
         self.assertIn('parkingPlan', self.draft()['draft_data']['financial_study_model'])
 
@@ -343,7 +349,7 @@ class FinancialParkingApiTests(unittest.TestCase):
                               'prompts': {'site': 'old', 'uses': 'old', 'massing': 'old'},
                               'distribution': {'rows': [{'component': 'شقق سكنية'}], 'approved': True}},
         }
-        self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        self.save_draft(payload)
         response, _ = self.suggest()
         approved = self.approve(response['financialModel']['parkingPlan']).get_json()
         concept = approved['visualConcept']

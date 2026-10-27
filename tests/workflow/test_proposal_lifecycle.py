@@ -420,8 +420,11 @@ class ProposalLifecycleApiTests(unittest.TestCase):
                 actor_id='user-employee', reason='طلب اعتماد التوليد')
 
         headers = {'Authorization': f'Bearer {self.employee_token}'}
+        with self.app.app_context():
+            revision = int(db.get_project_draft_by_id('tenant-1', 'draft-api-1')['revision'] or 0)
         save = self.client.post('/api/project-draft', headers=headers, json={
             'draftId': 'draft-api-1',
+            'expectedRevision': revision,
             'draftData': {'draftId': 'draft-api-1', 'project_name': 'تعديل مرفوض'},
             'sectionStatuses': {'basic': 'draft'},
         })

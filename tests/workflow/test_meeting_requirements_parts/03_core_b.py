@@ -1495,10 +1495,11 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         self.assertEqual(draft['title'], 'برج المشرق')
 
         # Restoring never overwrites what the draft still holds.
+        revision = client.get('/api/project-draft/draft-recover', headers=headers).get_json()['draft']['revision']
         client.post('/api/project-draft', headers=headers, json={'draftData': {
             'draftId': 'draft-recover', 'project_name': 'اسم محدّث', 'city': 'الرياض',
             'croquis_land_area': '7012', 'allowed_uses': 'سكني وتجاري',
-        }})
+        }, 'expectedRevision': revision})
         again = client.post('/api/project-draft/draft-recover/restore', headers=headers,
                             json={'presentationId': presentation_id})
         self.assertEqual(again.get_json()['restoredCount'], 0)

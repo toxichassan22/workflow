@@ -137,12 +137,16 @@ class HiddenSectionTests(ScopeTestBase):
         # Writing hidden content is refused.
         response = self.client.post('/api/project-draft', headers=self.emp_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'ملفي',
-                          'financial_study_model': {'capex': 999}}})
+                          'financial_study_model': {'capex': 999}},
+            'expectedRevision': 1})
         self.assertEqual(response.status_code, 403)
         self.assertEqual(response.get_json()['error_code'], 'SECTION_FORBIDDEN')
         # Omitting the hidden key restores the stored value instead of wiping it.
+        with self.app.app_context():
+            revision = int(db.get_project_draft_by_id(self.tenant, draft_id)['revision'] or 0)
         response = self.client.post('/api/project-draft', headers=self.emp_headers, json={
-            'draftData': {'draftId': draft_id, 'project_name': 'تعديل مسموح'}})
+            'draftData': {'draftId': draft_id, 'project_name': 'تعديل مسموح'},
+            'expectedRevision': revision})
         self.assertEqual(response.status_code, 200, response.get_json())
         with self.app.app_context():
             stored = db.get_project_draft_by_id(self.tenant, draft_id)['draft_data']
@@ -356,6 +360,7 @@ class SectionStatusSaveTests(ScopeTestBase):
                 {'basic': 'draft'}, 'draft', draft_id='status-draft-1')
         response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'حالة'},
+            'expectedRevision': 1,
             'sectionStatuses': {'location': 'approved', 'basic': 'approved'}})
         self.assertEqual(response.status_code, 200, response.get_json())
         with self.app.app_context():
@@ -373,6 +378,7 @@ class SectionStatusSaveTests(ScopeTestBase):
                 {'basic': 'approved', 'contact': 'approved'}, 'draft', draft_id='status-draft-2')
         response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'حالة'},
+            'expectedRevision': 1,
             'sectionStatuses': {'basic': 'draft'}})
         self.assertEqual(response.status_code, 200, response.get_json())
         with self.app.app_context():
@@ -385,8 +391,11 @@ class SharedDraftSaveTests(ScopeTestBase):
     """ISS-029: an in-scope shared draft saves instead of key-colliding."""
 
     def test_in_scope_employee_save_lands_on_the_owner_row(self):
+        with self.app.app_context():
+            revision = int(db.get_project_draft_by_id(self.tenant, self.draft_a)['revision'] or 0)
         response = self.client.post('/api/project-draft', headers=self.emp_headers, json={
-            'draftData': {'draftId': self.draft_a, 'project_name': 'تعديل تعاوني'}})
+            'draftData': {'draftId': self.draft_a, 'project_name': 'تعديل تعاوني'},
+            'expectedRevision': revision})
         self.assertEqual(response.status_code, 200, response.get_json())
         with self.app.app_context():
             stored = db.get_project_draft_by_id(self.tenant, self.draft_a)
@@ -639,8 +648,11 @@ class GenerationGateTests(ScopeTestBase):
                 'tenantSlidesData': [{'html': '<div class="slide">ok</div>'}],
                 'tenantSlidePlan': self.SLIDE_PLAN,
                 'slide_generation_checkpoint': {'completed': [0]}}
+        with self.app.app_context():
+            revision = int(db.get_project_draft_by_id(self.tenant, draft_id)['revision'] or 0)
         response = self.client.post('/api/project-draft', headers=self.admin_headers,
-                                    json={'draftData': live, 'slideCheckpoint': True})
+                                    json={'draftData': live, 'slideCheckpoint': True,
+                                          'expectedRevision': revision})
         self.assertEqual(response.status_code, 200, response.get_json())
         response = self._queue_slide(live)
         self.assertEqual(response.status_code, 202, response.get_json())

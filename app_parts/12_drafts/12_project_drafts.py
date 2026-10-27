@@ -137,6 +137,20 @@ def api_save_project_draft():
                 raise ValueError('negative')
         except (TypeError, ValueError):
             return jsonify({'error': 'expectedRevision must be a non-negative integer'}), 400
+    if previous is not None and expected_revision is None:
+        # A full-payload write that does not say which version it was built on
+        # is the exact shape of the incident that erased a client's sections:
+        # whoever saved last won, whatever the other person had written. The
+        # file is only writable against the revision its editor actually read.
+        app.logger.warning(
+            '[DRAFT SAVE] Refused a revision-less save: tenant=%s actor=%s draft=%s',
+            g.tenant_id, _project_draft_actor_id(), previous.get('id')
+        )
+        return jsonify({
+            'error': 'تعذر الحفظ: لم تحدد النسخة التي بُني عليها التعديل. أعد فتح المسودة ثم احفظ.',
+            'error_code': 'DRAFT_REVISION_REQUIRED',
+            'currentRevision': int(previous.get('revision') or 0),
+        }), 409
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
@@ -144,6 +158,7 @@ def api_save_project_draft():
             allow_generating=allow_generating,
             expected_revision=expected_revision,
             existing_row=previous,
+            clear_keys=data.get('clearKeys') if isinstance(data.get('clearKeys'), list) else None,
             commit_author_id=g.user_id,
             commit_author_name=_landloom_actor_name(),
         )
@@ -165,10 +180,21 @@ def api_save_project_draft():
         return _draft_locked_response(locked.status)
     except db.DraftOverwriteRefused as refused:
         app.logger.warning(
-            '[DRAFT SAVE] Refused to empty draft %s: tenant=%s actor=%s stored=%d fields received=%s',
+            '[DRAFT SAVE] Refused to empty draft %s: tenant=%s actor=%s reason=%s stored=%d fields received=%s',
             refused.draft_id, g.tenant_id, _project_draft_actor_id(),
+            getattr(refused, 'reason', 'empty'),
             len(refused.stored_keys), refused.incoming_keys[:20]
         )
+        if getattr(refused, 'reason', 'empty') == 'nameless':
+            return jsonify({
+                'error': 'لم يتم الحفظ: البيانات المرسلة لمشروع جديد فارغ، والمسودة المحفوظة تحتوي مشروعًا باسمه وبياناته',
+                'error_code': 'DRAFT_BLANK_PROJECT_OVERWRITE'
+            }), 409
+        if getattr(refused, 'reason', 'empty') == 'different_project':
+            return jsonify({
+                'error': 'لم يتم الحفظ: الطلب لا يحدد المسودة، والاسم المرسل يخص مشروعًا آخر غير أحدث مسودة محفوظة',
+                'error_code': 'DRAFT_UNNAMED_PROJECT_MISMATCH'
+            }), 409
         return jsonify({
             'error': 'لم يتم الحفظ: البيانات المرسلة فارغة والمسودة المحفوظة تحتوي بيانات المشروع',
             'error_code': 'DRAFT_EMPTY_OVERWRITE'

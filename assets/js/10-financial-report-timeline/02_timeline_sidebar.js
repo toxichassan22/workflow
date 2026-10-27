@@ -169,6 +169,7 @@
           return true;
         }
         let data;
+        let payloadClearKeys = [];
         if (slideCheckpoint) {
           renumberTenantSlides();
           data = {
@@ -178,6 +179,11 @@
             tenantCreativeImages,
             slide_generation_checkpoint: tenantSlideGenerationCheckpoint,
           };
+          // A checkpoint write must name its own file. Without the id the server
+          // fell back to the newest draft of the actor, so a run in one project
+          // could save its snapshot over a different one.
+          data.draftId = data.draftId || tenantProjectData.draftId || tenantProjectData.draft_id
+            || (checkpointProjectData && checkpointProjectData.draftId) || '';
         } else {
           Object.keys(LOCATION_TABLE_FIELDS).forEach(serializeLocationTable);
           if (typeof persistMarketStudyFromDom === 'function' && document.getElementById('marketStudyData')) {
@@ -254,6 +260,23 @@
             }
           };
         }
+        // Which fields the client ACTUALLY cleared. The server keeps a stored
+        // value whenever the payload leaves it blank and the key is not named
+        // here, so a section that merely failed to load can never erase it.
+        // Only a visible input that held a value at load and is empty now counts
+        // as a deliberate clear; hidden/dynamic-off controls are left alone.
+        if (!slideCheckpoint && typeof document !== 'undefined') {
+          const loaded = (typeof tenantDraftLoadedSnapshot === 'object' && tenantDraftLoadedSnapshot) || {};
+          document.querySelectorAll('#tenantProjectForm [data-key]').forEach(input => {
+            const key = input.getAttribute('data-key');
+            if (!key || key === 'draftId' || key === 'draft_id') return;
+            if (isBlankDraftValue(loaded[key])) return;
+            if (input.type === 'checkbox' || input.type === 'radio') return;
+            if (!input.offsetParent) return;
+            if (!isBlankDraftValue(input.value)) return;
+            payloadClearKeys.push(key);
+          });
+        }
         // Saving can now be megabytes (slides + images), so it uses parallel chunked uploads.
         // Show progress in the badge so a large save does not look like nothing is happening.
         const badge = document.getElementById('draftSyncBadge');
@@ -296,7 +319,7 @@
           for (let attempt = 0; attempt < 4; attempt++) {
             resp = await api('POST', '/api/project-draft',
               { draftData: snapshot, sectionStatuses: tenantProjectSectionStatuses, status: 'draft',
-                slideCheckpoint, expectedRevision: expectedRev,
+                slideCheckpoint, expectedRevision: expectedRev, clearKeys: payloadClearKeys,
                 mergeOnConflict: mergeRequested, mergeResolutions: mergeResolutions },
               false, { onProgress });
             if (!resp || resp.success) break;
@@ -314,20 +337,20 @@
                 ? await askDraftMergeDecisions(resp.conflicts || [])
                 : null;
               if (!decisions) {
-                // The user chose not to decide: writing over the newer copy
-                // stays possible, but it is an explicit answer, not a default.
-                const serverRevision = Number(resp.currentRevision);
-                if (!Number.isInteger(serverRevision) || typeof confirm !== 'function'
-                    || !confirm(WFT('draft.conflict_confirm',
-                      'توجد نسخة أحدث من المسودة محفوظة على الخادم (النسخة {rev}). هل تريد حفظ تعديلاتك الحالية فوقها؟',
-                      { rev: serverRevision }))) break;
-                expectedRev = serverRevision;
-                mergeRequested = false;
-                mergeResolutions = null;
-                continue;
+                // The user chose not to decide. Nothing is written over the
+                // newer copy — overwriting a file someone else just edited is
+                // how months of work disappeared, and it is never a default.
+                if (!silent) toast(WFT('draft.conflict_not_saved',
+                  'لم يتم الحفظ: توجد نسخة أحدث من المسودة. افتح «إصدارات المشروع» أو أعد تحميل المسودة لدمج التعديلات.'));
+                break;
               }
               mergeResolutions = decisions;
               continue;
+            }
+            if (resp.error_code === 'DRAFT_REVISION_REQUIRED') {
+              if (!silent) toast(WFT('draft.revision_required',
+                'تعذر الحفظ: لم تحدد النسخة التي بُني عليها التعديل. أعد فتح المسودة ثم احفظ.'));
+              break;
             }
             break;
           }
@@ -401,6 +424,9 @@
             }
           }
           if (stillCurrent) {
+            // The saved file is the new baseline: a later save may only clear a
+            // field that this state still holds.
+            tenantDraftLoadedSnapshot = JSON.parse(JSON.stringify(snapshot));
             if (!slideCheckpoint) tenantDraftDirty = false;
             if (badge) {
               const timeStr = wfTime(Date.now(), { hour: '2-digit', minute: '2-digit' });

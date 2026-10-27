@@ -156,8 +156,11 @@ class WorkflowClaimTests(ScopeTestBase):
         # The flag claims a running generation; parked at the approval gate the
         # draft has none, so the write is refused instead of unlocking.
         draft_id = self._draft('wfc-gen-locked', status='generation_approval_pending')
+        with self.app.app_context():
+            revision = int(db.get_project_draft_by_id(self.tenant, draft_id)['revision'] or 0)
         response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام'},
+            'expectedRevision': revision,
             'slideCheckpoint': True})
         self.assertEqual(response.status_code, 423)
         self.assertEqual(response.get_json()['error_code'], 'DRAFT_LOCKED')
@@ -168,8 +171,10 @@ class WorkflowClaimTests(ScopeTestBase):
         with self.app.app_context():
             stored = db.get_project_draft_by_id(self.tenant, draft_id)
             self.assertEqual(db.normalize_proposal_status(stored['status']), 'generating')
+            revision = int(stored['revision'] or 0)
         response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام'},
+            'expectedRevision': revision,
             'slideCheckpoint': True})
         self.assertEqual(response.status_code, 200, response.get_json())
 
@@ -201,17 +206,23 @@ class WorkflowClaimTests(ScopeTestBase):
         # The only location approval left is the AI site analysis text — a claim
         # with no analysis text behind it does not survive the save.
         draft_id = self._draft('wfc-strip')
+        with self.app.app_context():
+            revision = int(db.get_project_draft_by_id(self.tenant, draft_id)['revision'] or 0)
         response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام',
-                          'site_analysis_approved': True}})
+                          'site_analysis_approved': True},
+            'expectedRevision': revision})
         self.assertEqual(response.status_code, 200, response.get_json())
         stored = self._stored_draft_data(draft_id)
         self.assertNotIn(stored.get('site_analysis_approved'), (True, 'true', 1))
 
+        with self.app.app_context():
+            revision = int(db.get_project_draft_by_id(self.tenant, draft_id)['revision'] or 0)
         response = self.client.post('/api/project-draft', headers=self.admin_headers, json={
             'draftData': {'draftId': draft_id, 'project_name': 'مشروع الأعلام',
                           'site_analysis': 'تحليل نصي للموقع',
-                          'site_analysis_approved': True}})
+                          'site_analysis_approved': True},
+            'expectedRevision': revision})
         self.assertEqual(response.status_code, 200, response.get_json())
         stored = self._stored_draft_data(draft_id)
         self.assertEqual(stored.get('site_analysis_approved'), True)
@@ -581,11 +592,16 @@ class DraftRevisionConflictTests(ScopeTestBase):
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.get_json()['error_code'], 'DRAFT_REVISION_CONFLICT')
 
-    def test_legacy_save_without_revision_still_works(self):
+    def test_a_save_without_revision_is_refused(self):
+        """A full-payload save that does not name the version it was built on
+        is the exact shape of the overwrite that erased a client's sections:
+        the server refuses it instead of letting the last writer win."""
         response = self._save('rev-legacy', {'project_name': 'أول'})
         self.assertEqual(response.status_code, 200, response.get_json())
         response = self._save('rev-legacy', {'project_name': 'ثان', 'more': 'x'})
-        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.status_code, 409, response.get_json())
+        self.assertEqual(response.get_json()['error_code'], 'DRAFT_REVISION_REQUIRED')
+        self.assertEqual(self._stored('rev-legacy')['draft_data']['project_name'], 'أول')
 
     def test_invalid_expected_revision_is_a_client_error(self):
         response = self._save('rev-bad', {'project_name': 'أول'}, expected='abc')

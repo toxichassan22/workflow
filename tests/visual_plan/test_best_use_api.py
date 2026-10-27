@@ -140,9 +140,11 @@ class BestUseApiTests(unittest.TestCase):
         self.assertNotIn('unitRevenueMode', prompt)
         self.assertNotIn('"basementArea":', prompt)
         self.assertEqual(result['bestUse']['mode'], 'guided')
-        payload = copy.deepcopy(self.draft()['draft_data'])
+        draft = self.draft()
+        payload = copy.deepcopy(draft['draft_data'])
         payload['financial_study_model']['inputs'].update(basementArea=3000, unitRevenueMode='rental')
-        saved = self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        saved = self.client.post('/api/project-draft', headers=self.headers,
+                                 json={'draftData': payload, 'expectedRevision': draft['revision']})
         self.assertEqual(saved.status_code, 200, saved.get_json())
         self.assertFalse(self.draft()['draft_data']['best_use_data'].get('inputsChanged', False))
         approved = self.decide(result['bestUse'])
@@ -280,19 +282,23 @@ class BestUseApiTests(unittest.TestCase):
 
     def test_draft_save_cannot_forge_a_proposal_or_its_approval(self):
         result, _ = self.generate()
-        payload = copy.deepcopy(self.draft()['draft_data'])
+        draft = self.draft()
+        payload = copy.deepcopy(draft['draft_data'])
         payload['best_use_data'].update(approved=True, components=[])
         saved = self.client.post('/api/project-draft', headers=self.headers, json={
-            'draftData': payload, 'sectionStatuses': {'section-best-use': 'approved'}})
+            'draftData': payload, 'expectedRevision': draft['revision'],
+            'sectionStatuses': {'section-best-use': 'approved'}})
         self.assertEqual(saved.status_code, 200, saved.get_json())
         self.assertEqual(self.draft()['draft_data']['best_use_data'], result['bestUse'])
         self.assertNotEqual(self.draft()['section_statuses'].get('section-best-use'), 'approved')
 
     def test_a_changed_far_invalidates_the_old_proposal_without_editing_components(self):
         result, _ = self.generate()
-        payload = copy.deepcopy(self.draft()['draft_data'])
+        draft = self.draft()
+        payload = copy.deepcopy(draft['draft_data'])
         payload['approved_floor_area_ratio'] = 3
-        self.client.post('/api/project-draft', headers=self.headers, json={'draftData': payload})
+        self.client.post('/api/project-draft', headers=self.headers,
+                         json={'draftData': payload, 'expectedRevision': draft['revision']})
         response = self.decide(result['bestUse'])
         self.assertEqual(response.status_code, 409, response.get_json())
         self.assertEqual(response.get_json()['error_code'], 'BEST_USE_INPUTS_CHANGED')
@@ -480,7 +486,9 @@ class BestUseApiTests(unittest.TestCase):
 
     def test_unused_section_status_is_omitted_so_the_feature_remains_optional(self):
         saved = self.client.post('/api/project-draft', headers=self.headers, json={
-            'draftData': self.project, 'sectionStatuses': {**self.statuses, 'section-best-use': 'draft'}})
+            'draftData': self.project,
+            'expectedRevision': self.draft()['revision'],
+            'sectionStatuses': {**self.statuses, 'section-best-use': 'draft'}})
         self.assertEqual(saved.status_code, 200, saved.get_json())
         self.assertNotIn('section-best-use', self.draft()['section_statuses'])
 

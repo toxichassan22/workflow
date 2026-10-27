@@ -191,7 +191,26 @@ def api_get_draft_commit(draft_id, commit_id):
     commit = db.draft_commit_diff(g.tenant_id, draft_id, commit_id)
     if not commit:
         return _draft_commit_error('commit_not_found', 'النسخة غير موجودة', 404)
+    for change in commit.get('changes') or []:
+        change['label'] = _draft_commit_key_label(change.get('key'))
     return jsonify({'success': True, 'commit': commit})
+
+
+def _draft_commit_key_label(key):
+    """The visible Arabic name of a payload key, so a version reads as fields."""
+    try:
+        label = change_tracking.BLOB_KEY_LABELS.get(key)
+        if label:
+            return label
+    except Exception:
+        pass
+    try:
+        for field in db.PREBUILT_FIELDS:
+            if field.get('key') == key:
+                return field.get('label') or key
+    except Exception:
+        pass
+    return key
 
 
 @app.route('/api/project-draft/<draft_id>/commits/<commit_id>/restore', methods=['POST'])
@@ -243,6 +262,12 @@ def api_restore_draft_commit(draft_id, commit_id):
             409,
         )
     current = db.get_project_draft_by_id(g.tenant_id, draft_id) or {}
+    saved_data = current.get('draft_data') or {}
+    bookkeeping = set(getattr(db, 'DRAFT_BOOKKEEPING_KEYS', ()) or ())
+    unverified = sorted(set((meta or {}).get('unverified_keys') or ()))
+    unrestored = sorted(key for key in set(restored) | set(saved_data)
+                        if key not in bookkeeping and key not in ('draftId', 'draft_id')
+                        and saved_data.get(key) != restored.get(key))
     _record_draft_save_change(
         draft_id, stored, restored, draft.get('section_statuses') or {},
         statuses, draft)
@@ -253,5 +278,7 @@ def api_restore_draft_commit(draft_id, commit_id):
         'revision': int(current.get('revision') or 0),
         'demotedSections': demoted,
         'skippedKeys': (meta or {}).get('skipped_keys') or [],
+        'unverifiedKeys': unverified,
+        'unrestoredKeys': sorted(set(unrestored) | set(unverified)),
         'sectionStatuses': current.get('section_statuses') or {},
     })

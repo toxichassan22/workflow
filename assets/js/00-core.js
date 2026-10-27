@@ -327,6 +327,19 @@
     // somebody else's change and reloads the workspace under the person who
     // just saved. See 07-project-form/07_draft_live_sync.js.
     let draftLiveSyncRevision = 0;
+    // The file as it was loaded (or last saved). A save may only clear a field
+    // that still had a value here AND a visible input now reports empty — a
+    // field that simply fails to load is never treated as "the user erased it".
+    let tenantDraftLoadedSnapshot = {};
+
+    // Blank enough that a save would erase a stored value if it carried it.
+    function isBlankDraftValue(value) {
+      if (value === null || value === undefined) return true;
+      if (typeof value === 'string') return !value.trim();
+      if (Array.isArray(value)) return value.length === 0;
+      if (typeof value === 'object') return Object.keys(value).length === 0;
+      return false;
+    }
 
     // Move the workspace revision and the poll baseline together. Every write
     // path goes through this setter, so the two can never drift apart.

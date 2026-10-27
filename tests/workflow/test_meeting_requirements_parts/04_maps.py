@@ -462,6 +462,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
     def test_project_draft_list_returns_metadata_without_payload(self):
         client = self.app.test_client()
         response = client.post('/api/project-draft', headers=self._headers(self.token_a), json={
+            'draftId': 'draft-light-list',
             'draftData': {
                 'project_name': 'مسودة خفيفة',
                 'tenantSlidesData': [{'html': 'x' * 5000}],
@@ -515,7 +516,8 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
                 'draftId': 'draft-wipe-guard', 'project_name': '', 'location_address': '',
                 'approved_financial_area': '', 'market_study_data': '',
                 'pageDrafts': {'project': {'status': 'draft'}}, 'map_styles': {}, 'map_type': '',
-            }
+            },
+            'expectedRevision': 1,
         })
         self.assertEqual(blanked.status_code, 409, blanked.get_json())
         self.assertEqual(blanked.get_json()['error_code'], 'DRAFT_EMPTY_OVERWRITE')
