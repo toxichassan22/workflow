@@ -1091,7 +1091,9 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         module = self.application_module
         self.assertEqual(module._financial_report_format_number(1234567.26, 'projectCost'), '1,234,567.26')
         self.assertEqual(module._financial_report_format_number(1234567, 'projectCost'), '1,234,567')
-        self.assertEqual(module._financial_report_format_number(0.18254, 'projectIrr'), '18.254%')
+        # Every financial figure is rounded half-up to the hundredth at the
+        # display/save boundary, so an IRR of 0.18254 reads 18.25%.
+        self.assertEqual(module._financial_report_format_number(0.18254, 'projectIrr'), '18.25%')
         self.assertEqual(module._financial_report_format_number(6.55, 'payback'), '6.55 سنة')
         self.assertEqual(module._financial_report_format_number(2027, 'year'), '2027')
         self.assertEqual(module._financial_report_format_number(1234, 'units'), '1,234')
@@ -1117,7 +1119,9 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         }
         with self.app.app_context():
             html = module.build_financial_report_html('مشروع مالي', model, {}, self.tenant_a)
-        for expected in ('1,234,567.26', '18.256%', '9,876,543.26', '87.26%'):
+        # 18.256% is a supplied figure, so it is rounded to the same hundredth
+        # as every other financial value rather than repeated digit for digit.
+        for expected in ('1,234,567.26', '18.26%', '9,876,543.26', '87.26%'):
             self.assertIn(expected, html)
         self.assertIn('<td dir="ltr">2027</td>', html)
         self.assertNotIn('2,027', html)
@@ -1138,7 +1142,10 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
 
         index_source = read_frontend_text()
         self.assertIn('function formatFinancialResultNumber(value, grouped = true)', index_source)
-        self.assertIn('formatExactSystemNumber(value, grouped)', index_source)
+        # The shared formatter declares its own grouped default now, and the
+        # financial result path is the hundredth round followed by that formatter.
+        self.assertIn('function formatExactSystemNumber(value, grouped = true)', index_source)
+        self.assertIn('formatExactSystemNumber(roundFinancialHundredth(value), grouped)', index_source)
         self.assertIn('preserveFinancialResults(window.__financialProjection || {})', index_source)
 
     def test_financial_clarifications_are_manual_optional_and_omitted_when_empty(self):
@@ -1361,8 +1368,21 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         for library in ('font-awesome', 'fontawesome', 'material-icons', 'bootstrap-icons', 'lucide'):
             self.assertNotIn(library, index_source.lower(), f'{library} must not be used')
         self.assertEqual(shell_source.count('<svg'), 1, 'the shell may inline only the favicon SVG')
-        self.assertEqual(index_source.count('<svg'), 6,
-            'allowed SVG: favicon + map overlay + the three admin dashboard chart builders + parcel boundary editor')
+        # Every SVG in the client must belong to one of the allowed data-rendering
+        # uses: the favicon, the map polygon overlay, and the three super-admin
+        # dashboard chart builders (donut, sparkline, line). A new one without a
+        # context from this list is an icon and fails here.
+        svg_by_file = {}
+        for path in sorted((ROOT / 'assets' / 'js').rglob('*.js')):
+            text = path.read_text(encoding='utf-8')
+            if '<svg' in text:
+                svg_by_file[path.name] = text.count('<svg')
+        self.assertEqual(svg_by_file, {
+            '02a_admin_charts.js': 3,
+            '02_catchment_edits.js': 1,
+        }, 'only the admin chart builders and the map polygon overlay may draw SVG')
+        self.assertEqual(index_source.count('<svg'), 5,
+            'allowed SVG: favicon + map overlay + the three admin dashboard chart builders')
         self.assertIn('id="mapPolygonOverlay"', index_source)
 
         # Missing logos fall back to a text monogram rather than a building glyph.

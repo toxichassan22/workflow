@@ -986,9 +986,15 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         maps_source = read_module_source('maps_service.py')
         self.assertIn('def bundled_arabic_font_path():', maps_source)
         self.assertIn("os.path.join(FONTS_DIR, 'arabic-text.bin')", maps_source)
-        font_path = ROOT / 'fonts' / 'arabic-text.bin'
-        self.assertGreater(font_path.stat().st_size, 10000)
-        self.assertEqual(font_path.read_bytes()[:4], b'\x00\x01\x00\x00')
+        # The face the PDF path actually resolves. The bundled copy lives beside
+        # the maps module now, so the test follows the resolver instead of a
+        # hardcoded repo root path.
+        font_path = self.application_module.maps_service.bundled_arabic_font_path()
+        self.assertTrue(font_path, 'no bundled Arabic font resolved for PDF text')
+        self.assertTrue(os.path.isfile(font_path), font_path)
+        self.assertGreater(os.path.getsize(font_path), 10000, font_path)
+        with open(font_path, 'rb') as font_file:
+            self.assertEqual(font_file.read(4), b'\x00\x01\x00\x00')
         import tempfile
         from pathlib import Path
         with self.app.app_context():
