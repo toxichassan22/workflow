@@ -205,11 +205,13 @@ def _summary_aqar_evidence(payload, session, deadline=None):
             _AQAR_BLOCK_END,
         ])
         return {'readings': [], 'rows': 0, 'block': block,
-                'coverage_gap': reason}
+                'coverage_gap': reason,
+                'pages': len(pages)}
     return {
         'readings': readings,
         'rows': sum(len(item['cards']) for item in readings),
         'block': _summary_aqar_block(readings, payload),
+        'pages': len(readings),
     }
 
 
@@ -266,12 +268,13 @@ def _summary_aqar_evidence_into(payload, session, evidence_pool,
     if not result:
         return None
     if result.get('coverage_gap'):
+        gap_pages = int(result.get('pages') or 0)
         payload['_summaryAqarGap'] = {
             'reason': result['coverage_gap'],
-            'pages': len(pages),
+            'pages': gap_pages,
         }
         print(f"[MARKET SUMMARY] aqar coverage gap "
-              f"reason={result['coverage_gap']!r} pages={len(pages)}",
+              f"reason={result['coverage_gap']!r} pages={gap_pages}",
               flush=True)
         return result
     try:

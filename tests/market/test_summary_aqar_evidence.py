@@ -134,19 +134,30 @@ class SummaryAqarEvidenceTests(unittest.TestCase):
             def open_url(self, url):
                 return {'error': 'blocked'}
 
+        class Pool:
+            def add_page(self, *args, **kwargs):
+                pass
+
         pages = [('https://sa.aqar.fm/x', 'aqar.fm — فلل بيع — جدة')]
+        payload = {'city': 'جدة'}
         with patch.object(module.market_study, 'summary_activity_profile',
                           return_value=self._profile()), \
                 patch.object(module.market_study, '_payload_operations',
                              return_value={'بيع'}), \
                 patch.object(module.market_study, '_listing_urls',
-                             return_value=iter(pages)):
+                             side_effect=lambda *args, **kwargs: list(pages)):
             result = module._summary_aqar_evidence(
-                {'city': 'جدة'}, Session(), deadline=time.time() + 30)
+                payload, Session(), deadline=time.time() + 30)
+            into_result = module._summary_aqar_evidence_into(
+                payload, Session(), Pool(), deadline=time.time() + 30)
         self.assertIsNotNone(result)
         self.assertEqual(result['rows'], 0)
         self.assertEqual(result['coverage_gap'], 'blocked')
+        self.assertEqual(result['pages'], 1)
         self.assertIn('تعذر', result['block'])
+        self.assertIsNotNone(into_result)
+        self.assertEqual(payload.get('_summaryAqarGap', {}).get('reason'), 'blocked')
+        self.assertEqual(payload.get('_summaryAqarGap', {}).get('pages'), 1)
 
     def test_evidence_lands_in_the_pool_and_suppresses_the_search_job(self):
         module = self.module
