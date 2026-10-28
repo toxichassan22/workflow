@@ -112,6 +112,16 @@ class MeetingRequirementsTestsPart22(MeetingRequirementsTests):
             [slide['type'] for slide in renumbered if slide.get('section_key') == 'timeline'],
             ['section_divider', 'content'])
 
+    def test_the_client_repairs_stored_market_dividers_and_duplicate_gantts(self):
+        client = read_frontend_text()
+        self.assertIn('function repairMisclassifiedMarketDivider', client)
+        self.assertIn('FORCED_SECTION_BACKGROUND_RE', client)
+        self.assertIn('function collapseDuplicateTimelineGantts', client)
+        start = client.index('function renumberTenantSlides()')
+        head = client[start:start + 400]
+        self.assertIn('repairMisclassifiedMarketDivider', head)
+        self.assertIn('collapseDuplicateTimelineGantts', head)
+
     def test_plan_adopts_the_existing_timeline_page_instead_of_adding_another(self):
         engine = self.application_module.slide_engine
         project = {

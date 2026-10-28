@@ -233,8 +233,53 @@
       return template.innerHTML;
     }
 
+    const FORCED_SECTION_BACKGROUND_RE = /background-image\s*:\s*url\([^)]*\)\s*!important\s*;\s*background-size\s*:\s*cover\s*!important\s*;\s*background-position\s*:\s*center\s+center\s*!important\s*;\s*background-repeat\s*:\s*no-repeat\s*!important\s*;?/gi;
+
+    function slideVisibleWordCount(html) {
+      try {
+        const doc = new DOMParser().parseFromString(String(html || ''), 'text/html');
+        doc.querySelectorAll('style, script').forEach(node => node.remove());
+        return String(doc.body ? doc.body.textContent : '').trim().split(/\s+/).filter(Boolean).length;
+      } catch (err) {
+        return 0;
+      }
+    }
+
+    /* A stored market/swot content page the server retyped as a divider keeps
+       the cover photo forced onto its root. The saved revision is served as-is,
+       so the preview must repair every matching slide before rendering. */
+    function repairMisclassifiedMarketDivider(slide) {
+      if (!slide || typeof slide !== 'object') return slide;
+      if (String(slide.type || '').toLowerCase() !== 'section_divider') return slide;
+      const section = String(
+        slide.section_key || slide.sectionKey || tenantSlideSectionKey(slide, '') || ''
+      );
+      if (section !== 'market' && section !== 'swot_risks') return slide;
+      if (slideVisibleWordCount(slide.html) <= 30) return slide;
+      const repaired = { ...slide, type: 'content' };
+      delete repaired.design_style;
+      repaired.html = String(slide.html || '')
+        .replace(FORCED_SECTION_BACKGROUND_RE, '')
+        .replace(/<div\b[^>]*data-section-divider-background[^>]*>\s*<\/div>/gi, '');
+      return repaired;
+    }
+
+    function collapseDuplicateTimelineGantts(slides) {
+      let kept = false;
+      return slides.filter(slide => {
+        const html = String((slide || {}).html || '');
+        if (html.indexOf('data-timeline-gantt') === -1) return true;
+        if (kept) return false;
+        kept = true;
+        return true;
+      });
+    }
+
     function renumberTenantSlides() {
       if (!Array.isArray(tenantSlidesData) || !tenantSlidesData.length) return tenantSlidesData;
+      tenantSlidesData = collapseDuplicateTimelineGantts(
+        tenantSlidesData.map(repairMisclassifiedMarketDivider)
+      );
       let current = '';
       tenantSlidesData = tenantSlidesData.map(slide => {
         const item = { ...(slide || {}) };
