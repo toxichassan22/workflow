@@ -159,12 +159,32 @@ def _native_fallback_prompt(prompt_or_task, task_or_payload=None, payload_or_lan
     project_type = str(axis.get('type') or axis.get('base') or 'سكني').strip()
     operation_type = str(axis.get('operation') or 'بيع').strip()
 
+    all_unit_types = market_study.competitor_scope_unit_types(scope)
+    res_opts = getattr(market_study, 'RESIDENTIAL_UNIT_TYPES', ())
+    com_opts = getattr(market_study, 'COMMERCIAL_UNIT_TYPES', ())
+    if project_type in ('سكني', 'residential'):
+        matching_units = [u for u in all_unit_types if u in res_opts] or all_unit_types
+    elif project_type in ('تجاري', 'commercial'):
+        matching_units = [u for u in all_unit_types if u in com_opts] or all_unit_types
+    else:
+        matching_units = all_unit_types
+
     if offer_lang == 'en':
+        units_clause_en = (
+            f"Required property or unit types strictly: {', '.join(matching_units)} (exclude other property types).\n"
+            if matching_units else ""
+        )
+        search_scope_en = (
+            f"developments, compounds, or listings for ({', '.join(matching_units)})"
+            if matching_units else
+            f"developments, compounds, or listings matching '{axis_label}'"
+        )
+        default_unit_en = matching_units[0] if matching_units else "unit type"
         return (
             f"Identify real competitors for a real estate project in {city} matching '{axis_label}'.\n"
             f"Target neighborhoods: {districts_str or city}.\n"
-            f"Search the web for real commercial/residential developments, compounds, or listings matching '{axis_label}' "
-            f"in these specific neighborhoods or in {city}.\n"
+            f"{units_clause_en}"
+            f"Search the web for real {search_scope_en} in these specific neighborhoods or in {city}.\n"
             f"Assign the exact neighborhood to the 'district' field.\n"
             f"Respond STRICTLY with JSON formatted as:\n"
             "{\n"
@@ -175,6 +195,7 @@ def _native_fallback_prompt(prompt_or_task, task_or_payload=None, payload_or_lan
             '      "district": "Neighborhood name",\n'
             f'      "project_type": "{project_type}",\n'
             f'      "operation_type": "{operation_type}",\n'
+            f'      "unit_type": "{default_unit_en}",\n'
             '      "price_type": "unit price or price per sqm or rent",\n'
             '      "price_value": "price as number or string",\n'
             '      "area_sqm": "area in sqm as number or string",\n'
@@ -187,10 +208,22 @@ def _native_fallback_prompt(prompt_or_task, task_or_payload=None, payload_or_lan
             "}\n"
             "List 3 to 5 real competitors with prices and areas instead of returning an empty list."
         )
+
+    units_clause_ar = (
+        f"نوع العقار أو الوحدات المطلوبة حصراً: {' أو '.join(matching_units)} (استبعد أي أنواع عقارية أخرى مختلفة مثل الشقق أو الأراضي).\n"
+        if matching_units else ""
+    )
+    search_scope_ar = (
+        f"عروض أو مشاريع لوحدات ({' أو '.join(matching_units)})"
+        if matching_units else
+        f"مشاريع حقيقية أو مجمعات أو عروض معلنة تطابق «{axis_label}»"
+    )
+    default_unit_ar = matching_units[0] if matching_units else "نوع الوحدة"
     return (
         f"المطلوب حصر منافسين لمشروع عقاري في {city} ({axis_label}).\n"
         f"نطاق الأحياء المستهدفة: {districts_str or city}.\n"
-        f"ابحث في الويب عن مشاريع حقيقية أو مجمعات أو عروض معلنة تطابق «{axis_label}» في هذه الأحياء بالتحديد أو في {city}.\n"
+        f"{units_clause_ar}"
+        f"ابحث في الويب عن {search_scope_ar} في هذه الأحياء بالتحديد أو في {city}.\n"
         f"يجب كتابة اسم الحي في حقل 'district' مطابقاً لأحد الأحياء المستهدفة كلما أمكن.\n"
         "أعد الناتج بتنسيق JSON حصراً بالشكل التالي:\n"
         "{\n"
@@ -201,6 +234,7 @@ def _native_fallback_prompt(prompt_or_task, task_or_payload=None, payload_or_lan
         '      "district": "اسم الحي",\n'
         f'      "project_type": "{project_type}",\n'
         f'      "operation_type": "{operation_type}",\n'
+        f'      "unit_type": "{default_unit_ar}",\n'
         '      "price_type": "سعر الوحدة أو سعر المتر أو الإيجار السنوي",\n'
         '      "price_value": "السعر كرقم أو نص",\n'
         '      "area_sqm": "المساحة بالمتر المربع كرقم أو نص",\n'
@@ -247,12 +281,28 @@ def _native_search_fallback(system_prompt, prompt, usage_ctx, evidence_pool,
     if not isinstance(rows, list) or not rows:
         return None
     axis = (task or {}).get('axis') if isinstance((task or {}).get('axis'), dict) else {}
+    scope = (payload or {}).get('competitorScope') or (payload or {}).get('competitor_scope') or {}
+    all_unit_types = market_study.competitor_scope_unit_types(scope)
+    res_opts = getattr(market_study, 'RESIDENTIAL_UNIT_TYPES', ())
+    com_opts = getattr(market_study, 'COMMERCIAL_UNIT_TYPES', ())
+    p_type = str(axis.get('type') or axis.get('base') or '').strip()
+    if p_type in ('سكني', 'residential'):
+        matching_units = [u for u in all_unit_types if u in res_opts] or all_unit_types
+    elif p_type in ('تجاري', 'commercial'):
+        matching_units = [u for u in all_unit_types if u in com_opts] or all_unit_types
+    else:
+        matching_units = all_unit_types
+
     for row in rows:
         if isinstance(row, dict):
             if axis.get('type') and not row.get('project_type'):
                 row['project_type'] = 'سكني' if axis.get('type') == 'residential' else 'تجاري'
             if axis.get('operation') and not row.get('operation_type'):
                 row['operation_type'] = 'بيع' if axis.get('operation') == 'sale' else 'إيجار'
+            if matching_units and not row.get('unit_type'):
+                row_name = str(row.get('name') or '')
+                found_u = next((u for u in matching_units if u in row_name), None)
+                row['unit_type'] = found_u or matching_units[0]
             if not row.get('city') and (payload or {}).get('city'):
                 row['city'] = (payload or {}).get('city')
             if not row.get('classification'):

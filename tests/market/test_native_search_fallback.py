@@ -185,6 +185,21 @@ class NativeSearchFallbackTests(unittest.TestCase):
         self.assertIn('JSON', res)
         self.assertIn('competitors', res)
 
+    def test_native_fallback_prompt_includes_unit_types(self):
+        prompt_fn = getattr(self.module, '_native_fallback_prompt', None)
+        task = {'axis': {'type': 'residential', 'operation': 'sale', 'label': 'فلل للبيع'}}
+        payload = {
+            'city': 'جدة',
+            'competitorScope': {
+                'districts': ['الروضة'],
+                'unit_types': ['فيلا مستقلة', 'فيلا دوبلكس'],
+            },
+        }
+        res = prompt_fn(task, payload, offer_lang='ar')
+        self.assertIn('فيلا مستقلة', res)
+        self.assertIn('فيلا دوبلكس', res)
+        self.assertIn('استبعد أي أنواع عقارية أخرى', res)
+
 
 if __name__ == '__main__':
     unittest.main()
