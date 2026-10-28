@@ -32,7 +32,7 @@ def _agent_exec_edit(task, ctx, session, feedback='', color_request=None):
             color_request=color_request)
         return idx, before, html, reply
 
-    workers = min(3, len(indexes))
+    workers = 1 if ctx.get('_serial_slides') else min(3, len(indexes))
     if workers <= 1:
         results = [work(idx) for idx in indexes]
     else:
@@ -520,8 +520,265 @@ def _agent_job_cancelled(ctx):
     return bool(isinstance(job, dict) and job.get('cancelRequested'))
 
 
+_AGENT_PARALLEL_OPS = frozenset({'edit', 'redesign', 'rewrite'})
+_AGENT_TASK_WORKERS = 3
+
+
+def _agent_task_prepare(task, ctx, slides):
+    """Resolve a task's target indexes on the live deck.
+
+    Returns the indexes, or None when the task cannot run — the task then
+    carries its own failure reason for the runner to journal.
+    """
+    op = task['op']
+    selector = {'ids': task.get('slides') or []}
+    indexes, sel_err = designer_agent_ops.resolve_selector(selector, slides, ctx['current_index'])
+    if op in ('create',):
+        indexes = indexes or []  # create resolves its own position
+    elif not indexes:
+        task['status'] = 'failed'
+        task['failureReason'] = sel_err[0] if isinstance(sel_err, list) and sel_err else (sel_err or 'missing_slide')
+        return None
+    task['_indexes'] = indexes
+    task['_instruction'] = designer_agent_ops.instruction_for(task)
+    return indexes
+
+
+def _agent_parallel_batch(tasks, start, ctx, slides):
+    """Consecutive edit-family tasks that touch disjoint slides.
+
+    Only a task whose result can be committed by slide id runs in the batch.
+    A structural op (create/delete/move/split/restructure) changes positions
+    and is a barrier, and two tasks on the same slide stay sequential because
+    the second must see the first result.
+    """
+    batch, seen = [], set()
+    for task in tasks[start:start + _AGENT_TASK_WORKERS]:
+        if task.get('op') not in _AGENT_PARALLEL_OPS or not (task.get('slides') or []):
+            break
+        indexes, _err = designer_agent_ops.resolve_selector(
+            {'ids': task.get('slides') or []}, slides, ctx['current_index'])
+        if not indexes or seen.intersection(indexes):
+            break
+        seen.update(indexes)
+        batch.append((task, indexes))
+    return batch
+
+
+def _agent_run_attempts(task, ctx, session, measure):
+    """The attempt loop for one task, against the ctx it is given.
+
+    A parallel batch hands in a per-task deck copy, so nothing here writes the
+    live rows — the caller commits the changed slides back in plan order.
+    """
+    slides = ctx['slides']
+    op = task['op']
+    indexes = task.get('_indexes') or []
+    ctx['agent_last_worker_reason'] = None
+    before_htmls = [slides[i].get('html', '') for i in indexes] if indexes else []
+    executor = _EXECUTORS.get(op) or _agent_exec_code
+    ok, reply, reason = False, None, None
+    feedback = ''
+    attempts_log = []
+    before_by_index = dict(zip(indexes, before_htmls))
+    for attempt in range(_AGENT_TASK_ATTEMPTS):
+        after_htmls = None
+        measure_report = None
+        rejected_by_check = False
+        ctx['agent_last_worker_reason'] = None
+        # Executors mutate slides before verification runs; a rejected attempt
+        # must leave the deck untouched (and retry from the original slides,
+        # not from its own rejected output).
+        deck_backup = [dict(s) if isinstance(s, dict) else s for s in slides]
+        try:
+            ok, reply, reason, after_htmls = executor(task, ctx, session, feedback)
+        except Exception as exc:
+            print(f"[DESIGNER-AGENT] task {task.get('n')} ({op}) raised: {exc}")
+            ok, reply, reason = False, None, f'exception:{type(exc).__name__}'
+        if ok:
+            if after_htmls is None:
+                after_htmls = [slides[j].get('html', '') for j in
+                               sorted(task.get('_indexes') or indexes) if j < len(slides)]
+            v_ok, v_reasons = designer_agent_ops.verify_task_result(
+                op, before_htmls, after_htmls,
+                allowed_numbers=ctx.get('superseded_numbers'),
+                request_text='\n'.join(str(part) for part in (
+                    ctx.get('message'), task.get('_instruction'),
+                    task.get('exact_text')) if part),
+                exact_text=task.get('exact_text'))
+            if v_ok and measure and op in ('edit', 'redesign', 'rewrite', 'restructure', 'split'):
+                for j in sorted(task.get('_indexes') or indexes):
+                    if j >= len(slides):
+                        continue
+                    lock = ctx.get('_session_lock')
+                    if lock is not None:
+                        with lock:
+                            m_uri, m_report = session.render(slides[j].get('html', ''), screenshot=True)
+                    else:
+                        m_uri, m_report = session.render(slides[j].get('html', ''), screenshot=True)
+                    if m_uri:
+                        # The last slide designed this run is the consistency
+                        # reference the next worker call sees (chatplan 3.6).
+                        ctx['agent_style_ref_uri'] = m_uri
+                    # Single-slide edits answer only for regressions against
+                    # their own source; split/restructure rebuild the layout.
+                    source = before_by_index.get(j) if op in designer_agent_ops.EDIT_OPS else None
+                    m_reasons = _agent_layout_reasons(ctx, session, source, m_report)
+                    if m_reasons:
+                        v_ok, v_reasons, measure_report = False, m_reasons, m_report
+                        break
+            if v_ok:
+                break
+            ok, rejected_by_check = False, True
+            reason = ';'.join(v_reasons) or 'verification_failed'
+        retry = (attempt + 1 < _AGENT_TASK_ATTEMPTS
+                 and designer_agent_ops.is_retryable_failure(op, reason, rejected_by_check)
+                 and not _is_billing_error_text(str(reason or '')))
+        if not retry:
+            # Give-up path: when every remaining finding is content drift
+            # the owner rule is apply + warn — the client sees the result
+            # and can undo or re-ask. Only a nothing/impossible result
+            # (empty, invalid, unchanged, wrong shape) still rejects.
+            codes = designer_agent_ops.reason_codes(reason)
+            if codes and all(designer_agent_ops.reason_is_warning(c) for c in codes):
+                task['warnings'] = (task.get('warnings') or []) + [
+                    part for part in str(reason or '').split(';') if part.strip()]
+                ok = True
+                break
+        slides[:] = deck_backup
+        attempts_log.append({'attempt': attempt + 1, 'reason': str(reason or '')[:400],
+                             'feedback': feedback, 'resultHtml': after_htmls or []})
+        # Every worker op retries what the model can repair or a transient
+        # provider failure — once, with feedback that names the defect.
+        if retry:
+            feedback = designer_agent_ops.retry_feedback(reason, before_htmls, measure_report)
+            continue
+        break
+    return {'task': task, 'ok': ok, 'reply': reply, 'reason': reason,
+            'slides': slides, 'before_htmls': before_htmls, 'attempts_log': attempts_log}
+
+
+def _agent_commit_isolated(result, slides):
+    """Apply a parallel task's changed rows to the live deck by slide id."""
+    if not result.get('ok'):
+        return
+    task = result['task']
+    copy = result.get('slides') or []
+    by_id = {str(s.get('id')): j for j, s in enumerate(slides)
+             if isinstance(s, dict) and s.get('id') is not None}
+    for idx in sorted(task.get('_indexes') or []):
+        if idx < 0 or idx >= len(copy) or not isinstance(copy[idx], dict):
+            continue
+        changed = copy[idx]
+        if not changed.get('_designer_keep_html'):
+            continue
+        target = by_id.get(str(changed.get('id')))
+        if target is None:
+            target = idx if idx < len(slides) else None
+        if target is None or not isinstance(slides[target], dict):
+            continue
+        slides[target]['html'] = changed.get('html') or slides[target].get('html')
+        slides[target]['_designer_keep_html'] = True
+        slides[target]['is_custom'] = True
+        if changed.get('captions'):
+            slides[target]['captions'] = changed['captions']
+
+
+def _agent_finish_task(result, ctx, tasks, executed, total, index, report):
+    """Record one task outcome: statuses, failure journal, checkpoint, progress."""
+    task = result['task']
+    op = task['op']
+    n = task.get('n') or index + 1
+    ok, reason, reply = result['ok'], result['reason'], result['reply']
+    task_cancelled = billing_stopped = False
+    if ok:
+        task['status'] = 'success'
+        executor_notes = task.pop('_warnings', []) or []
+        if executor_notes:
+            task['warnings'] = executor_notes + list(task.get('warnings') or [])
+        executed.append({'tool': f'agent_{op}', 'status': 'success', 'task': n,
+                         'indexes': sorted(task.get('_indexes') or [])})
+        if reply:
+            task['reply'] = reply
+    else:
+        task['status'] = 'failed'
+        task['failureReason'] = str(reason or 'unknown')[:400]
+        executed.append({'tool': f'agent_{op}', 'status': 'failed', 'task': n,
+                         'reason': task['failureReason']})
+        if _is_billing_error_text(str(reason or '')) or _is_billing_error_text(str(reply or '')):
+            billing_stopped = True
+        if 'cancelled' in designer_agent_ops.reason_codes(reason):
+            # An executor noticed the marker mid-task — remaining tasks take
+            # the cancelled branch instead of running to failure. A
+            # user-requested stop is not a journaled failure either.
+            task_cancelled = True
+            task['status'] = 'skipped'
+            task['failureReason'] = 'cancelled'
+            executed[-1]['status'] = 'skipped'
+        else:
+            _agent_record_failure(ctx, task, reason, result.get('before_htmls') or [],
+                                  result.get('attempts_log') or [])
+    _agent_job_checkpoint(ctx, tasks, ctx['slides'])
+    report(15 + int(70 * (index + 1) / max(1, total)),
+           f"اكتملت المهمة {n}/{total} ({'نجاح' if ok else 'تعذّر'})",
+           {'phase': 'agent', 'tasks': [designer_agent_ops.public_task(t) for t in tasks]})
+    return task_cancelled, billing_stopped
+
+
+def _agent_run_parallel(prepared, ctx, session, measure):
+    """Run prepared tasks in a bounded pool; results come back in task order.
+
+    Each task gets its own deck copy and its own mutable context; the shared
+    Playwright session stays serialized through ``_session_lock``, and threads
+    never write the job document — the caller checkpoints in plan order.
+    """
+    import concurrent.futures
+    try:
+        from flask import current_app
+        flask_app = current_app._get_current_object()
+    except Exception:
+        flask_app = None
+    tenant_id = ctx.get('tenant_id')
+    results = [None] * len(prepared)
+
+    def run_one(pos, task):
+        task_ctx = dict(ctx)
+        task_ctx['slides'] = [dict(s) if isinstance(s, dict) else s for s in ctx['slides']]
+        task_ctx['agent_last_worker_reason'] = None
+        task_ctx['_is_cancelled'] = ctx.get('_is_cancelled') or (lambda: False)
+        task_ctx['_session_lock'] = ctx.get('_session_lock') or threading.Lock()
+        # One model call per task: the executor's own slide pool must not
+        # multiply the batch's provider concurrency.
+        task_ctx['_serial_slides'] = True
+        task_ctx['report_progress'] = lambda *a, **k: None
+        try:
+            if flask_app is not None:
+                with flask_app.app_context():
+                    from flask import g as thread_g
+                    thread_g.tenant_id = tenant_id
+                    return pos, _agent_run_attempts(task, task_ctx, session, measure)
+            return pos, _agent_run_attempts(task, task_ctx, session, measure)
+        except Exception as exc:
+            print(f"[DESIGNER-AGENT] parallel task {task.get('n')} raised: {exc}")
+            return pos, {'task': task, 'ok': False, 'reply': None,
+                         'reason': f'exception:{type(exc).__name__}',
+                         'slides': task_ctx['slides'], 'before_htmls': [],
+                         'attempts_log': []}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(prepared)) as pool:
+        futures = [pool.submit(run_one, pos, task) for pos, task in enumerate(prepared)]
+        for future in concurrent.futures.as_completed(futures):
+            pos, result = future.result()
+            results[pos] = result
+    return results
+
+
 def _designer_agent_run(tasks, ctx, session=None):
-    """Execute tasks one by one. Successful work survives later failures."""
+    """Execute the plan, running edit-family tasks on disjoint slides together.
+
+    A batch commits in plan order, so slide ids and checkpoints stay those of a
+    sequential run; structural ops and overlapping targets stay sequential.
+    """
     slides = ctx['slides']
     executed = []
     cancelled = False
@@ -530,8 +787,7 @@ def _designer_agent_run(tasks, ctx, session=None):
     measure = (session is not None and getattr(session, 'available', False))
     report = ctx['report_progress']
     # Executors check this between slide indexes inside a task; the render
-    # lock serializes Playwright calls when per-slide worker calls run in
-    # the bounded pool.
+    # lock serializes Playwright calls when worker calls run in the pool.
     ctx['_is_cancelled'] = lambda: _agent_job_cancelled(ctx)
     ctx.setdefault('_session_lock', threading.Lock())
     # The marker file is scoped to this job id — only a click for THIS run can
@@ -539,144 +795,61 @@ def _designer_agent_run(tasks, ctx, session=None):
     # the first task boundary. Do not clear it here: clearing would swallow a
     # cancel that arrived while the planner was still thinking.
 
-    for i, task in enumerate(tasks):
+    i = 0
+    while i < total:
+        task = tasks[i]
         n = task.get('n') or i + 1
         if cancelled or billing_stopped:
             task['status'] = 'skipped'
             task['failureReason'] = 'cancelled' if cancelled else 'billing_stopped'
+            i += 1
             continue
         if _agent_job_cancelled(ctx):
             cancelled = True
             task['status'] = 'skipped'
             task['failureReason'] = 'cancelled'
+            i += 1
             continue
 
-        op = task['op']
+        batch = _agent_parallel_batch(tasks, i, ctx, slides) if total - i > 1 else []
+        if len(batch) > 1:
+            for offset, (batched, indexes) in enumerate(batch):
+                batched['status'] = 'running'
+                batched['_indexes'] = indexes
+                batched['_instruction'] = designer_agent_ops.instruction_for(batched)
+                batched_n = batched.get('n') or (i + offset + 1)
+                batched_op = batched.get('op')
+                report(15 + int(70 * (i + offset) / max(1, total)),
+                       f"مهمة {batched_n}/{total}: "
+                       f"{designer_agent_ops.OP_LABELS.get(batched_op, batched_op)}...",
+                       {'phase': 'agent', 'agentTask': batched_n,
+                        'tasks': [designer_agent_ops.public_task(t) for t in tasks]})
+            results = _agent_run_parallel([entry[0] for entry in batch], ctx, session, measure)
+            for offset, result in enumerate(results):
+                _agent_commit_isolated(result, slides)
+                c_delta, b_delta = _agent_finish_task(
+                    result, ctx, tasks, executed, total, i + offset, report)
+                cancelled = cancelled or c_delta
+                billing_stopped = billing_stopped or b_delta
+            i += len(batch)
+            continue
+
         task['status'] = 'running'
         report(15 + int(70 * i / max(1, total)),
-               f"مهمة {n}/{total}: {designer_agent_ops.OP_LABELS.get(op, op)}...",
-               {'phase': 'agent', 'agentTask': n, 'tasks': [designer_agent_ops.public_task(t) for t in tasks]})
-
-        selector = {'ids': task.get('slides') or []}
-        indexes, sel_err = designer_agent_ops.resolve_selector(selector, slides, ctx['current_index'])
-        if op in ('create',):
-            indexes = indexes or []  # create resolves its own position
-        elif not indexes:
-            task['status'] = 'failed'
-            task['failureReason'] = sel_err[0] if isinstance(sel_err, list) and sel_err else (sel_err or 'missing_slide')
-            executed.append({'tool': f'agent_{op}', 'status': 'failed', 'task': n,
+               f"مهمة {n}/{total}: {designer_agent_ops.OP_LABELS.get(task['op'], task['op'])}...",
+               {'phase': 'agent', 'agentTask': n,
+                'tasks': [designer_agent_ops.public_task(t) for t in tasks]})
+        if _agent_task_prepare(task, ctx, slides) is None:
+            executed.append({'tool': f"agent_{task['op']}", 'status': 'failed', 'task': n,
                              'reason': task['failureReason']})
             _agent_record_failure(ctx, task, task['failureReason'], [], [])
+            i += 1
             continue
-        task['_indexes'] = indexes
-        ctx['agent_last_worker_reason'] = None
-        before_htmls = [slides[i].get('html', '') for i in indexes] if indexes else []
-        task['_instruction'] = designer_agent_ops.instruction_for(task)
-
-        executor = _EXECUTORS.get(op) or _agent_exec_code
-        ok, reply, reason = False, None, None
-        feedback = ''
-        attempts_log = []
-        before_by_index = dict(zip(indexes, before_htmls))
-        for attempt in range(_AGENT_TASK_ATTEMPTS):
-            after_htmls = None
-            measure_report = None
-            rejected_by_check = False
-            ctx['agent_last_worker_reason'] = None
-            # Executors mutate slides before verification runs; a rejected
-            # attempt must leave the deck untouched (and retry from the
-            # original slides, not from its own rejected output).
-            deck_backup = [dict(s) if isinstance(s, dict) else s for s in slides]
-            try:
-                ok, reply, reason, after_htmls = executor(task, ctx, session, feedback)
-            except Exception as exc:
-                print(f"[DESIGNER-AGENT] task {n} ({op}) raised: {exc}")
-                ok, reply, reason = False, None, f'exception:{type(exc).__name__}'
-            if ok:
-                if after_htmls is None:
-                    after_htmls = [slides[j].get('html', '') for j in
-                                   sorted(task.get('_indexes') or indexes) if j < len(slides)]
-                v_ok, v_reasons = designer_agent_ops.verify_task_result(
-                    op, before_htmls, after_htmls,
-                    allowed_numbers=ctx.get('superseded_numbers'),
-                    request_text='\n'.join(str(part) for part in (
-                        ctx.get('message'), task.get('_instruction'),
-                        task.get('exact_text')) if part),
-                    exact_text=task.get('exact_text'))
-                if v_ok and measure and op in ('edit', 'redesign', 'rewrite', 'restructure', 'split'):
-                    for j in sorted(task.get('_indexes') or indexes):
-                        if j >= len(slides):
-                            continue
-                        m_uri, m_report = session.render(slides[j].get('html', ''), screenshot=True)
-                        if m_uri:
-                            # The last slide designed this run is the consistency
-                            # reference the next worker call sees (chatplan 3.6).
-                            ctx['agent_style_ref_uri'] = m_uri
-                        # Single-slide edits answer only for regressions against
-                        # their own source; split/restructure rebuild the layout.
-                        source = before_by_index.get(j) if op in designer_agent_ops.EDIT_OPS else None
-                        m_reasons = _agent_layout_reasons(ctx, session, source, m_report)
-                        if m_reasons:
-                            v_ok, v_reasons, measure_report = False, m_reasons, m_report
-                            break
-                if v_ok:
-                    break
-                ok, rejected_by_check = False, True
-                reason = ';'.join(v_reasons) or 'verification_failed'
-            retry = (attempt + 1 < _AGENT_TASK_ATTEMPTS
-                     and designer_agent_ops.is_retryable_failure(op, reason, rejected_by_check)
-                     and not _is_billing_error_text(str(reason or '')))
-            if not retry:
-                # Give-up path: when every remaining finding is content drift
-                # the owner rule is apply + warn — the client sees the result
-                # and can undo or re-ask. Only a nothing/impossible result
-                # (empty, invalid, unchanged, wrong shape) still rejects.
-                codes = designer_agent_ops.reason_codes(reason)
-                if codes and all(designer_agent_ops.reason_is_warning(c) for c in codes):
-                    task['warnings'] = (task.get('warnings') or []) + [
-                        part for part in str(reason or '').split(';') if part.strip()]
-                    ok = True
-                    break
-            slides[:] = deck_backup
-            attempts_log.append({'attempt': attempt + 1, 'reason': str(reason or '')[:400],
-                                 'feedback': feedback, 'resultHtml': after_htmls or []})
-            # Every worker op retries what the model can repair or a transient
-            # provider failure — once, with feedback that names the defect.
-            if retry:
-                feedback = designer_agent_ops.retry_feedback(reason, before_htmls, measure_report)
-                continue
-            break
-
-        if ok:
-            task['status'] = 'success'
-            executor_notes = task.pop('_warnings', []) or []
-            if executor_notes:
-                task['warnings'] = executor_notes + list(task.get('warnings') or [])
-            executed.append({'tool': f'agent_{op}', 'status': 'success', 'task': n,
-                             'indexes': sorted(task.get('_indexes') or [])})
-            if reply:
-                task['reply'] = reply
-        else:
-            task['status'] = 'failed'
-            task['failureReason'] = str(reason or 'unknown')[:400]
-            executed.append({'tool': f'agent_{op}', 'status': 'failed', 'task': n,
-                             'reason': task['failureReason']})
-            if _is_billing_error_text(str(reason or '')) or _is_billing_error_text(str(reply or '')):
-                billing_stopped = True
-            if 'cancelled' in designer_agent_ops.reason_codes(reason):
-                # An executor noticed the marker mid-task — remaining tasks
-                # take the cancelled branch instead of running to failure.
-                # A user-requested stop is not a journaled failure either.
-                cancelled = True
-                task['status'] = 'skipped'
-                task['failureReason'] = 'cancelled'
-                executed[-1]['status'] = 'skipped'
-            else:
-                _agent_record_failure(ctx, task, reason, before_htmls, attempts_log)
-        _agent_job_checkpoint(ctx, tasks, slides)
-        report(15 + int(70 * (i + 1) / max(1, total)),
-               f"اكتملت المهمة {n}/{total} ({'نجاح' if ok else 'تعذّر'})",
-               {'phase': 'agent', 'tasks': [designer_agent_ops.public_task(t) for t in tasks]})
+        result = _agent_run_attempts(task, ctx, session, measure)
+        c_delta, b_delta = _agent_finish_task(result, ctx, tasks, executed, total, i, report)
+        cancelled = cancelled or c_delta
+        billing_stopped = billing_stopped or b_delta
+        i += 1
 
     _agent_job_clear_cancel(ctx)
     return {'tasks': tasks, 'executed': executed, 'cancelled': cancelled,
@@ -745,6 +918,11 @@ def _agent_layout_reasons(ctx, session, source_html, report):
     cache = ctx.setdefault('agent_layout_cache', {})
     key = _agent_layout_key(source_html)
     if key not in cache:
-        _uri, cache[key] = session.render(source_html, screenshot=False)
+        lock = ctx.get('_session_lock')
+        if lock is not None:
+            with lock:
+                _uri, cache[key] = session.render(source_html, screenshot=False)
+        else:
+            _uri, cache[key] = session.render(source_html, screenshot=False)
     return _measure_regression_reasons(cache[key], report)
 

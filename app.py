@@ -403,7 +403,7 @@ VISUAL_PLAN_TEXT_MODEL = os.environ.get('VISUAL_PLAN_TEXT_MODEL') or GEMINI_TEXT
 VISUAL_PLAN_DISTRIBUTION_MODEL = (
     os.environ.get('VISUAL_PLAN_DISTRIBUTION_MODEL') or SLIDE_TEXT_MODEL).strip()
 DESIGNER_PLANNER_MAX_TOKENS = int(os.environ.get('DESIGNER_PLANNER_MAX_TOKENS', '3000'))
-DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '16000'))
+DESIGNER_EDIT_MAX_TOKENS = int(os.environ.get('DESIGNER_EDIT_MAX_TOKENS', '24000'))
 # Designer agent (chatplan): per-task planner/runner path behind a flag. When 0,
 # /api/designer-chat keeps the legacy all-at-once planner.
 DESIGNER_AGENT = (os.environ.get('DESIGNER_AGENT') or '').strip() == '1'

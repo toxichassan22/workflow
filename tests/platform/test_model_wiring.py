@@ -8,6 +8,7 @@ map references, attached images) until a better vision model is chosen.
 """
 
 import json
+import os
 import re
 import sys
 import unittest
@@ -50,7 +51,7 @@ class ModelConstantTests(unittest.TestCase):
         self.assertEqual(application.VISUAL_PLAN_TEXT_MODEL, application.GEMINI_TEXT_MODEL)
         self.assertEqual(application.DESIGNER_AGENT_PLANNER_MODEL, os.environ.get('DESIGNER_AGENT_PLANNER_MODEL') or application.GEMINI_TEXT_MODEL)
         self.assertEqual(application.DESIGNER_AGENT_WORKER_MODEL, os.environ.get('DESIGNER_AGENT_WORKER_MODEL') or application.GEMINI_TEXT_MODEL)
-        self.assertEqual(application.MARKET_STUDY_MODEL, application.GEMINI_TEXT_MODEL)
+        self.assertEqual(application.MARKET_STUDY_MODEL, os.environ.get('MARKET_STUDY_MODEL') or application.GEMINI_TEXT_MODEL)
 
     def test_vision_model_stays_argon(self):
         self.assertEqual(application.VISION_MODEL, 'google/gemini-4-argon')

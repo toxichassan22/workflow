@@ -751,7 +751,10 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(body['tasks'][0]['status'], 'success')
 
     def test_billing_failure_is_not_retried_and_stops_the_run(self):
-        slides = [slide('<p>أ</p>'), slide('<p>ب</p>')]
+        # The first three edit tasks share one batch, so all three reach the
+        # provider at once — a 402 costs nothing. What must hold: none of them
+        # is retried, and the task after the batch never starts.
+        slides = [slide('<p>أ</p>'), slide('<p>ب</p>'), slide('<p>ج</p>'), slide('<p>د</p>')]
         turn = {'kind': 'plan', 'ops': [
             {'op': 'edit', 'select': {'all': True}, 'instruction': 'عدل'}]}
         calls = []
@@ -761,9 +764,10 @@ class AgentFlowTests(unittest.TestCase):
             return None, 'provider_error:[DESIGNER-WORKER] {"message": "[402] Insufficient credits"}'
 
         body = self.run_with_worker(slides, turn, worker, message='عدل الكل')
-        self.assertEqual(calls, [0])
+        self.assertEqual(sorted(calls), [0, 1, 2])
         self.assertTrue(body['agent']['billingStopped'])
-        self.assertEqual([t['status'] for t in body['tasks']], ['failed', 'skipped'])
+        self.assertEqual([t['status'] for t in body['tasks']],
+                         ['failed', 'failed', 'failed', 'skipped'])
 
     def test_dropped_figure_containing_402_is_not_a_wallet_stop(self):
         # «14020» contains «402» and the worker summary says «الرصيد»; neither
@@ -879,6 +883,97 @@ class AgentFlowTests(unittest.TestCase):
         self.assertEqual(worker_calls, [])
         self.assertEqual(body['tasks'][0]['status'], 'success', body['tasks'][0])
         self.assertIn('#0000ff', body['slidesData'][0]['html'].lower())
+
+    def test_edit_family_tasks_on_disjoint_slides_run_together(self):
+        # A 17-task plan ran one task at a time: at ~3+ minutes per worker
+        # call the deck took longer than the work itself. Edit-family tasks on
+        # different slides are independent, so they share one bounded pool —
+        # and still commit in plan order, never by completion order.
+        import threading
+        import time
+        slides = [slide('<p>أ</p>'), slide('<p>ب</p>'), slide('<p>ج</p>')]
+        designer_agent_ids.ensure_slide_ids(slides)
+        tasks = [{'n': i + 1, 'op': 'redesign', 'slides': [s['id']],
+                  'instruction': 'أعد التصميم'}
+                 for i, s in enumerate(slides)]
+        lock = threading.Lock()
+        state = {'active': 0, 'peak': 0, 'finished': []}
+
+        def editor(ctx, slide_obj, index, instruction, total, *a, **k):
+            with lock:
+                state['active'] += 1
+                state['peak'] = max(state['peak'], state['active'])
+            time.sleep(0.15)
+            with lock:
+                state['active'] -= 1
+                state['finished'].append(index)
+            html = slide_obj.get('html', '')
+            return html[:html.rfind('</div>')] + f'<p>R{index}</p></div>', 'تم'
+
+        progress = []
+        ctx = {'job_id': None, 'tenant_id': self.tenant, 'slides': slides,
+               'current_index': 0, 'message': 'أعد التصميم',
+               'report_progress': lambda p, m, extra=None: progress.append(m)}
+        with patch.object(self.module, '_agent_worker_edit_slide', side_effect=editor):
+            run = self.module._designer_agent_run(tasks, ctx, session=None)
+        self.assertGreaterEqual(state['peak'], 2)
+        self.assertEqual([t['status'] for t in tasks], ['success', 'success', 'success'])
+        for i, item in enumerate(slides):
+            self.assertIn(f'R{i}', item['html'])
+        self.assertEqual(
+            [m for m in progress if m.startswith('اكتملت')],
+            [f'اكتملت المهمة {n}/3 (نجاح)' for n in (1, 2, 3)])
+
+    def test_a_failed_task_does_not_stop_the_batch_commit(self):
+        slides = [slide('<p>أ</p>'), slide('<p>ب</p>'), slide('<p>ج</p>')]
+        designer_agent_ids.ensure_slide_ids(slides)
+        tasks = [{'n': i + 1, 'op': 'redesign', 'slides': [s['id']],
+                  'instruction': 'أعد التصميم'}
+                 for i, s in enumerate(slides)]
+
+        def editor(ctx, slide_obj, index, instruction, total, *a, **k):
+            if index == 1:
+                raise RuntimeError('provider blew up')
+            html = slide_obj.get('html', '')
+            return html[:html.rfind('</div>')] + f'<p>R{index}</p></div>', 'تم'
+
+        ctx = {'job_id': None, 'tenant_id': self.tenant, 'slides': slides,
+               'current_index': 0, 'message': 'أعد التصميم',
+               'report_progress': lambda *a, **k: None}
+        with patch.object(self.module, '_agent_worker_edit_slide', side_effect=editor):
+            run = self.module._designer_agent_run(tasks, ctx, session=None)
+        self.assertEqual([t['status'] for t in tasks],
+                         ['success', 'failed', 'success'])
+        self.assertIn('R0', slides[0]['html'])
+        self.assertIn('R2', slides[2]['html'])
+        self.assertNotIn('R1', slides[1]['html'])
+        self.assertFalse(run['all_failed'])
+
+    def test_structural_and_overlapping_tasks_stay_sequential(self):
+        slides = [slide('<p>أ</p>'), slide('<p>ب</p>')]
+        designer_agent_ids.ensure_slide_ids(slides)
+        ctx = {'slides': slides, 'current_index': 0}
+        first = {'n': 1, 'op': 'redesign', 'slides': [slides[0]['id']]}
+        create = {'n': 2, 'op': 'create', 'slides': []}
+        other = {'n': 3, 'op': 'redesign', 'slides': [slides[1]['id']]}
+        same = {'n': 4, 'op': 'rewrite', 'slides': [slides[0]['id']]}
+        # A structural op changes slide positions: it ends the batch.
+        self.assertEqual(len(self.module._agent_parallel_batch(
+            [first, create, other], 0, ctx, slides)), 1)
+        self.assertEqual(self.module._agent_parallel_batch([create, other], 0, ctx, slides), [])
+        # Two tasks on one slide must see each other's result.
+        self.assertEqual(len(self.module._agent_parallel_batch(
+            [first, same], 0, ctx, slides)), 1)
+        self.assertEqual(len(self.module._agent_parallel_batch(
+            [other, same], 0, ctx, slides)), 2)
+
+    def test_worker_output_cap_fits_a_full_slide(self):
+        # Both attempts of a live redesign stopped at exactly the old 16000
+        # cap, so the returned HTML was cut and rejected as invalid. The cap
+        # must leave room for a whole slide plus the model's own tokens.
+        import app as app_module
+        self.assertGreaterEqual(app_module.DESIGNER_EDIT_MAX_TOKENS, 24000)
+
 
 class SelectorAndVerifyTests(unittest.TestCase):
     def test_selector_forms(self):
