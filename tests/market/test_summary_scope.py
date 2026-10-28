@@ -167,6 +167,8 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('يُمنع منعًا باتًا دمج أي حيين واردين في البيانات داخل فقرة واحدة', prompt)
         self.assertIn('أفرده بفقرة تحليلية مستقلة وكاملة', prompt)
         self.assertIn('قاعدة المؤشر الإيجاري لشبكة إيجار وسكني (شمولية القيمة والعدد)', prompt)
+        self.assertIn('قاعدة شمولية كل الأحياء المدخلة في نطاق الدراسة', prompt)
+        self.assertIn('دون استثناء أي حي', prompt)
         self.assertIn('تجنب تماماً أي تكرار ميكانيكي أو لفظي مثل «ريال سعودي سعوديًا»', prompt)
         self.assertIn('بل اسرد التحليل بفقرات متماسكة تبدأ بجمل افتتاحية استشارية متصلة', prompt)
 
@@ -175,6 +177,8 @@ class SummaryScopePromptTests(unittest.TestCase):
             'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': []}]},
         }, [], offer_lang='en')
         self.assertIn('Dynamic District Rule: For every district present in summaryLocalBenchmarks groups', en_prompt)
+        self.assertIn('All Entered Districts Rule', en_prompt)
+        self.assertIn('without omitting any entered district', en_prompt)
         self.assertIn('Rental Benchmark Rule: In rental_groups from Ejar and Sakani', en_prompt)
         self.assertIn('Avoid robotic colon-separated bullet headers', en_prompt)
 

@@ -118,7 +118,7 @@ def _summary_scope_block(payload, offer_lang=None):
             'An empty district list means the full city. For ordinary scope-bound axes, when districts '
             'are listed use only those districts. city_position always covers the full city. Each of '
             'sector_performance, supply, and demand must give a concise overview of the full city, then '
-            'separate detailed analysis for each listed district; if no districts are listed, give detailed '
+            'separate detailed analysis for each listed district by name without omitting any entered district; if a district has transaction data detail its figures, and if a listed district had no completed sales in the period state that explicitly; if no districts are listed, give detailed '
             'city-wide analysis. Never mix cities or districts, infer a district, or substitute nearby places. '
             'If evidence is missing, state that it is unavailable. The competitors radius applies only to '
             'the competitors table. National or regional figures are context only and must be labeled.\n')
@@ -130,7 +130,7 @@ def _summary_scope_block(payload, offer_lang=None):
         'ترك الأحياء فارغة يعني تحليل المدينة كاملة. في المحاور العادية المقيدة بالنطاق، إذا ذُكرت أحياء '
         'فاستخدم هذه الأحياء وحدها. محور city_position يغطي المدينة كاملة دائمًا. وفي كل من '
         'sector_performance وsupply وdemand قدّم قراءة موجزة للمدينة كاملة، ثم تحليلًا مفصلًا منفصلًا '
-        'لكل حي مدخل؛ وإن لم تُذكر أحياء فحلل المدينة كاملة بتفصيل. لا تخلط المدن أو الأحياء ولا تستنتج '
+        'لكل حي مدخل بالاسم دون استثناء أي حي؛ الحي الذي يحتوي بيانات بيع فصّل أرقامه، والحي الذي لا يحتوي صفقات بيع منفذة في الفترة صرّح بعدم تسجيل صفقات منفذة فيه خلال الفترة المحددة؛ وإن لم تُذكر أحياء فحلل المدينة كاملة بتفصيل. لا تخلط المدن أو الأحياء ولا تستنتج '
         'حيًا ولا تستبدله بمكان قريب. عند غياب الدليل صرّح بعدم توفره. نطاق المنافسين يخص جدول المنافسين '
         'فقط. أرقام المملكة أو المنطقة خلفية فقط ويجب وصفها بذلك صراحةً.\n')
 
@@ -218,6 +218,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'standalone analytical paragraph detailing its transaction count, average price per sqm, price range (min to max), '
             'and average deal value with investment takeaways. Never merge two districts into a joint paragraph or condense any '
             'district into a footnote. If data exists for only one district, analyze that district alone. '
+            'All Entered Districts Rule: When specific districts are listed in the geographic scope (summaryScope), every listed district must appear by name across sector_performance, supply, and demand. For districts with recorded sales transactions, provide their detailed metrics as specified above. For any listed district with no recorded completed sales in the period, state clearly that no completed sales were recorded for it in the period along with its comparative context, rather than dropping the district from the narrative. '
             'Rental Benchmark Rule: In rental_groups from Ejar and Sakani, state for each property category both its transaction count '
             'and its average annual rental value without dropping rental amounts.\n')
         narrative_rules = (
@@ -311,6 +312,9 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'والمتوسط الحسابي لقيمة الصفقة) مع الدلالة الاستثمارية. يُمنع منعًا باتًا دمج أي حيين واردين في البيانات داخل فقرة واحدة '
             'أو اختزال أي حي في جملة عابرة أو ملحقة مهما تفاوت عدد صفقاته؛ فكل حي في البيانات يمثل عينة مستقلة تستوجب قراءة متكاملة. '
             'وإن تضمنت البيانات حيًا واحدًا فقط فحلل ذلك الحي وحده. '
+            'قاعدة شمولية كل الأحياء المدخلة في نطاق الدراسة: '
+            'إذا حدد المستخدم أحياء في نطاق ملخص السوق (summaryScope)، فيجب أن تُغطى جميع الأحياء المدخلة بالاسم في كل من أداء القطاع والعرض والطلب؛ '
+            'الحي الذي توفرت له صفقات بيع منفذة للفترة يُفرد بفقرته التحليلية وأرقامه كاملة كما ورد أعلاه، وأي حي مدخل آخر لم تُسجل له صفقات بيع منفذة خلال الفترة المحددة صرّح بوضوح: «وفي حي [اسم الحي] لم تُسجل صفقات بيع منفذة خلال الفترة، [مع بيان موقعه أو وضعه المقارن]»، ولا تُسقط أي حي مدخل بصمت أبداً، ولا تخلط حي المشروع بأحياء المقارنة المحيطة بل وضّح موقع المشروع وحالة المعروض والطلب في كل حي من الأحياء المدخلة. '
             'قاعدة المؤشر الإيجاري لشبكة إيجار وسكني (شمولية القيمة والعدد): '
             'عند استعراض مؤشرات الإيجار السنوي لشبكة إيجار ومنصة سكني المرفقة (rental_groups)، اذكر لكل فئة عقارية معروضة '
             '(المعارض، المحلات، المكاتب، الفلل، الشقق، الدوبلكس، الاستوديوهات) عدد صفقاتها ومتوسط قيمتها الإيجارية السنوية الموثقة '
