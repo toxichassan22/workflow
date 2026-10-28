@@ -89,6 +89,41 @@ class MeetingRequirementsTestsPart23(MeetingRequirementsTests):
         kept = app._drop_ungenerated_slides(slides)
         self.assertEqual([item.get('title') for item in kept], ['الغلاف', 'محتوى السوق'])
 
+    def test_the_page_count_follows_the_content_in_every_direction(self):
+        engine = self.application_module.slide_engine
+
+        # No risks, no site reading, no summary: the sections emit nothing.
+        empty_plan = engine.normalize_presentation_plan(
+            {'slides': self._cover_index_closing()}, project_data={'project_name': 'مشروع'})
+        self.assertFalse([
+            item for item in empty_plan['slides']
+            if item.get('section_key') == 'swot_risks' and item.get('design_style') == 'risk'
+        ])
+        self.assertFalse([
+            item for item in empty_plan['slides']
+            if str(item.get('content_source') or '').startswith('site_analysis')
+        ])
+
+        # One risk is one page; ten long risks open as many pages as they need.
+        self.assertEqual(
+            engine._risk_page_ranges([{'risk': 'خطر', 'mitigation': 'معالجة'}]),
+            [(0, None)])
+        many_risks = [
+            {'risk': 'خطر رقم %d %s' % (index, 'تفصيل ' * 30),
+             'mitigation': 'معالجة ' * 20}
+            for index in range(10)
+        ]
+        self.assertGreaterEqual(len(engine._risk_page_ranges(many_risks)), 3)
+
+        # A long executive summary is not capped at two pages either.
+        long_summary = '\n\n'.join(
+            'القسم %d\n\n%s' % (index, 'شرح ' * 140)
+            for index in range(12))
+        long_project = {
+            'executive_content': json.dumps({'summary': long_summary}, ensure_ascii=False),
+        }
+        self.assertGreater(len(engine._executive_summary_pages(long_project)), 3)
+
     def test_two_risks_stay_on_one_page(self):
         engine = self.application_module.slide_engine
         items = [
