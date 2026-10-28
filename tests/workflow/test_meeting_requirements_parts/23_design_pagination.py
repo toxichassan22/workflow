@@ -89,6 +89,47 @@ class MeetingRequirementsTestsPart23(MeetingRequirementsTests):
         kept = app._drop_ungenerated_slides(slides)
         self.assertEqual([item.get('title') for item in kept], ['الغلاف', 'محتوى السوق'])
 
+    def test_the_overview_slide_never_requests_a_map(self):
+        engine = self.application_module.slide_engine
+        plan = {'slides': [
+            {'title': 'الغلاف', 'type': 'cover'},
+            {'title': 'محتويات العرض', 'type': 'index'},
+            {'title': 'نبذة عن المشروع', 'type': 'content', 'section_key': 'overview',
+             'image_tokens': ['##MAP_OVERVIEW##'], 'requires_image': True},
+            {'title': 'الخاتمة', 'type': 'closing'},
+        ]}
+        normalized = engine.normalize_presentation_plan(
+            plan, project_data={'project_name': 'مشروع'},
+            images={'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'}})
+        overview = [
+            item for item in normalized['slides']
+            if item.get('section_key') == 'overview' and item.get('type') == 'content'
+        ]
+        self.assertTrue(overview)
+        for item in overview:
+            self.assertEqual(item.get('image_tokens') or [], [])
+            self.assertFalse(item.get('requires_image'))
+
+    def test_a_map_token_requires_an_available_map(self):
+        engine = self.application_module.slide_engine
+        project = {'project_name': 'مشروع', 'site_analysis': 'قراءة موقع قصيرة.'}
+        base_plan = {'slides': self._cover_index_closing()}
+        with_map = engine.normalize_presentation_plan(
+            base_plan, project_data=project,
+            images={'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'}})
+        without_map = engine.normalize_presentation_plan(
+            base_plan, project_data=project, images={})
+
+        def location_tokens(normalized):
+            return [
+                token
+                for item in normalized['slides'] if item.get('section_key') == 'location'
+                for token in (item.get('image_tokens') or [])
+            ]
+
+        self.assertIn('##MAP_OVERVIEW##', location_tokens(with_map))
+        self.assertNotIn('##MAP_OVERVIEW##', location_tokens(without_map))
+
     def test_the_page_count_follows_the_content_in_every_direction(self):
         engine = self.application_module.slide_engine
 

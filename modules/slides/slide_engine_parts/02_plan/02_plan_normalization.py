@@ -31,6 +31,48 @@ def _site_analysis_page_ranges(blocks):
     ranges.append((start, None))
     return ranges
 
+_MAP_TOKEN_RE = re.compile(r'##MAP_(?:OVERVIEW|LANDMARKS|ACCESS|CATCHMENT)##')
+_MAP_ALLOWED_SECTIONS = {'location', 'land', 'executive_summary'}
+
+
+def _sanitize_plan_map_tokens(groups, map_placeholders):
+    """Keep a map token only where maps belong and only when the map exists.
+
+    The planner handed the overview page a ##MAP_OVERVIEW## token even though
+    that page never shows a map; with no approved image behind it the page
+    shipped a «خريطة الموقع العام» card with nothing in it.
+    """
+    map_placeholders = map_placeholders if isinstance(map_placeholders, dict) else {}
+    for section_key, slides in (groups or {}).items():
+        for slide in slides if isinstance(slides, list) else []:
+            tokens = [str(token) for token in (slide.get('image_tokens') or [])]
+            if not tokens:
+                continue
+            kept = []
+            had_map = False
+            for token in tokens:
+                match = _MAP_TOKEN_RE.fullmatch(token.strip())
+                if not match:
+                    kept.append(token)
+                    continue
+                had_map = True
+                if section_key not in _MAP_ALLOWED_SECTIONS:
+                    continue
+                key = match.group(0)
+                bare = key.strip('#')
+                if (map_placeholders.get(key) or map_placeholders.get(bare)
+                        or map_placeholders.get(bare.lower())):
+                    kept.append(token)
+            if kept != tokens:
+                slide['image_tokens'] = kept
+                if had_map and not kept:
+                    slide['requires_image'] = False
+                    if str(slide.get('type') or '').startswith('map_'):
+                        slide['type'] = 'content'
+                        slide['design_style'] = 'cards'
+    return groups
+
+
 def _ensure_required_plan_content(groups, project_data=None, images=None, tenant_id=None, offer_lang=None):
     source = project_data if isinstance(project_data, dict) else {}
     lang = resolve_offer_lang(source, offer_lang)
@@ -38,7 +80,12 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     map_placeholders = images.get('map_placeholders') if isinstance(images.get('map_placeholders'), dict) else {}
     has_map_context = any(str(source.get(key) or '').strip() for key in (
         'location_address', 'location_lat', 'location_lng', 'site_analysis')) or any(map_placeholders.values())
-    overview_map_tokens = ['##MAP_OVERVIEW##'] if has_map_context else []
+    # The summary requests the overview map only when that map actually exists:
+    # a token with no image behind it ships a labelled card with nothing in it.
+    overview_map_tokens = ['##MAP_OVERVIEW##'] if (
+        map_placeholders.get('##MAP_OVERVIEW##')
+        or map_placeholders.get('overview')
+    ) else []
 
     def add(section_key, slide, replace=False):
         slide = _canonicalize_slide_image_tokens(dict(slide))
@@ -993,6 +1040,9 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
                     'image_tokens': ['##IMAGE_COVER##'] if has_cover_image else [], 'bullets': []})
 
     groups = {key: [] for key in PRESENTATION_SECTION_ORDER if key != 'closing'}
+    map_placeholders = (
+        images.get('map_placeholders')
+        if isinstance(images, dict) and isinstance(images.get('map_placeholders'), dict) else {})
     signatures = set()
     current = ''
     for slide in source_slides:
@@ -1036,6 +1086,7 @@ def normalize_presentation_plan(plan, project_data=None, images=None, tenant_id=
 
     _ensure_required_plan_content(groups, project_data, images, tenant_id, offer_lang=lang)
     _drop_redundant_generic_slides(groups, offer_lang=lang)
+    _sanitize_plan_map_tokens(groups, map_placeholders)
 
     if not any(groups.values()) and project_data:
         groups['overview'].append({
