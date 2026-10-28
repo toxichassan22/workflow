@@ -212,8 +212,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'from official ADR. With fewer than three comparable observations, report the sample without an '
             'average. Never call this a historical or annual ADR, or a city-wide market standard.\n')
         local_data_rules = (
-            'For reference transactions from the supplied files, use the source names exactly as listed in each '
-            'group’s sources field, such as Ministry of Justice. Attribute each figure to its listed source. '
+            'Official Authority Attribution Rule (Ban "Reference Files"): Strictly forbid using phrases like "reference files", "file transactions", "owner files", or "attached files" in the analytical narrative. Always attribute transactions and indicators directly to their official source: cite "Ministry of Justice documented transactions", "Real Estate General Authority (REGA) indicators", "Ejar Network and Sakani Rental Index", or "Ministry of Tourism indicators". Attribute each figure explicitly to its verified authority. '
             'Dynamic District Rule: For every district present in summaryLocalBenchmarks groups, provide a dedicated, '
             'standalone analytical paragraph detailing its transaction count, average price per sqm, price range (min to max), '
             'and average deal value with investment takeaways. Never merge two districts into a joint paragraph or condense any '
@@ -308,12 +307,11 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'ثلاث أسعار قابلة للمقارنة، اعرض المشاهدات دون متوسط. لا تسمّه ADR تاريخيًا أو سنويًا أو معيارًا للسوق '
             'كله.\n')
         local_data_rules = (
-            'انسب صفقات الملفات إلى أسماء المصادر كما تظهر حرفيًا في حقل sources لكل مجموعة؛ إذا ظهر «وزارة العدل» '
-            'فسمّها «صفقات وزارة العدل»، وإذا ظهر «منصة سكني - شبكة إيجار» فسمّها «المؤشر الإيجاري لشبكة إيجار ومنصة سكني». '
+            'قاعدة النسبة الصريحة للجهات الرسمية ومنع مسمى الملفات المرجعية: يُمنع منعًا باتًا استخدام تعبيرات «الملفات المرجعية» أو «صفقات الملفات» أو «ملفات المالك» أو «الملف المرفق» في صياغة التحليل. انسب البيانات دائمًا وبشكل مباشر وصريح إلى اسم الجهة الرسمية أو المؤشر المعتمد: إذا ظهر «وزارة العدل» فسمّها «صفقات وزارة العدل» أو «مؤشرات الهيئة العامة للعقار (REGA)» الموثقة لصفقات البيع، واذكر «المؤشر الإيجاري لشبكة إيجار ومنصة سكني» لبيانات الإيجار، واذكر «بيانات ومؤشرات وزارة السياحة» لمؤشرات السياحة والفندقة، واذكر «الهيئة العامة للإحصاء» للمؤشرات السكانية والكلية. '
             'استفد من صفقات البيع المنفذة وصفقات المؤشر الإيجاري الموثقة للأنشطة السكنية والتجارية (المعارض، المكاتب، المحلات، الفلل، الشقق) '
-            'في إثراء أداء القطاع والعرض والطلب وتحديد الأسعار المرجعية. '
+            'في إثراء أداء القطاع والعرض والطلب وتحديد الأسعار المقارنة. '
             'قاعدة تحليل الأحياء في الصفقات المرجعية (قاعدة ديناميكية وشاملة): '
-            'لكل حي يظهر له سجل في صفقات البيع المرجعية المرفقة (summaryLocalBenchmarks)، أفرده بفقرة تحليلية مستقلة وكاملة '
+            'لكل حي تتوفر له صفقات بيع منفذة في البيانات الموثقة (summaryLocalBenchmarks)، أفرده بفقرة تحليلية مستقلة وكاملة '
             'تفصل أداءه (اسم الحي، عدد الصفقات، المتوسط الحسابي لسعر المتر المربع المنفذ، النطاق السعري من الأدنى إلى الأعلى، '
             'والمتوسط الحسابي لقيمة الصفقة) مع الدلالة الاستثمارية. يُمنع منعًا باتًا دمج أي حيين واردين في البيانات داخل فقرة واحدة '
             'أو اختزال أي حي في جملة عابرة أو ملحقة مهما تفاوت عدد صفقاته؛ فكل حي في البيانات يمثل عينة مستقلة تستوجب قراءة متكاملة. '
@@ -365,6 +363,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'Keep the narrative cohesive, fluent, and well-structured, with every selected activity and property type thoroughly analyzed. '
             'Ensure natural phrasing for monetary figures in SAR without mechanical currency repetitions. '
             'Number, Currency, and Unit Integrity Rule: Ensure numbers are written with proper spacing from preceding prepositions (e.g. write "at 5,000,000 SAR" instead of gluing words to numbers). Never append currency names to area units (areas must strictly use "sqm" or "m²" without currency words). State the currency name exactly once without mechanical repetitions (never write "SAR Saudi Riyals" or "SAR SAR"). When summarizing price or area ranges, report the actual verified values accurately without concatenating disparate figures. '
+            'Official Authority Attribution Rule (Ban "Reference Files"): Strictly forbid using phrases like "reference files", "file transactions", "owner files", or "attached files" in the analytical narrative. Always attribute transactions and indicators directly to their official source: cite "Ministry of Justice documented transactions", "Real Estate General Authority (REGA) indicators", "Ejar Network and Sakani Rental Index", or "Ministry of Tourism indicators". '
             'Round all numbers, monetary amounts, and percentages to whole integers or at most two decimal places (e.g. 218.76 or 219); never output long floating-point decimals or unrounded fractions like 218.763680126269923099. '
             'Strictly forbid performing unrequested ad-hoc mathematical divisions or fabricating derived per-capita or per-visitor ratios (e.g. dividing total tourism spend by visitor count); with the specific exception in competition analysis of calculating the indicative price per square meter for direct competitor units by dividing unit price by unit area (Price ÷ Area = SAR/sqm) when both are supplied, to enable direct unit-level pricing comparison with the project. Report all other figures and totals exactly as published in official sources with their original units without manual division. '
             'Maintain an actionable real-estate advisory tone that uses all retrieved numbers constructively; do not consume narrative space with repetitive defensive disclaimers, excuses, or pretexts for discarding returned evidence. State methodological limitations concisely and focus on investment interpretation. '
@@ -387,7 +386,8 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'في محور المنافسة competition: افصل تمامًا وبدقة بين مسافة المنافس بالكيلومتر distance_km وبين أسعار الوحدات؛ فالمسافة تخص البُعد الجغرافي فقط ولا توضع إطلاقًا داخل جملة السعر ولا يلحق بها اسم العملة ريال. '
             'قاعدة سلامة الأرقام والعملات والوحدات: اكتب الأرقام بوضوح مع وضع مسافة دائمًا بين الرقم والحروف التي قبله أو بعده (مثال: «بسعر 5,000,000 ريال» وليس «ب5000000»، و«البالغ 791 ريالاً» وليس «البالغ791»). لا تدمج اسم العملة «ريال» في وحدات المساحة؛ فالمساحات تُكتب بـ «م²» فقط دون كلمة ريال إطلاقاً. اكتب اسم العملة مرة واحدة فقط وبأسلوب لغوي سليم («ريال» أو «ريال سعودي») دون أي تكرار مثل «ريال سعودي ريال» أو «ريال سعودي ريالاً». عند ذكر نطاق الأسعار أو المساحات، اذكر أرقام الوحدات الحقيقية كما وردت بدقة دون دمج أرقام غير متجانسة من مؤشرات أخرى. '
             'اكتب اسم العملة «ريال» أو «ريال سعودي» بأسلوب لغوي سليم، وتجنب تماماً أي تكرار ميكانيكي أو لفظي مثل «ريال سعودي سعوديًا». '
-            'لكل حي يظهر في الصفقات المرجعية المرفقة فقرة تحليلية مستقلة ببياناته الكاملة دون دمج حيين معًا. '
+            'قاعدة حظر مسمى «الملفات المرجعية» والنسبة الصريحة للجهات الرسمية: يُمنع منعًا باتًا استخدام تعبيرات مثل «صفقات الملفات»، أو «الملفات المرجعية»، أو «ملفات المالك»، أو «الملف المرفق»، أو «العينة المرفقة» في صياغة التحليل. انسب الصفقات والمؤشرات دائمًا لمصدرها الرسمي الصريح؛ قل: «حسب صفقات وزارة العدل الموثقة»، أو «وفق مؤشرات الهيئة العامة للعقار (REGA)»، أو «استنادًا إلى المؤشر الإيجاري لشبكة إيجار ومنصة سكني»، أو «بحسب بيانات ومؤشرات وزارة السياحة». '
+            'لكل حي تتوفر له صفقات بيع منفذة فقرة تحليلية مستقلة ببياناته الكاملة دون دمج حيين معًا. '
             'ولكل فئة إيجارية في المؤشر الإيجاري اذكر عدد الصفقات ومتوسط القيمة الإيجارية السنوية معًا. '
             'امنح كل فئة تدعمها الأدلة عمقًا متقاربًا، وأدرج الأرقام المفيدة كاملة دون حد للكلمات. '
             'احذف الفئات الفرعية غير المتاحة دون القول إنها مفقودة أو متعذرة أو غير متاحة؛ وأعد قيمة فارغة للمحور الذي لا يسنده دليل. '
@@ -420,7 +420,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
         + narrative_rules + lang + '\n' + decision
         + 'الأدلة وصفحات المصادر المفتوحة من الباحثين:\n' + evidence + '\n\n'
         + local_data_rules
-        + 'بيانات الصفقات المرجعية والمؤشرات الرسمية من ملفات المالك وشبكة إيجار وسكني، إن وجدت؛ يتضمن كل سجل اسم مصدره ضمن حقل sources:\n'
+        + 'بيانات صفقات البيع الموثقة والمؤشرات الرسمية من وزارة العدل والهيئة العامة للعقار وشبكة إيجار وسكني؛ يتضمن كل سجل اسم مصدره ضمن حقل sources:\n'
         + json.dumps(local, ensure_ascii=False, indent=2, default=str) + '\n\n'
         + 'مدخلات المشروع لتحديد النشاط والنطاق والتقييم المحايد:\n'
         + _project_input_block(payload) + '\n\n'
