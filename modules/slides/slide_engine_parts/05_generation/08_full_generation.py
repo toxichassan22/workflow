@@ -313,6 +313,24 @@ def _ensure_cover_background_element(html, cover_url):
         source, count=1, flags=re.IGNORECASE)
 
 
+def _update_section_divider_background(html, cover_url):
+    """Point the divider's own background layer at the current cover image.
+
+    It only follows an element that already exists: a divider whose layer the
+    client deleted must stay without a photo on save, export and reopen.
+    """
+    cover = _usable_slide_image_url(cover_url)
+    if not html or not cover:
+        return html
+    source = str(html)
+    if not re.search(r'data-section-divider-background', source, re.IGNORECASE):
+        return source
+    return re.sub(
+        r'(data-section-divider-background\s*=\s*["\']?1["\']?[^>]*?background-image\s*:\s*url\()([^)]*)(\))',
+        lambda match: match.group(1) + _css_url(cover) + match.group(3),
+        source, count=1, flags=re.IGNORECASE)
+
+
 def _force_section_divider_background(html, cover_url):
     """Make a divider use the deck's real cover even when its saved CSS is empty or stale."""
     cover = _usable_slide_image_url(cover_url)

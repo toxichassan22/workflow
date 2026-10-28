@@ -118,10 +118,45 @@ class MeetingRequirementsTestsPart23(MeetingRequirementsTests):
             branding=self._branding(), project_data=project, creative_images=creative)
         self.assertNotIn('data-cover-background', out_existing[0]['html'])
 
+    def test_a_deleted_divider_background_is_not_planted_again(self):
+        engine = self.application_module.slide_engine
+        forced = ("background:#ffffff;background-image:url('/old.png')!important;"
+                  "background-size:cover!important;background-position:center center!important;"
+                  "background-repeat:no-repeat!important;")
+        divider_html = ('<div class="slide" style="width:1280px;height:720px;' + forced + '">'
+                        '<div>تحليل السوق</div></div>')
+        slides = [
+            {'title': 'الغلاف', 'type': 'cover', 'html': '<div class="slide">غلاف</div>'},
+            {'title': 'محتويات العرض', 'type': 'index', 'html': '<div class="slide">فهرس</div>'},
+            {'title': 'تحليل السوق', 'type': 'section_divider', 'section_key': 'market',
+             'is_custom': True, '_designer_keep_html': True, 'html': divider_html},
+            {'title': 'الخاتمة', 'type': 'closing', 'html': '<div class="slide">ختام</div>'},
+        ]
+        out = engine.renumber_presentation_slides(
+            slides, branding=self._branding(),
+            project_data={'project_name': 'مشروع'},
+            creative_images={'cover': '/uploads/creative/t/cover.png'})
+        divider = out[2]
+        self.assertNotIn('background-size:cover!important', divider['html'])
+        self.assertNotIn('data-section-divider-background', divider['html'])
+
+        with_layer_html = ('<div class="slide" style="width:1280px;height:720px;">'
+                           '<div data-section-divider-background="1" style="position:absolute;'
+                           'inset:0;background-image:url(\'/old.png\');background-size:cover;'
+                           'background-position:center center;"></div>'
+                           '<div>تحليل السوق</div></div>')
+        out_kept = engine.renumber_presentation_slides(
+            [slides[0], slides[1], dict(slides[2], html=with_layer_html), slides[3]],
+            branding=self._branding(), project_data={'project_name': 'مشروع'},
+            creative_images={'cover': '/uploads/creative/t/cover.png'})
+        self.assertIn('data-section-divider-background', out_kept[2]['html'])
+        self.assertIn('/uploads/creative/t/cover.png', out_kept[2]['html'])
+
     def test_the_client_updates_the_cover_layer_instead_of_replanting_it(self):
         client = read_frontend_text()
         self.assertIn('function updateCoverBackgroundHtml', client)
         self.assertIn('coverBackgroundRemoved', client)
+        self.assertIn('sectionDividerBackgroundRemoved', client)
         self.assertIn('data-cover-background', client)
 
     def test_exec_badge_text_reads_a_multi_select_value(self):

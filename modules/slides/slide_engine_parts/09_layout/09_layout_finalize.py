@@ -539,12 +539,16 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['section_key'] = section_key
             if slide_type == 'section_divider' and section_key in PRESENTATION_SECTION_ORDER:
                 current_section = section_key
-        if slide_type == 'cover' and not item.get('coverBackgroundRemoved'):
-            cover_target = (creative_images.get('cover') or project_data.get('cover')
-                            or project_data.get('mainImageData') or '')
-            if cover_target:
-                item['html'] = _ensure_cover_background_element(
-                    item.get('html') or '', cover_target)
+        if slide_type == 'cover':
+            cover_html = item.get('html') or ''
+            if 'data-cover-background' in cover_html:
+                item['_cover_background_added'] = True
+            elif not item.get('coverBackgroundRemoved') and not item.get('_cover_background_added'):
+                cover_target = (creative_images.get('cover') or project_data.get('cover')
+                                or project_data.get('mainImageData') or '')
+                if cover_target:
+                    item['html'] = _ensure_cover_background_element(cover_html, cover_target)
+                    item['_cover_background_added'] = True
         if preserve_html or _designer_preserves_html(item):
             item['_designer_keep_html'] = True
             item['is_custom'] = True
@@ -577,6 +581,12 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                 continue
             html = _rewrite_preserved_counter(item.get('html') or '', slide_type, index, total)
             html = _strip_header_page_marker(html)
+            if slide_type == 'section_divider':
+                cover_target = (creative_images.get('cover') or project_data.get('cover')
+                                or project_data.get('mainImageData') or '')
+                if cover_target:
+                    html = _update_section_divider_background(html, cover_target)
+                html = _strip_forced_section_background(html)
             item['html'] = _strip_presentation_icons(html)
             continue
         # A designer-chat edit, user edit, or custom slide produced this HTML
@@ -633,7 +643,14 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                             curr_html = re.sub(cover_pat, cover_target, curr_html, flags=re.IGNORECASE)
                     item['html'] = curr_html
                 if cover_target:
-                    item['html'] = _force_section_divider_background(item.get('html') or '', cover_target)
+                    # Follow the current cover only when the divider still owns
+                    # its background layer; never plant it again after a delete.
+                    item['html'] = _update_section_divider_background(
+                        item.get('html') or '', cover_target)
+                # Older builds baked the photo into the root style, where the
+                # editor can never remove it. Strip that copy so the divider's
+                # own layer is the only source of the image.
+                item['html'] = _strip_forced_section_background(item.get('html') or '')
             else:
                 curr_html = _rewrite_slide_counter(
                     item.get('html') or '', slide_type, index, total)

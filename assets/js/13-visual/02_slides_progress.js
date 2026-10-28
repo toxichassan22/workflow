@@ -958,10 +958,17 @@
       // not leave an empty full-slide layer behind.
       const deleteTarget = watermarkOverlayOf(rawTarget) || rawTarget;
       if (!deleteTarget.parentElement) return;
-      if (deleteTarget.getAttribute && deleteTarget.getAttribute('data-cover-background') === '1') {
-        // Removing the cover photo is a deliberate edit: the save/renumber path
+      const coverBackground = deleteTarget.getAttribute
+        ? deleteTarget.getAttribute('data-cover-background') : '';
+      const dividerBackground = deleteTarget.getAttribute
+        ? deleteTarget.getAttribute('data-section-divider-background') : '';
+      if (coverBackground === '1' || dividerBackground === '1') {
+        // Removing a photo layer is a deliberate edit: the save/renumber path
         // must not plant it back on the next open.
-        slideData.coverBackgroundRemoved = true;
+        if (coverBackground === '1') slideData.coverBackgroundRemoved = true;
+        if (dividerBackground === '1') slideData.sectionDividerBackgroundRemoved = true;
+        slideData._designer_keep_html = true;
+        slideData.is_custom = true;
       }
       pushSlideEditHistory(index);
       deleteTarget.parentElement.removeChild(deleteTarget);
