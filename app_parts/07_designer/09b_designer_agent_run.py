@@ -725,12 +725,71 @@ def _agent_finish_task(result, ctx, tasks, executed, total, index, report):
     return task_cancelled, billing_stopped
 
 
+class _AgentRenderProxy:
+    """Owns one SlideRenderSession on a dedicated thread.
+
+    Playwright's sync API belongs to the thread that started it: a pool thread
+    calling the job thread's session deadlocks, and no lock can fix that. Every
+    render is marshalled to this proxy's own thread (and its own Chromium), so
+    the batch's tasks stay concurrent while rendering stays single-threaded.
+    """
+
+    def __init__(self, ctx):
+        import queue
+        self._queue = queue.Queue()
+        self._session = _agent_render_session(ctx.get('branding'), ctx.get('tenant_id'))
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    @property
+    def available(self):
+        return bool(getattr(self._session, 'available', False))
+
+    @property
+    def error(self):
+        return str(getattr(self._session, 'error', '') or '')
+
+    def _serve(self):
+        try:
+            while True:
+                item = self._queue.get()
+                if item is None:
+                    return
+                slide_html, screenshot, box = item
+                try:
+                    box['result'] = self._session.render(slide_html, screenshot=screenshot)
+                except Exception as exc:
+                    box['error'] = exc
+                finally:
+                    box['event'].set()
+        finally:
+            try:
+                self._session.__exit__()
+            except Exception:
+                pass
+
+    def render(self, slide_html, screenshot=True):
+        box = {'event': threading.Event()}
+        self._queue.put((slide_html, screenshot, box))
+        if not box['event'].wait(180):
+            return None, None
+        return box.get('result') or (None, None)
+
+    def close(self):
+        try:
+            self._queue.put(None)
+            self._thread.join(timeout=15)
+        except Exception:
+            pass
+
+
 def _agent_run_parallel(prepared, ctx, session, measure):
     """Run prepared tasks in a bounded pool; results come back in task order.
 
-    Each task gets its own deck copy and its own mutable context; the shared
-    Playwright session stays serialized through ``_session_lock``, and threads
-    never write the job document — the caller checkpoints in plan order.
+    Each task gets its own deck copy and its own mutable context; renders go
+    through the batch's own render thread (``_AgentRenderProxy``) because the
+    Playwright session cannot cross threads, and threads never write the job
+    document — the caller checkpoints in plan order.
     """
     import concurrent.futures
     try:
@@ -740,6 +799,7 @@ def _agent_run_parallel(prepared, ctx, session, measure):
         flask_app = None
     tenant_id = ctx.get('tenant_id')
     results = [None] * len(prepared)
+    renderer = _AgentRenderProxy(ctx) if measure else session
 
     def run_one(pos, task):
         task_ctx = dict(ctx)
@@ -756,8 +816,8 @@ def _agent_run_parallel(prepared, ctx, session, measure):
                 with flask_app.app_context():
                     from flask import g as thread_g
                     thread_g.tenant_id = tenant_id
-                    return pos, _agent_run_attempts(task, task_ctx, session, measure)
-            return pos, _agent_run_attempts(task, task_ctx, session, measure)
+                    return pos, _agent_run_attempts(task, task_ctx, renderer, measure)
+            return pos, _agent_run_attempts(task, task_ctx, renderer, measure)
         except Exception as exc:
             print(f"[DESIGNER-AGENT] parallel task {task.get('n')} raised: {exc}")
             return pos, {'task': task, 'ok': False, 'reply': None,
@@ -765,11 +825,15 @@ def _agent_run_parallel(prepared, ctx, session, measure):
                          'slides': task_ctx['slides'], 'before_htmls': [],
                          'attempts_log': []}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(prepared)) as pool:
-        futures = [pool.submit(run_one, pos, task) for pos, task in enumerate(prepared)]
-        for future in concurrent.futures.as_completed(futures):
-            pos, result = future.result()
-            results[pos] = result
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(prepared)) as pool:
+            futures = [pool.submit(run_one, pos, task) for pos, task in enumerate(prepared)]
+            for future in concurrent.futures.as_completed(futures):
+                pos, result = future.result()
+                results[pos] = result
+    finally:
+        if renderer is not session:
+            renderer.close()
     return results
 
 

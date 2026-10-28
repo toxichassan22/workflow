@@ -949,6 +949,39 @@ class AgentFlowTests(unittest.TestCase):
         self.assertNotIn('R1', slides[1]['html'])
         self.assertFalse(run['all_failed'])
 
+    def test_parallel_renders_keep_playwright_on_one_thread(self):
+        # Playwright's sync API is bound to the thread that started it; a pool
+        # thread calling the job thread's session deadlocked a live run at
+        # task 3/17 with Chromium idle and no provider call. Every render of a
+        # parallel batch must run on the batch's own render thread.
+        import threading
+        caller = threading.get_ident()
+        seen = []
+
+        class FakeRender(_NoRender):
+            available = True
+
+            def render(self, html, screenshot=True):
+                seen.append(threading.get_ident())
+                return None, {'ok': True}
+
+        ctx = {'branding': {}, 'tenant_id': self.tenant}
+        with patch.object(self.module, '_agent_render_session', return_value=FakeRender()):
+            proxy = self.module._AgentRenderProxy(ctx)
+            try:
+                workers = [threading.Thread(
+                    target=lambda: proxy.render('<div class="slide">x</div>'))
+                    for _ in range(2)]
+                for worker in workers:
+                    worker.start()
+                for worker in workers:
+                    worker.join()
+            finally:
+                proxy.close()
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(len(set(seen)), 1)
+        self.assertNotEqual(seen[0], caller)
+
     def test_structural_and_overlapping_tasks_stay_sequential(self):
         slides = [slide('<p>أ</p>'), slide('<p>ب</p>')]
         designer_agent_ids.ensure_slide_ids(slides)
