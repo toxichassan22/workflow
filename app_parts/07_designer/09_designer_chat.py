@@ -491,8 +491,8 @@ def api_designer_chat():
                 # the rest of the plan instead of paying for all of it.
                 planner_response = run_control.raise_if_cancelled(call_text_chat_stream(
                     planner_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS,
-                    model=VISION_MODEL if user_image_refs else GEMINI_TEXT_MODEL,
-                    reasoning_effort=None if user_image_refs else DESIGNER_REASONING_EFFORT,
+                    model=DESIGNER_AGENT_PLANNER_MODEL,
+                    reasoning_effort=DESIGNER_REASONING_EFFORT,
                     image_references=user_image_refs, timeout=300,
                     usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id)))
                 planner_raw = extract_chat_content(planner_response, 'DESIGNER-PLANNER')
@@ -574,8 +574,8 @@ def api_designer_chat():
                         planner_raw = extract_chat_content(
                             run_control.raise_if_cancelled(call_text_chat_stream(
                                 slim_prompt, message, max_tokens=DESIGNER_PLANNER_MAX_TOKENS,
-                                model=VISION_MODEL if user_image_refs else GEMINI_TEXT_MODEL,
-                                reasoning_effort=None if user_image_refs else DESIGNER_REASONING_EFFORT,
+                                model=DESIGNER_AGENT_PLANNER_MODEL,
+                                reasoning_effort=DESIGNER_REASONING_EFFORT,
                                 image_references=user_image_refs, timeout=300,
                                 usage_ctx=_usage_ctx('designer_chat', data, presentation_id=presentation_id))),
                             'DESIGNER-PLANNER')

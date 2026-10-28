@@ -249,8 +249,8 @@ HTML الحالي:
             # of the output instead of paying for all of it.
             edit_response = run_control.raise_if_cancelled(call_text_chat_stream(
                 prompt, instruction, max_tokens=DESIGNER_EDIT_MAX_TOKENS,
-                model=VISION_MODEL if image_refs else GEMINI_TEXT_MODEL,
-                reasoning_effort=None if image_refs else DESIGNER_REASONING_EFFORT,
+                model=DESIGNER_AGENT_WORKER_MODEL,
+                reasoning_effort=DESIGNER_REASONING_EFFORT,
                 image_references=image_refs, timeout=300,
                 usage_ctx=_usage_ctx('designer_chat', project_data, presentation_id=presentation_id)))
             raw = extract_chat_content(edit_response, 'DESIGNER-EDIT')

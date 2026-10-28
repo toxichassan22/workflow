@@ -152,12 +152,12 @@ def _agent_worker_call(ctx, user_content, *, slide_type='content', facts='',
             ctx, slide_type, facts, style_brief)},
         {'role': 'user', 'content': user_content},
     ]
-    worker_vision = isinstance(user_content, list) and any(
-        isinstance(part, dict) and part.get('type') == 'image_url' for part in user_content)
+    # The designer model is multimodal: the slide screenshot rides the same
+    # call instead of switching to a separate vision model.
     response = call_openrouter_messages(
         messages, response_format=_AGENT_WORKER_SCHEMA,
-        model=VISION_MODEL if worker_vision else DESIGNER_AGENT_WORKER_MODEL,
-        reasoning_effort=None if worker_vision else DESIGNER_REASONING_EFFORT,
+        model=DESIGNER_AGENT_WORKER_MODEL,
+        reasoning_effort=DESIGNER_REASONING_EFFORT,
         max_tokens=max_tokens, temperature=temperature, timeout=300,
         usage_ctx=_agent_usage_ctx(ctx))
     result = openrouter_response_message(response, 'DESIGNER-WORKER')

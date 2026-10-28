@@ -959,7 +959,13 @@ class AgentFlowTests(unittest.TestCase):
         seen = []
 
         class FakeRender(_NoRender):
-            available = True
+            available = False
+
+            def __enter__(self):
+                # Entering is what enables rendering; a proxy that forgets it
+                # silently dropped every screenshot.
+                self.available = True
+                return self
 
             def render(self, html, screenshot=True):
                 seen.append(threading.get_ident())
@@ -968,6 +974,7 @@ class AgentFlowTests(unittest.TestCase):
         ctx = {'branding': {}, 'tenant_id': self.tenant}
         with patch.object(self.module, '_agent_render_session', return_value=FakeRender()):
             proxy = self.module._AgentRenderProxy(ctx)
+            self.assertTrue(proxy.available)
             try:
                 workers = [threading.Thread(
                     target=lambda: proxy.render('<div class="slide">x</div>'))

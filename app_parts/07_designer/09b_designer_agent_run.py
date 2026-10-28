@@ -738,6 +738,13 @@ class _AgentRenderProxy:
         import queue
         self._queue = queue.Queue()
         self._session = _agent_render_session(ctx.get('branding'), ctx.get('tenant_id'))
+        # Entering is what marks the session available and loads Playwright;
+        # without it every render returned (None, None) and the worker silently
+        # lost the slide screenshot.
+        try:
+            self._session.__enter__()
+        except Exception:
+            pass
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._thread.start()
 

@@ -125,15 +125,36 @@ class VisionWiringTests(unittest.TestCase):
                 'VISION_MODEL if references else GEMINI_TEXT_MODEL',
             'app_parts/05_visual_plan/06b_visual_concept_edit.py':
                 'VISION_MODEL if (base_image or extra_images) else GEMINI_TEXT_MODEL',
-            'app_parts/07_designer/09a_designer_agent.py': 'VISION_MODEL if planner_vision',
-            'app_parts/07_designer/09c_designer_agent_worker.py': 'VISION_MODEL if worker_vision',
+            'app_parts/07_designer/09a_designer_agent.py':
+                'model=DESIGNER_AGENT_PLANNER_MODEL',
+            'app_parts/07_designer/09c_designer_agent_worker.py':
+                'model=DESIGNER_AGENT_WORKER_MODEL,',
             'app_parts/07_designer/09_designer_chat.py':
-                'model=VISION_MODEL if user_image_refs else GEMINI_TEXT_MODEL',
+                'model=DESIGNER_AGENT_PLANNER_MODEL',
             'app_parts/07_designer/08b_designer_edit_slide.py':
-                'model=VISION_MODEL if image_refs else GEMINI_TEXT_MODEL',
+                'model=DESIGNER_AGENT_WORKER_MODEL',
         }
         for relative, marker in expectations.items():
             self.assertIn(marker, read_part(relative), relative)
+
+    def test_designer_paths_never_route_images_to_the_vision_model(self):
+        # Owner rule (2026-10-28): the designer model sees the image itself;
+        # designer chat/work never switches to google/gemini-4-argon. The
+        # vision model still owns site/land/map document analysis.
+        for relative in ('app_parts/07_designer/08b_designer_edit_slide.py',
+                         'app_parts/07_designer/09a_designer_agent.py',
+                         'app_parts/07_designer/09c_designer_agent_worker.py',
+                         'app_parts/07_designer/09_designer_chat.py'):
+            source = read_part(relative)
+            self.assertNotIn('VISION_MODEL', source, relative)
+            self.assertNotIn('GEMINI_TEXT_MODEL', source, relative)
+        # The screenshots/attachments still travel with the call.
+        self.assertIn('image_references=user_image_refs',
+                      read_part('app_parts/07_designer/09_designer_chat.py'))
+        self.assertIn('image_references=image_refs',
+                      read_part('app_parts/07_designer/08b_designer_edit_slide.py'))
+        self.assertIn("'type': 'image_url'",
+                      read_part('app_parts/07_designer/09c_designer_agent_worker.py'))
 
     def test_land_documents_ride_the_vision_model(self):
         self.assertIn('LAND_ANALYSIS_MODEL = VISION_MODEL',
