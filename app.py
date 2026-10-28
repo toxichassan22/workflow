@@ -392,6 +392,10 @@ REQUIRE_TENANT_OPENROUTER_KEY = (
 VISION_MODEL = "google/gemini-4-argon"
 GEMINI_TEXT_MODEL = "google/gemini-4-argon"
 TEXT_REASONING_EFFORT = os.environ.get('TEXT_REASONING_EFFORT', 'high')
+# The designer chat edits slides that are already designed; the owner wants it
+# answering fast. It keeps its own effort so the rest of the text workflows are
+# unaffected. Vision calls still send no effort at all.
+DESIGNER_REASONING_EFFORT = os.environ.get('DESIGNER_REASONING_EFFORT', 'low')
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
 # The plans workflow (verify, boundary, distribution, notes, scene) runs its own

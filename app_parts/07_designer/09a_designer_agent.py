@@ -484,7 +484,7 @@ def _designer_agent_plan(ctx, session=None):
                 messages, tools=_DESIGNER_AGENT_TOOLS,
                 response_format=_AGENT_PLAN_SCHEMA,
                 model=VISION_MODEL if planner_vision else DESIGNER_AGENT_PLANNER_MODEL,
-                reasoning_effort=None if planner_vision else TEXT_REASONING_EFFORT,
+                reasoning_effort=None if planner_vision else DESIGNER_REASONING_EFFORT,
                 max_tokens=DESIGNER_PLANNER_MAX_TOKENS + 3000,
                 temperature=0.3, timeout=180,
                 usage_ctx=_agent_usage_ctx(ctx))

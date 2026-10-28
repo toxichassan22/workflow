@@ -72,6 +72,21 @@ class ModelConstantTests(unittest.TestCase):
         self.assertEqual(captured['model'], application.GEMINI_TEXT_MODEL)
         self.assertEqual(captured['reasoning_effort'], application.TEXT_REASONING_EFFORT)
 
+    def test_designer_chat_effort_is_low_and_separate_from_text(self):
+        # Owner rule (2026-10-28): the designer chat answers fast; the rest of
+        # the text workflows keep their own effort untouched.
+        self.assertEqual(application.DESIGNER_REASONING_EFFORT,
+                         os.environ.get('DESIGNER_REASONING_EFFORT') or 'low')
+        self.assertNotEqual(application.DESIGNER_REASONING_EFFORT,
+                            application.TEXT_REASONING_EFFORT)
+        for relative in ('app_parts/07_designer/08b_designer_edit_slide.py',
+                         'app_parts/07_designer/09a_designer_agent.py',
+                         'app_parts/07_designer/09c_designer_agent_worker.py',
+                         'app_parts/07_designer/09_designer_chat.py'):
+            source = read_part(relative)
+            self.assertIn('DESIGNER_REASONING_EFFORT', source, relative)
+            self.assertNotIn('TEXT_REASONING_EFFORT', source, relative)
+
     def test_vision_chat_keeps_no_default_effort(self):
         captured = {}
         with patch.object(application, '_has_any_openrouter_key', return_value=True), \
@@ -141,7 +156,7 @@ class TextWiringTests(unittest.TestCase):
             'app_parts/05_visual_plan/05a_visual_concept_plan.py': 'reasoning_effort=TEXT_REASONING_EFFORT',
             'app_parts/05_visual_plan/05ad_visual_plan_contract.py': 'reasoning_effort=TEXT_REASONING_EFFORT',
             'app_parts/05_visual_plan/06_visual_concept_routes.py': 'reasoning_effort=TEXT_REASONING_EFFORT',
-            'app_parts/07_designer/09c_designer_agent_worker.py': 'reasoning_effort=TEXT_REASONING_EFFORT',
+            'app_parts/07_designer/09c_designer_agent_worker.py': 'reasoning_effort=DESIGNER_REASONING_EFFORT',
             'app_parts/20_admin/21b_training_chat_actions.py': 'reasoning_effort=TEXT_REASONING_EFFORT',
         }
         for relative, marker in expectations.items():
