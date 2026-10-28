@@ -274,6 +274,19 @@ def format_timeline_phase_line(phase):
     return f"{phase['name']}: {detail}{notes_text}".strip(': ').strip()
 
 
+def _collapse_duplicate_timeline_gantts(items):
+    """Two timeline pages render the same deterministic Gantt — keep the first."""
+    kept = False
+    result = []
+    for item in items if isinstance(items, list) else []:
+        if isinstance(item, dict) and 'data-timeline-gantt' in str(item.get('html') or ''):
+            if kept:
+                continue
+            kept = True
+        result.append(item)
+    return result
+
+
 def _timeline_data_note(project_data):
     """Keep the phase table, including notes, outside the truncated project JSON."""
     phases = parse_timeline_phases(project_data)

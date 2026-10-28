@@ -323,6 +323,14 @@ def _slide_section_key(slide, current=''):
 
 
 _FIXED_DIVIDER_SECTION_KEYS = {'market', 'swot_risks'}
+_SECTION_DIVIDER_MAX_WORDS = 30
+
+
+def _slide_visible_word_count(html):
+    """Count rendered words only: a divider carries its section name, not a body."""
+    source = re.sub(r'<(style|script)\b[^>]*>.*?</\1>', ' ', str(html or ''),
+                    flags=re.IGNORECASE | re.DOTALL)
+    return len(re.sub(r'<[^>]+>', ' ', source).split())
 
 
 def _is_fixed_section_divider(slide, section_key=None):
@@ -334,7 +342,11 @@ def _is_fixed_section_divider(slide, section_key=None):
     if str(item.get('type') or '').strip().lower() == 'section_divider':
         return True
     title = re.sub(r'\s+', ' ', str(item.get('title') or '').strip())
-    return title == PRESENTATION_SECTION_TITLES.get(section, '')
+    if title != PRESENTATION_SECTION_TITLES.get(section, ''):
+        return False
+    # A divider carries the section name alone. A model-composed content page
+    # that happens to be titled «تحليل السوق» must never be retyped as one.
+    return _slide_visible_word_count(item.get('html')) <= _SECTION_DIVIDER_MAX_WORDS
 
 
 def _plan_slide_signature(slide):

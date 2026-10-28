@@ -342,6 +342,15 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
     phases = parse_timeline_phases(source)
     if phases:
         timeline_slides = [s for s in groups.get('timeline', []) if s.get('content_source') == 'timeline_table_data' or s.get('design_style') == 'timeline']
+        if not timeline_slides and groups.get('timeline'):
+            # The planner already proposed a timeline page under another style;
+            # adopt it instead of adding a second page that renders the same Gantt.
+            adopted = groups['timeline'][0]
+            adopted.update({
+                'type': 'content', 'design_style': 'timeline',
+                'content_source': 'timeline_table_data', 'requires_image': False,
+            })
+            timeline_slides = [adopted]
         if not timeline_slides:
             add('timeline', {
                 'title': 'Timeline & Development Phases' if lang == OFFER_LANG_ENGLISH else 'الجدول الزمني ومراحل التطوير', 'type': 'content',

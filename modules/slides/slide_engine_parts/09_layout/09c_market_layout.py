@@ -198,6 +198,29 @@ def _normalize_market_content_layout(html, slide_type='', slide_title='', conten
     return html[:root_match.start()] + replacement + html[root_end:]
 
 
+_FORCED_SECTION_BACKGROUND_RE = re.compile(
+    r"background-image\s*:\s*url\([^)]*\)\s*!important\s*;\s*"
+    r"background-size\s*:\s*cover\s*!important\s*;\s*"
+    r"background-position\s*:\s*center\s+center\s*!important\s*;\s*"
+    r"background-repeat\s*:\s*no-repeat\s*!important\s*;?",
+    re.IGNORECASE,
+)
+
+
+def _strip_forced_section_background(html):
+    """Remove the cover photo a misclassified divider forced onto a content page."""
+    return _FORCED_SECTION_BACKGROUND_RE.sub('', str(html or ''))
+
+
+def _restore_misclassified_section_divider(item, section_key):
+    """A market/swot content page retyped as a divider because of its title."""
+    if str(item.get('type') or '').strip().lower() != 'section_divider':
+        return False
+    if section_key not in _FIXED_DIVIDER_SECTION_KEYS:
+        return False
+    return _slide_visible_word_count(item.get('html')) > _SECTION_DIVIDER_MAX_WORDS
+
+
 def _strip_market_slide_media(html):
     """Keep competitor logos while removing maps and unrelated images from market slides."""
     protected_images = []

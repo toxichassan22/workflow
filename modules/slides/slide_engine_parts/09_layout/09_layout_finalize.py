@@ -518,6 +518,11 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['section_key'] = 'index'
         else:
             section_key = _slide_section_key(item, current_section)
+            if _restore_misclassified_section_divider(item, section_key):
+                slide_type = 'content'
+                item['type'] = 'content'
+                item.pop('design_style', None)
+                item['html'] = _strip_forced_section_background(item.get('html') or '')
             if _is_fixed_section_divider(item, section_key):
                 slide_type = 'section_divider'
                 current_title = str(item.get('title') or '').strip()
@@ -544,6 +549,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['html'] = _normalize_watermark_ink(item['html'])
         normalized.append(item)
 
+    normalized = _collapse_duplicate_timeline_gantts(normalized)
     refresh_index_entries({'slides': normalized}, offer_lang=lang)
     for index, item in enumerate(normalized, 1):
         slide_type = str(item.get('type') or 'content')
