@@ -359,7 +359,11 @@ def sanitize_search_query(query):
 
 
 def _search_url(provider, query, cap):
-    q = quote_plus(str(query))
+    q_str = str(query or '')
+    if q_str and not re.search(r'\b(?:السعودية|المملكة|Saudi|KSA)\b', q_str, re.I):
+        if re.search(r'\b(?:جدة|الرياض|الدمام|مكة|المدينة|الخبر|Jeddah|Riyadh)\b', q_str, re.I):
+            q_str = q_str + ' السعودية'
+    q = quote_plus(q_str)
     if provider == 'ddg':
         return _DDG_URL + q
     if provider == 'bing':

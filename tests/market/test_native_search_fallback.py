@@ -149,6 +149,25 @@ class NativeSearchFallbackTests(unittest.TestCase):
         self.assertEqual(
             dead_fn('https://walmart.com/stores'),
             'dead_source')
+        self.assertEqual(
+            dead_fn('https://www.diamondmaterials.com/about/'),
+            'dead_source')
+        self.assertEqual(
+            dead_fn('https://us-contractor.us/road-paving'),
+            'dead_source')
+        self.assertEqual(
+            dead_fn('https://somedomain.co.uk/project'),
+            'dead_source')
+
+    def test_native_fallback_prompt_anchors_guidance_and_scope(self):
+        prompt_fn = getattr(self.module, '_native_fallback_prompt', None)
+        self.assertTrue(callable(prompt_fn))
+        task = {'axis': {'key': 'villas', 'operation': 'sale', 'label': 'فلل للبيع'}}
+        payload = {'city': 'جدة', 'district': 'الروضة', 'competitorScope': {'districts': ['الروضة', 'الخالدية']}}
+        res = prompt_fn('BASE_PROMPT', task, payload, offer_lang='ar')
+        self.assertIn('جدة', res)
+        self.assertIn('توجيه إضافي لبحث الويب الأصلي', res)
+        self.assertIn('مشاريع ومجمعات حقيقية', res)
 
 
 if __name__ == '__main__':

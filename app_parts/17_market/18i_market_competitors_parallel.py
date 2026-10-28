@@ -714,14 +714,38 @@ def _native_fallback_needed(result):
     return False
 
 
+def _native_fallback_prompt(prompt, task, payload, offer_lang='ar'):
+    axis = (task or {}).get('axis') if isinstance((task or {}).get('axis'), dict) else {}
+    city = str((payload or {}).get('city') or 'جدة').strip()
+    scope = (payload or {}).get('competitorScope') or (payload or {}).get('competitor_scope') or {}
+    districts = market_study.competitor_scope_districts(
+        scope, (payload or {}).get('district') or (payload or {}).get('neighborhood'))
+    districts_str = '، '.join(districts) if districts else str((payload or {}).get('district') or '')
+    axis_label = market_study.benchmark_axis_label(axis, offer_lang) if axis else str((task or {}).get('label') or 'المنافسين')
+    guidance = (
+        f'ابحث في الويب عن مشاريع ومجمعات حقيقية معلنة أو عروض مطورين عقاريين نشطين في {city} تطابق «{axis_label}». '
+        f'إذا كانت أسماء المشاريع التسويقية نادرة في الأحياء المحددة بالتحديد، اذكر مشاريع ومجمعات حقيقية مطابقة في {city} '
+        'من مطورين معروفين مع ذكر الحي ومصدر السعر والمساحة بدلاً من إرجاع قائمة فارغة. '
+        'أعد الناتج بتنسيق JSON حصراً يحتوي على قائمة "competitors" تحوي المنافسين.'
+        if offer_lang != 'en' else
+        f'Search the web for real projects, compounds, and developer offerings in {city} matching "{axis_label}". '
+        f'If named branded projects in the specific listed neighborhoods are scarce, include comparable real developer projects '
+        f'and villa/commercial compounds in {city} with documented pricing and area rather than returning an empty list.'
+    )
+    return f"{prompt}\n\nتوجيه إضافي لبحث الويب الأصلي:\n{guidance}"
+
+
 def _native_search_fallback(system_prompt, prompt, usage_ctx, evidence_pool,
-                            deadline, search_budget=3, max_steps=6):
+                            deadline, search_budget=3, max_steps=6,
+                            task=None, payload=None, offer_lang='ar'):
     """One provider-native OpenRouter web search when the browser search layer
     is blocked. The owner ordered this fallback for genuinely refused search
     engines; it runs on MARKET_STUDY_MODEL, never a model of its own."""
     try:
+        effective_prompt = _native_fallback_prompt(
+            prompt, task, payload, offer_lang=offer_lang) if task else prompt
         response = _browse_agent_call(
-            system_prompt, prompt, usage_ctx,
+            system_prompt, effective_prompt, usage_ctx,
             evidence_pool=evidence_pool, deadline=deadline,
             local_tools=False,
             plugins=[{'id': 'web', 'max_results': 5}],
@@ -820,7 +844,8 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
         fallback = _native_search_fallback(
             system_prompt, prompt,
             _usage_ctx('market', data, tenant_id=tenant_id),
-            evidence_pool, fallback_deadline, search_budget=3, max_steps=6)
+            evidence_pool, fallback_deadline, search_budget=3, max_steps=6,
+            task=task, payload=payload, offer_lang=offer_lang)
         fallback_count = len((fallback or {}).get('parsed', {}).get('competitors') or [])
         if fallback and fallback_count > competitor_count:
             fallback['task'] = task
@@ -1024,12 +1049,15 @@ def _run_expansion_scan_task(task, payload, existing, mode, offer_lang,
         'search_blocked': search_blocked,
         'pages_blocked': pages_blocked,
     }
-    if _native_fallback_needed(result):
+    competitor_count = len(parsed.get('competitors') or []) if isinstance(parsed, dict) else 0
+    if _native_fallback_needed(result) or competitor_count < 2:
         fallback = _native_search_fallback(
             system_prompt, prompt,
             _usage_ctx('market', data, tenant_id=tenant_id),
-            evidence_pool, deadline, search_budget=3, max_steps=6)
-        if fallback and fallback.get('parsed', {}).get('competitors'):
+            evidence_pool, deadline, search_budget=3, max_steps=6,
+            task=task, payload=payload, offer_lang=offer_lang)
+        fallback_count = len((fallback or {}).get('parsed', {}).get('competitors') or [])
+        if fallback and fallback_count > competitor_count:
             fallback['task'] = task
             print(f'[MARKET STUDY] native search fallback used for '
                   f'{task.get("label") or "expansion"}', flush=True)
