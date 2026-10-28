@@ -550,7 +550,7 @@
         cleanHtml = forceSectionDividerBackgroundHtml(cleanHtml, coverImage);
       } else if (coverImage && (slideType === 'cover' || cleanHtml.includes('class="slide cover"') || cleanHtml.includes("class='slide cover'"))) {
         if (!cleanHtml.includes(coverImage) && !cleanHtml.includes('background-image')) {
-          const bgDiv = '<div aria-hidden="true" style="position:absolute;inset:0;z-index:0;background-image:url(\'' + coverImage.replace(/'/g, "\\'") + '\');background-size:cover;background-position:center;"></div>';
+          const bgDiv = '<div aria-hidden="true" data-slide-live-only="1" style="position:absolute;inset:0;z-index:0;background-image:url(\'' + coverImage.replace(/'/g, "\\'") + '\');background-size:cover;background-position:center;"></div>';
           cleanHtml = cleanHtml.replace(/(<div[^>]*class=["']slide[^"']*["'][^>]*>)/i, '$1' + bgDiv);
         }
       }
@@ -718,6 +718,7 @@
           const parent = node.parentElement;
           if (!parent) return NodeFilter.FILTER_REJECT;
           if (parent.closest('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return NodeFilter.FILTER_REJECT;
+          if (parent.closest('[data-slide-live-only="1"]')) return NodeFilter.FILTER_REJECT;
           const tag = parent.tagName;
           if (tag === 'SCRIPT' || tag === 'STYLE') return NodeFilter.FILTER_REJECT;
           return NodeFilter.FILTER_ACCEPT;
@@ -765,13 +766,30 @@
       autoFitSlideContent(stage);
     }
 
+    /* Editor chrome (move/resize handles, the hover delete button) and the
+       preview-only cover photo are appended inside the slide. Paths must skip
+       them or an edit that changes the text-node count lands on a neighbour. */
+    function slidePathIgnores(node) {
+      if (!node || node.nodeType !== 1) return false;
+      const flag = node.getAttribute ? String(node.getAttribute('data-slide-live-only') || '') : '';
+      if (flag === '1') return true;
+      const classes = node.classList;
+      if (!classes) return false;
+      return classes.contains('slide-resize-handle')
+        || classes.contains('slide-move-handle')
+        || classes.contains('slide-element-delete-btn');
+    }
+
     function slideElementPath(root, element) {
       const path = [];
       let node = element;
       while (node && node !== root) {
         const parent = node.parentElement;
         if (!parent) return null;
-        path.unshift(Array.prototype.indexOf.call(parent.children, node));
+        const children = Array.from(parent.children).filter(child => !slidePathIgnores(child));
+        const index = children.indexOf(node);
+        if (index === -1) return null;
+        path.unshift(index);
         node = parent;
       }
       return node === root ? path : null;
@@ -780,8 +798,10 @@
     function elementAtSlidePath(root, path) {
       let node = root;
       for (const index of path || []) {
-        if (!node || !node.children || !node.children[index]) return null;
-        node = node.children[index];
+        if (!node || !node.children) return null;
+        const children = Array.from(node.children).filter(child => !slidePathIgnores(child));
+        node = children[index];
+        if (!node) return null;
       }
       return node;
     }
