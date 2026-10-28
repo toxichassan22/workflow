@@ -860,7 +860,7 @@
           toast(data.error || completion);
           return;
         }
-        updateLoaderProgress(82, 'جاري تحديث الهوية البصرية...');
+        updateLoaderStep('جاري تحديث الهوية البصرية...');
         tenantBranding = data.branding || { ...(tenantBranding || {}), watermark_path: data.watermarkPath };
         renderSettingsWatermarkPreview(tenantBranding);
         completion = 'تم رفع العلامة المائية';

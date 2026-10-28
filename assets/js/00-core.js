@@ -15,135 +15,10 @@
       return '';
     }
 
-    let loaderProgressTimer = null;
-    let loaderHideTimer = null;
-    let loaderProgressValue = 0;
-    let loaderProgressStartValue = 0;
-    let loaderProgressAnchorAt = 0;
-    let loaderProgressMax = 92;
-    let loaderProgressReal = false;
-    let loaderSessionActive = false;
-    let genProgressValue = 0;
-    const inlineLoaderTimers = new WeakMap();
-
-    function clampLoaderProgress(pct) {
-      const value = Number(pct);
-      return Number.isFinite(value) ? Math.max(0, Math.min(100, Math.round(value))) : 0;
-    }
-
-    function renderLoaderProgress(pct, stepText, options = {}) {
-      const requested = clampLoaderProgress(pct);
-      const allowDecrease = !!options.allowDecrease;
-      const value = allowDecrease ? requested : Math.max(loaderProgressValue, requested);
-      const bar = document.getElementById('globalLoaderBar');
-      const pctEl = document.getElementById('globalLoaderPct');
-      const stepEl = document.getElementById('globalLoaderStep');
-      const track = bar ? bar.parentElement : null;
-      loaderProgressValue = value;
-      if (bar) bar.style.width = value + '%';
-      if (pctEl) pctEl.textContent = value + '%';
-      if (stepEl && stepText !== undefined && stepText !== null) stepEl.textContent = stepText || '';
-      if (track) track.setAttribute('aria-valuenow', String(value));
-    }
-
-    function stopLoaderProgressTimer() {
-      if (loaderProgressTimer) {
-        clearInterval(loaderProgressTimer);
-        loaderProgressTimer = null;
-      }
-    }
-
-    function startLoaderProgressTimer() {
-      stopLoaderProgressTimer();
-      loaderProgressAnchorAt = Date.now();
-      loaderProgressStartValue = loaderProgressValue;
-      loaderProgressTimer = setInterval(() => {
-        const elapsed = Date.now() - loaderProgressAnchorAt;
-        // Once real numbers arrive the drift only smooths the gap to the next
-        // report — +3 keeps the bar honest instead of inventing a stage.
-        const ceiling = loaderProgressReal
-          ? Math.min(loaderProgressMax, loaderProgressStartValue + 3)
-          : loaderProgressMax;
-        const estimated = Math.min(ceiling, loaderProgressStartValue + Math.max(1, Math.floor(elapsed / 900)));
-        if (estimated > loaderProgressValue) renderLoaderProgress(estimated);
-      }, 700);
-    }
-
-    function showLoader(title, text, pct, options = {}) {
-      const loader = document.getElementById('globalLoader');
-      if (!loader) return;
-      const alreadyVisible = loader.style.display === 'flex';
-      const continueExisting = alreadyVisible && loaderSessionActive && options.reset !== true;
-      clearTimeout(loaderHideTimer);
-      document.getElementById('globalLoaderTitle').textContent = title || WFT('loader.loading', 'جاري التحميل...');
-      document.getElementById('globalLoaderText').textContent = text || '';
-      document.getElementById('globalLoaderProgress').style.display = 'block';
-      loaderProgressMax = Number.isFinite(Number(options.maxProgress)) ? Math.max(1, Math.min(99, Number(options.maxProgress))) : 92;
-      const nextPct = pct === undefined || pct === null ? (continueExisting ? loaderProgressValue : 5) : pct;
-      if (continueExisting) {
-        renderLoaderProgress(nextPct, text || WFT('loader.preparing', 'جاري التحضير...'));
-      } else {
-        loaderSessionActive = true;
-        loaderProgressValue = 0;
-        loaderProgressReal = false;
-        renderLoaderProgress(nextPct, text || WFT('loader.preparing', 'جاري التحضير...'), { allowDecrease: true });
-      }
-      loader.style.display = 'flex';
-      // A long paid operation shows the stop button; a short one never does.
-      const stopButton = document.getElementById('globalLoaderStopButton');
-      if (stopButton) {
-        stopButton.style.display = options.stoppable ? 'inline-flex' : 'none';
-        if (options.stoppable) {
-          if (typeof resetTenantGenerationStop === 'function') {
-            resetTenantGenerationStop();
-          }
-          stopButton.disabled = false;
-          stopButton.textContent = WFT('gen.stop', 'إيقاف');
-        }
-      }
-      startLoaderProgressTimer();
-    }
-
-    // The work a long operation is doing right now, in words. The percentage is
-    // not a step: the client has to see what the server is actually doing.
-    function updateLoaderMessage(text) {
-      const el = document.getElementById('globalLoaderText');
-      if (el) el.textContent = String(text || '');
-    }
-
-    function updateLoaderProgress(pct, stepText) {
-      const prog = document.getElementById('globalLoaderProgress');
-      if (prog) prog.style.display = 'block';
-      renderLoaderProgress(pct, stepText);
-      loaderProgressReal = true;
-      loaderProgressAnchorAt = Date.now();
-      // Anchor the drift window to the last REPORTED value, not the displayed
-      // one — otherwise each real update re-anchors above creep's own drift and
-      // the bar ratchets far ahead of actual progress again.
-      loaderProgressStartValue = clampLoaderProgress(pct);
-    }
-
-    function hideLoader(completionText) {
-      const loader = document.getElementById('globalLoader');
-      if (!loader || loader.style.display === 'none') return;
-      stopLoaderProgressTimer();
-      renderLoaderProgress(100, completionText || WFT('loader.done', 'اكتمل'));
-      const textEl = document.getElementById('globalLoaderText');
-      if (textEl) textEl.textContent = completionText || WFT('loader.loaded', 'اكتمل التحميل');
-      clearTimeout(loaderHideTimer);
-      loaderHideTimer = setTimeout(() => {
-        loader.style.display = 'none';
-        loaderSessionActive = false;
-        loaderProgressMax = 92;
-        loaderProgressReal = false;
-        renderLoaderProgress(0, WFT('loader.preparing', 'جاري التحضير...'), { allowDecrease: true });
-      }, 420);
-    }
-
     async function readBlobWithProgress(response, startPct, endPct) {
       const total = Number(response.headers.get('content-length') || 0);
       if (!response.body || !total) {
-        updateLoaderProgress(endPct - 2, WFT('loader.preparing_file', 'جاري تجهيز الملف للتحميل...'));
+        updateLoaderStep(WFT('loader.preparing_file', 'جاري تجهيز الملف للتحميل...'));
         return response.blob();
       }
       const reader = response.body.getReader();
@@ -156,148 +31,11 @@
         received += result.value.byteLength;
         const ratio = Math.min(1, received / total);
         const pct = startPct + Math.round(ratio * (endPct - startPct));
-        updateLoaderProgress(pct, WFT('loader.uploading_file', 'جاري تحميل الملف ({pct}%)...', { pct: pct }));
+        // Bytes actually received out of a known length: a real fraction.
+        updateLoaderProgress(pct, WFT('loader.uploading_file', 'جاري تحميل الملف ({pct}%)...', { pct: pct }), true);
       }
       return new Blob(chunks, { type: response.headers.get('content-type') || 'application/octet-stream' });
     }
-
-    function showInlineLoader(container, text) {
-      if (!container) return;
-      const previousTimer = inlineLoaderTimers.get(container);
-      if (previousTimer) clearInterval(previousTimer);
-      const label = String(text || 'جاري التحميل...')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-      container.innerHTML =
-        '<div class="inline-loading-box">' +
-        '<div class="inline-loading-header"><span>' + label + '</span><strong data-inline-loader-pct>5%</strong></div>' +
-        '<div class="inline-loading-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="5">' +
-        '<div class="inline-loading-fill" data-inline-loader-bar style="width:5%"></div>' +
-        '</div></div>';
-      inlineLoaderTimers.delete(container);
-    }
-
-    function setInlineLoaderProgress(container, pct, text) {
-      if (!container) return;
-      const bar = container.querySelector('[data-inline-loader-bar]');
-      const pctEl = container.querySelector('[data-inline-loader-pct]');
-      const track = bar?.parentElement;
-      const value = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
-      if (bar) bar.style.width = value + '%';
-      if (pctEl) pctEl.textContent = value + '%';
-      if (track) track.setAttribute('aria-valuenow', String(value));
-      if (text) {
-        const labelEl = container.querySelector('.inline-loading-header span:first-child');
-        if (labelEl) labelEl.textContent = text;
-      }
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // FULL-PAGE GENERATION PROGRESS
-    // ═══════════════════════════════════════════════════════════════
-    const GEN_STEPS = [
-      { id: 'plan', label: 'إعداد خطة الشرائح' },
-      { id: 'prompts', label: 'صياغة أوصاف الصور' },
-      { id: 'images', label: 'توليد الصور الإبداعية' },
-      { id: 'maps', label: 'توليد خرائط الموقع' },
-      { id: 'slides', label: 'توليد الشرائح' },
-      { id: 'save', label: 'حفظ العرض' }
-    ];
-    let genStartMs = 0;
-
-    function showGenProgress() {
-      genStartMs = Date.now();
-      genProgressValue = 0;
-      showTenantPage('tenantSlidesPage');
-    }
-
-    function setGenPct(pct, subtitle) {
-      const requested = clampLoaderProgress(pct);
-      const value = Math.max(genProgressValue, requested);
-      genProgressValue = value;
-      const bar = document.getElementById('genBar');
-      const pctEl = document.getElementById('genPct');
-      const subEl = document.getElementById('genSubtitle');
-      const etaEl = document.getElementById('genEta');
-      if (bar) bar.style.width = value + '%';
-      if (pctEl) pctEl.textContent = value + '%';
-      if (subEl && subtitle) subEl.textContent = subtitle;
-      if (etaEl && genStartMs && value > 2) {
-        const elapsed = (Date.now() - genStartMs) / 1000;
-        const remaining = Math.max(0, Math.round((elapsed / value) * (100 - value)));
-        etaEl.innerHTML = '<span>متبقي ~</span>' + remaining + ' <span>ثانية</span>';
-      }
-    }
-
-    function setGenStep(stepId, state) {
-      const el = document.getElementById('genStep_' + stepId);
-      if (!el) return;
-      const dot = el.querySelector('.gen-dot-wrapper');
-      const label = el.querySelector('span:first-child');
-      const status = el.querySelector('.gen-step-status');
-      if (state === 'active') {
-        el.style.background = 'var(--soft)';
-        el.style.borderColor = 'var(--p)';
-        el.style.boxShadow = '0 2px 6px rgba(0,0,0,0.08)';
-        if (dot) { dot.style.background = 'var(--p)'; dot.style.color = '#fff'; }
-        if (label) { label.style.color = 'var(--p)'; label.style.fontWeight = '700'; }
-        if (status) { status.textContent = 'جاري التنفيذ...'; status.style.color = 'var(--p)'; status.style.fontWeight = '600'; }
-      } else if (state === 'done') {
-        el.style.background = '#f0fdf4';
-        el.style.borderColor = '#bbf7d0';
-        el.style.boxShadow = 'none';
-        if (dot) { dot.style.background = '#16a34a'; dot.style.color = '#fff'; }
-        if (label) { label.style.color = '#166534'; label.style.fontWeight = '600'; }
-        if (status) { status.textContent = 'مكتمل'; status.style.color = '#16a34a'; status.style.fontWeight = '500'; }
-      } else if (state === 'error') {
-        el.style.background = '#fef2f2';
-        el.style.borderColor = '#fecaca';
-        el.style.boxShadow = 'none';
-        if (dot) { dot.style.background = '#dc2626'; dot.style.color = '#fff'; }
-        if (label) { label.style.color = '#991b1b'; }
-        if (status) { status.textContent = 'تخطي / غير متاح'; status.style.color = '#dc2626'; }
-      }
-    }
-
-    function hideGenProgress() {
-      const bar = document.getElementById('genBar');
-      if (bar) bar.style.width = '100%';
-      setGenPct(100, 'اكتمل!');
-      setTimeout(() => {
-        hideLoader();
-      }, 600);
-    }
-
-    function setLiveGenBanner(visible, title, details, pct) {
-      const banner = document.getElementById('tenantLiveGenBanner');
-      if (!banner) return;
-      if (!visible) {
-        banner.style.display = 'none';
-        return;
-      }
-      banner.style.display = 'block';
-      const titleEl = document.getElementById('liveGenSlideTitle');
-      const detailsEl = document.getElementById('liveGenSlideDetails');
-      const barEl = document.getElementById('liveGenProgressBar');
-      const pctEl = document.getElementById('liveGenProgressPct');
-      const resumeButton = document.getElementById('liveGenResumeButton');
-      if (titleEl && title) titleEl.textContent = title;
-      if (detailsEl) detailsEl.textContent = details || '';
-      if (resumeButton) {
-        const checkpoint = tenantSlideGenerationCheckpoint || tenantProjectData?.slide_generation_checkpoint;
-        const resumable = checkpoint?.status === 'paused' && checkpoint?.active !== false;
-        resumeButton.style.display = resumable ? 'inline-flex' : 'none';
-      }
-      if (typeof pct === 'number') {
-        const clampedPct = Math.max(0, Math.min(100, Math.round(pct)));
-        if (barEl) barEl.style.width = clampedPct + '%';
-        if (pctEl) pctEl.textContent = clampedPct + '%';
-      }
-    }
-
     //  TENANT UI (Multi-Tenant Frontend)
     // ═══════════════════════════════════════════════════════════════════════
     const T_TOKEN_KEY = 'tenant_token';
@@ -685,7 +423,6 @@
       }
 
       const totalSteps = (needImages ? 1 : 0) + (needMaps ? 1 : 0);
-      let currentStep = 0;
       const generationPageActive = document.getElementById('tenantGenerationPage')?.classList.contains('active');
       const globalLoader = document.getElementById('globalLoader');
       const ownsGlobalLoader = totalSteps > 0 && !generationPageActive && globalLoader && globalLoader.style.display !== 'flex';
@@ -693,9 +430,6 @@
         const task = needImages && needMaps ? 'جاري تجهيز الصور والخرائط...' : (needImages ? 'جاري توليد الصور...' : 'جاري توليد خرائط الموقع...');
         showLoader('جاري تجهيز أصول العرض', task, 5);
       }
-      const basePct = ownsGlobalLoader ? 5 : 60;
-      const progressSpan = ownsGlobalLoader ? 87 : 30;
-      const stepPct = totalSteps > 0 ? Math.round(progressSpan / totalSteps) : 0;
 
       function recordError(res, fallback) {
         tenantCreativeImages.last_error =
@@ -709,7 +443,6 @@
         const staleImages = !hasStoredImages();
         if (!force && !staleImages) {
           console.log('[ASSETS] reusing stored cover/moodboard');
-          currentStep++;
           if (document.getElementById('tenantGenerationPage')?.classList.contains('active')) {
             setGenStep('images', 'done');
           }
@@ -718,7 +451,7 @@
             setGenStep('prompts', 'active');
             setGenPct(22, 'صياغة أوصاف الصور بالذكاء الاصطناعي...');
           }
-          updateLoaderProgress(basePct, 'جاري توليد الصور الإبداعية...');
+          updateLoaderStep('جاري توليد الصور الإبداعية...');
           const payload = {
             projectData: tenantProjectData,
             includeCover: includeCover !== false,
@@ -740,8 +473,7 @@
           } else {
             recordError(res, 'تعذر الاتصال بالسيرفر أثناء توليد الصور');
           }
-          currentStep++;
-          updateLoaderProgress(basePct + stepPct * currentStep, 'اكتمل توليد الصور');
+          updateLoaderStep('اكتمل توليد الصور');
         }
       }
 

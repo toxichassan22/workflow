@@ -266,7 +266,8 @@
           }
           const done = created + failed;
           const target = Math.max(1, totalKeyless || done || 1);
-          updateLoaderProgress(Math.min(95, Math.round((done / target) * 100)));
+          // Created plus failed rows out of the rows this run set out to do.
+          updateLoaderProgress(Math.min(95, Math.round((done / target) * 100)), undefined, true);
           if (!data.results || !data.results.length) break;
           const remaining = (data.remaining_keyless !== undefined && data.remaining_keyless !== null)
             ? data.remaining_keyless : keyless;

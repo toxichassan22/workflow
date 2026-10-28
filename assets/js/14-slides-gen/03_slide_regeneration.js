@@ -525,6 +525,11 @@
       tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', requestBody)
         .then(async res => {
           if (!(res && res.jobId && !res.plan)) return res;
+          // The queued answer already carries the real step list, so the card
+          // shows the plan from the first moment instead of a blank wait.
+          if (typeof onProgress === 'function') {
+            try { onProgress(res); } catch (progressError) { /* display-only */ }
+          }
           // The plan is a paid call too: its run handle is stoppable.
           registerTenantGenerationRun(res.jobId);
           const completed = await pollTenantSlidePlanJob(res.jobId, onProgress);

@@ -397,7 +397,7 @@
         showTenantPage('tenantSlidesPage');
 
         // Set up live generation banner
-        setLiveGenBanner(true, 'بدء توليد الشرائح بالذكاء الاصطناعي...', WFT('gen.total_slides', 'إجمالي {n} شريحة', { n: totalSlides }), 10);
+        setLiveGenBanner(true, 'بدء توليد الشرائح بالذكاء الاصطناعي...', WFT('gen.total_slides', 'إجمالي {n} شريحة', { n: totalSlides }), 0);
         // The stop button stays available for the whole run: it is the only
         // way to stop before the remaining slides are paid for.
         setTenantGenerationStopVisible(true);
@@ -525,7 +525,9 @@
         function updateGenerationBanner() {
           if (generationFinished) return;
           const done = tenantSlidesData.length;
-          const slidePct = Math.round(20 + (done / totalSlides) * 75);
+          // Completed slides are the only measured unit of this run; the old
+          // 20 + 75 offset claimed work that had not happened yet.
+          const slidePct = totalSlides ? Math.round((done / totalSlides) * 100) : 0;
           const activeTitles = [];
           Object.keys(pendingSlides).forEach((key) => {
             const idx = Number(key);
@@ -803,7 +805,8 @@
 
         if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !containsSlideRoot(s.html))) {
           await settleGenerationRun(false, 'لم يكتمل التوليد');
-          setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ', 90);
+          setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ',
+            totalSlides ? Math.round((tenantSlidesData.length / totalSlides) * 100) : 0);
           toast('لم يكتمل توليد العرض، لذلك لم يتم حفظه.');
           return;
         }

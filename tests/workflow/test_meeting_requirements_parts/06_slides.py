@@ -1817,6 +1817,20 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertIn('const value = Math.max(genProgressValue, requested);', index_source)
         self.assertIn('let genProgressValue = 0;', index_source)
 
+    def test_progress_is_measured_never_invented_by_the_clock(self):
+        index_source = read_frontend_text()
+        # The old engine grew the bar by one point every ~900ms whether or not
+        # the server had done anything. That creep, and the estimate it fed,
+        # are the reason a stuck job looked alive.
+        self.assertNotIn('loaderProgressStartValue', index_source)
+        self.assertNotIn('Math.floor(elapsed / 900)', index_source)
+        self.assertNotIn("elapsedEl.innerHTML = '<span>متبقي ~</span>' + remaining", index_source)
+        # Real step progress is the replacement: a job payload renders its
+        # checklist, and a plan without a measured fraction is indeterminate.
+        self.assertIn('function applyLoaderJobProgress(job)', index_source)
+        self.assertIn('function renderLoaderSteps(steps, activeKey)', index_source)
+        self.assertIn('setLoaderIndeterminate(true)', index_source)
+
     def test_presentation_bulk_map_regeneration_is_rejected_without_mutation(self):
         with self.app.app_context():
             pres_id = db.create_presentation(

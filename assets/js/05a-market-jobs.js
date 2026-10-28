@@ -197,13 +197,9 @@
         { stoppable: true }
       );
       try {
-        let lastJobPct = 10;
-        const onProgress = job => {
-          const pct = Number(job && job.progress);
-          if (Number.isFinite(pct) && pct > 0) lastJobPct = Math.min(pct, 99);
-          updateLoaderProgress(lastJobPct,
-            (job && job.message) || 'جاري البحث...');
-        };
+        // The job names the stage it is on; its progress constant is authored,
+        // so the card follows the words instead of an invented fraction.
+        const onProgress = job => applyLoaderJobProgress(job);
         let res = await resumeMarketJob('competitors', onProgress,
           () => { if (note) note.textContent = marketJobResumedText(); });
         const resumed = res !== null;
@@ -213,7 +209,7 @@
           res = await api('POST', '/api/market-study/competitors', payload);
           if (res && res.jobId && !Array.isArray(res.competitors)) {
             rememberMarketJob('competitors', res.jobId);
-            updateLoaderProgress(10, res.message || 'بدأت المهمة في الخلفية...');
+            updateLoaderStep(res.message || 'بدأت المهمة في الخلفية...');
             res = await pollMarketStudyJob(res.jobId, onProgress);
           }
         }
@@ -254,7 +250,7 @@
           ? 'اكتمل التحديث بنتيجة جزئية — التفاصيل موضحة أسفل الجدول'
           : (resumed ? doneNote
             : (mode === 'fill' ? 'تم إكمال بيانات المنافسين دون حذف الصفوف' : 'تم استبدال جدول المنافسين بالنتيجة الجديدة')));
-        updateLoaderProgress(100, showPartialStatus ? 'اكتمل التحديث بنتيجة جزئية' : 'اكتمل تحديث المنافسين');
+        updateLoaderProgress(100, showPartialStatus ? 'اكتمل التحديث بنتيجة جزئية' : 'اكتمل تحديث المنافسين', true);
       } catch (error) {
         toast(error.message || 'تعذر تحديث المنافسين');
       } finally {
@@ -341,13 +337,7 @@
       showLoader('توليد ملخص السوق', 'جاري البحث في المصادر الرسمية وكتابة الملخص التنفيذي...', 12,
         { stoppable: true });
       try {
-        let lastJobPct = 10;
-        const onProgress = job => {
-          const pct = Number(job && job.progress);
-          if (Number.isFinite(pct) && pct > 0) lastJobPct = Math.min(pct, 99);
-          updateLoaderProgress(lastJobPct,
-            (job && job.message) || 'جاري إعداد الملخص...');
-        };
+        const onProgress = job => applyLoaderJobProgress(job);
         const priorState = getMarketStudyState();
         const currentSummary = marketSummaryState(priorState.summary);
         const currentSwot = { ...(priorState.swot || {}) };
@@ -368,7 +358,7 @@
           if (res && res.jobId && !res.summary) {
             setMarketResearchTraceJob(res.jobId);
             rememberMarketJob('summary', res.jobId);
-            updateLoaderProgress(10, res.message || 'بدأت المهمة في الخلفية...');
+            updateLoaderStep(res.message || 'بدأت المهمة في الخلفية...');
             res = await pollMarketStudyJob(res.jobId, onProgress);
           }
         }
@@ -416,11 +406,7 @@
       showLoader('استكمال ملخص السوق', 'جاري استكمال مراحل الدراسة المحفوظة...', 12,
         { stoppable: true });
       try {
-        const onProgress = job => {
-          const pct = Number(job && job.progress);
-          updateLoaderProgress(Number.isFinite(pct) && pct > 0 ? Math.min(pct, 99) : 12,
-            (job && job.message) || 'جاري استكمال الملخص...');
-        };
+        const onProgress = job => applyLoaderJobProgress(job);
         let res = await api(
           'POST', '/api/market-study/jobs/' + encodeURIComponent(jobId) + '/resume', {});
         if (res && res.jobId && (res.status === 'queued' || res.status === 'running')) {
@@ -493,6 +479,6 @@
         persistMarketStudyFromDom();
         toast(WFT('market.summary_generated', 'تم توليد ملخص السوق وتحليل SWOT') + unverifiedNote);
       }
-      updateLoaderProgress(100, 'اكتمل ملخص السوق');
+      updateLoaderProgress(100, 'اكتمل ملخص السوق', true);
       if (fail) fail.textContent = '';
     }

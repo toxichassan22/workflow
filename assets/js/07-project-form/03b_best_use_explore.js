@@ -426,7 +426,7 @@
             endpoint += ['chat', 'revise'].includes(action) ? 'chat' : action;
             Object.assign(payload, { stage, message, revise: action === 'revise' });
           }
-          updateLoaderProgress(15, WFT('best_use_explore.processing', 'معالجة أدلة الأرض والأسعار والمفاهيم'));
+          updateLoaderStep(WFT('best_use_explore.processing', 'معالجة أدلة الأرض والأسعار والمفاهيم'));
           let response = await apiWithTimeout('POST', endpoint, payload);
           const deadline = Date.now() + 1200000;
           while (response?.success && response.jobId && !['completed', 'failed'].includes(response.status)
@@ -445,7 +445,9 @@
             const detail = response?.detail;
             if (detail && detail.use) label += ' — ' + bestUseExploreUseLabel(detail.use);
             if (detail && Number(detail.index) > 0 && Number(detail.total) > 1) label += ' ' + detail.index + '/' + detail.total;
-            updateLoaderProgress(response?.progress || 20, label);
+            // The server names the stage and how many of its units finished;
+            // the bar itself carries no authored percentage.
+            updateLoaderStep(label);
           }
           if (response?.jobId && !['completed', 'failed'].includes(response.status)) response = { success: false, error_code: 'BEST_USE_JOB_INTERRUPTED' };
           if (!response?.success) {
@@ -462,7 +464,7 @@
             const input = document.getElementById('bestUseExploreChatInput');
             if (input?.value.trim() === message) input.value = '';
           }
-          updateLoaderProgress(100, WFT('best_use.done', 'اكتملت المعالجة'));
+          updateLoaderProgress(100, WFT('best_use.done', 'اكتملت المعالجة'), true);
           return received;
         } catch (error) {
           console.warn('[BEST-USE-EXPLORE]', action, 'threw:', error);

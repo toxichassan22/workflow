@@ -183,29 +183,24 @@
       const label = progress?.querySelector('[data-logo-progress-label]');
       if (!progress || !bar || !label) return;
       progress.hidden = false;
-      let value = 8;
-      let phase = 0;
-      const phases = ['جاري التحقق من الموقع الرسمي', 'جاري البحث عن صورة الشعار', 'جاري حفظ الشعار'];
-      bar.style.width = value + '%';
-      bar.setAttribute('aria-valuenow', String(value));
-      label.textContent = initialLabel || phases[phase];
+      // One request does the whole import, so there is no fraction to report.
+      // The bar sweeps and the label states the one thing that is happening.
       clearInterval(tr._competitorLogoProgressTimer);
-      tr._competitorLogoProgressTimer = window.setInterval(() => {
-        value = value < 65 ? value + 7 : value < 90 ? value + 2 : value;
-        if (value >= 35) phase = 1;
-        if (value >= 70) phase = 2;
-        bar.style.width = value + '%';
-        bar.setAttribute('aria-valuenow', String(value));
-        label.textContent = phases[phase];
-      }, 700);
+      tr._competitorLogoProgressTimer = null;
+      progress.classList.add('is-indeterminate');
+      bar.removeAttribute('aria-valuenow');
+      bar.style.width = '';
+      label.textContent = initialLabel || busyLabel;
     }
 
     function finishCompetitorLogoProgress(tr, success, successLabel = 'اكتمل استيراد الشعار', failureLabel = 'تعذر استيراد الشعار') {
       if (!tr) return;
       clearInterval(tr._competitorLogoProgressTimer);
+      tr._competitorLogoProgressTimer = null;
       const progress = tr.querySelector('[data-logo-progress]');
       const bar = progress?.querySelector('[data-logo-progress-bar]');
       const label = progress?.querySelector('[data-logo-progress-label]');
+      if (progress) progress.classList.remove('is-indeterminate');
       if (bar) {
         bar.style.width = '100%';
         bar.setAttribute('aria-valuenow', '100');
@@ -277,7 +272,7 @@
       const busy = uploading;
       const busyLabel = 'جاري حفظ الشعار';
       const progress = busy
-        ? '<div data-logo-progress class="market-logo-progress"><div class="market-logo-progress-track"><div data-logo-progress-bar class="market-logo-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="8"></div></div><span data-logo-progress-label class="market-logo-progress-label">' + busyLabel + '</span></div>'
+        ? '<div data-logo-progress class="market-logo-progress is-indeterminate"><div class="market-logo-progress-track"><div data-logo-progress-bar class="market-logo-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"></div></div><span data-logo-progress-label class="market-logo-progress-label">' + busyLabel + '</span></div>'
         : '';
       const warning = (!hasLogo && !busy) ? String(tr.dataset.logoImportWarning || '').trim() : '';
       const faviconHost = String(tr.dataset.logoFaviconHost || '').trim();

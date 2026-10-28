@@ -59,7 +59,7 @@
         10,
         { stoppable: true });
       try {
-        updateLoaderProgress(25, 'جاري تجهيز بيانات الموقع والخرائط وملفات الاشتراطات كاملة...');
+        updateLoaderStep('جاري تجهيز بيانات الموقع والخرائط وملفات الاشتراطات كاملة...');
         let res = await api('POST', '/api/extract-croquis', {
           documents,
           draftId: tenantProjectData.draftId,
@@ -83,7 +83,7 @@
             resetTenantGenerationStop();
           }
           registerTenantGenerationRun(jobId);
-          updateLoaderProgress(35, res.message || 'بدأ التحليل في الخلفية...');
+          updateLoaderStep(res.message || 'بدأ التحليل في الخلفية...');
           const started = Date.now();
           while (Date.now() - started < 12 * 60 * 1000) {
             if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) break;
@@ -93,10 +93,7 @@
             if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) break;
             res = await api('GET', '/api/extract-croquis/' + encodeURIComponent(jobId));
             const jobStatus = String(res && res.status || '');
-            updateLoaderProgress(
-              jobStatus === 'running' ? 55 : 40,
-              (res && res.message) || 'جاري تحليل المستندات والاشتراطات...'
-            );
+            updateLoaderStep((res && res.message) || 'جاري تحليل المستندات والاشتراطات...');
             if (jobStatus === 'completed' || jobStatus === 'failed' || jobStatus === 'cancelled'
               || (res && res.extractedData) || (res && res.failureReason)) break;
             if (!res || res.failureReason === 'job_not_found') break;
@@ -110,7 +107,7 @@
             return;
           }
         }
-        updateLoaderProgress(55, 'تم تجهيز الموقع والخرائط؛ جاري قراءة المستندات والاشتراطات...');
+        updateLoaderStep('تم تجهيز الموقع والخرائط؛ جاري قراءة المستندات والاشتراطات...');
         if (res.success && res.extractedData) {
           const data = res.extractedData;
           const documentProcessing = res.documentProcessing || data.document_processing || [];
@@ -141,7 +138,7 @@
           refreshAllowedUsesStatusNote();
           const appliedCount = Object.values(extractedFields)
             .filter(value => value !== undefined && value !== null && value !== '' && typeof value !== 'object').length;
-          updateLoaderProgress(100, WFT('land.analyzed_review', 'تم تحليل الملفات وتحديث {n} حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.', { n: appliedCount }));
+          updateLoaderProgress(100, WFT('land.analyzed_review', 'تم تحليل الملفات وتحديث {n} حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.', { n: appliedCount }), true);
           toast(WFT('land.analyzed_done', 'تم التحليل وتحديث {n} حقلًا. راجع النتائج قبل الاعتماد.', { n: appliedCount }));
           clearLandAnalysisFailure();
           triggerAutoSaveDraft();
@@ -152,14 +149,14 @@
           // why these failures were only ever visible in the browser console.
           const reason = res.error || 'تعذر تحليل ملفات الأرض والكروكي والرخصة';
           showLandAnalysisFailure(reason, res.providerError);
-          updateLoaderProgress(100, WFT('land.no_fields_updated', 'لم يتم تحديث أي حقل: {reason}', { reason: wfTr(reason) }));
+          updateLoaderProgress(100, WFT('land.no_fields_updated', 'لم يتم تحديث أي حقل: {reason}', { reason: wfTr(reason) }), true);
           toast('لم يتم تحديث أي حقل — التفصيل أسفل خانة الملفات');
           console.warn('[LAND ANALYSIS] rejected', res.failureReason || 'unknown', res);
         }
       } catch (err) {
         const reason = WFT('land.analysis_error', 'حدث خطأ أثناء تحليل الملفات: {err}', { err: wfTr(err.message || err) });
         showLandAnalysisFailure(reason);
-        updateLoaderProgress(100, 'فشل التحليل ولم يتغير أي حقل.');
+        updateLoaderProgress(100, 'فشل التحليل ولم يتغير أي حقل.', true);
         toast(reason);
         console.warn('[LAND ANALYSIS] exception', err);
       } finally {
@@ -401,7 +398,7 @@
       });
       showLoader('تحليل الموقع بالذكاء الاصطناعي', 'جاري تجهيز بيانات الموقع...', 5);
       try {
-        updateLoaderProgress(35, 'جاري إرسال بيانات الموقع للتحليل...');
+        updateLoaderStep('جاري إرسال بيانات الموقع للتحليل...');
         const data = await api('POST', '/api/site-analysis', { projectData: analysisProjectData });
         if (data.success && data.analysis) {
           const filledFields = data.fields && typeof data.fields === 'object' ? data.fields : {};
@@ -419,7 +416,7 @@
             }
           });
           refreshLocationTables();
-          updateLoaderProgress(90, 'تم استلام التحليل والبيانات المكملة...');
+          updateLoaderStep('تم استلام التحليل والبيانات المكملة...');
           tenantProjectData.site_analysis = data.analysis;
           tenantProjectData.site_analysis_approved = false;
           const targetInput = document.querySelector('#tenantProjectForm [data-key="site_analysis"]') || input;
@@ -428,7 +425,7 @@
           refreshSiteAnalysisApprovalUI();
           if (typeof saveProjectAsDraft === 'function') await saveProjectAsDraft(true);
           triggerAutoSaveDraft();
-          updateLoaderProgress(100, 'اكتمل تحليل الموقع. راجعه ثم اعتمده أو عدّله.');
+          updateLoaderProgress(100, 'اكتمل تحليل الموقع. راجعه ثم اعتمده أو عدّله.', true);
         } else if (data.error) {
           toast(data.error);
         }
@@ -546,7 +543,7 @@
               : await new Promise(resolve => setTimeout(resolve, 2000));
             if (typeof tenantGenerationStopRequested !== 'undefined' && (tenantGenerationStopRequested || !slept)) break;
             const job = await api('GET', '/api/site-analysis-jobs/' + encodeURIComponent(jobId));
-            updateLoaderProgress(60, (job && job.message) || 'جاري تحليل بيانات الموقع...');
+            updateLoaderStep((job && job.message) || 'جاري تحليل بيانات الموقع...');
             if (job && (job.result || job.error)) { data = job.result || job; break; }
             if (!job) break;
             if (tenantGenerationStopRequested) break;

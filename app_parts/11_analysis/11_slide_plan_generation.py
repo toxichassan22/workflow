@@ -9,6 +9,7 @@ from slide_engine import (
     _timeline_data_note, _financial_data_note,
 )
 import context_contracts
+import task_progress
 
 
 PROJECT_SECTION_PRESENTATION_TARGETS = {
@@ -95,8 +96,9 @@ def _ensure_required_location_slides(plan, project_data):
     return plan
 
 
-def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_section_keys=None):
+def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_section_keys=None, progress=None):
     """Ask the planner for a slide plan, then enforce the company's slide bounds on it."""
+    report = progress if callable(progress) else (lambda *_args, **_kwargs: None)
     target_section_keys = tuple(
         key for key in (target_section_keys or ())
         if key in slide_engine.PRESENTATION_SECTION_ORDER
@@ -149,10 +151,12 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
 
     plan = None
     last_error = None
+    report('inputs')
     # The planner must finish before the web worker timeout so a slow provider can fall back cleanly.
     max_attempts = 1
     for attempt in range(1, max_attempts + 1):
         try:
+            report('ai', 'تحليل بيانات المشروع بالذكاء الاصطناعي')
             response = call_text_chat_parallel(
                 "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية الاستثمارية.",
                 prompt,
@@ -200,6 +204,9 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
         plan_source = 'fallback'
         plan_error = str(last_error or '')
 
+    # The model call is over: every later change is local assembly, so these
+    # are the boundaries the progress card can name honestly.
+    report('arrange', f'{len(plan.get("slides") or [])} شريحة من المحلل')
     plan = _ensure_required_location_slides(plan, project_data)
     # A project with no financial study gets no financial slides at all, from any source.
     plan = slide_engine.strip_financial_slides(plan, project_data)
@@ -286,6 +293,7 @@ def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_s
     if not is_valid:
         print(f"[SLIDE-PLAN] Validation issues: {issues}")
 
+    report('ready', f'{len(plan.get("slides") or [])} شريحة في الخطة')
     return {
         'success': True,
         'plan': plan,
@@ -323,15 +331,26 @@ def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images,
             'message': 'جاري تحليل بيانات المشروع وإعداد هيكل العرض...',
             'fallbackPlan': fallback_plan,
         })
+        def report_plan_step(step_key, detail=''):
+            update = task_progress.payload('slide_plan', step_key, detail=detail)
+            _write_job('.plan_jobs', tenant_id, job_id, {
+                **update,
+                'status': 'running',
+                'success': True,
+                'message': detail or update['stepLabel'],
+            })
+
         try:
             payload = _execute_slide_plan(
                 project_data, tenant_id, branding, images,
                 target_section_keys=target_section_keys,
+                progress=report_plan_step,
             )
             succeeded = bool(payload.get('success'))
             cancelled = payload.get('error_code') == run_control.CANCELLED_ERROR_CODE
             _write_job('.plan_jobs', tenant_id, job_id, {
                 **payload,
+                **(task_progress.payload('slide_plan', 'ready', complete=True) if succeeded else {}),
                 'status': 'completed' if succeeded else ('cancelled' if cancelled else 'failed'),
                 'message': ('تم إيقاف المهمة' if cancelled else
                             'تم إعداد خطة الشرائح' if succeeded else payload.get('error', 'تعذر إعداد خطة الشرائح')),
@@ -421,6 +440,7 @@ def api_slide_plan():
     fallback_plan = _emergency_slide_plan(
         project_data, branding, images, g.tenant_id, target_section_keys=target_section_keys)
     _write_job('.plan_jobs', g.tenant_id, job_id, {
+        **task_progress.payload('slide_plan', 'inputs'),
         'status': 'queued',
         'success': True,
         'message': 'تم استلام طلب إعداد هيكل العرض',
@@ -437,6 +457,7 @@ def api_slide_plan():
         daemon=True,
     ).start()
     return jsonify({
+        **task_progress.payload('slide_plan', 'inputs'),
         'success': True,
         'jobId': job_id,
         'status': 'queued',

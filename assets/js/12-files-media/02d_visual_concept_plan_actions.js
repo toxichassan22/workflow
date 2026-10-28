@@ -86,8 +86,10 @@
         }
       }
       const active = workflow.jobTodos.find(item => item.status === 'active');
-      if (active && job.status === 'running' && typeof updateLoaderProgress === 'function') {
-        updateLoaderProgress(Number(job.progress || 20), active.label);
+      if (active && job.status === 'running' && typeof updateLoaderStep === 'function') {
+        // job.progress is an authored constant: the checklist row the worker
+        // marked active is the only real position of this run.
+        updateLoaderStep(active.label);
       }
     }
 

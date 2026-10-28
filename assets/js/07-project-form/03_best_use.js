@@ -482,7 +482,7 @@
         await new Promise(resolve => setTimeout(resolve, 1500));
         response = await api('GET', '/api/best-use/jobs/' + response.jobId);
         if (!response?.success || response.status === 'completed' || response.status === 'failed') return response;
-        updateLoaderProgress(response.progress || 20, WFT('best_use.processing', 'تحليل بيانات الأرض والسوق والتوزيع'));
+        updateLoaderStep(WFT('best_use.processing', 'تحليل بيانات الأرض والسوق والتوزيع'));
       }
       return { success: false, error_code: 'BEST_USE_JOB_INTERRUPTED' };
     }
@@ -523,7 +523,7 @@
             endpoint = 'chat';
           }
           else Object.assign(payload, { proposalId: state.id, decision: action });
-          updateLoaderProgress(20, WFT('best_use.processing', 'تحليل بيانات الأرض والسوق والتوزيع'));
+          updateLoaderStep(WFT('best_use.processing', 'تحليل بيانات الأرض والسوق والتوزيع'));
           let response = await api('POST', '/api/best-use/' + endpoint, payload);
           response = await bestUseAwaitJob(response, requestContext.draftId);
           if (!response?.success) {
@@ -538,7 +538,7 @@
           }
           const received = applyBestUseResponse(response, requestContext);
           if (received && input && (endpoint === 'generate' || (endpoint === 'chat' && input.value.trim() === message))) input.value = '';
-          updateLoaderProgress(100, WFT('best_use.done', 'اكتملت المعالجة'));
+          updateLoaderProgress(100, WFT('best_use.done', 'اكتملت المعالجة'), true);
           return received;
         } catch (error) {
           console.warn('[BEST-USE]', action, 'threw:', error);

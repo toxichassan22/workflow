@@ -1152,6 +1152,65 @@
       transition: width 0.45s ease;
     }
 
+    /* No measured fraction yet: the bar sweeps instead of claiming a
+       percentage nobody calculated. */
+    .global-loader-progress.is-indeterminate .global-loader-progress-fill,
+    .inline-loading-track.is-indeterminate .inline-loading-fill {
+      width: 35%;
+      transition: none;
+      animation: globalLoaderIndeterminate 1.3s ease-in-out infinite;
+    }
+
+    @keyframes globalLoaderIndeterminate {
+      0% { transform: translateX(-110%); }
+      100% { transform: translateX(300%); }
+    }
+
+    .global-loader-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      margin-top: 8px;
+    }
+
+    .global-loader-step {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .global-loader-step-index {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      background: var(--soft);
+      color: var(--p);
+      font-size: 9px;
+      font-weight: 700;
+    }
+
+    .global-loader-step.is-done,
+    .global-loader-step.is-active {
+      color: var(--p);
+    }
+
+    .global-loader-step.is-done .global-loader-step-index,
+    .global-loader-step.is-active .global-loader-step-index {
+      background: var(--p);
+      color: #fff;
+    }
+
+    .global-loader-step.is-active {
+      font-weight: 700;
+    }
+
     .global-loader-progress-meta,
     .inline-loading-header {
       display: flex;

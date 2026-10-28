@@ -751,6 +751,13 @@
       transition: width .35s ease;
     }
 
+    /* The import is one request: no fraction exists, so it sweeps. */
+    #section-market-study .market-logo-progress.is-indeterminate .market-logo-progress-bar {
+      width: 38%;
+      transition: none;
+      animation: globalLoaderIndeterminate 1.3s ease-in-out infinite;
+    }
+
     #section-market-study .market-logo-progress-label {
       display: block;
       margin-top: 3px;

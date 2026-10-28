@@ -562,11 +562,12 @@
 
       // The plan also runs before navigation: a planner failure keeps the
       // project page in place with the error instead of a dead design stage.
-      showLoader(WFT('gen.preparing_presentation', 'إعداد عرض {label}', { label: wfTr(resolvedLabel) }), 'تحليل بيانات القسم وبناء الشرائح', 5);
+      showLoader(WFT('gen.preparing_presentation', 'إعداد عرض {label}', { label: wfTr(resolvedLabel) }),
+        'تحليل بيانات القسم وبناء الشرائح');
       let planResponse = null;
       try {
         planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
-          updateLoaderProgress(8, (job && job.message) || 'تحليل بيانات القسم وبناء الشرائح');
+          applyLoaderJobProgress(job);
         }, sectionKey);
       } finally {
         hideLoader();
@@ -854,10 +855,10 @@
         // a dead provider keeps the user on this page with the error instead
         // of stranding them on an empty design stage.
         showLoader(WFT('gen.planning_structure', 'إعداد خطة وهيكل العرض الاستثماري'),
-        WFT('gen.planning_structure_detail', 'تحليل متطلبات المشروع والهيكل الأنسب'), 5,
+        WFT('gen.planning_structure_detail', 'تحليل متطلبات المشروع والهيكل الأنسب'), undefined,
         { stoppable: true });
         const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
-          updateLoaderProgress(8, (job && job.message) || 'تحليل متطلبات المشروع والهيكل الأنسب');
+          applyLoaderJobProgress(job);
         }).finally(() => hideLoader());
         if (tenantGenerationStopRequested) {
           // The user stopped the plan: no slide may start after that.
@@ -879,7 +880,7 @@
           showTenantPage('tenantSlidesPage');
           clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
           setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
-          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', WFT('gen.slides_planned', '{n} شريحة — بدء التوليد المباشر', { n: planCount }), 12);
+          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', WFT('gen.slides_planned', '{n} شريحة — بدء التوليد المباشر', { n: planCount }), 0);
         } else {
           // The gate already escrowed the hold: a dead plan releases it and
           // returns the draft from 'generating' instead of stranding both.

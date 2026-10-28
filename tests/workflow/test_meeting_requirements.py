@@ -29,7 +29,7 @@ import auth
 import db
 
 FRONTEND_JS_ORDER = (
-    '00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+    '00-core.js', '00-core/01_progress.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
     '02-settings-branding/02_auth_boot.js',
     '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
     '05a-market-summary-chat.js',

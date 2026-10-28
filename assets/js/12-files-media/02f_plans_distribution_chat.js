@@ -204,8 +204,8 @@
       const tick = () => {
         const elapsed = visualConceptDistributionChatElapsed((Date.now() - startedAt) / 1000);
         const elapsedText = WFT('plans.distribution_chat_elapsed', 'يعمل الآن… {time}', { time: elapsed });
-        if (typeof updateLoaderProgress === 'function') {
-          updateLoaderProgress(30, currentStep ? currentStep + ' — ' + elapsedText : elapsedText);
+        if (typeof updateLoaderStep === 'function') {
+          updateLoaderStep(currentStep ? currentStep + ' — ' + elapsedText : elapsedText);
         }
       };
       tick();

@@ -304,7 +304,7 @@
           toast(response?.error || response?.validation?.[0]?.message || 'لا يمكن تصدير الدراسة المالية');
           return;
         }
-        updateLoaderProgress(80, 'تم إنشاء الملف، جاري تحميله...');
+        updateLoaderStep('تم إنشاء الملف، جاري تحميله...');
         const token = getTenantToken();
         const download = await fetch(response.url, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
         if (!download.ok) {
@@ -321,7 +321,7 @@
         link.click();
         link.remove();
         URL.revokeObjectURL(blobUrl);
-        updateLoaderProgress(100, 'اكتمل تحميل الدراسة المالية');
+        updateLoaderProgress(100, 'اكتمل تحميل الدراسة المالية', true);
         toast('تم تصدير الدراسة المالية وحفظها في سجل التصديرات');
       } catch (error) {
         toast(WFT('financial.export_failed', 'تعذر تصدير الدراسة المالية: {err}', { err: wfTr(error?.message || 'خطأ في الاتصال') }));

@@ -6,7 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 // index.html is a slim shell now; the code under test lives in ordered classic
 // scripts. Mirrors FRONTEND_JS_ORDER in app_parts/22_rules_pages/22_rules_approvals_static.py.
-const FRONTEND_JS_ORDER = ['00-core.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
+const FRONTEND_JS_ORDER = ['00-core.js', '00-core/01_progress.js', '01-nav-auth.js', '02-settings-branding/01_routing.js',
   '02-settings-branding/02_auth_boot.js',
   '03-executive-classification.js', '04-market.js', '05-market-competitors.js',
   '06-team.js', '07-project-form/01_form_sections.js',

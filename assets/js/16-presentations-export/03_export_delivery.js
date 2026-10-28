@@ -53,7 +53,7 @@
           toast(data.error || 'فشل التصدير');
           return;
         }
-        updateLoaderProgress(82, 'تم إنشاء الملف، جاري بدء التحميل...');
+        updateLoaderStep('تم إنشاء الملف، جاري بدء التحميل...');
         const fileName = data.url.split('/').pop() || ('presentation.' + format);
         let downloadRecord = null;
         try {
@@ -87,7 +87,7 @@
           api('POST', '/api/downloads/' + encodeURIComponent(downloadRecord.id) + '/delivered').catch(() => {});
         }
 
-        updateLoaderProgress(100, 'اكتمل تحميل الملف');
+        updateLoaderProgress(100, 'اكتمل تحميل الملف', true);
         toast('تم تحميل الملف');
       } catch (e) {
         console.warn('Export download:', e);
