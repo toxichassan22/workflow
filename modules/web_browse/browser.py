@@ -334,12 +334,15 @@ def _unwrap_yahoo(href):
 _QUERY_PREFIX_RE = re.compile(
     r'^(?:التحقق\s+من\s+(?:وجود\s+|مشروعات\s+|مشروع\s+)?|'
     r'البحث\s+عن\s+(?:وجود\s+|مشاريع\s+|مشروعات\s+|مشروع\s+)?|'
+    r'العثور\s+على\s+(?:مشاريع\s+|مشروعات\s+|مشروع\s+|أبراج\s+|فلل\s+)?|'
     r'حصر\s+(?:مشاريع\s+|مشروعات\s+|المشروعات\s+)?|'
+    r'رصد\s+(?:مشاريع\s+|مشروعات\s+|مشروع\s+)?|'
+    r'إيجاد\s+|تحديد\s+|جمع\s+|'
     r'معرفة\s+(?:أسعار\s+|وجود\s+)?|'
     r'استكشاف\s+|فحص\s+)', re.I)
 
 _QUERY_FILLER_RE = re.compile(
-    r'\b(?:مسماة|المسماة|المحددة|المذكورة)\b', re.I)
+    r'\b(?:مسماة|المسماة|المحددة|المذكورة|فقط|الحالية)\b', re.I)
 
 
 def sanitize_search_query(query):
@@ -1107,6 +1110,8 @@ class BrowserWorker:
                     hits = []
                     failed = True
             if hits:
+                if provider == 'searxng':
+                    self._searxng_zero_streak = 0
                 _browser_log(f'[BROWSER] search provider={provider} hits={len(hits)}')
                 self._search_hits_total = getattr(self, '_search_hits_total', 0) + len(hits)
                 self._successful_searches = getattr(self, '_successful_searches', 0) + 1
@@ -1138,6 +1143,15 @@ class BrowserWorker:
                     blocked.add(provider)
                     _browser_log(f'[BROWSER] search provider={provider} skipped for this session')
                 continue
+            if provider == 'searxng':
+                sx_streaks = getattr(self, '_searxng_zero_streak', 0) + 1
+                self._searxng_zero_streak = sx_streaks
+                if sx_streaks >= 2:
+                    blocked = getattr(self, '_blocked_serps', None)
+                    if blocked is None:
+                        blocked = self._blocked_serps = set()
+                    blocked.add('searxng')
+                    _browser_log('[BROWSER] search provider=searxng skipped for this session (consecutive empty/suspended)')
             _browser_log(f"[BROWSER] search provider={provider} hits=0 title={title!r}")
         return []
 

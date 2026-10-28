@@ -308,6 +308,8 @@ _DEAD_URL_SHAPES = (
     re.compile(r'rega\.gov\.sa/ar/advanced-search', re.I),
     re.compile(r'spa\.gov\.sa(?:/(?!ar/)|/?$)', re.I),
     re.compile(r'(?:walmart|idealhome|realtor|zillow|redfin|trulia|homedepot|target)\.(?:com|co\.uk)', re.I),
+    re.compile(r'(?:nft|crypto|bitcoin|ethereum|web3|blockchain|token|esprezzo)', re.I),
+    re.compile(r'(?:lawncare|lawn-care|gardening|landscaping)', re.I),
 )
 
 

@@ -136,6 +136,20 @@ class NativeSearchFallbackTests(unittest.TestCase):
         self.assertEqual(len(result['parsed']['competitors']), 1)
         self.assertEqual(result['parsed']['competitors'][0]['name'], 'مشروع فلل الروضة الموثق')
 
+    def test_dead_url_shape_blocks_nft_and_crypto(self):
+        import agent
+        dead_fn = getattr(agent, '_dead_url_shape', None)
+        self.assertTrue(callable(dead_fn))
+        self.assertEqual(
+            dead_fn('https://blog.esprezzo.io/11-of-the-most-interesting-membership-nfts-in-2023'),
+            'dead_source')
+        self.assertEqual(
+            dead_fn('https://nftnow.com/features/nft-tickets-are-the-future-of-live-music/'),
+            'dead_source')
+        self.assertEqual(
+            dead_fn('https://walmart.com/stores'),
+            'dead_source')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -816,10 +816,11 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
     if (str(task.get('kind') or '') != 'fill'
             and (_native_fallback_needed(result)
                  or (competitor_count < 2 and str(task.get('kind') or '') == 'axis'))):
+        fallback_deadline = max(float(deadline or 0), time.time() + 30.0)
         fallback = _native_search_fallback(
             system_prompt, prompt,
             _usage_ctx('market', data, tenant_id=tenant_id),
-            evidence_pool, deadline, search_budget=3, max_steps=6)
+            evidence_pool, fallback_deadline, search_budget=3, max_steps=6)
         fallback_count = len((fallback or {}).get('parsed', {}).get('competitors') or [])
         if fallback and fallback_count > competitor_count:
             fallback['task'] = task
