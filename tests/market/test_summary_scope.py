@@ -232,6 +232,7 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('حساب سعر المتر المربع الاسترشادي لوحدات المنافسين المباشرين', prompt_ar)
         self.assertIn('وظّف بيانات تفضيل نمط المسكن', prompt_ar)
         self.assertIn('تبنّ لغة استشارية تحليلية شجاعة وبناءة', prompt_ar)
+        self.assertIn('قاعدة سلامة الأرقام والعملات والوحدات', prompt_ar)
 
         prompt_en = market_study.build_summary_user_prompt({
             'city': 'Jeddah',
@@ -242,6 +243,7 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('Market Scale & Housing Stock Rule', prompt_en)
         self.assertIn('calculating the indicative price per square meter for direct competitor units', prompt_en)
         self.assertIn('Maintain an actionable real-estate advisory tone', prompt_en)
+        self.assertIn('Number, Currency, and Unit Integrity Rule', prompt_en)
 
 
 class SummaryScopePayloadTests(unittest.TestCase):
