@@ -105,6 +105,37 @@ class MarketResearchTraceTests(unittest.TestCase):
             headers={'Authorization': 'Bearer ' + other_token})
         self.assertEqual(denied.status_code, 404)
 
+    def test_reaggregate_only_loads_trace_reports_without_browsing(self):
+        module = self.module
+        job_id = 'reaggtest01'
+        trace_path = module._market_research_trace_path(self.tenant, job_id)
+        os.makedirs(os.path.dirname(trace_path), exist_ok=True)
+        with open(trace_path, 'w', encoding='utf-8') as handle:
+            handle.write(json.dumps({'event': 'market_study_job_started'}) + '\n')
+            handle.write(json.dumps({
+                'event': 'researcher_result',
+                'researcher': 'development_and_supply',
+                'hosts': ['nhc.sa'],
+                'city': 'جدة',
+                'district': '',
+                'searched': True,
+                'citation_urls': ['https://nhc.sa/ar/projects/al-sadan'],
+                'parsed': {'findings': [{'title': 'مشروع السدن', 'details': '2.5 مليار'}]},
+            }) + '\n')
+
+        found_path = module._find_market_research_trace_file(self.tenant, job_id)
+        self.assertEqual(found_path, trace_path)
+
+        reports, citations = module._load_market_research_trace_reports(found_path)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]['research_group'], 'development_and_supply')
+        self.assertEqual(reports[0]['research_output']['findings'][0]['title'], 'مشروع السدن')
+        self.assertIn('https://nhc.sa/ar/projects/al-sadan', citations)
+
+        # When job_id is omitted, it finds the newest trace file for the tenant
+        auto_found = module._find_market_research_trace_file(self.tenant)
+        self.assertEqual(auto_found, trace_path)
+
 
 if __name__ == '__main__':
     unittest.main()

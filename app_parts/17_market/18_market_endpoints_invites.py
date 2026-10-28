@@ -877,17 +877,27 @@ def _run_market_summary(data, tenant_id=None, progress=None,
     report(10, 'جاري فحص المصادر المرتبطة بأنشطة المشروع المختارة — قد يستغرق دقائق...')
     usage_ctx = _usage_ctx('market', data, tenant_id=tenant_id)
     usage_ctx['billing_flow'] = 'market_summary'
-    # Load known deep links and city datasets before model-led source research.
-    _run_market_source_plan(payload, offer_lang=offer_lang,
-                            evidence_pool=evidence_pool, session=session,
-                            deadline=deadline, report=report)
-    # Dispatch independent browser tasks for the selected activity and
-    # geography; each researcher opens only its assigned relevant sources.
-    research = _run_market_summary_research_with_booking(
-        payload, usage_ctx, evidence_pool, deadline, report=report,
-        offer_lang=offer_lang, resume_state=resume_state,
-        checkpoint=checkpoint, trace_writer=trace_writer,
-        data=data, tenant_id=tenant_id, session=session)
+    reaggregate_only = bool(data.get('reaggregateOnly') or data.get('reaggregate_only'))
+    cached_trace_job = str(data.get('jobId') or data.get('traceJobId') or '').strip()
+    research = None
+    if reaggregate_only:
+        report(20, 'استرجاع أدلة البحث السابقة لإعادة التحليل...')
+        trace_path = _find_market_research_trace_file(tenant_id, cached_trace_job)
+        loaded_reports, loaded_citations = _load_market_research_trace_reports(trace_path)
+        if loaded_reports:
+            research = {'success': True, 'reports': loaded_reports, 'citation_urls': loaded_citations}
+    if research is None:
+        # Load known deep links and city datasets before model-led source research.
+        _run_market_source_plan(payload, offer_lang=offer_lang,
+                                evidence_pool=evidence_pool, session=session,
+                                deadline=deadline, report=report)
+        # Dispatch independent browser tasks for the selected activity and
+        # geography; each researcher opens only its assigned relevant sources.
+        research = _run_market_summary_research_with_booking(
+            payload, usage_ctx, evidence_pool, deadline, report=report,
+            offer_lang=offer_lang, resume_state=resume_state,
+            checkpoint=checkpoint, trace_writer=trace_writer,
+            data=data, tenant_id=tenant_id, session=session)
     if not research.get('success'):
         fatal = next((_ai_fatal_error_dict(item.get('result') or {})
                       for item in research.get('outcomes') or []

@@ -81,3 +81,60 @@ def _market_research_trace_writer(tenant_id, job_id):
                 print(f'[MARKET SUMMARY] research trace write failed: {exc}')
 
     return write
+
+
+def _find_market_research_trace_file(tenant_id, job_id=None):
+    if job_id and tenant_id:
+        path = _market_research_trace_path(tenant_id, job_id)
+        if _market_trace_os.path.isfile(path):
+            return path
+    if tenant_id:
+        job_dir = _market_job_dir(tenant_id)
+        try:
+            candidates = [
+                _market_trace_os.path.join(job_dir, f)
+                for f in _market_trace_os.listdir(job_dir)
+                if f.endswith('.research.jsonl')
+            ]
+            if candidates:
+                candidates.sort(key=_market_trace_os.path.getmtime, reverse=True)
+                return candidates[0]
+        except OSError:
+            pass
+    return None
+
+
+def _load_market_research_trace_reports(trace_path):
+    if not trace_path or not _market_trace_os.path.isfile(trace_path):
+        return [], []
+    reports = []
+    citations = []
+    try:
+        with open(trace_path, 'r', encoding='utf-8') as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = _market_trace_json.loads(line)
+                except Exception:
+                    continue
+                if record.get('event') == 'researcher_result':
+                    reports.append({
+                        'research_group': record.get('researcher'),
+                        'source_hosts': record.get('hosts') or [],
+                        'city': record.get('city'),
+                        'district': record.get('district'),
+                        'opened_evidence': bool(record.get('searched')),
+                        'coverage_status': record.get('coverage_status') or 'complete',
+                        'research_output': record.get('parsed') or {},
+                        'coverage_gap': record.get('coverage_gap') or '',
+                    })
+                    for u in record.get('citation_urls') or []:
+                        if u and u not in citations:
+                            citations.append(u)
+    except Exception as exc:
+        print(f'[MARKET SUMMARY] load trace reports failed: {exc}')
+        return [], []
+    return reports, citations
+
