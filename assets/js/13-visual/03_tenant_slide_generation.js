@@ -326,6 +326,9 @@
       if (!tenantSlidePlan || !tenantProjectData) return;
       isGeneratingTenantSlides = true;
       resetTenantGenerationStop();
+      // `finally` sits outside the try block's scope, so the interval handle it
+      // clears must be declared here, not inside the try.
+      let heartbeatTimer = null;
       try {
         const sectionKey = String(options.sectionKey || '');
         const runWatermark = options.watermark === true;
@@ -490,7 +493,20 @@
             if (jobRes && jobRes.success && jobRes.job) window.currentGenerationJobId = jobRes.job.id;
           } catch (jobErr) { console.warn('Generation job register:', jobErr); }
         }
-        let heartbeatTimer = null;
+        const pendingSlides = {};
+        let launchIndex = startIndex;
+        let inFlightCount = 0;
+        let commitIndex = startIndex;
+        let generationStopped = false;
+        let generationFinished = false;
+        let generationFailure = null;
+        let finishResolve = null;
+        const generationDone = new Promise((resolve) => { finishResolve = resolve; });
+        let commitRunning = false;
+        let commitAgain = false;
+
+        // The heartbeat reads the run state above, so it starts only after those
+        // declarations have initialized.
         function sendGenerationHeartbeat() {
           if (generationStopped || generationFinished) return;
           if (window.currentGenerationJobId) {
@@ -505,17 +521,6 @@
           sendGenerationHeartbeat();
           heartbeatTimer = setInterval(sendGenerationHeartbeat, 15000);
         }
-        const pendingSlides = {};
-        let launchIndex = startIndex;
-        let inFlightCount = 0;
-        let commitIndex = startIndex;
-        let generationStopped = false;
-        let generationFinished = false;
-        let generationFailure = null;
-        let finishResolve = null;
-        const generationDone = new Promise((resolve) => { finishResolve = resolve; });
-        let commitRunning = false;
-        let commitAgain = false;
 
         function updateGenerationBanner() {
           if (generationFinished) return;

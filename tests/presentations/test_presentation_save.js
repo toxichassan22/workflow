@@ -81,6 +81,7 @@ vm.runInContext(source.slice(start, end), context);
   await testGenerationRunRelease();
   await testCheckpointPreservesInputs();
   await testSlideGenerationFailures();
+  await testGenerationHeartbeatScope();
   testSlidePartialGate();
   testPlanFingerprintIncludesEngineVersion();
   console.log('Presentation save harness passed: update/create, conflict preservation, scoped generation reuse, generation failure checkpoints.');
@@ -247,8 +248,13 @@ async function testCheckpointPreservesInputs() {
     tenantProjectSectionStatuses: { basic: 'approved' }, draftEditCounter: 0,
     tenantDraftDirty: true, tenantArchiveCache: null, draftSaveChain: Promise.resolve(),
     LOCATION_TABLE_FIELDS: {}, VISUAL_CONCEPT_EXTERNAL_SLOTS: [],
-    document: { getElementById: () => null },
+    document: { getElementById: () => null, querySelectorAll: () => [] },
     renumberTenantSlides() {}, serializeLocationTable() {}, designerChatPersistence: () => ({}), toast() {},
+    setTenantDraftRevision(revision) {
+      if (revision === null || revision === undefined || revision === '') return state.tenantDraftRevision;
+      state.tenantDraftRevision = Number(revision);
+      return state.tenantDraftRevision;
+    },
     async collectTenantFormData() { collected++; return { project_name: 'Form edit' }; },
     async api(method, route, body) {
       assert.equal(route, '/api/project-draft');
@@ -324,6 +330,11 @@ async function testSlideGenerationFailures() {
       toast() {}, renderTenantSlidesSidebar() {}, renderTenantDesignerChat() {},
       checkpointPresentationUndo() {}, updatePresentationUndoButtons() {},
       setLiveGenBanner: (...args) => banners.push(args),
+      setTenantGenerationStopVisible() {}, resetTenantGenerationStop() {},
+      registerTenantGenerationRun() {}, releaseTenantGenerationRun() {},
+      autoFitSlideContent() {}, repairSlideTextContrast() {}, enableSlideInlineEditing() {},
+      processSlideHtmlClient: html => html, escapeHtml: value => String(value),
+      tenantGenerationStopRequested: false,
       settleGenerationRun: async consumed => settlements.push(consumed),
       requestTenantSlideGeneration(payload) {
         const request = deferred();
@@ -381,6 +392,64 @@ async function testSlideGenerationFailures() {
     assert.equal(checkpoints.at(-1).status, 'complete');
     assert.deepEqual(settlements, [false, true]);
   }
+}
+
+async function testGenerationHeartbeatScope() {
+  // A registered generation job starts the heartbeat before the per-run state
+  // is declared, and its interval must still be reachable from `finally`.
+  const match = /^    async function generateTenantSlides\(/m.exec(source);
+  assert(match);
+  const generateSource = source.slice(match.index, source.indexOf('\n    }', match.index) + 6);
+  const heartbeats = [];
+  const intervals = [];
+  const cleared = [];
+  const generation = {
+    console, JSON, Math, Number, String, Promise,
+    window: { currentGenerationJobId: 'job-heartbeat', currentGenerationApprovalId: null },
+    WFT: (k, d) => d || k,
+    wfNewSlideId: (() => { let n = 0; return () => 'hb' + (++n); })(),
+    isGeneratingTenantSlides: false,
+    tenantSlidePlan: { slides: [{ title: 'Cover' }, { title: 'Body' }] },
+    tenantProjectData: { draftId: 'draft', project_name: 'Project' },
+    tenantSlidesData: [], tenantSlideGenerationCheckpoint: null,
+    tenantPresentationId: 'presentation', tenantPresentationTitle: 'Title',
+    tenantCreativeImages: {}, tempCoverImage: null, tempMoodboardImages: {}, activeSlideIndex: 0,
+    document: { getElementById: () => null, querySelectorAll: () => [] },
+    tenantSlidePlanFingerprint: () => 'plan', tenantSlideGenerationOptions: options => options,
+    collectTenantFormData: async () => ({}), persistVisualConceptDraftState() {},
+    buildPresentationGenerationImages: () => ({}), slimGenerationProjectData: data => data,
+    containsSlideRoot: value => value.includes('class="slide"'), showTenantPage() {},
+    toast() {}, renderTenantSlidesSidebar() {}, renderTenantDesignerChat() {},
+    checkpointPresentationUndo() {}, updatePresentationUndoButtons() {},
+    setLiveGenBanner() {}, setTenantGenerationStopVisible() {}, resetTenantGenerationStop() {},
+    registerTenantGenerationRun() {}, releaseTenantGenerationRun() {},
+    autoFitSlideContent() {}, repairSlideTextContrast() {}, enableSlideInlineEditing() {},
+    processSlideHtmlClient: html => html, escapeHtml: value => String(value),
+    tenantGenerationStopRequested: false,
+    setTimeout: () => 0,
+    async settleGenerationRun(consumed) {
+      generation.window.currentGenerationJobId = null;
+      generation.window.currentGenerationApprovalId = null;
+    },
+    async saveTenantSlideGenerationCheckpoint() { return true; },
+    async requestTenantSlideGeneration() {
+      return { success: true, slide: { html: '<div class="slide">ok</div>' } };
+    },
+    async saveTenantPresentation() { return true; },
+    triggerAutoSaveDraft() {}, selectTenantSlide() {}, setSlidesEditorInfo() {},
+    api: async (method, url) => { heartbeats.push({ method, url }); return { success: true }; },
+    setInterval: (fn, ms) => { intervals.push(ms); return 'heartbeat-timer'; },
+    clearInterval: id => { cleared.push(id); },
+  };
+  vm.createContext(generation);
+  vm.runInContext(generateSource, generation);
+  await generation.generateTenantSlides({ approvalGranted: true, financialValidated: true });
+  assert.equal(generation.tenantSlidesData.length, 2, 'the run must finish its slides');
+  assert.equal(generation.isGeneratingTenantSlides, false, 'finally must release the run flag');
+  assert(heartbeats.length >= 1, 'a registered job must receive a heartbeat');
+  assert.equal(heartbeats[0].url, '/api/generation-jobs/job-heartbeat/heartbeat');
+  assert.deepEqual(intervals, [15000], 'the run must arm exactly one heartbeat interval');
+  assert.deepEqual(cleared, ['heartbeat-timer'], 'finally must clear the heartbeat interval');
 }
 
 function testSlidePartialGate() {
