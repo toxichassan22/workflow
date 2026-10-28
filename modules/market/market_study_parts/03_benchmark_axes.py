@@ -324,20 +324,25 @@ def competitor_matches_location_scope(row, scope, city='', district=''):
             radius = float(DEFAULT_COMPETITOR_RADIUS_KM)
         return distance is not None and distance <= radius
     row_city = _fold_choice(row.get('city') or row.get('location_city'))
-    if not row_city or row_city != _fold_choice(city):
+    target_city = _fold_choice(city)
+    row_city_norm = re.sub(r'^(مدينه|مدينة|city)\s+', '', row_city).strip()
+    target_city_norm = re.sub(r'^(مدينه|مدينة|city)\s+', '', target_city).strip()
+    if not row_city_norm or (row_city_norm != target_city_norm and row_city != target_city):
         return False
     if mode == 'city':
         return True
     row_district = _fold_choice(row.get('district') or row.get('neighborhood'))
     if not row_district:
         return False
+    row_district_norm = re.sub(r'^(حي|منطقه|district)\s+', '', row_district).strip()
     # A district scope may cover several neighborhoods the client picked; any
     # one of them is inside the scope and nothing outside it is.
     wanted = [district]
     if isinstance(scope.get('districts'), (list, tuple)):
         wanted.extend(scope.get('districts') or [])
     wanted_keys = {_fold_choice(item) for item in wanted if _fold_choice(item)}
-    return row_district in wanted_keys
+    wanted_norm = {re.sub(r'^(حي|منطقه|district)\s+', '', k).strip() for k in wanted_keys}
+    return row_district in wanted_keys or row_district_norm in wanted_norm
 
 
 _FOLDED_UNIT_TYPE_TOKENS = {}

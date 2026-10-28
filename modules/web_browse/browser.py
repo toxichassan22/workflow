@@ -1015,7 +1015,20 @@ class BrowserWorker:
             # real failure, and a lost page would drop its hotels.
             _browser_log(f'[BROWSER] booking timeout, retrying once: {url}')
             result = self._open_url_once(page, url, timeout)
+        self._open_url_attempts = getattr(self, '_open_url_attempts', 0) + 1
+        if not result.get('error'):
+            self._open_url_successes = getattr(self, '_open_url_successes', 0) + 1
+        elif result.get('error') in ('http_403', 'blocked'):
+            self._open_url_blocked = getattr(self, '_open_url_blocked', 0) + 1
         return result
+
+    @property
+    def pages_blocked(self):
+        """True when page navigation was attempted but all target pages were blocked by WAF/403."""
+        attempts = getattr(self, '_open_url_attempts', 0)
+        successes = getattr(self, '_open_url_successes', 0)
+        blocked = getattr(self, '_open_url_blocked', 0)
+        return attempts > 0 and successes == 0 and blocked > 0
 
     @property
     def search_blocked(self):

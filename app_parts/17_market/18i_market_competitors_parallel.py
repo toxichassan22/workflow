@@ -707,7 +707,7 @@ def _native_fallback_needed(result):
     empty market is a real answer and must not trigger the paid fallback."""
     if not isinstance(result, dict):
         return True
-    if result.get('search_blocked'):
+    if result.get('search_blocked') or result.get('pages_blocked'):
         return True
     if result.get('provider_error'):
         return True
@@ -800,8 +800,9 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
     parsed, parse_error = (_parse_market_model_json(response)
                            if isinstance(response, dict) else ({}, 'empty_response'))
     search_blocked = bool(session is not None and getattr(session, 'search_blocked', False))
+    pages_blocked = bool(session is not None and getattr(session, 'pages_blocked', False))
     search_ran = bool(isinstance(response, dict) and _market_search_ran(response))
-    if search_blocked:
+    if search_blocked or pages_blocked:
         search_ran = False
     result = {
         'task': task,
@@ -811,6 +812,7 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
         'provider_error': provider_error or '',
         'search_ran': search_ran,
         'search_blocked': search_blocked,
+        'pages_blocked': pages_blocked,
     }
     if (str(task.get('kind') or '') != 'fill'
             and _native_fallback_needed(result)):
@@ -1005,8 +1007,9 @@ def _run_expansion_scan_task(task, payload, existing, mode, offer_lang,
     parsed, parse_error = (_parse_market_model_json(response)
                            if isinstance(response, dict) else ({}, 'empty_response'))
     search_blocked = bool(session is not None and getattr(session, 'search_blocked', False))
+    pages_blocked = bool(session is not None and getattr(session, 'pages_blocked', False))
     search_ran = bool(isinstance(response, dict) and _market_search_ran(response))
-    if search_blocked:
+    if search_blocked or pages_blocked:
         search_ran = False
     result = {
         'task': task,
@@ -1016,6 +1019,7 @@ def _run_expansion_scan_task(task, payload, existing, mode, offer_lang,
         'provider_error': provider_error or '',
         'search_ran': search_ran,
         'search_blocked': search_blocked,
+        'pages_blocked': pages_blocked,
     }
     if _native_fallback_needed(result):
         fallback = _native_search_fallback(

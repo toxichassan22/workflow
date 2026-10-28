@@ -82,6 +82,8 @@ class NativeSearchFallbackTests(unittest.TestCase):
         self.assertTrue(module._native_fallback_needed({
             'search_ran': True, 'search_blocked': True, 'parsed': {'competitors': []}}))
         self.assertTrue(module._native_fallback_needed({
+            'search_ran': True, 'pages_blocked': True, 'parsed': {'competitors': []}}))
+        self.assertTrue(module._native_fallback_needed({
             'search_ran': True, 'provider_error': 'captcha', 'parsed': {'competitors': []}}))
 
     def test_fallback_failure_returns_none(self):

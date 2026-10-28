@@ -193,6 +193,19 @@ class BenchmarkAxesTests(unittest.TestCase):
         self.assertFalse(market_study.competitor_matches_location_scope(
             distant, scope, city='الرياض', district='النرجس'))
 
+    def test_district_and_city_scope_handles_prefixes(self):
+        scope = {'mode': 'district', 'districts': ['الروضة', 'الخالدية']}
+        self.assertTrue(market_study.competitor_matches_location_scope(
+            {'city': 'جدة', 'district': 'حي الروضة'}, scope, city='جدة', district='الروضة'))
+        self.assertTrue(market_study.competitor_matches_location_scope(
+            {'city': 'مدينة جدة', 'district': 'الخالدية'}, scope, city='جدة', district='الروضة'))
+        self.assertTrue(market_study.competitor_matches_location_scope(
+            {'city': 'مدينة جدة', 'district': 'حي الخالدية'}, scope, city='جدة', district='الروضة'))
+        self.assertFalse(market_study.competitor_matches_location_scope(
+            {'city': 'جدة', 'district': 'حي المروة'}, scope, city='جدة', district='الروضة'))
+        self.assertFalse(market_study.competitor_matches_location_scope(
+            {'city': 'الرياض', 'district': 'الروضة'}, scope, city='جدة', district='الروضة'))
+
     def test_competitor_normalization_converts_foreign_prices_to_sar(self):
         with patch.object(market_study, '_live_fx_rates', return_value={}):
             row = market_study.normalize_competitor_row({
