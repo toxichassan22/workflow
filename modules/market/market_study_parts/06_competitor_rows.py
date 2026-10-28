@@ -672,9 +672,19 @@ def normalize_summary_currency(text):
     return value.strip()
 
 
+def _strip_citation_brackets(text):
+    if not text:
+        return ''
+    cleaned = re.sub(r'\[\s*\d+(?:\s*[,،-]\s*\d+)*\s*\]', '', str(text))
+    cleaned = re.sub(r'[ 	]{2,}', ' ', cleaned)
+    cleaned = re.sub(r'\s+([.،,؛:!؟])', r'\1', cleaned)
+    return cleaned
+
+
 def _normalize_summary_axis_text(value):
     text = normalize_summary_currency(value)
     text = sanitize_summary_floats(text)
+    text = _strip_citation_brackets(text)
     lines = [re.sub(r'[ \t]+', ' ', line).strip() for line in text.splitlines()]
     while lines and not lines[0]:
         lines.pop(0)

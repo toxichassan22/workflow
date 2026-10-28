@@ -232,7 +232,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'apartments, villas, hotels, and every other selected activity comparable analytical depth when the '
             'evidence supports it; do not compress any available category into a one-line mention. Preserve every '
             'useful statistic and its interpretation, with no fixed word limit. Keep source names out of '
-            'axis prose; put citations only in sources. The competition axis may use the supplied competitor '
+            'axis prose; put citations only in sources. No Citation Brackets Rule: Strictly forbid placing citation brackets, footnote numbers, or inline reference tags (such as [1], [2], [6], or [24][25]) inside the narrative text of any axis; all citations belong solely in sources without bracketed tags in the narrative. The competition axis may use the supplied competitor '
             'table; every other axis analyzes only selected project activities and components in the binding '
             'activity scope. Include another sector only as brief context when it materially supports a '
             'selected activity. '
@@ -334,7 +334,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'تبنّ لغة استشارية تحليلية شجاعة وبناءة توظف الأرقام المتاحة في صياغة فرضيات الاستثمار والتسعير بدلاً من استهلاك النص في عبارات التبرؤ الدفاعي أو الاعتذار المتكرر ومبررات عدم كفاية البيانات؛ اذكر القيود المنهجية باقتضاب وركّز على استخلاص الدلالات الاستثمارية للأرقام المتاحة. '
             'امنح الشقق والفلل والفنادق والمعارض وكل نشاط مختار عمقًا تحليليًا متقاربًا بحسب الأدلة، '
             'مع إدراج كل الأرقام المتاحة دون حد للكلمات أو اختصار مخل. اشرح دلالة الدليل وأثره العملي في سياق سردي متدفق. '
-            'لا تذكر أسماء المصادر داخل نص المحاور؛ اجمعها في sources فقط. يجوز أن يستفيد '
+            'لا تذكر أسماء المصادر داخل نص المحاور؛ اجمعها في sources فقط. قاعدة حظر أرقام الاستشهادات والأقواس المرجعية في المتن: يُمنع منعًا باتًا وضع أرقام استشهادات أو هوامش بين أقواس مربعة مثل [1] أو [2] أو [6] أو [24][25] داخل نصوص أي محور؛ اجعل السرد مسترسلاً ومتصلاً دون أي أرقام أو رموز تحيل إلى المصادر، فالمصادر توضع فقط في مصفوفة sources دون أي علامات إحالة داخل النص. يجوز أن يستفيد '
             'محور المنافسة من جدول المنافسين المرفق؛ أما بقية المحاور فتحلل الأنشطة والمكونات المحددة في نطاق المشروع '
             'الملزم فقط. اذكر قطاعًا آخر كسياق موجز فقط إذا كان يخدم نشاطًا مختارًا بوضوح. '
             'في project_evaluation وضح المدخلات التي لا تكفي للحكم ولا تخترع حالة مالية. اجعل one_block_summary '
@@ -373,6 +373,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'Every rental category in rental_groups must include both its transaction count and its average annual rental value. '
             'Give every evidence-supported category comparable depth and include all useful figures; impose no word limit. '
             'Omit unavailable subcategories without saying they were missing, inaccessible, or unavailable; use an empty string for an axis with no evidence. '
+            'Strictly forbid writing footnote brackets or citation numbers like [1] or [6] anywhere in the narrative prose. '
             'All monetary values in the study and source notes must be SAR. Convert other currencies using a verified exchange rate for the data date; omit an amount when the rate cannot be verified. '
             'Never mention the access date in narrative or source notes. State the study issue date and source publication/data date when available; accessed_at is metadata only.\n')
     else:
@@ -391,6 +392,7 @@ def build_summary_user_prompt(payload, competitors, current_summary=None,
             'ولكل فئة إيجارية في المؤشر الإيجاري اذكر عدد الصفقات ومتوسط القيمة الإيجارية السنوية معًا. '
             'امنح كل فئة تدعمها الأدلة عمقًا متقاربًا، وأدرج الأرقام المفيدة كاملة دون حد للكلمات. '
             'احذف الفئات الفرعية غير المتاحة دون القول إنها مفقودة أو متعذرة أو غير متاحة؛ وأعد قيمة فارغة للمحور الذي لا يسنده دليل. '
+            'يُمنع منعًا باتًا وضع أي أقواس مرجعية أو أرقام مصادر مثل [1] أو [6] في نهاية الجمل أو الفقرات؛ اجعل النصوص نقية وخالية تماماً من علامات الترقيم المرجعية. '
             'كل القيم المالية في الدراسة وملاحظات المصادر بالريال السعودي. حوّل العملات الأخرى بسعر صرف موثق لتاريخ البيانات؛ واحذف المبلغ إذا تعذر التحقق من السعر. '
             'لا تذكر تاريخ الوصول داخل النص أو ملاحظات المصادر. اذكر تاريخ إصدار الدراسة وتاريخ نشر/بيانات المصدر عند توفره؛ حقل accessed_at للتوثيق فقط. '
             'لا تكتب كلمة «وسيط» في أي نص ظاهر للمستخدم. استخدم «متوسط حسابي» فقط للمعدل الحسابي الحقيقي، واحذف قيمة أي مقياس آخر بدل تسميته متوسطًا.\n')

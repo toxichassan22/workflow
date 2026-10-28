@@ -171,6 +171,7 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('دون استثناء أي حي', prompt)
         self.assertIn('تجنب تماماً أي تكرار ميكانيكي أو لفظي مثل «ريال سعودي سعوديًا»', prompt)
         self.assertIn('بل اسرد التحليل بفقرات متماسكة تبدأ بجمل افتتاحية استشارية متصلة', prompt)
+        self.assertIn('قاعدة حظر أرقام الاستشهادات والأقواس المرجعية في المتن', prompt)
 
         en_prompt = market_study.build_summary_user_prompt({
             'city': 'Jeddah',
@@ -181,6 +182,18 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('without omitting any entered district', en_prompt)
         self.assertIn('Rental Benchmark Rule: In rental_groups from Ejar and Sakani', en_prompt)
         self.assertIn('Avoid robotic colon-separated bullet headers', en_prompt)
+        self.assertIn('No Citation Brackets Rule', en_prompt)
+
+    def test_strip_citation_brackets_cleans_inline_footnote_references(self):
+        text = 'وقد بلغ عدد الصفقات 47 صفقة[6] بمتوسط 9,434 ريال[1] وفق تقرير السوق.[15][16][17] كما بلغت القيمة 10 ملايين.[24, 25]'
+        cleaned = market_study._strip_citation_brackets(text)
+        self.assertEqual(cleaned, 'وقد بلغ عدد الصفقات 47 صفقة بمتوسط 9,434 ريال وفق تقرير السوق. كما بلغت القيمة 10 ملايين.')
+
+        axis_cleaned = market_study._normalize_summary_axis_text(text)
+        self.assertNotIn('[6]', axis_cleaned)
+        self.assertNotIn('[1]', axis_cleaned)
+        self.assertNotIn('[15]', axis_cleaned)
+        self.assertNotIn('[24, 25]', axis_cleaned)
 
     def test_english_scope_and_research_prompt(self):
         block = market_study._summary_scope_block(

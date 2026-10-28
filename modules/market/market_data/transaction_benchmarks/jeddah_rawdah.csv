@@ -1,4 +1,4 @@
-﻿date,city,district,unit_type,deal_value_sar,price_sqm_sar,area_sqm,source,source_url
+date,city,district,unit_type,deal_value_sar,price_sqm_sar,area_sqm,source,source_url
 2025-08-11,جدة,الروضة,فيلا,4900000.0,12864.27,380.9,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2025-08-11,جدة,الروضة,فيلا,5200000.0,9629.63,540.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2025-08-04,جدة,الروضة,فيلا,9000000.0,17857.14,504.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
@@ -24,7 +24,7 @@
 2025-05-04,جدة,الروضة,فيلا,6300000.0,8506.39,740.62,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2025-04-30,جدة,الروضة,فيلا,7000000.0,9333.33,750.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2025-04-30,جدة,الروضة,فيلا,6700000.0,9080.19,737.87,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
-2025-04-30,جدة,الروضة,فيلا,8200000.0,10933.33,750.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
+2025-04-30,جدة,الروضة,فيلا,8199999.999999999,10933.33,750.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2025-04-07,جدة,الروضة,فيلا,6300000.0,12395.47,508.25,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2025-03-25,جدة,الروضة,فيلا,6500000.0,12788.98,508.25,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2025-03-25,جدة,الروضة,فيلا,6300000.0,12395.47,508.25,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
@@ -70,16 +70,12 @@
 2024-06-05,جدة,الروضة,فيلا,9000000.0,11042.94,815.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-06-02,جدة,الروضة,فيلا,4500000.0,7200.0,625.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-05-21,جدة,الروضة,فيلا,3500000.0,7597.3,460.69,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
-2024-05-15,جدة,الروضة,فيلا,800000000.0,320000.0,2500.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
-2024-05-15,جدة,الروضة,فيلا,800000000.0,320000.0,2500.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
-2024-05-15,جدة,الروضة,فيلا,800000000.0,320000.0,2500.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
-2024-05-15,جدة,الروضة,فيلا,800000000.0,266666.67,3000.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-05-14,جدة,الروضة,فيلا,4300000.0,10452.11,411.4,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-05-08,جدة,الروضة,فيلا,3500000.0,6363.64,550.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-05-08,جدة,الروضة,فيلا,3100000.0,6738.69,460.03,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-04-30,جدة,الروضة,فيلا,2800000.0,7000.0,400.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-04-28,جدة,الروضة,فيلا,16000000.0,10000.0,1600.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
-2024-04-24,جدة,الروضة,فيلا,16100000.0,6440.0,2500.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
+2024-04-24,جدة,الروضة,فيلا,16100000.000000002,6440.0,2500.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-04-01,جدة,الروضة,فيلا,2600000.0,6419.75,405.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-02-26,جدة,الروضة,فيلا,4500000.0,6746.63,667.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2024-02-20,جدة,الروضة,فيلا,4200000.0,6720.0,625.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
@@ -89,8 +85,8 @@
 2023-12-21,جدة,الروضة,فيلا,3700000.0,6994.33,529.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2023-12-20,جدة,الروضة,فيلا,5900000.0,11153.12,529.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2023-12-12,جدة,الروضة,فيلا,3700000.0,7830.69,472.5,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
-2023-12-03,جدة,الروضة,فيلا,8200000.0,6833.33,1200.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
-2023-12-03,جدة,الروضة,فيلا,8300000.0,6916.67,1200.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
+2023-12-03,جدة,الروضة,فيلا,8199999.999999999,6833.33,1200.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
+2023-12-03,جدة,الروضة,فيلا,8300000.000000001,6916.67,1200.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2023-11-28,جدة,الروضة,فيلا,11500000.0,6764.71,1700.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2023-11-12,جدة,الروضة,فيلا,3500000.0,6616.26,529.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals
 2023-10-10,جدة,الروضة,فيلا,3700000.0,6994.33,529.0,وزارة العدل,https://rei.rega.gov.sa/ar/advanced-search/deals

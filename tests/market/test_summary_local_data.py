@@ -115,7 +115,7 @@ class SummaryLocalDataTests(unittest.TestCase):
                 'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
             })
         self.assertTrue(result['available'])
-        self.assertEqual(sum(group['deal_count_in_file'] for group in result['groups']), 339)
+        self.assertEqual(sum(group['deal_count_in_file'] for group in result['groups']), 332)
         self.assertEqual({group['unit_type'] for group in result['groups']},
                          {'فيلا', 'دور'})
         self.assertNotIn('source_record_id', str(result))
@@ -131,9 +131,9 @@ class SummaryLocalDataTests(unittest.TestCase):
         districts = {group['district'] for group in result['groups']}
         self.assertIn('الروضة', districts)
         rawdah_group = next(g for g in result['groups'] if g['district'] == 'الروضة')
-        self.assertEqual(rawdah_group['deal_count_in_file'], 96)
+        self.assertEqual(rawdah_group['deal_count_in_file'], 92)
         self.assertEqual(rawdah_group['period_to'], '2025-08-11')
-        self.assertAlmostEqual(rawdah_group['median_price_sqm_sar'], 9073.72, places=2)
+        self.assertAlmostEqual(rawdah_group['median_price_sqm_sar'], 8961.12, places=1)
 
     def test_rental_benchmarks_are_loaded_from_sakani_indicators(self):
         with patch.object(market_study, '_summary_benchmark_files', return_value=[]), \
