@@ -397,7 +397,7 @@
         showTenantPage('tenantSlidesPage');
 
         // Set up live generation banner
-        setLiveGenBanner(true, 'بدء توليد الشرائح بالذكاء الاصطناعي...', WFT('gen.total_slides', 'إجمالي {n} شريحة', { n: totalSlides }), 0);
+        setLiveGenBanner(true, 'بدء توليد الشرائح بالذكاء الاصطناعي...', WFT('gen.total_slides', 'إجمالي {n} شريحة', { n: totalSlides }), 0, true);
         // The stop button stays available for the whole run: it is the only
         // way to stop before the remaining slides are paid for.
         setTenantGenerationStopVisible(true);
@@ -537,7 +537,7 @@
             }
           });
           setLiveGenBanner(true, WFT('gen.slides_progress', 'توليد الشرائح ({done} من {total})', { done: done, total: totalSlides }),
-            activeTitles.length ? activeTitles.slice(0, 3).join(' | ') : 'جاري الصياغة والتصميم بالذكاء الاصطناعي...', slidePct);
+            activeTitles.length ? activeTitles.slice(0, 3).join(' | ') : 'جاري الصياغة والتصميم بالذكاء الاصطناعي...', slidePct, true);
         }
 
         function markSlideGenerating(i) {
@@ -672,17 +672,18 @@
           generationFailure = { index: i, error: lastError || '' };
           const stoppedByUser = tenantGenerationStopRequested;
           const checkpointSaved = await saveTenantSlideGenerationCheckpoint(i, 'paused', lastError, generationProjectData);
-          const slidePct = Math.round(20 + (tenantSlidesData.length / totalSlides) * 75);
+          const slidePct = totalSlides
+            ? Math.round((tenantSlidesData.length / totalSlides) * 100) : 0;
           if (stoppedByUser) {
             setLiveGenBanner(true, WFT('gen.stopped_title', 'تم إيقاف التوليد'),
               (checkpointSaved
                 ? WFT('gen.stopped_detail', 'تم حفظ {n} شريحة ويمكن استكمال العرض لاحقًا.', { n: tenantSlidesData.length })
-                : WFT('gen.checkpoint_missing_detail', 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.')), slidePct);
+                : WFT('gen.checkpoint_missing_detail', 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.')), slidePct, true);
           } else {
             setLiveGenBanner(true, WFT('gen.paused_at_slide', 'توقف التوليد مؤقتًا عند الشريحة {n}', { n: i + 1 }),
               (lastError ? lastError + ' — ' : '') + (checkpointSaved
                 ? WFT('gen.checkpoint_saved_detail', 'تم حفظ {n} شريحة ويمكن استكمال العرض لاحقًا.', { n: tenantSlidesData.length })
-                : WFT('gen.checkpoint_missing_detail', 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.')), slidePct);
+                : WFT('gen.checkpoint_missing_detail', 'تعذر حفظ نقطة الاستئناف — الشرائح المنجزة محفوظة في هذه الجلسة فقط.')), slidePct, true);
           }
           renderTenantSlidesSidebar(true);
           toast(stoppedByUser
@@ -806,13 +807,13 @@
         if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !containsSlideRoot(s.html))) {
           await settleGenerationRun(false, 'لم يكتمل التوليد');
           setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ',
-            totalSlides ? Math.round((tenantSlidesData.length / totalSlides) * 100) : 0);
+            totalSlides ? Math.round((tenantSlidesData.length / totalSlides) * 100) : 0, true);
           toast('لم يكتمل توليد العرض، لذلك لم يتم حفظه.');
           return;
         }
 
         await saveTenantSlideGenerationCheckpoint(totalSlides, 'complete', '', generationProjectData);
-        setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', WFT('gen.total_slides_approved', 'إجمالي {n} شريحة معتمدة', { n: totalSlides }), 100);
+        setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', WFT('gen.total_slides_approved', 'إجمالي {n} شريحة معتمدة', { n: totalSlides }), 100, true);
         renderTenantSlidesSidebar(true);
         renderTenantDesignerChat();
         // await saveTenantPresentation(options.presentationTitle)
@@ -821,7 +822,7 @@
           // No file was produced, so the hold is released — the draft leaves
           // 'generating' and the points return to the wallet.
           await settleGenerationRun(false, 'تعذر حفظ العرض بعد التوليد');
-          setLiveGenBanner(true, 'اكتمل التوليد وتعذر الحفظ', 'الشرائح ما زالت مفتوحة في المعاينة', 100);
+          setLiveGenBanner(true, 'اكتمل التوليد وتعذر الحفظ', 'الشرائح ما زالت مفتوحة في المعاينة', 100, true);
           return;
         }
         await settleGenerationRun(true, '');

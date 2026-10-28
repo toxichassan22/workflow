@@ -880,7 +880,7 @@
           showTenantPage('tenantSlidesPage');
           clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
           setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
-          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', WFT('gen.slides_planned', '{n} شريحة — بدء التوليد المباشر', { n: planCount }), 0);
+          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', WFT('gen.slides_planned', '{n} شريحة — بدء التوليد المباشر', { n: planCount }), 0, true);
         } else {
           // The gate already escrowed the hold: a dead plan releases it and
           // returns the draft from 'generating' instead of stranding both.

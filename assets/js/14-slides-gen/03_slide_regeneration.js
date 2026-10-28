@@ -360,7 +360,8 @@
         for (let position = 0; position < plannedSlides.length; position += 1) {
           const planSlide = { ...plannedSlides[position] };
           setLiveGenBanner(true, WFT('gen.regenerating_section', 'إعادة توليد قسم {section}', { section: wfTr(sectionLabel) }),
-            WFT('gen.slide_of_total', 'الشريحة {n} من {total}', { n: position + 1, total: plannedSlides.length }), 20 + Math.round((position / plannedSlides.length) * 65));
+            WFT('gen.slide_of_total', 'الشريحة {n} من {total}', { n: position + 1, total: plannedSlides.length }),
+            Math.round((position / plannedSlides.length) * 100), true);
           const generated = await generateTenantSlideFromSnapshot(
             planSlide, firstIndex + position, projectedTotal, generationImages, {});
           if (deckHadWatermark) generated.html = applyDeckWatermarkToHtml(generated.html);

@@ -372,7 +372,10 @@
       }, 600);
     }
 
-    function setLiveGenBanner(visible, title, details, pct) {
+    // The live banner follows the same rule: a number only when the caller
+    // counted the slides behind it. Fifth argument marks a measured fraction;
+    // without it the bar sweeps and the percentage stays hidden.
+    function setLiveGenBanner(visible, title, details, pct, measured) {
       const banner = document.getElementById('tenantLiveGenBanner');
       if (!banner) return;
       if (!visible) {
@@ -385,6 +388,7 @@
       const barEl = document.getElementById('liveGenProgressBar');
       const pctEl = document.getElementById('liveGenProgressPct');
       const resumeButton = document.getElementById('liveGenResumeButton');
+      const barHost = barEl ? barEl.parentElement : null;
       if (titleEl && title) titleEl.textContent = title;
       if (detailsEl) detailsEl.textContent = details || '';
       if (resumeButton) {
@@ -392,9 +396,20 @@
         const resumable = checkpoint?.status === 'paused' && checkpoint?.active !== false;
         resumeButton.style.display = resumable ? 'inline-flex' : 'none';
       }
-      if (typeof pct === 'number') {
+      if (measured === true && typeof pct === 'number') {
         const clampedPct = Math.max(0, Math.min(100, Math.round(pct)));
+        if (barHost) barHost.classList.remove('is-indeterminate');
         if (barEl) barEl.style.width = clampedPct + '%';
-        if (pctEl) pctEl.textContent = clampedPct + '%';
+        if (pctEl) {
+          pctEl.style.visibility = '';
+          pctEl.textContent = clampedPct + '%';
+        }
+        return;
+      }
+      if (barHost) barHost.classList.add('is-indeterminate');
+      if (barEl) barEl.style.width = '';
+      if (pctEl) {
+        pctEl.style.visibility = 'hidden';
+        pctEl.textContent = '';
       }
     }

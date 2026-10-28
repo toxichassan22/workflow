@@ -61,6 +61,8 @@ function createPage() {
   const track = makeElement('globalLoaderTrack');
   const bar = get('globalLoaderBar');
   bar.parentElement = track;
+  const bannerBar = makeElement('liveGenBarTrack');
+  get('liveGenProgressBar').parentElement = bannerBar;
   ['globalLoader', 'globalLoaderTitle', 'globalLoaderText', 'globalLoaderProgress',
     'globalLoaderPct', 'globalLoaderStep', 'globalLoaderEstimate', 'globalLoaderSteps',
     'globalLoaderStopButton', 'tenantLiveGenBanner', 'liveGenSlideTitle',
@@ -104,6 +106,7 @@ function createPage() {
     fn: sandbox,
     node: get,
     track,
+    bannerBar,
     tick(times) {
       for (let index = 0; index < times; index += 1) {
         intervals.filter(Boolean).forEach(interval => interval.fn());
@@ -224,6 +227,24 @@ test('a finished task ends at one hundred and resets after the card closes', () 
   assert.equal(page.node('globalLoader').style.display, 'none');
   assert.equal(page.node('globalLoaderBar').style.width, '0%');
   assert.equal(page.node('globalLoaderEstimate').textContent, '');
+});
+
+test('the live generation banner draws only counted slides', () => {
+  const page = createPage();
+  const bar = page.node('liveGenProgressBar');
+  const pct = page.node('liveGenProgressPct');
+  // Regeneration names a slide, not a fraction: sweep, no number.
+  page.fn.setLiveGenBanner(true, 'إعادة توليد الشريحة 3 من 9', 'لن تتأثر بقية الشرائح', 35);
+  assert.equal(bar.style.width, '');
+  assert.equal(pct.style.visibility, 'hidden');
+  assert.equal(pct.textContent, '');
+  assert.equal(page.bannerBar.classList.contains('is-indeterminate'), true);
+  // Committed slides out of the plan is a real count.
+  page.fn.setLiveGenBanner(true, 'توليد الشرائح (3 من 9)', 'الشريحة 4', 33, true);
+  assert.equal(bar.style.width, '33%');
+  assert.equal(pct.textContent, '33%');
+  assert.equal(pct.style.visibility, '');
+  assert.equal(page.bannerBar.classList.contains('is-indeterminate'), false);
 });
 
 test('closing the card clears the step list so the next task starts clean', () => {

@@ -346,6 +346,13 @@
       transition: width 0.4s ease;
     }
 
+    /* No counted slides yet: sweep instead of claiming a fraction. */
+    .tenant-live-gen-bar.is-indeterminate .tenant-live-gen-fill {
+      width: 35%;
+      transition: none;
+      animation: globalLoaderIndeterminate 1.3s ease-in-out infinite;
+    }
+
     .tenant-live-gen-pct {
       font-size: 13px;
       font-weight: 700;
