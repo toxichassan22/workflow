@@ -3,7 +3,7 @@
     function marketSourcesTableHtml() {
       return '<div class="table-wrap"><table class="market-sources-table">' +
         '<thead><tr><th>المصدر</th><th>الرابط</th><th>تاريخ البيانات</th>' +
-        '<th>تاريخ الوصول</th><th>الموثوقية</th><th>ملاحظة</th><th></th></tr></thead><tbody></tbody></table></div>';
+        '<th></th></tr></thead><tbody></tbody></table></div>';
     }
 
     function selectMarketSourceTab(key) {
@@ -166,13 +166,13 @@
       const link = safeUrl
         ? '<a href="' + escapeHtml(safeUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(sourceRow.url || '') + '</a>'
         : '';
+      tr.dataset.accessedAt = sourceRow.accessed_at || '';
+      tr.dataset.reliability = sourceRow.reliability || '';
+      tr.dataset.note = sourceRow.note || '';
       tr.innerHTML =
         '<td><textarea data-field="name" rows="2">' + escapeHtml(sourceRow.name || '') + '</textarea></td>' +
         '<td><input data-field="url" value="' + escapeHtml(sourceRow.url || '') + '"><div data-source-link class="market-source-links">' + link + '</div></td>' +
         '<td><input data-field="data_date" value="' + escapeHtml(sourceRow.data_date || '') + '"></td>' +
-        '<td><input data-field="accessed_at" value="' + escapeHtml(sourceRow.accessed_at || '') + '"></td>' +
-        '<td><textarea data-field="reliability" rows="2">' + escapeHtml(sourceRow.reliability || '') + '</textarea></td>' +
-        '<td><textarea data-field="note" rows="2">' + escapeHtml(sourceRow.note || '') + '</textarea></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-source>حذف</button></td>';
       tb.appendChild(tr);
       tr.querySelector('[data-remove-source]').addEventListener('click', () => removeMarketSourcePermanently(tr));
@@ -184,13 +184,6 @@
           ? '<a href="' + escapeHtml(current) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(value) + '</a>'
           : '';
         attachMarketSourceToCompetitor(tr);
-        const reliability = tr.querySelector('[data-field="reliability"]');
-        if (reliability && !reliability.value) {
-          reliability.value = marketOfficialSourceReliability(
-            tr.querySelector('[data-field="competitor_name"]')?.value,
-            tr.querySelector('[data-field="name"]')?.value,
-            value);
-        }
       });
       tr.querySelectorAll('input,textarea').forEach(input => input.addEventListener('input', persistMarketStudyFromDom));
       refreshDynamicI18n(tr);
@@ -213,9 +206,9 @@
           name: read('name'),
           url: read('url'),
           data_date: read('data_date'),
-          accessed_at: read('accessed_at'),
-          reliability: read('reliability'),
-          note: read('note')
+          accessed_at: tr.dataset.accessedAt || read('accessed_at') || '',
+          reliability: tr.dataset.reliability || read('reliability') || '',
+          note: tr.dataset.note || read('note') || ''
         };
       }).filter(row => row.name || row.url);
     }

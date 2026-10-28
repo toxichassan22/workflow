@@ -602,8 +602,7 @@
       border-collapse: collapse;
     }
 
-    #marketCompetitorsTable,
-    .market-sources-table {
+    #marketCompetitorsTable {
       min-width: 1450px;
     }
 
@@ -612,32 +611,33 @@
     }
 
     .market-sources-table {
-      min-width: 2100px;
+      min-width: 800px;
+      width: 100%;
     }
 
     .market-sources-table th:nth-child(1),
     .market-sources-table td:nth-child(1) {
-      min-width: 190px;
+      min-width: 200px;
+      width: 32%;
     }
 
     .market-sources-table th:nth-child(2),
     .market-sources-table td:nth-child(2) {
-      min-width: 250px;
+      min-width: 320px;
+      width: 48%;
     }
 
     .market-sources-table th:nth-child(3),
     .market-sources-table td:nth-child(3) {
-      min-width: 320px;
+      min-width: 140px;
+      width: 14%;
     }
 
-    .market-sources-table th:nth-child(6),
-    .market-sources-table td:nth-child(6) {
-      min-width: 220px;
-    }
-
-    .market-sources-table th:nth-child(7),
-    .market-sources-table td:nth-child(7) {
-      min-width: 300px;
+    .market-sources-table th:nth-child(4),
+    .market-sources-table td:nth-child(4) {
+      min-width: 70px;
+      width: 6%;
+      text-align: center;
     }
 
     #marketCompetitorsTable th:nth-child(1), #marketCompetitorsTable td:nth-child(1) { width:280px;min-width:280px; }
