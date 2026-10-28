@@ -313,53 +313,6 @@ def _ensure_cover_background_element(html, cover_url):
         source, count=1, flags=re.IGNORECASE)
 
 
-def _update_section_divider_background(html, cover_url):
-    """Point the divider's own background layer at the current cover image.
-
-    It only follows an element that already exists: a divider whose layer the
-    client deleted must stay without a photo on save, export and reopen.
-    """
-    cover = _usable_slide_image_url(cover_url)
-    if not html or not cover:
-        return html
-    source = str(html)
-    if not re.search(r'data-section-divider-background', source, re.IGNORECASE):
-        return source
-    return re.sub(
-        r'(data-section-divider-background\s*=\s*["\']?1["\']?[^>]*?background-image\s*:\s*url\()([^)]*)(\))',
-        lambda match: match.group(1) + _css_url(cover) + match.group(3),
-        source, count=1, flags=re.IGNORECASE)
-
-
-def _force_section_divider_background(html, cover_url):
-    """Make a divider use the deck's real cover even when its saved CSS is empty or stale."""
-    cover = _usable_slide_image_url(cover_url)
-    if not html or not cover:
-        return html
-    declaration = (
-        "background-image:url('" + _css_url(cover) + "')!important;"
-        'background-size:cover!important;background-position:center center!important;'
-        'background-repeat:no-repeat!important;'
-    )
-    source = str(html)
-    source, count = re.subn(
-        r'background(?:-image)?\s*:\s*(?:url\([^)]*\)|none)\s*;?',
-        declaration, source, count=1, flags=re.IGNORECASE,
-    )
-    if count:
-        return source
-    background = (
-        '<div data-section-divider-background="1" aria-hidden="true" '
-        'style="position:absolute;top:0;right:0;left:0;bottom:0;'
-        + declaration + '"></div>'
-    )
-    return re.sub(
-        r'(<div\b[^>]*\bclass=["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>)',
-        lambda match: match.group(1) + background,
-        source, count=1, flags=re.IGNORECASE,
-    )
-
-
 def build_section_divider_slide(slide, slide_num, total_slides, branding=None, project_data=None, offer_lang=None):
     """Render a section divider: the main image, darkened, with the section name over it.
 

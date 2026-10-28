@@ -150,7 +150,9 @@ class MeetingRequirementsTestsPart23(MeetingRequirementsTests):
             branding=self._branding(), project_data={'project_name': 'مشروع'},
             creative_images={'cover': '/uploads/creative/t/cover.png'})
         self.assertIn('data-section-divider-background', out_kept[2]['html'])
-        self.assertIn('/uploads/creative/t/cover.png', out_kept[2]['html'])
+        # The divider's own layer is authoritative; a save/export must not
+        # rewrite it from the live cover image.
+        self.assertIn('/old.png', out_kept[2]['html'])
 
     def test_the_client_updates_the_cover_layer_instead_of_replanting_it(self):
         client = read_frontend_text()
@@ -158,6 +160,9 @@ class MeetingRequirementsTestsPart23(MeetingRequirementsTests):
         self.assertIn('coverBackgroundRemoved', client)
         self.assertIn('sectionDividerBackgroundRemoved', client)
         self.assertIn('data-cover-background', client)
+        export_source = client.split('async function exportTenantSlides', 1)[1].split(
+            'async function deleteTenantPresentation', 1)[0]
+        self.assertNotIn('forceSectionDividerBackgroundHtml', export_source)
 
     def test_exec_badge_text_reads_a_multi_select_value(self):
         engine = self.application_module.slide_engine

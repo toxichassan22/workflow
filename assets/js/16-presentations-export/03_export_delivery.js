@@ -30,10 +30,11 @@
           if (!item || typeof item !== 'object') return;
           let sHtml = String(item.html || '');
           const sType = String(item.type || '').toLowerCase();
+          // A divider owns its photo layer inside its own HTML. Replacing it
+          // with the live cover here injected the cover image (even the company
+          // logo after a bad cover state) into every divider at export time.
+          if (sType === 'section_divider') return;
           sHtml = sHtml.replace(/#*(?:IMAGE_COVER|COVER_IMAGE|MAIN_IMAGE|PROJECT_IMAGE_COVER)#*/gi, exportCover);
-          if (sType === 'section_divider') {
-            sHtml = forceSectionDividerBackgroundHtml(sHtml, exportCover);
-          }
           item.html = sHtml;
         });
       }

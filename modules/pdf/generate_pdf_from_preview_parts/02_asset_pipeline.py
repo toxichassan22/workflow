@@ -312,21 +312,6 @@ def _default_tenant_logo_uri():
     return p.as_uri() if p.is_file() else None
 
 
-def _heal_section_divider_backgrounds(slides, cover_uri):
-    if not cover_uri:
-        return list(slides or [])
-    healed = []
-    for slide in slides or []:
-        source = str(slide or '')
-        is_divider = (
-            'data-section-divider-background' in source
-            or 'section_divider' in source
-            or ('linear-gradient(160deg' in source and 'font-size:58px' in source)
-        )
-        healed.append(_force_section_divider_background(source, cover_uri) if is_divider else source)
-    return healed
-
-
 def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     global LAST_PDF_ENGINE
     LAST_PDF_ENGINE = ''
@@ -402,8 +387,10 @@ def generate_pdf(slides_html, branding=None, out_path=None, tenant_id=None):
     slides = extract_slide_elements(html)
     if slides:
         slides = [_unwrap_spurious_map_summary_cards(slide) for slide in slides]
-    if cover_uri and slides:
-        slides = _heal_section_divider_backgrounds(slides, cover_uri)
+    # A divider owns its photo layer inside its own HTML. The print pipeline
+    # used to plant the discovered cover image into every divider, which put a
+    # full-page company logo on dividers whenever the cover lookup picked a
+    # logo. The PDF now prints exactly the slide it was given.
     if slides:
         html = "\n".join(f'<div class="pdf-export-page">{slide}</div>' for slide in slides)
     if slide_tags and len(slides) != slide_tags:

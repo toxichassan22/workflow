@@ -582,10 +582,6 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             html = _rewrite_preserved_counter(item.get('html') or '', slide_type, index, total)
             html = _strip_header_page_marker(html)
             if slide_type == 'section_divider':
-                cover_target = (creative_images.get('cover') or project_data.get('cover')
-                                or project_data.get('mainImageData') or '')
-                if cover_target:
-                    html = _update_section_divider_background(html, cover_target)
                 html = _strip_forced_section_background(html)
             item['html'] = _strip_presentation_icons(html)
             continue
@@ -642,14 +638,10 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
                         for cover_pat in [r'#*IMAGE_COVER#*', r'#*COVER_IMAGE#*', r'#*MAIN_IMAGE#*', r'#*PROJECT_IMAGE_COVER#*']:
                             curr_html = re.sub(cover_pat, cover_target, curr_html, flags=re.IGNORECASE)
                     item['html'] = curr_html
-                if cover_target:
-                    # Follow the current cover only when the divider still owns
-                    # its background layer; never plant it again after a delete.
-                    item['html'] = _update_section_divider_background(
-                        item.get('html') or '', cover_target)
-                # Older builds baked the photo into the root style, where the
-                # editor can never remove it. Strip that copy so the divider's
-                # own layer is the only source of the image.
+                # The divider's own layer is the only source of its photo: a
+                # save/export never follows or re-adds the cover image. Older
+                # builds baked the photo into the root style where the editor
+                # could never remove it, so that copy is stripped.
                 item['html'] = _strip_forced_section_background(item.get('html') or '')
             else:
                 curr_html = _rewrite_slide_counter(

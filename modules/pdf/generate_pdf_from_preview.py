@@ -9,7 +9,6 @@ from urllib.parse import unquote, urlparse
 from design_templates import build_font_css, extract_slide_elements, sanitize_slide_html_for_export
 from slide_engine import (
     _cover_image_url_from_html,
-    _force_section_divider_background,
     _unwrap_spurious_map_summary_cards,
     resolve_logo_in_html,
 )
