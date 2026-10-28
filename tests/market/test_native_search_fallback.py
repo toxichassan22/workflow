@@ -39,6 +39,7 @@ class NativeSearchFallbackTests(unittest.TestCase):
                     'name': 'منافس من البحث البديل',
                     'project_type': 'سكني',
                     'operation_type': 'بيع',
+                    'source': '[عقار](https://sa.aqar.fm/x)',
                 }]}, ensure_ascii=False),
                 'annotations': [{'url_citation': {
                     'url': 'https://sa.aqar.fm/x',
@@ -54,6 +55,8 @@ class NativeSearchFallbackTests(unittest.TestCase):
 
         def fake_call(system_prompt, prompt, usage_ctx=None, **kwargs):
             captured.update(kwargs)
+            captured['system_prompt'] = system_prompt
+            captured['prompt'] = prompt
             return self._response()
 
         with patch.object(self.module, '_browse_agent_call',
@@ -66,8 +69,11 @@ class NativeSearchFallbackTests(unittest.TestCase):
         self.assertEqual(captured.get('plugins'),
                          [{'id': 'web', 'max_results': 5}])
         self.assertNotIn('model', captured)
+        self.assertIn('JSON', captured.get('system_prompt', ''))
         self.assertEqual(result['parsed']['competitors'][0]['name'],
                          'منافس من البحث البديل')
+        self.assertEqual(result['parsed']['competitors'][0]['source_url'],
+                         'https://sa.aqar.fm/x')
         self.assertTrue(result['search_ran'])
 
     def test_fallback_is_only_for_a_search_that_never_ran(self):
@@ -136,7 +142,7 @@ class NativeSearchFallbackTests(unittest.TestCase):
         self.assertEqual(len(result['parsed']['competitors']), 1)
         self.assertEqual(result['parsed']['competitors'][0]['name'], 'مشروع فلل الروضة الموثق')
 
-    def test_dead_url_shape_blocks_nft_and_crypto(self):
+    def test_dead_url_shape_blocks_nft_crypto_and_financial_sites(self):
         import agent
         dead_fn = getattr(agent, '_dead_url_shape', None)
         self.assertTrue(callable(dead_fn))
@@ -158,16 +164,26 @@ class NativeSearchFallbackTests(unittest.TestCase):
         self.assertEqual(
             dead_fn('https://somedomain.co.uk/project'),
             'dead_source')
+        self.assertEqual(
+            dead_fn('https://www.bankrate.com/credit-cards/rewards/best-credit-card-rewards-programs/'),
+            'dead_source')
+        self.assertEqual(
+            dead_fn('https://gobankingrates.com/banking/banking-advice/banking-expert-ways-to-take-advantage-of-loyalty-programs/'),
+            'dead_source')
+        self.assertEqual(
+            dead_fn('https://www.nerdwallet.com/best/credit-cards/rewards'),
+            'dead_source')
 
     def test_native_fallback_prompt_anchors_guidance_and_scope(self):
         prompt_fn = getattr(self.module, '_native_fallback_prompt', None)
         self.assertTrue(callable(prompt_fn))
         task = {'axis': {'key': 'villas', 'operation': 'sale', 'label': 'فلل للبيع'}}
         payload = {'city': 'جدة', 'district': 'الروضة', 'competitorScope': {'districts': ['الروضة', 'الخالدية']}}
-        res = prompt_fn('BASE_PROMPT', task, payload, offer_lang='ar')
+        res = prompt_fn(task, payload, offer_lang='ar')
         self.assertIn('جدة', res)
-        self.assertIn('توجيه إضافي لبحث الويب الأصلي', res)
-        self.assertIn('مشاريع ومجمعات حقيقية', res)
+        self.assertIn('الروضة', res)
+        self.assertIn('JSON', res)
+        self.assertIn('competitors', res)
 
 
 if __name__ == '__main__':

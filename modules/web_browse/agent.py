@@ -307,9 +307,10 @@ _ACTION_TOOLS = ('click_element', 'type_text', 'scroll_page')
 _DEAD_URL_SHAPES = (
     re.compile(r'rega\.gov\.sa/ar/advanced-search', re.I),
     re.compile(r'spa\.gov\.sa(?:/(?!ar/)|/?$)', re.I),
-    re.compile(r'(?:walmart|idealhome|realtor|zillow|redfin|trulia|homedepot|target)\.(?:com|co\.uk)', re.I),
+    re.compile(r'(?:walmart|idealhome|realtor|zillow|redfin|trulia|homedepot|target|bankrate|gobankingrates|creditcards?|nerdwallet|fool\.com)\.(?:com|co\.uk)', re.I),
     re.compile(r'(?:nft|crypto|bitcoin|ethereum|web3|blockchain|token|esprezzo)', re.I),
     re.compile(r'(?:lawncare|lawn-care|gardening|landscaping|diamondmaterials|paving|materials\.com)', re.I),
+    re.compile(r'(?:credit-card|banking-advice|rewards-programs?|loyalty-programs?|personal-finance)', re.I),
     re.compile(r'\.(?:us|co\.uk|ca|au|de|fr|in|ru)(?:/|$|\?)', re.I),
 )
 
