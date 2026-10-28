@@ -93,12 +93,10 @@ def _portals_focus_line(offer_lang='ar'):
 
 
 def _scan_search_limits(task_count):
-    total_searches = max(4, int(_COMPETITORS_SEARCH_BUDGET))
-    total_steps = max(10, int(_COMPETITORS_MAX_STEPS))
-    per_task = max(1, task_count)
+    per_task = max(1, min(task_count, 2))
     return (
-        max(3, total_searches // per_task),
-        max(5, total_steps // per_task),
+        max(4, int(_COMPETITORS_SEARCH_BUDGET) // per_task),
+        max(14, int(_COMPETITORS_MAX_STEPS) // per_task),
     )
 
 
@@ -1040,8 +1038,8 @@ def _run_parallel_expansions(tasks, payload, existing, mode, offer_lang,
     if not tasks:
         return []
     report = _locked_report(report)
-    search_budget = max(3, int(_COMPETITORS_SEARCH_BUDGET) // max(1, len(tasks) + 2))
-    max_steps = max(5, int(_COMPETITORS_MAX_STEPS) // max(1, len(tasks) + 1))
+    search_budget = max(4, int(_COMPETITORS_SEARCH_BUDGET) // max(1, min(len(tasks), 2)))
+    max_steps = max(12, int(_COMPETITORS_MAX_STEPS) // max(1, min(len(tasks), 2)))
     workers = min(_PARALLEL_SCAN_WORKERS, len(tasks)) or 1
     results = [None] * len(tasks)
     done = [0]
