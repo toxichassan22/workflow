@@ -91,7 +91,10 @@ def _agent_preamble(budget, research_mode=False):
         'و open_url تقرأ نص الصفحة الفعلي، و inspect_page تعرض عناصر الصفحة '
         'التفاعلية مرقّمة، و click_element و type_text و scroll_page تنفّذ عليها '
         '(أرقام العناصر تخص آخر نتيجة فقط). استخدم open_url للقراءة المباشرة، '
-        'وأدوات التفاعل فقط حين تحتاج الصفحة إدخالًا أو ضغطًا أو تمريرًا. نفّذ '
+        'وأدوات التفاعل فقط حين تحتاج الصفحة إدخالًا أو ضغطًا أو تمريرًا. '
+        'عند استخدام web_search اكتب كلمات بحثية موجزة ومباشرة فقط '
+        '(مثل: "مشروع فلل الروضة جدة" أو "مجمع تجاري الخالدية جدة")، وتجنب العبارات الحوارية. '
+        'نفّذ '
         + _search_count_phrase(advertised) + ' كحد أقصى طوال المهمة. '
     )
     if research_mode:
@@ -304,6 +307,7 @@ _ACTION_TOOLS = ('click_element', 'type_text', 'scroll_page')
 _DEAD_URL_SHAPES = (
     re.compile(r'rega\.gov\.sa/ar/advanced-search', re.I),
     re.compile(r'spa\.gov\.sa(?:/(?!ar/)|/?$)', re.I),
+    re.compile(r'(?:walmart|idealhome|realtor|zillow|redfin|trulia|homedepot|target)\.(?:com|co\.uk)', re.I),
 )
 
 

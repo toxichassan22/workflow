@@ -156,12 +156,14 @@ def _start_source_plan_async(payload, offer_lang, evidence_pool, deadline,
         return None
 
     def _worker():
+        thread_session = None
         try:
             with _worker_app_context():
+                thread_session = _market_browser_session(search_provider='searxng')
                 kwargs = dict(
                     offer_lang=offer_lang,
                     evidence_pool=evidence_pool,
-                    session=session,
+                    session=thread_session,
                     deadline=deadline,
                     report=report)
                 if market_wide:
@@ -169,6 +171,12 @@ def _start_source_plan_async(payload, offer_lang, evidence_pool, deadline,
                 _run_market_source_plan(payload, **kwargs)
         except Exception as exc:
             print(f'[MARKET STUDY] parallel source plan failed: {exc}')
+        finally:
+            if thread_session is not None:
+                try:
+                    thread_session.close()
+                except Exception:
+                    pass
 
     thread = threading.Thread(target=_worker, name='market-source-plan', daemon=True)
     thread.start()

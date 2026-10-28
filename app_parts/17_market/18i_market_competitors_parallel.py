@@ -812,16 +812,20 @@ def _run_single_competitor_scan(task, payload, existing, mode, offer_lang,
         'search_blocked': search_blocked,
         'pages_blocked': pages_blocked,
     }
+    competitor_count = len(parsed.get('competitors') or []) if isinstance(parsed, dict) else 0
     if (str(task.get('kind') or '') != 'fill'
-            and _native_fallback_needed(result)):
+            and (_native_fallback_needed(result)
+                 or (competitor_count < 2 and str(task.get('kind') or '') == 'axis'))):
         fallback = _native_search_fallback(
             system_prompt, prompt,
             _usage_ctx('market', data, tenant_id=tenant_id),
             evidence_pool, deadline, search_budget=3, max_steps=6)
-        if fallback and fallback.get('parsed', {}).get('competitors'):
+        fallback_count = len((fallback or {}).get('parsed', {}).get('competitors') or [])
+        if fallback and fallback_count > competitor_count:
             fallback['task'] = task
             print(f'[MARKET STUDY] native search fallback used for '
-                  f'{task.get("label") or "scan"}', flush=True)
+                  f'{task.get("label") or "scan"} (found {fallback_count} vs {competitor_count})',
+                  flush=True)
             result = fallback
     return result
 

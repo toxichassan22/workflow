@@ -331,6 +331,30 @@ def _unwrap_yahoo(href):
     return href
 
 
+_QUERY_PREFIX_RE = re.compile(
+    r'^(?:التحقق\s+من\s+(?:وجود\s+|مشروعات\s+|مشروع\s+)?|'
+    r'البحث\s+عن\s+(?:وجود\s+|مشاريع\s+|مشروعات\s+|مشروع\s+)?|'
+    r'حصر\s+(?:مشاريع\s+|مشروعات\s+|المشروعات\s+)?|'
+    r'معرفة\s+(?:أسعار\s+|وجود\s+)?|'
+    r'استكشاف\s+|فحص\s+)', re.I)
+
+_QUERY_FILLER_RE = re.compile(
+    r'\b(?:مسماة|المسماة|المحددة|المذكورة)\b', re.I)
+
+
+def sanitize_search_query(query):
+    """Strip conversational Arabic directives and filler words so search engines receive keywords."""
+    text = str(query or '').strip()
+    if not text:
+        return ''
+    cleaned = _QUERY_PREFIX_RE.sub('', text).strip()
+    cleaned = _QUERY_FILLER_RE.sub('', cleaned).strip()
+    cleaned = re.sub(r'\bداخل\s+حي\b', 'حي', cleaned)
+    cleaned = re.sub(r'\bداخل\s+', 'في ', cleaned)
+    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+    return cleaned or text
+
+
 def _search_url(provider, query, cap):
     q = quote_plus(str(query))
     if provider == 'ddg':
@@ -617,6 +641,7 @@ class BrowserWorker:
         self._chrome_profile = ''
         self._using_cdp = False
         self.is_open = False
+        self._thread_id = threading.get_ident()
 
     def __enter__(self):
         return self.start()
@@ -626,9 +651,12 @@ class BrowserWorker:
         return False
 
     def start(self):
+        current_thread = threading.get_ident()
         if self.is_open and self._page is not None and not self._page.is_closed():
-            return self
+            if getattr(self, '_thread_id', None) == current_thread:
+                return self
         self.close()   # drop any half-open driver before relaunching
+        self._thread_id = current_thread
         from playwright.sync_api import sync_playwright
         self._pw = sync_playwright().start()
         endpoint = (os.environ.get('BROWSER_WS_ENDPOINT') or '').strip()
@@ -714,6 +742,13 @@ class BrowserWorker:
         tab it was then loses its price without anything being wrong with
         Booking. Only a browser that cannot produce another page is replaced.
         """
+        current_thread = threading.get_ident()
+        if getattr(self, '_thread_id', None) != current_thread:
+            _browser_log(
+                f'[BROWSER] thread mismatch ({getattr(self, "_thread_id", None)} -> {current_thread}), recycling worker')
+            self.close()
+            self.start()
+            return self._page
         if self._page is not None and not self._page.is_closed():
             return self._page
         if self.is_open and self._context is not None:
@@ -1046,6 +1081,7 @@ class BrowserWorker:
         """SERP scrape: tries each provider in order until hits; never raises.
         A provider that serves a bot wall twice in a row is skipped for the
         rest of the session — its goto+settle seconds are pure cost."""
+        query = sanitize_search_query(query)
         cap = max(1, int(max_results or MAX_RESULTS))
         self._search_attempts = getattr(self, '_search_attempts', 0) + 1
         for provider in _providers(getattr(self, 'search_provider', None)):
@@ -1055,9 +1091,21 @@ class BrowserWorker:
             try:
                 hits = self._search_once(provider, query, cap)
             except Exception as exc:
-                _browser_log(f'[BROWSER] search provider={provider} failed: {exc}')
-                hits = []
-                failed = True
+                err_msg = str(exc)
+                if 'different thread' in err_msg or 'greenlet' in err_msg.lower():
+                    _browser_log(f'[BROWSER] search provider={provider} thread error: {exc}, recycling worker')
+                    try:
+                        self.close()
+                        self.start()
+                        hits = self._search_once(provider, query, cap)
+                    except Exception as retry_exc:
+                        _browser_log(f'[BROWSER] search retry failed: {retry_exc}')
+                        hits = []
+                        failed = True
+                else:
+                    _browser_log(f'[BROWSER] search provider={provider} failed: {exc}')
+                    hits = []
+                    failed = True
             if hits:
                 _browser_log(f'[BROWSER] search provider={provider} hits={len(hits)}')
                 self._search_hits_total = getattr(self, '_search_hits_total', 0) + len(hits)

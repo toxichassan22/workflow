@@ -70,6 +70,13 @@ def _tool_callable(session, name):
 def _run_web_search(session, args, search_state, evidence_pool=None,
                     allowed_hosts=None):
     query = str(args.get('query') or '').strip()
+    try:
+        import browser as _browser_module
+        sanitizer = getattr(_browser_module, 'sanitize_search_query', None)
+        if callable(sanitizer):
+            query = sanitizer(query)
+    except Exception:
+        pass
     if not query:
         return {'error': 'empty_query'}
     scoped_query = _source_scoped_query(query, allowed_hosts)

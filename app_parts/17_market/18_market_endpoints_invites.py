@@ -463,7 +463,7 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
         offer_lang=offer_lang)
     source_thread = _start_source_plan_async(
         payload, offer_lang=offer_lang, evidence_pool=evidence_pool,
-        deadline=deadline, report=locked_report, session=session)
+        deadline=deadline, report=locked_report, session=None)
     # One scan per comparison axis (plus a complementary portal angle for a
     # single-axis project), all in flight together. Each thread owns its
     # browser, and the shared evidence pool keeps them from refetching.

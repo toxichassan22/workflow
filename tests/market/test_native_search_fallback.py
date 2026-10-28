@@ -92,6 +92,50 @@ class NativeSearchFallbackTests(unittest.TestCase):
             self.assertIsNone(self.module._native_search_fallback(
                 'system', 'prompt', {}, None, None))
 
+    def test_sanitize_search_query_strips_conversational_prefixes(self):
+        import browser
+        sanitizer = getattr(browser, 'sanitize_search_query', None)
+        self.assertTrue(callable(sanitizer))
+        cases = [
+            ('التحقق من وجود مشاريع فلل للبيع مسماة في حي الأندلس بجدة',
+             'مشاريع فلل للبيع في حي الأندلس بجدة'),
+            ('حصر مشاريع الفلل السكنية المسماة للبيع داخل حي الحمراء في جدة',
+             'الفلل السكنية للبيع حي الحمراء في جدة'),
+            ('البحث عن مجمع تجاري حي الخالدية جدة',
+             'مجمع تجاري حي الخالدية جدة'),
+            ('مشروع فلل الروضة جدة',
+             'مشروع فلل الروضة جدة'),
+        ]
+        for raw, expected in cases:
+            self.assertEqual(sanitizer(raw), expected)
+
+    def test_run_single_competitor_scan_triggers_fallback_when_axis_competitors_sparse(self):
+        task = {'kind': 'axis', 'label': 'فلل للبيع', 'axis': {'key': 'villas'}}
+        fake_response = {
+            'choices': [{'message': {
+                'content': json.dumps({'competitors': []}, ensure_ascii=False),
+            }}],
+            'usage': {'prompt_tokens': 1, 'completion_tokens': 1},
+        }
+        fallback_res = {
+            'task': None,
+            'reply': self._response(),
+            'parsed': {'competitors': [{'name': 'مشروع فلل الروضة الموثق'}]},
+            'parse_error': '',
+            'provider_error': '',
+            'search_ran': True,
+        }
+        with patch.object(self.module, '_browse_agent_call', return_value=fake_response), \
+             patch.object(self.module, '_market_browser_session', return_value=None), \
+             patch.object(self.module, '_native_search_fallback', return_value=fallback_res) as mock_fallback:
+            result = self.module._run_single_competitor_scan(
+                task, {'city': 'جدة'}, [], 'generate', 'ar', None, {}, None, None,
+                'system', None, (0, 10), 3, 5)
+
+        self.assertTrue(mock_fallback.called)
+        self.assertEqual(len(result['parsed']['competitors']), 1)
+        self.assertEqual(result['parsed']['competitors'][0]['name'], 'مشروع فلل الروضة الموثق')
+
 
 if __name__ == '__main__':
     unittest.main()
