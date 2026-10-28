@@ -133,7 +133,7 @@ class SummaryLocalDataTests(unittest.TestCase):
         rawdah_group = next(g for g in result['groups'] if g['district'] == 'الروضة')
         self.assertEqual(rawdah_group['deal_count_in_file'], 96)
         self.assertEqual(rawdah_group['period_to'], '2025-08-11')
-        self.assertEqual(rawdah_group['median_price_sqm_sar'], 9074)
+        self.assertAlmostEqual(rawdah_group['median_price_sqm_sar'], 9073.72, places=2)
 
     def test_rental_benchmarks_are_loaded_from_sakani_indicators(self):
         with patch.object(market_study, '_summary_benchmark_files', return_value=[]), \

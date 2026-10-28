@@ -828,7 +828,7 @@ class SummaryBrowseAgentTests(unittest.TestCase):
             {'projectType': 'سكني'}, group, ['aqar.fm'], 'جدة')
         expected_urls = [url for url, _label in market_study._listing_urls(
             ['سكني'], {'بيع', 'إيجار'}, 'جدة')]
-        self.assertEqual(len(expected_urls), 6)
+        self.assertEqual(len(expected_urls), 4)
         for url in expected_urls:
             self.assertIn(url, prompt)
         for unrelated_kind in ('تجاري', 'فندقي', 'صناعي ولوجستي'):

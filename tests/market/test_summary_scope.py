@@ -221,6 +221,28 @@ class SummaryScopePromptTests(unittest.TestCase):
         self.assertIn('نطاق ملخص السوق: جدة — الأحياء: النرجس', block)
         self.assertIn('نطاق المنافسين (لجدول المنافسين فقط)', block)
 
+    def test_summary_prompt_pipeline_and_zonal_and_competitor_rules(self):
+        prompt_ar = market_study.build_summary_user_prompt({
+            'city': 'جدة',
+            'summaryScope': {'cities': [{'name': 'جدة', 'districts': []}]},
+        }, [])
+        self.assertIn('قاعدة المعروض المستقبلي ومشاريع التطوير الكبرى (Future Pipeline)', prompt_ar)
+        self.assertIn('قاعدة النطاقات السعرية الجغرافية المرجعية', prompt_ar)
+        self.assertIn('قاعدة حجم السوق الكلي ومخزون الوحدات', prompt_ar)
+        self.assertIn('حساب سعر المتر المربع الاسترشادي لوحدات المنافسين المباشرين', prompt_ar)
+        self.assertIn('وظّف بيانات تفضيل نمط المسكن', prompt_ar)
+        self.assertIn('تبنّ لغة استشارية تحليلية شجاعة وبناءة', prompt_ar)
+
+        prompt_en = market_study.build_summary_user_prompt({
+            'city': 'Jeddah',
+            'summaryScope': {'cities': [{'name': 'Jeddah', 'districts': []}]},
+        }, [], offer_lang='en')
+        self.assertIn('Future Pipeline and Mega-Projects Rule', prompt_en)
+        self.assertIn('Regional Price Benchmarks Rule', prompt_en)
+        self.assertIn('Market Scale & Housing Stock Rule', prompt_en)
+        self.assertIn('calculating the indicative price per square meter for direct competitor units', prompt_en)
+        self.assertIn('Maintain an actionable real-estate advisory tone', prompt_en)
+
 
 class SummaryScopePayloadTests(unittest.TestCase):
 
