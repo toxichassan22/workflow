@@ -89,6 +89,37 @@ class MeetingRequirementsTestsPart23(MeetingRequirementsTests):
         kept = app._drop_ungenerated_slides(slides)
         self.assertEqual([item.get('title') for item in kept], ['الغلاف', 'محتوى السوق'])
 
+    def test_two_risks_stay_on_one_page(self):
+        engine = self.application_module.slide_engine
+        items = [
+            {'risk': 'تأخر التراخيص', 'mitigation': 'فريق تراخيص ومتابعة أسبوعية'},
+            {'risk': 'ارتفاع تكاليف المواد', 'mitigation': 'تثبيت عقود التوريد مبكرًا'},
+        ]
+        self.assertEqual(engine._risk_page_ranges(items), [(0, None)])
+
+    def test_a_short_summary_stays_on_one_page(self):
+        engine = self.application_module.slide_engine
+        summary = 'البيانات الأساسية\n\nملخص قصير للمشروع.\n\nالموقع\n\nموقع استراتيجي في جدة.'
+        short_project = {
+            'executive_content': json.dumps({'summary': summary}, ensure_ascii=False),
+        }
+        pages = engine._executive_summary_pages(short_project)
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(len(pages[0][1]), 2)
+
+        long_project = {
+            'executive_content': json.dumps({'summary': '\n\n'.join(
+                'القسم %d\n\n%s' % (index, 'شرح ' * 160) for index in range(6))},
+                ensure_ascii=False),
+        }
+        self.assertGreater(len(engine._executive_summary_pages(long_project)), 1)
+
+    def test_a_short_site_reading_stays_on_one_page(self):
+        engine = self.application_module.slide_engine
+        short_reading = 'قراءة موجزة للموقع في جدة ضمن نطاق متكامل.'
+        blocks = engine._site_analysis_blocks(short_reading)
+        self.assertEqual(engine._site_analysis_page_ranges(blocks), [(0, None)])
+
     def test_the_cover_photo_is_a_persisted_removable_layer(self):
         engine = self.application_module.slide_engine
         cover_html = '<div class="slide" style="width:1280px;height:720px;"><p>غلاف</p></div>'
@@ -191,6 +222,38 @@ class MeetingRequirementsTestsPart23(MeetingRequirementsTests):
         self.assertIn('data-exec-lead="1"', html)
         self.assertIn('data-exec-topic="2"', html)
         self.assertIn('نوع المشروع: سكني، تجاري', html)
+
+    def test_a_continuation_exec_page_reads_as_a_continuing_reading(self):
+        engine = self.application_module.slide_engine
+        block = 'نص معتمد مفصل يغطي هذا القسم بالكامل مع أرقام ومؤشرات. ' * 12
+        summary = '\n\n'.join('%s\n\n%s' % (label, block) for label in (
+            'البيانات الأساسية', 'الموقع', 'الأرض والاشتراطات',
+            'الجدول الزمني', 'الدراسة المالية', 'فريق العمل'))
+        project = {
+            'project_name': 'مشروع',
+            'executive_content': json.dumps({'summary': summary}, ensure_ascii=False),
+        }
+        pages = engine._executive_summary_pages(project)
+        self.assertGreaterEqual(len(pages), 2)
+        branding = {'primary_color': '#123B6D', 'accent_color': '#C4A35A'}
+        start, rows = pages[1]
+        slide = {
+            'title': 'الملخص التنفيذي', 'type': 'content',
+            'section_key': 'executive_summary', 'design_style': 'editorial',
+            'content_source': 'executive_content.summary:%d:%d' % (start, start + len(rows)),
+            'market_row_start': start, 'market_row_end': start + len(rows),
+        }
+        html = engine._build_executive_summary_slide(slide, project, branding)
+        self.assertNotIn('data-exec-lead', html)
+        self.assertIn('تابع الملخص التنفيذي', html)
+        self.assertEqual(html.count('data-exec-topic='), len(rows))
+
+        first_slide = dict(
+            slide, content_source='executive_content.summary',
+            market_row_start=0, market_row_end=len(pages[0][1]))
+        first_html = engine._build_executive_summary_slide(first_slide, project, branding)
+        self.assertIn('data-exec-lead', first_html)
+        self.assertNotIn('تابع الملخص التنفيذي', first_html)
 
     def test_exec_pages_hold_at_most_four_topics(self):
         engine = self.application_module.slide_engine

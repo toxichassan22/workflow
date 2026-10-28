@@ -1491,17 +1491,23 @@ def _risk_items_from_value(value):
     return result
 
 
-_RISK_PAGE_BUDGET_PX = 470
-_RISK_MAX_ROWS_PER_PAGE = 4
+_RISK_PAGE_BUDGET_PX = 520
+_RISK_MAX_ROWS_PER_PAGE = 5
 
 
 def _risk_row_height(item):
-    """Estimated register row height from the risk and mitigation lengths."""
+    """Estimated register row height from the risk and mitigation lengths.
+
+    The register renders at 13.5px in two columns narrower than the slide, so a
+    line holds fewer characters than a full-width paragraph. The estimate is
+    deliberately conservative: a page that overflows under the footer is worse
+    than one extra page.
+    """
     risk = str((item or {}).get('risk') or '')
     mitigation = str((item or {}).get('mitigation') or '')
-    risk_lines = max(1, math.ceil(len(risk) / 52))
-    mitigation_lines = max(1, math.ceil(len(mitigation) / 72))
-    return 46 + max(risk_lines, mitigation_lines) * 20
+    risk_lines = max(1, math.ceil(len(risk) / 44))
+    mitigation_lines = max(1, math.ceil(len(mitigation) / 58))
+    return 56 + max(risk_lines, mitigation_lines) * 23
 
 
 def _risk_page_ranges(items):
@@ -1588,22 +1594,25 @@ def _market_summary_topic_height(label, value, lead=False):
     return 54 + lines * 21
 
 
-def _budget_row_pages(rows, first_budget=None, page_budget=None, max_topics=None):
+def _budget_row_pages(rows, first_budget=None, page_budget=None, max_topics=None,
+                      height_fn=None):
     """Pack (label, text) rows into pages by estimated rendered height."""
     rows = list(rows or [])
     budget = _MARKET_PAGE_BUDGET_PX if page_budget is None else page_budget
     limit = _MARKET_MAX_TOPICS_PER_PAGE if max_topics is None else max_topics
     first_budget = budget if first_budget is None else first_budget
+    height = height_fn or (
+        lambda label, value, lead=False: _market_summary_topic_height(label, value, lead))
     pages = []
     index = 0
     while index < len(rows):
         start = index
         page_budget = first_budget if start == 0 else budget
-        used = _market_summary_topic_height(rows[index][0], rows[index][1], lead=True)
+        used = height(rows[index][0], rows[index][1], True)
         index += 1
         while (index < len(rows) and index - start < limit
-               and used + _market_summary_topic_height(rows[index][0], rows[index][1]) <= page_budget):
-            used += _market_summary_topic_height(rows[index][0], rows[index][1])
+               and used + height(rows[index][0], rows[index][1]) <= page_budget):
+            used += height(rows[index][0], rows[index][1])
             index += 1
         pages.append((start, rows[start:index]))
     return pages
@@ -1683,16 +1692,31 @@ def _executive_summary_sections(project_data):
     return sections
 
 
-_EXEC_PAGE_BUDGET_PX = 500
+_EXEC_PAGE_BUDGET_PX = 520
+_EXEC_FIRST_PAGE_BUDGET_PX = 470
 _EXEC_MAX_TOPICS_PER_PAGE = 4
 
 
+def _exec_topic_height(label, value, lead=False):
+    """Rendered height of one executive block in the designed cards."""
+    text = re.sub(r'\s+', ' ', str(value or '')).strip()
+    columns = 2 if len(text) > 420 else 1
+    lines = max(1, math.ceil(len(text) / (84 * columns)))
+    return (96 + lines * 27) if lead else (72 + lines * 23)
+
+
 def _executive_summary_pages(project_data):
-    """Pack executive-summary sections into pages the designed cards can hold."""
+    """Pack executive-summary sections into pages the designed cards can hold.
+
+    The count follows the content: a short summary stays one page, and only a
+    long one opens continuation pages.
+    """
     return _budget_row_pages(
         _executive_summary_sections(project_data),
+        first_budget=_EXEC_FIRST_PAGE_BUDGET_PX,
         page_budget=_EXEC_PAGE_BUDGET_PX,
         max_topics=_EXEC_MAX_TOPICS_PER_PAGE,
+        height_fn=_exec_topic_height,
     )
 
 

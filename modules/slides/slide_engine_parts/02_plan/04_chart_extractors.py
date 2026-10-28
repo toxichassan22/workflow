@@ -492,11 +492,13 @@ def _exec_text_chunks(text, target=620):
     return chunks
 
 
-def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
-    """Editorial block: a brand lead panel + numbered topic cards.
+def _exec_editorial_body(rows, row_offset, primary, accent, ext_token='', continuation=False):
+    """Editorial block: a brand lead panel (first page) + numbered topic cards.
 
-    Executive slides carry no images or maps; ext_token is accepted for
-    backwards compatibility but never rendered.
+    A continuation page carries no dark lead — every block on it is a topic card
+    under a «تابع» rule, so a long executive summary reads as one flow instead of
+    a stack of new section openings. Executive slides carry no images or maps;
+    ext_token is accepted for backwards compatibility but never rendered.
     """
     rows = list(rows or [])
     if not rows:
@@ -510,7 +512,7 @@ def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
         f'<span style="font-size:{17 if compact else 15}px;font-weight:800;color:#ffffff;">'
         f'{html_lib.escape(str(lead_label))}</span>'
     ) if lead_label else ''
-    lead_html = (
+    lead_html = '' if continuation else (
         f'<div data-exec-lead="1" style="position:relative;overflow:hidden;border-radius:16px;'
         f'padding:{26 if compact else 22}px 30px;box-sizing:border-box;'
         f'background:linear-gradient(135deg,{primary} 0%,{_mix_hex_colors(primary, accent, 0.45)} 100%);">'
@@ -529,6 +531,12 @@ def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
         f'color:#eef2f7;text-align:justify;{lead_columns}">{_market_rich_text(lead_value, accent)}</div>'
         f'</div>'
     )
+    continuation_html = (
+        '<div style="display:flex;align-items:center;gap:10px;margin-bottom:2px;">'
+        f'<span style="font-size:11px;font-weight:800;letter-spacing:1.2px;color:{accent};">'
+        'تابع الملخص التنفيذي</span>'
+        '<span style="flex:1;height:1px;background:#e2e8f0;"></span></div>'
+    ) if continuation else ''
 
     def render_topic(index, label, value):
         label_html = (
@@ -552,13 +560,14 @@ def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
             f'</div>'
         )
 
+    topic_rows = list(enumerate(rows)) if continuation else list(enumerate(rows[1:], 1))
     topics_html = ''.join(
         render_topic(row_offset + idx + 1, label, value)
-        for idx, (label, value) in enumerate(rows[1:], 1)
+        for idx, (label, value) in topic_rows
     )
     return (
         f'<div data-exec-analysis="1" style="display:flex;flex-direction:column;'
-        f'gap:{14 if compact else 11}px;">{lead_html}{topics_html}</div>'
+        f'gap:{14 if compact else 11}px;">{continuation_html}{lead_html}{topics_html}</div>'
     )
 
 
@@ -580,7 +589,8 @@ def _build_executive_summary_slide(slide, source, branding=None, slide_num=None,
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
 
     badge_strip = _exec_badges_strip(source, primary, accent) if row_offset == 0 else ''
-    body_content = _exec_editorial_body(rows, row_offset, primary, accent)
+    body_content = _exec_editorial_body(
+        rows, row_offset, primary, accent, continuation=row_offset > 0)
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">
@@ -630,11 +640,14 @@ def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=N
         content_source = str((slide or {}).get('content_source') or '')
         if ':' not in content_source:
             pages = _budget_row_pages(
-                all_rows, page_budget=_EXEC_PAGE_BUDGET_PX,
-                max_topics=_EXEC_MAX_TOPICS_PER_PAGE)
+                all_rows, first_budget=_EXEC_FIRST_PAGE_BUDGET_PX,
+                page_budget=_EXEC_PAGE_BUDGET_PX,
+                max_topics=_EXEC_MAX_TOPICS_PER_PAGE,
+                height_fn=_exec_topic_height)
             if pages:
                 rows = pages[0][1]
-    body_content = _exec_editorial_body(rows, row_offset, primary, accent)
+    body_content = _exec_editorial_body(
+        rows, row_offset, primary, accent, continuation=row_offset > 0)
 
     slide_num_str = _slide_counter_text(slide_num, total_slides) if slide_num else ''
     return f'''<div class="slide" dir="rtl" style="width:1280px;height:720px;position:relative;overflow:hidden;background:#ffffff;box-sizing:border-box;">

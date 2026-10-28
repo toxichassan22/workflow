@@ -744,8 +744,10 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             opp_slide = existing_by_source.get('executive_content.opportunity') or {}
             opp_rows = [('', chunk) for chunk in _exec_text_chunks(str(executive.get('opportunity') or ''))]
             opp_pages = _budget_row_pages(
-                opp_rows, page_budget=_EXEC_PAGE_BUDGET_PX,
-                max_topics=_EXEC_MAX_TOPICS_PER_PAGE) or [(0, opp_rows)]
+                opp_rows, first_budget=_EXEC_FIRST_PAGE_BUDGET_PX,
+                page_budget=_EXEC_PAGE_BUDGET_PX,
+                max_topics=_EXEC_MAX_TOPICS_PER_PAGE,
+                height_fn=_exec_topic_height) or [(0, opp_rows)]
             for start, page_rows in opp_pages:
                 add('executive_summary', exec_page_slide(
                     opp_slide, 'executive_content.opportunity',
