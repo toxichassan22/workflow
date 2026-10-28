@@ -60,8 +60,7 @@
             clearTenantNavigationState();
             return false;
           }
-          if (state.pageId === 'tenantGenerationPage') showTenantPage('tenantSlidesPage');
-          else if (state.pageId !== 'tenantSlidesPage') {
+          if (state.pageId !== 'tenantSlidesPage') {
             await navigateTenantWorkflow(state.pageId);
             if (state.pageId === 'tenantProjectPage' && state.activeSection) showSection(state.activeSection, true);
           }
@@ -74,8 +73,7 @@
             if (state.mode === 'new') {
               await startTenantProject();
               if (state.pageId === 'tenantProjectPage') return true;
-              if (state.pageId === 'tenantGenerationPage') showTenantPage('tenantSlidesPage');
-              else await navigateTenantWorkflow(state.pageId);
+              await navigateTenantWorkflow(state.pageId);
               return true;
             }
             clearTenantNavigationState();
@@ -85,8 +83,6 @@
           if (state.pageId === 'tenantProjectPage') {
             showTenantPage(state.pageId);
             if (tenantActiveProjectSection) showSection(tenantActiveProjectSection, true);
-          } else if (state.pageId === 'tenantGenerationPage') {
-            showTenantPage('tenantSlidesPage');
           } else {
             await navigateTenantWorkflow(state.pageId);
           }
@@ -96,8 +92,7 @@
         if (TENANT_NAVIGATION_CONTEXT_PAGES.has(state.pageId)) {
           await startTenantProject();
           if (state.pageId === 'tenantProjectPage') return true;
-          if (state.pageId === 'tenantGenerationPage') showTenantPage('tenantSlidesPage');
-          else await navigateTenantWorkflow(state.pageId);
+          await navigateTenantWorkflow(state.pageId);
           return true;
         }
 
@@ -243,7 +238,9 @@
       // A path the user actually asked for wins over the last-visited page, so deep links and
       // refreshes land where the URL says instead of somewhere remembered in localStorage.
       const resolvedRequested = (typeof resolveTenantRoutePath === 'function') ? resolveTenantRoutePath(window.location.pathname) : null;
-      const requestedPage = (resolvedRequested && resolvedRequested.pageId) || TENANT_ROUTE_PAGES[window.location.pathname];
+      const requestedPage = (resolvedRequested && resolvedRequested.pageId)
+        || TENANT_ROUTE_PAGES[window.location.pathname]
+        || (TENANT_RETIRED_ROUTES || {})[window.location.pathname];
       const requestedSection = new URLSearchParams(window.location.search).get('section');
       // The dashboard list is tiny now, so start it while the route resolves
       // instead of waiting for the page to ask for it.

@@ -121,7 +121,7 @@ function fixture() {
     confirm: () => true,
     triggerAutoSaveDraft() {},
     hasPermission: () => true,
-    showLoader() {}, updateLoaderProgress() {}, hideLoader() {},
+    showLoader() {}, updateLoaderProgress() {}, updateLoaderStep() {}, hideLoader() {},
     parseStoredLandTable: value => {
       if (!value) return null;
       if (typeof value === 'string') { try { return JSON.parse(value); } catch (e) { return null; } }

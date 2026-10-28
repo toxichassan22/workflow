@@ -293,7 +293,7 @@ def _visual_plan_site_packet(data):
             'landAreaSource': prompt_contract.get('landAreaSource'),
         },
     }
-    _visual_plan_report_site_chat_progress(2, 68)
+    _visual_plan_report_site_chat_progress(2)
     return packet, render_contract, context, signature
 
 

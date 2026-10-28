@@ -176,8 +176,7 @@
     const TENANT_NAVIGATION_CONTEXT_PAGES = new Set([
       'tenantProjectPage',
       'tenantVisualConceptPage',
-      'tenantSlidesPage',
-      'tenantGenerationPage'
+      'tenantSlidesPage'
     ]);
 
     function getTenantNavigationState() {
@@ -258,7 +257,6 @@
       tenantProjectPage: '/app/projects/new',
       tenantProjectPresentationsPage: '/app/projects/presentations',
       tenantVisualConceptPage: '/app/projects/visual-concept',
-      tenantGenerationPage: '/app/projects/generation',
       tenantSlidesPage: '/app/presentations/current',
       tenantPresentationsPage: '/app/presentations',
       tenantSettingsPage: '/app/settings',

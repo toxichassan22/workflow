@@ -210,7 +210,7 @@ def _visual_plan_site_interview(data, action='chat'):
         'latestClientMessage': message,
         'compactContext': compact_mode,
     }
-    _visual_plan_report_site_chat_progress(3, 82)
+    _visual_plan_report_site_chat_progress(3)
     model_started = time.perf_counter()
     reasoning_effort = 'medium' if continuing else 'high'
     max_tokens = _VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS
@@ -363,10 +363,10 @@ def _visual_plan_site_retain_project_identity(fragment, current_svg):
     return etree.tostring(replacement_root, encoding='unicode')
 
 
-def _visual_plan_site_report_progress(progress, todos, checkpoints, signature=None):
+def _visual_plan_site_report_progress(todos, checkpoints, signature=None):
     callback = getattr(g, 'visual_plan_job_progress', None)
     if callable(callback):
-        callback(progress=progress, todos=todos, checkpoint={
+        callback(todos=todos, checkpoint={
             'svgSections': checkpoints,
             'svgRenderRevision': _VISUAL_PLAN_SITE_RENDER_REVISION,
             'svgInputSignature': signature or '',
@@ -697,7 +697,7 @@ def _visual_plan_site_generate(data, interview):
                 'inputSignature': signature,
             })
             _visual_plan_site_report_progress(
-                100, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints, signature)
+                _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints, signature)
             reply = (ai_scene.get('reply') if isinstance(ai_scene, dict) and ai_scene.get('reply')
                      else interview.get('reply') or (workflow.get('scene') if isinstance(workflow.get('scene'), dict) else {}).get('reply')
                      or 'تم إنشاء المخطط بنجاح لمراجعته.')
@@ -735,19 +735,16 @@ def _visual_plan_site_generate(data, interview):
         'landscape': lambda: _visual_plan_site_landscape_fragment(drawing_layout),
         'legend': lambda: _visual_plan_site_legend_fragment(drawing_layout),
     }
-    total = len(_VISUAL_PLAN_SITE_SECTIONS)
     for section, _description in _VISUAL_PLAN_SITE_SECTIONS:
         if section in checkpoints:
             continue
         _visual_plan_site_report_progress(
-            20 + int(65 * len(checkpoints) / total),
             _visual_plan_site_section_todos(checkpoints, active_section=section), checkpoints, signature)
         checkpoints[section] = renderers[section]()
         state['checkpoints'] = checkpoints
         next_section = next((name for name, _label in _VISUAL_PLAN_SITE_SECTIONS
                              if name not in checkpoints), None)
         _visual_plan_site_report_progress(
-            20 + int(65 * len(checkpoints) / total),
             _visual_plan_site_section_todos(
                 checkpoints, active_section=next_section,
                 assembly_active=next_section is None), checkpoints, signature)
@@ -761,7 +758,7 @@ def _visual_plan_site_generate(data, interview):
                   'renderRevision': _VISUAL_PLAN_SITE_RENDER_REVISION,
                   'checkpoints': checkpoints})
     _visual_plan_site_report_progress(
-        98, _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints, signature)
+        _visual_plan_site_section_todos(checkpoints, complete=True), checkpoints, signature)
     reply = 'تم إنشاء المخطط لمراجعته.'
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': svg,
             'model': VISUAL_PLAN_SITE_MODEL, 'reply': reply,
@@ -845,7 +842,7 @@ def _visual_plan_site_edit(data):
         state['answers'] = state['answers'][-100:]
         state['pendingQuestion'] = ''
     state['turns'].append({'role': 'user', 'text': instruction})
-    _visual_plan_report_site_chat_progress(0, 25)
+    _visual_plan_report_site_chat_progress(0)
     checkpoints = _visual_plan_site_extract_checkpoints(svg)
     target_section = str(data.get('targetSection') or '').strip()
     if target_section not in _VISUAL_PLAN_SITE_SECTION_IDS:
@@ -895,7 +892,7 @@ def _visual_plan_site_edit(data):
         system_prompt, json.dumps(user_packet, ensure_ascii=False), data=data,
         max_tokens=_VISUAL_PLAN_SITE_MAX_OUTPUT_TOKENS)
     _visual_plan_site_record_tokens(state, prompt_tokens)
-    _visual_plan_report_site_chat_progress(1, 70)
+    _visual_plan_report_site_chat_progress(1)
     if parsed.get('clear') is False:
         question = _visual_concept_text(parsed.get('question'), 800) or 'حدد العنصر المطلوب تعديله.'
         raw_choices = parsed.get('choices') if isinstance(parsed.get('choices'), list) else []
@@ -923,7 +920,7 @@ def _visual_plan_site_edit(data):
         reply = _visual_concept_text(parsed.get('reply'), _VISUAL_PLAN_SITE_REPLY_MAX_CHARS) or 'تم تحديث المخطط.'
         state['turns'].append({'role': 'assistant', 'text': reply})
 
-        _visual_plan_report_site_chat_progress(2, 95)
+        _visual_plan_report_site_chat_progress(2)
         return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
                 'model': VISUAL_PLAN_SITE_MODEL, 'reply': reply,
                 'assistantState': state, 'scene': workflow.get('scene')}
@@ -964,7 +961,7 @@ def _visual_plan_site_edit(data):
     if sanitized_sections:
         reply += ' حُذفت تسميات غير إنجليزية من القسم المعدل.'
     state['turns'].append({'role': 'assistant', 'text': reply})
-    _visual_plan_report_site_chat_progress(2, 95)
+    _visual_plan_report_site_chat_progress(2)
     return {'success': True, 'slotId': 'plan_site', 'image': image, 'svgCode': revised,
             'targetSection': section, 'model': VISUAL_PLAN_SITE_MODEL,
             'reply': reply,

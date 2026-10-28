@@ -883,10 +883,7 @@
         if (isTransientDesignerChatResponse(result)) {
           retryDelay = Math.min(10000, Math.round(retryDelay * 1.5));
           if (tenantDesignerJobMatchesWorkspace(metadata)) {
-            updateDesignerChatBusy(
-              tenantDesignerChatBusy?.progress || 5,
-              'مهمة تعديل العرض مستمرة وجار استعادة الاتصال...'
-            );
+            updateDesignerChatBusy('مهمة تعديل العرض مستمرة وجار استعادة الاتصال...');
           }
           continue;
         }
@@ -946,9 +943,8 @@
         metadata.updatedAt = Date.now();
         persistTenantDesignerJob(metadata);
         retryDelay = 2000;
-        const progress = Math.max(1, Math.min(99, Number(result?.progress || 5)));
         if (tenantDesignerJobMatchesWorkspace(metadata)) {
-          updateDesignerChatBusy(progress, result?.message || 'جاري تنفيذ تعديل العرض...');
+          updateDesignerChatBusy(result?.message || 'جاري تنفيذ تعديل العرض...');
           if (Array.isArray(result?.tasks) && result.tasks.length
             && typeof renderDesignerChecklist === 'function') {
             renderDesignerChecklist(result.tasks);
@@ -995,7 +991,7 @@
             }
           }
           if (indicator && document.contains(indicator)) {
-            setInlineLoaderProgress(indicator, progress, result?.message || 'جاري تنفيذ تعديل العرض...');
+            setInlineLoaderProgress(indicator, result?.message || 'جاري تنفيذ تعديل العرض...');
           }
         }
 
@@ -1007,7 +1003,7 @@
             );
             if (isTransientDesignerChatResponse(completed)) {
               if (tenantDesignerJobMatchesWorkspace(metadata)) {
-                updateDesignerChatBusy(99, 'اكتمل التعديل وجار استلام النتيجة...');
+                updateDesignerChatBusy('اكتمل التعديل وجار استلام النتيجة...');
               }
               await new Promise(resolve => setTimeout(resolve, retryDelay));
               retryDelay = Math.min(10000, Math.round(retryDelay * 1.5));

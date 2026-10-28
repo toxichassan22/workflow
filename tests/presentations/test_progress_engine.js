@@ -67,7 +67,7 @@ function createPage() {
     'globalLoaderPct', 'globalLoaderStep', 'globalLoaderEstimate', 'globalLoaderSteps',
     'globalLoaderStopButton', 'tenantLiveGenBanner', 'liveGenSlideTitle',
     'liveGenSlideDetails', 'liveGenProgressBar', 'liveGenProgressPct',
-    'liveGenResumeButton', 'genBar', 'genPct', 'genSubtitle', 'genEta', 'genSteps']
+    'liveGenResumeButton']
     .forEach(get);
   const sandbox = {
     window: {},

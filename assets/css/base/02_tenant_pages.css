@@ -253,15 +253,6 @@
       display: block;
     }
 
-    #tenantGenerationPage.active {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 480px;
-      padding: 48px 24px;
-    }
-
     .tenant-live-gen-banner {
       background: linear-gradient(135deg, var(--p) 0%, var(--pd) 100%);
       color: #fff;

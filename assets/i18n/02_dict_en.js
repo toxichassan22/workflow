@@ -249,7 +249,6 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "page.support_desk": "Support desk",
   "page.join_requests": "Join requests",
   "page.fields": "Fields",
-  "page.generation": "Preparing presentation",
   "page.notifications": "Notifications",
   "page.operations": "Operations",
   "page.presentation_editor": "Presentation editor",

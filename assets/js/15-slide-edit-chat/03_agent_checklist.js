@@ -290,7 +290,7 @@
       job.updatedAt = Date.now();
       persistTenantDesignerJob(job);
       tenantDesignerCancelling = true;
-      updateDesignerChatBusy(tenantDesignerChatBusy?.progress || 5,
+      updateDesignerChatBusy(
         designerAgentText('designer_agent.cancelling', 'جاري إيقاف التنفيذ...'));
       renderDesignerChecklist();
       const cancelPath = '/api/designer-chat/jobs/' + encodeURIComponent(String(job.jobId)) + '/cancel';

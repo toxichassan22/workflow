@@ -110,13 +110,13 @@ def _visual_plan_job_terminal_todos(kind, state, current_todos=None, active_inde
     return _visual_plan_job_todos(kind, state, active_index=active_index)
 
 
-def _visual_plan_report_site_chat_progress(active_index, progress):
+def _visual_plan_report_site_chat_progress(active_index):
     if not has_request_context() or getattr(g, 'visual_plan_job_kind', '') not in ('site_chat', 'site_edit', 'site_generate'):
         return
     callback = getattr(g, 'visual_plan_job_progress', None)
     if callable(callback):
-        callback(progress=progress,
-                 todos=_visual_plan_job_todos(getattr(g, 'visual_plan_job_kind', 'site_chat'), active_index=active_index))
+        callback(todos=_visual_plan_job_todos(
+            getattr(g, 'visual_plan_job_kind', 'site_chat'), active_index=active_index))
 
 
 def _visual_plan_report_site_chat_timing(name, started_at):
@@ -291,15 +291,13 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
         except (TypeError, ValueError):
             g.visual_plan_job_deadline = time.time() + _visual_plan_job_timeout_seconds(kind)
         g.visual_plan_job_kind = kind
-        def report_progress(progress=None, todos=None, checkpoint=None, timing=None):
+        def report_progress(todos=None, checkpoint=None, timing=None):
             try:
                 current = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
             except Exception:
                 current = {}
-            if progress is not None or todos is not None or checkpoint is not None:
+            if todos is not None or checkpoint is not None:
                 current.update({'status': 'running', 'success': True})
-            if progress is not None:
-                current['progress'] = max(5, min(99, int(progress)))
             if todos is not None:
                 current['todos'] = todos
             if checkpoint is not None:
@@ -325,7 +323,7 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                                   'error_code': 'PLANS_PERMISSION_REQUIRED'}, 403
             else:
                 _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id,
-                           {'status': 'running', 'success': True, 'progress': 20,
+                           {'status': 'running', 'success': True,
                             'createdAt': initial_job.get('createdAt'),
                             'deadlineAt': g.visual_plan_job_deadline,
                             'timeoutSeconds': initial_job.get('timeoutSeconds', _VISUAL_PLAN_JOB_TIMEOUT_SECONDS),
@@ -350,7 +348,7 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
             active_index = next((index for index, item in enumerate(final_job.get('todos') or [])
                                  if isinstance(item, dict) and item.get('status') == 'active'), None)
             final_job.update({'status': 'completed' if result.get('success') else 'failed',
-                              'success': bool(result.get('success')), 'progress': 100,
+                              'success': bool(result.get('success')),
                               'todos': _visual_plan_job_terminal_todos(
                                   kind, result_state, current_todos=final_job.get('todos'),
                                   active_index=active_index),
@@ -367,7 +365,7 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
             active_index = next((index for index, item in enumerate(failed_job.get('todos') or [])
                                  if isinstance(item, dict) and item.get('status') == 'active'), None)
             expired = time.time() >= g.visual_plan_job_deadline
-            failed_job.update({'status': 'failed', 'success': False, 'progress': 100,
+            failed_job.update({'status': 'failed', 'success': False,
                                'todos': _visual_plan_job_terminal_todos(
                                    kind, 'failed', current_todos=failed_job.get('todos'),
                                    active_index=active_index),
@@ -392,7 +390,7 @@ def _visual_plan_dispatch(kind, data, slot_id=''):
     actor = {key: getattr(g, key, None) for key in
              ('tenant_id', 'user_id', 'user_name', 'user_role', 'is_admin', 'token_payload')}
     _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id,
-               {'status': 'queued', 'success': True, 'progress': 5, 'actor': actor,
+               {'status': 'queued', 'success': True, 'actor': actor,
                 'createdAt': created_at, 'deadlineAt': deadline_at,
                 'timeoutSeconds': timeout_seconds,
                 'todos': _visual_plan_job_todos(kind, 'queued'),
@@ -400,7 +398,7 @@ def _visual_plan_dispatch(kind, data, slot_id=''):
     threading.Thread(target=_visual_plan_job_worker,
                      args=(current_app._get_current_object(), actor, data, kind, slot_id, job_id),
                      daemon=True).start()
-    return jsonify({'success': True, 'jobId': job_id, 'status': 'queued', 'progress': 5,
+    return jsonify({'success': True, 'jobId': job_id, 'status': 'queued',
                     'timeoutSeconds': timeout_seconds}), 202
 
 
@@ -462,7 +460,7 @@ def api_visual_concept_plan_job(job_id):
             active_index = next((index for index, item in enumerate(todos)
                                  if isinstance(item, dict) and item.get('status') == 'pending'), 0)
         job = dict(job)
-        job.update({'status': 'failed', 'success': False, 'progress': 100, 'httpStatus': 503,
+        job.update({'status': 'failed', 'success': False, 'httpStatus': 503,
                     'todos': _visual_plan_job_terminal_todos(
                         kind, 'failed', current_todos=todos, active_index=active_index),
                     'result': {'success': False, 'error': 'انتهت مهلة معالجة المشهد الهندسي.',

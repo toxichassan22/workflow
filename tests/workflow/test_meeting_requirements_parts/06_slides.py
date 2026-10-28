@@ -1814,8 +1814,10 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         index_source = read_frontend_text()
         self.assertIn('const value = allowDecrease ? requested : Math.max(loaderProgressValue, requested);', index_source)
         self.assertIn('const continueExisting = alreadyVisible && loaderSessionActive && options.reset !== true;', index_source)
-        self.assertIn('const value = Math.max(genProgressValue, requested);', index_source)
-        self.assertIn('let genProgressValue = 0;', index_source)
+        # The retired full-page generation bar is gone: it carried a hardcoded
+        # 22% and no screen ever opened it, so its value state must not return.
+        self.assertNotIn('genProgressValue', index_source)
+        self.assertNotIn('tenantGenerationPage', index_source)
 
     def test_progress_is_measured_never_invented_by_the_clock(self):
         index_source = read_frontend_text()

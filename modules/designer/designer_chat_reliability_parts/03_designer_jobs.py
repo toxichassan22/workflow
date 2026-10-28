@@ -100,7 +100,7 @@ def install_job_routes(app, namespace):
                 run_control.bind_run(job_id, tenant_id)
                 write_job(".designer_chat_jobs", tenant_id, job_id, {
                     **job_record_context,
-                    "status": "running", "success": True, "progress": 10,
+                    "status": "running", "success": True,
                     "message": "جاري تنفيذ وتطبيق التعديل...",
                 })
                 result = flask_app.view_functions["api_designer_chat"]()
@@ -115,7 +115,6 @@ def install_job_routes(app, namespace):
                     **job_record_context,
                     "status": "completed" if succeeded else "failed",
                     "success": bool(succeeded),
-                    "progress": 100,
                     "message": "اكتمل تنفيذ تعديل العرض" if succeeded else body.get("error", "تعذر تعديل العرض"),
                 }
                 if failure_reason:
@@ -125,7 +124,7 @@ def install_job_routes(app, namespace):
                 flask_app.logger.exception("Designer chat background job failed")
                 write_job(".designer_chat_jobs", tenant_id, job_id, {
                     **job_record_context,
-                    "status": "failed", "success": False, "progress": 100,
+                    "status": "failed", "success": False,
                     "error": f"تعذر تنفيذ تعديل العرض: {error}", "failureReason": "job_failed",
                 })
             finally:
@@ -180,7 +179,7 @@ def install_job_routes(app, namespace):
         try:
             created, existing = claim_job(g.tenant_id, job_id, {
                 **queued_context,
-                "status": "queued", "success": True, "progress": 1,
+                "status": "queued", "success": True,
                 "message": "تم استلام طلب تعديل العرض",
                 "payload": {"data": payload},
                 "actor": {
@@ -207,7 +206,6 @@ def install_job_routes(app, namespace):
                 "success": True,
                 "jobId": job_id,
                 "status": existing.get("status") or "queued",
-                "progress": existing.get("progress") or 1,
                 "message": existing.get("message") or "مهمة تعديل العرض مسجلة",
                 "reused": True,
             }), 202
@@ -217,7 +215,7 @@ def install_job_routes(app, namespace):
             daemon=True,
         ).start()
         return jsonify({
-            "success": True, "jobId": job_id, "status": "queued", "progress": 1,
+            "success": True, "jobId": job_id, "status": "queued",
             "message": "بدأ تعديل العرض في الخلفية",
         }), 202
 

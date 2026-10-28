@@ -17,8 +17,6 @@
     let loaderStartedAt = 0;
     let loaderPlan = [];
     let loaderActiveStep = '';
-    let genProgressValue = 0;
-    let genStartMs = 0;
 
     function clampLoaderProgress(pct) {
       const value = Number(pct);
@@ -280,96 +278,12 @@
     // Text only: the percentage this used to draw was the job's authored
     // constant, not a count of anything, so the inline card names the step and
     // leaves the fraction out.
-    function setInlineLoaderProgress(container, pct, text) {
+    function setInlineLoaderProgress(container, text) {
       if (!container) return;
-      void pct;
       if (text) {
         const labelEl = container.querySelector('.inline-loading-header span:first-child');
         if (labelEl) labelEl.textContent = text;
       }
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // FULL-PAGE GENERATION PROGRESS
-    // ═══════════════════════════════════════════════════════════════
-    const GEN_STEPS = [
-      { id: 'plan', label: 'إعداد خطة الشرائح' },
-      { id: 'prompts', label: 'صياغة أوصاف الصور' },
-      { id: 'images', label: 'توليد الصور الإبداعية' },
-      { id: 'slides', label: 'توليد الشرائح' },
-      { id: 'save', label: 'حفظ العرض' }
-    ];
-
-    function renderGenSteps() {
-      const box = document.getElementById('genSteps');
-      if (!box) return;
-      box.innerHTML = GEN_STEPS.map((step, index) =>
-        '<div class="gen-step" id="genStep_' + step.id + '">' +
-        '<span>' + (index + 1) + '. ' + escapeHtml(step.label) + '</span>' +
-        '<span class="gen-step-status"></span>' +
-        '</div>').join('');
-    }
-
-    function showGenProgress() {
-      genStartMs = Date.now();
-      genProgressValue = 0;
-      renderGenSteps();
-      showTenantPage('tenantSlidesPage');
-    }
-
-    function elapsedGenText() {
-      return genStartMs
-        ? WFT('loader.elapsed', 'منقضي {time}', { time: formatLoaderClock(Date.now() - genStartMs) })
-        : '';
-    }
-
-    function setGenPct(pct, subtitle) {
-      const requested = clampLoaderProgress(pct);
-      const value = Math.max(genProgressValue, requested);
-      genProgressValue = value;
-      const bar = document.getElementById('genBar');
-      const pctEl = document.getElementById('genPct');
-      const subEl = document.getElementById('genSubtitle');
-      const elapsedEl = document.getElementById('genEta');
-      if (bar) bar.style.width = value + '%';
-      if (pctEl) pctEl.textContent = value + '%';
-      if (subEl && subtitle) subEl.textContent = subtitle;
-      // Elapsed time is measured. A "remaining" figure extrapolated from the
-      // percentage was another guess dressed up as an estimate.
-      if (elapsedEl) elapsedEl.textContent = elapsedGenText();
-    }
-
-    function setGenStep(stepId, state) {
-      const el = document.getElementById('genStep_' + stepId);
-      if (!el) return;
-      const dot = el.querySelector('.gen-step-index');
-      const label = el.querySelector('span:first-child');
-      const status = el.querySelector('.gen-step-status');
-      if (state === 'active') {
-        el.classList.add('is-active');
-        el.classList.remove('is-done', 'is-error');
-        if (dot) dot.style.background = 'var(--p)';
-        if (label) label.style.fontWeight = '700';
-        if (status) status.textContent = WFT('loader.running', 'جارٍ');
-      } else if (state === 'done') {
-        el.classList.add('is-done');
-        el.classList.remove('is-active', 'is-error');
-        if (dot) dot.style.background = 'var(--p)';
-        if (status) status.textContent = WFT('loader.done', 'اكتمل');
-      } else if (state === 'error') {
-        el.classList.add('is-error');
-        el.classList.remove('is-active', 'is-done');
-        if (status) status.textContent = WFT('loader.skipped', 'لم تُنفَّذ');
-      }
-    }
-
-    function hideGenProgress() {
-      const bar = document.getElementById('genBar');
-      if (bar) bar.style.width = '100%';
-      setGenPct(100, WFT('loader.done', 'اكتمل'));
-      setTimeout(() => {
-        hideLoader();
-      }, 600);
     }
 
     // The live banner follows the same rule: a number only when the caller

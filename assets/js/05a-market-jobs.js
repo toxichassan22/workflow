@@ -55,6 +55,12 @@
       return WFT('market.job_still_running', 'المهمة ما زالت تعمل في الخلفية.');
     }
 
+    // The progress card belongs to 00-core; a harness that stubs it out must
+    // not turn a running job into a failed one.
+    function reportMarketJobProgress(job) {
+      if (typeof applyLoaderJobProgress === 'function') applyLoaderJobProgress(job);
+    }
+
     function marketJobResumedText() {
       return WFT('market.job_resumed', 'توجد مهمة قيد التنفيذ — جاري متابعة نتيجتها.');
     }
@@ -199,7 +205,7 @@
       try {
         // The job names the stage it is on; its progress constant is authored,
         // so the card follows the words instead of an invented fraction.
-        const onProgress = job => applyLoaderJobProgress(job);
+        const onProgress = reportMarketJobProgress;
         let res = await resumeMarketJob('competitors', onProgress,
           () => { if (note) note.textContent = marketJobResumedText(); });
         const resumed = res !== null;
@@ -337,7 +343,7 @@
       showLoader('توليد ملخص السوق', 'جاري البحث في المصادر الرسمية وكتابة الملخص التنفيذي...', 12,
         { stoppable: true });
       try {
-        const onProgress = job => applyLoaderJobProgress(job);
+        const onProgress = reportMarketJobProgress;
         const priorState = getMarketStudyState();
         const currentSummary = marketSummaryState(priorState.summary);
         const currentSwot = { ...(priorState.swot || {}) };
@@ -406,7 +412,7 @@
       showLoader('استكمال ملخص السوق', 'جاري استكمال مراحل الدراسة المحفوظة...', 12,
         { stoppable: true });
       try {
-        const onProgress = job => applyLoaderJobProgress(job);
+        const onProgress = reportMarketJobProgress;
         let res = await api(
           'POST', '/api/market-study/jobs/' + encodeURIComponent(jobId) + '/resume', {});
         if (res && res.jobId && (res.status === 'queued' || res.status === 'running')) {

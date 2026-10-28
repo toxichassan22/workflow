@@ -423,9 +423,8 @@
       }
 
       const totalSteps = (needImages ? 1 : 0) + (needMaps ? 1 : 0);
-      const generationPageActive = document.getElementById('tenantGenerationPage')?.classList.contains('active');
       const globalLoader = document.getElementById('globalLoader');
-      const ownsGlobalLoader = totalSteps > 0 && !generationPageActive && globalLoader && globalLoader.style.display !== 'flex';
+      const ownsGlobalLoader = totalSteps > 0 && globalLoader && globalLoader.style.display !== 'flex';
       if (ownsGlobalLoader) {
         const task = needImages && needMaps ? 'جاري تجهيز الصور والخرائط...' : (needImages ? 'جاري توليد الصور...' : 'جاري توليد خرائط الموقع...');
         showLoader('جاري تجهيز أصول العرض', task, 5);
@@ -443,14 +442,7 @@
         const staleImages = !hasStoredImages();
         if (!force && !staleImages) {
           console.log('[ASSETS] reusing stored cover/moodboard');
-          if (document.getElementById('tenantGenerationPage')?.classList.contains('active')) {
-            setGenStep('images', 'done');
-          }
         } else {
-          if (document.getElementById('tenantGenerationPage')?.classList.contains('active')) {
-            setGenStep('prompts', 'active');
-            setGenPct(22, 'صياغة أوصاف الصور بالذكاء الاصطناعي...');
-          }
           updateLoaderStep('جاري توليد الصور الإبداعية...');
           const payload = {
             projectData: tenantProjectData,
@@ -509,7 +501,6 @@
 
     function setDesignerChatBusy(message, workspaceKey = designerChatWorkspaceKey()) {
       tenantDesignerChatBusy = {
-        progress: 5,
         message: String(message || 'جاري تنفيذ التعديل...'),
         workspaceKey: String(workspaceKey || '')
       };

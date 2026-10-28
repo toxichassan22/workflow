@@ -174,7 +174,7 @@ def api_resume_market_study_job(job_id):
         _write_market_job(g.tenant_id, job_id, {
             **resumable,
             'status': 'queued', 'success': True, 'kind': 'summary',
-            'progress': 0, 'resumed': True,
+            'resumed': True,
             'message': 'استُؤنفت دراسة السوق من آخر مرحلة محفوظة',
         })
     threading.Thread(

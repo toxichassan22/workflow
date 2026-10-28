@@ -407,7 +407,7 @@ def _visual_plan_explain_layout_failure(error, contract, program, data, model_ke
 
 def _visual_plan_create_scene(data, context=None):
     contract, context = _visual_plan_contract(data, context)
-    _visual_plan_report_site_chat_progress(1, 35)
+    _visual_plan_report_site_chat_progress(1)
     if (contract['primaryFrontage'].get('status') == 'unresolved'
             and (contract.get('landBrief') or contract.get('regulatoryConstraints'))):
         resolved = _visual_plan_resolve_primary_frontage(

@@ -380,7 +380,7 @@ def _best_use_execute(draft, data, kind, job=None):
                           'دون كسر أي قيد آخر ضمن الحدود المعتمدة.')
             if job:
                 _write_job(_BEST_USE_JOB_NAMESPACE, job[0], job[1], {
-                    'status': 'running', 'progress': 30 + attempt * 15, 'draftId': data['draftId']})
+                    'status': 'running', 'draftId': data['draftId']})
         except Exception as error:
             fatal = _ai_fatal_http_response(error)
             if fatal is not None:
@@ -403,7 +403,7 @@ def _best_use_job_worker(flask_app, actor, data, kind, job_id):
             g.tenant = db.get_tenant_by_id(tenant_id)
             if g.user_id:
                 g.user_permissions = db.get_user_permissions(g.user_id, g.user_role)
-            _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {'status': 'running', 'progress': 20,
+            _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {'status': 'running',
                                                                   'draftId': data['draftId']})
             draft, error = _best_use_draft(data)
             if error is not None:
@@ -417,13 +417,13 @@ def _best_use_job_worker(flask_app, actor, data, kind, job_id):
                 result, status = readiness if readiness else _best_use_execute(draft, data, kind,
                                                                                job=(tenant_id, job_id))
             _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {
-                'status': 'completed' if status < 400 else 'failed', 'progress': 100,
+                'status': 'completed' if status < 400 else 'failed',
                 'draftId': data['draftId'], 'result': result, 'httpStatus': status})
     except Exception:
         app.logger.exception('Best Use job failed')
         result, status = _best_use_error('BEST_USE_PROVIDER_FAILED', 503)
         _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {
-            'status': 'failed', 'progress': 100, 'draftId': data['draftId'], 'result': result, 'httpStatus': status})
+            'status': 'failed', 'draftId': data['draftId'], 'result': result, 'httpStatus': status})
 
 
 def _best_use_start(kind):
@@ -452,12 +452,12 @@ def _best_use_start(kind):
         job_id = _uuid.uuid4().hex
         actor = {key: getattr(g, key, None) for key in ('tenant_id', 'user_id', 'user_name', 'user_role', 'is_admin')}
         _write_job(_BEST_USE_JOB_NAMESPACE, g.tenant_id, job_id, {
-            'status': 'queued', 'progress': 5, 'draftId': draft['id'], 'actor': actor,
+            'status': 'queued', 'draftId': draft['id'], 'actor': actor,
             'payload': {'draftId': draft['id'], 'expectedRevision': draft.get('revision'),
                         'message': data.get('message'), 'revise': data.get('revise') is True, 'kind': kind}})
         threading.Thread(target=_best_use_job_worker,
                          args=(current_app._get_current_object(), actor, data, kind, job_id), daemon=True).start()
-        return jsonify({'success': True, 'jobId': job_id, 'status': 'queued', 'progress': 5}), 202
+        return jsonify({'success': True, 'jobId': job_id, 'status': 'queued'}), 202
     result, status = _best_use_execute(draft, data, kind)
     return jsonify(result), status
 
@@ -490,8 +490,7 @@ def api_best_use_job(job_id):
     if time.time() - float(job.get('updatedAt') or 0) > 300:
         result, status = _best_use_error('BEST_USE_JOB_INTERRUPTED', 503)
         return jsonify(result), status
-    return jsonify({'success': True, 'status': job.get('status') or 'running', 'jobId': job_id,
-                    'progress': job.get('progress') or 10})
+    return jsonify({'success': True, 'status': job.get('status') or 'running', 'jobId': job_id})
 
 
 @app.route('/api/best-use/decision', methods=['POST'])

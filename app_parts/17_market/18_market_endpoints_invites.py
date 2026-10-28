@@ -1043,20 +1043,17 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
             'success': True,
             'message': 'جاري البحث في المصادر الرسمية وإعداد النتائج...',
             'kind': kind,
-            'progress': 8,
             'resumeState': resume_state,
         })
 
-        def report(pct, message):
-            try:
-                pct_value = max(0, min(99, int(pct)))
-            except (TypeError, ValueError):
-                pct_value = 0
+        def report(_pct, message):
+            # The stage message is what the job publishes; the percentage the
+            # workers compute for their own budget is not a measurement of the
+            # study, so it must not reach the job document.
             _write_market_job(tenant_id, job_id, {
                 'status': 'running',
                 'success': True,
                 'kind': kind,
-                'progress': pct_value,
                 'message': str(message or '').strip() or 'جاري إعداد دراسة السوق...',
             })
 
@@ -1067,7 +1064,6 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
             resume_state = state
             _write_market_job(tenant_id, job_id, {
                 'status': 'running', 'success': True, 'kind': kind,
-                'progress': 62,
                 'message': 'حُفظ تقدم باحثي السوق المكتمل',
                 'resumeState': resume_state,
             })
@@ -1100,7 +1096,6 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
                 **payload,
                 'status': status,
                 'kind': kind,
-                'progress': 100,
                 'message': payload.get('error') or 'اكتملت دراسة السوق',
             })
         except Exception as exc:

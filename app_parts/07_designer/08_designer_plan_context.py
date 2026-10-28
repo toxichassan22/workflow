@@ -932,16 +932,22 @@ def _designer_chat_memory(history, memory, usage_ctx=None):
 
 
 def _report_designer_job_progress(job_id, tenant_id, progress_val, message_text, extra_data=None):
-    """Update background designer job progress file thread-safely for client polling."""
+    """Publish the step the designer job is on, never a guessed percentage.
+
+    ``progress_val`` is kept in the signature because the callers pass the unit
+    they are counting (slide i of n) and it still belongs in their own messages;
+    the job document carries the message only, so no reader can mistake an
+    authored number for measured work.
+    """
     if not job_id or not tenant_id:
         return
+    _ = progress_val
     try:
         current_job = _read_job('.designer_chat_jobs', tenant_id, job_id) or {}
         updated_job = {
             **current_job,
             'status': 'running',
             'success': True,
-            'progress': max(1, min(99, int(progress_val))),
             'message': str(message_text or 'جاري معالجة الطلب...'),
         }
         if extra_data and isinstance(extra_data, dict):

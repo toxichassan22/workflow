@@ -249,7 +249,6 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "page.support_desk": "الدعم الفني",
   "page.join_requests": "طلبات الانضمام",
   "page.fields": "الحقول",
-  "page.generation": "تجهيز العرض",
   "page.notifications": "الإشعارات",
   "page.operations": "العمليات",
   "page.presentation_editor": "محرر العرض",

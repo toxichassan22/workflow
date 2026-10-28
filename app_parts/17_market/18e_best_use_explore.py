@@ -49,16 +49,18 @@ def _best_use_explore_execute(draft, data, kind, job=None):
     stage_error = _best_use_explore_stage_error(project, kind, data)
     if stage_error:
         return stage_error
-    def progress(value, step, detail=None):
+    # The step name is the progress here: the stages are real, the constant
+    # percentage that used to ride along with them was not.
+    def progress(step, detail=None):
         if job:
             payload = {'status': 'running', 'flow': 'explore',
-                'draftId': draft['id'], 'progress': value, 'step': step}
+                'draftId': draft['id'], 'step': step}
             if detail:
                 payload['detail'] = detail
             _write_job(_BEST_USE_JOB_NAMESPACE, job[0], job[1], payload)
     try:
         if kind == 'concepts':
-            progress(10, 'regulations')
+            progress('regulations')
             regulation_data = _best_use_extract_regulations(draft, data)
             state['regulations'] = best_use_workflow.make_artifact(project, 'regulations', regulation_data,
                                                                   _uuid.uuid4().hex, state.get('regulations'))
@@ -87,7 +89,7 @@ def _best_use_explore_execute(draft, data, kind, job=None):
                                         'message': message, 'revise': data.get('revise') is True}, ensure_ascii=False)
         feedback, parsed, normalized = '', None, None
         for attempt in range(3):
-            progress(65 + attempt * 8, stage, {'index': attempt + 1, 'total': 3})
+            progress(stage, {'index': attempt + 1, 'total': 3})
             map_references = _best_use_map_references(draft)
             vision = bool(map_references)
             response = call_text_chat(system, prompt + feedback, max_tokens=10000 if targets else 2500,
@@ -130,7 +132,7 @@ def _best_use_explore_execute(draft, data, kind, job=None):
         statuses = dict(draft.get('section_statuses') or {})
         if targets:
             statuses[best_use.SECTION_KEY] = 'draft'
-        progress(95, 'saving')
+        progress('saving')
         return _best_use_explore_store(draft, project, statuses, 'توليد محتوى الاستكشاف' if targets else 'مناقشة توزيع الاستكشاف')
     except best_use_contract.ProposalError as error:
         code = ('BEST_USE_SEARCH_FAILED' if str(error).startswith('price_') else
@@ -165,12 +167,12 @@ def _best_use_explore_worker(flask_app, actor, data, kind, job_id):
                 readiness = _best_use_explore_readiness(draft)
                 result, status = readiness if readiness else _best_use_explore_execute(draft, data, kind, (tenant_id, job_id))
             _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {'status': 'completed' if status < 400 else 'failed',
-                'flow': 'explore', 'draftId': data['draftId'], 'progress': 100, 'result': result, 'httpStatus': status})
+                'flow': 'explore', 'draftId': data['draftId'], 'result': result, 'httpStatus': status})
     except Exception:
         app.logger.exception('Best Use exploration job failed')
         result, status = _best_use_error('BEST_USE_PROVIDER_FAILED', 503)
         _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {'status': 'failed', 'flow': 'explore',
-            'draftId': data['draftId'], 'progress': 100, 'result': result, 'httpStatus': status})
+            'draftId': data['draftId'], 'result': result, 'httpStatus': status})
 
 
 def _best_use_explore_start(kind):
@@ -202,10 +204,10 @@ def _best_use_explore_start(kind):
         job_id = _uuid.uuid4().hex
         actor = {key: getattr(g, key, None) for key in ('tenant_id', 'user_id', 'user_name', 'user_role', 'is_admin')}
         _write_job(_BEST_USE_JOB_NAMESPACE, g.tenant_id, job_id, {'status': 'queued', 'flow': 'explore',
-            'draftId': draft['id'], 'progress': 5})
+            'draftId': draft['id']})
         threading.Thread(target=_best_use_explore_worker,
             args=(current_app._get_current_object(), actor, data, kind, job_id), daemon=True).start()
-        return jsonify({'success': True, 'jobId': job_id, 'status': 'queued', 'progress': 5}), 202
+        return jsonify({'success': True, 'jobId': job_id, 'status': 'queued'}), 202
     result, status = _best_use_explore_execute(draft, data, kind)
     return jsonify(result), status
 
@@ -245,7 +247,7 @@ def api_best_use_explore_job(job_id):
         result, status = _best_use_error('BEST_USE_JOB_INTERRUPTED', 503)
         return jsonify(result), status
     return jsonify({'success': True, 'status': job.get('status') or 'running', 'jobId': job_id,
-                    'progress': job.get('progress') or 10, 'step': job.get('step') or 'regulations',
+                    'step': job.get('step') or 'regulations',
                     'detail': job.get('detail')})
 
 

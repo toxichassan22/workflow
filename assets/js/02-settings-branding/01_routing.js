@@ -1,5 +1,9 @@
 /* 02-settings-branding.js - index.html lines 8354-9747, shared global scope, classic scripts in order */
     const TENANT_ROUTE_PAGES = Object.fromEntries(Object.entries(TENANT_PAGE_ROUTES).map(([page, route]) => [route, page]));
+    // The retired generation page and its URL now belong to the deck editor:
+    // a saved bookmark lands there instead of resolving to nothing.
+    const TENANT_RETIRED_ROUTES = Object.freeze({ '/app/projects/generation': 'tenantSlidesPage' });
+    const TENANT_RETIRED_SUFFIXES = Object.freeze({ 'projects/generation': 'tenantSlidesPage' });
 
     // Role-prefixed URLs: super-admin lives under /superadmin, each company under
     // /c/<slug> where slug is the stable latin subdomain/username (never the Arabic
@@ -10,7 +14,6 @@
       tenantProjectPage: 'projects/new',
       tenantProjectPresentationsPage: 'projects/presentations',
       tenantVisualConceptPage: 'projects/visual-concept',
-      tenantGenerationPage: 'projects/generation',
       tenantSlidesPage: 'presentations/current',
       tenantPresentationsPage: 'presentations',
       tenantSettingsPage: 'settings',
@@ -29,7 +32,10 @@
       tenantAdminPackagesPage: 'admin/packages',
       tenantAdminPlatformPage: 'admin/platform'
     };
-    const TENANT_SUFFIX_PAGES = Object.fromEntries(Object.entries(TENANT_ROUTE_SUFFIXES).map(([page, suffix]) => [suffix, page]));
+    const TENANT_SUFFIX_PAGES = Object.fromEntries([
+      ...Object.entries(TENANT_ROUTE_SUFFIXES).map(([page, suffix]) => [suffix, page]),
+      ...Object.entries(TENANT_RETIRED_SUFFIXES)
+    ]);
 
     function tenantUrlSlug() {
       const raw = (tenantUser && (tenantUser.slug || tenantUser.subdomain || tenantUser.username)) || '';
@@ -179,7 +185,8 @@
       if (!getTenantToken()) return;
       const path = window.location.pathname;
       const resolved = (typeof resolveTenantRoutePath === 'function') ? resolveTenantRoutePath(path) : null;
-      const pageId = (resolved && resolved.pageId) || TENANT_ROUTE_PAGES[path];
+      const pageId = (resolved && resolved.pageId)
+        || TENANT_ROUTE_PAGES[path] || TENANT_RETIRED_ROUTES[path];
       if (resolved && typeof enforceTenantRouteGuard === 'function') {
         const guard = enforceTenantRouteGuard(pageId, resolved.urlSlug);
         if (guard === 'TENANT_SLUG_MISMATCH' || guard === 'TENANT_ADMIN_FORBIDDEN') {
@@ -617,7 +624,6 @@
       tenantProjectPage: ['page.project_new', 'مشروع جديد'],
       tenantProjectPresentationsPage: ['page.project_presentations', 'عروض المشروع'],
       tenantVisualConceptPage: ['page.visual_concept', 'التصور البصري'],
-      tenantGenerationPage: ['page.generation', 'تجهيز العرض'],
       tenantSlidesPage: ['page.presentation_editor', 'محرر العرض'],
       tenantPresentationsPage: ['page.projects', 'المشاريع'],
       tenantSettingsPage: ['page.company_settings', 'إعدادات الشركة'],
@@ -729,7 +735,6 @@
       const parentPages = {
         tenantProjectPresentationsPage: 'tenantPresentationsPage',
         tenantVisualConceptPage: 'tenantProjectPage',
-        tenantGenerationPage: 'tenantProjectPage',
         tenantSlidesPage: 'tenantProjectPage'
       };
       const activePageId = parentPages[pageId] || pageId;

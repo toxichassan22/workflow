@@ -89,7 +89,6 @@ def _site_analysis_job_worker(flask_app, tenant_id, data, job_id):
             _write_job(_SITE_ANALYSIS_JOB_NAMESPACE, tenant_id, job_id, {
                 'status': 'completed',
                 'success': True,
-                'progress': 100,
                 'message': 'اكتمل تحليل الموقع',
                 'result': result,
             })
@@ -99,7 +98,6 @@ def _site_analysis_job_worker(flask_app, tenant_id, data, job_id):
             _write_job(_SITE_ANALYSIS_JOB_NAMESPACE, tenant_id, job_id, {
                 'status': 'cancelled' if cancelled else 'failed',
                 'success': False,
-                'progress': 100,
                 'error': run_control.CANCELLED_MESSAGE if cancelled else f'تعذر تحليل الموقع: {exc}',
                 'error_code': run_control.CANCELLED_ERROR_CODE if cancelled else 'SITE_ANALYSIS_FAILED',
             })

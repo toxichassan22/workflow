@@ -408,7 +408,7 @@
       triggerAutoSaveDraft();
 
       const messagesDiv = document.getElementById('tenantChatMessages');
-      updateDesignerChatBusy(5, 'جاري تجهيز الطلب...');
+      updateDesignerChatBusy('جاري تجهيز الطلب...');
       restoreDesignerChatBusyIndicator();
       const indicator = document.getElementById('tenantChatTypingIndicator');
       if (messagesDiv) messagesDiv.scrollTop = messagesDiv.scrollHeight;
@@ -871,13 +871,13 @@
        job storage and restore/reset helpers. ── */
 
 
-    function updateDesignerChatBusy(progress, message) {
+    // The indicator carries the step word only: the server publishes no measured
+    // fraction for a chat turn, so there is no number to put in it.
+    function updateDesignerChatBusy(message) {
       if (!tenantDesignerChatBusy) return;
-      const value = Math.max(0, Math.min(100, Math.round(Number(progress) || 0)));
-      tenantDesignerChatBusy.progress = value;
       if (message) tenantDesignerChatBusy.message = String(message);
       const indicator = document.getElementById('tenantChatTypingIndicator');
-      if (indicator) setInlineLoaderProgress(indicator, value, tenantDesignerChatBusy.message);
+      if (indicator) setInlineLoaderProgress(indicator, tenantDesignerChatBusy.message);
       updateDesignerChatStatus();
     }
 
@@ -906,7 +906,7 @@
       indicator.id = 'tenantChatTypingIndicator';
       indicator.className = 'tenant-chat-message assistant typing';
       showInlineLoader(indicator, tenantDesignerChatBusy.message);
-      setInlineLoaderProgress(indicator, tenantDesignerChatBusy.progress, tenantDesignerChatBusy.message);
+      setInlineLoaderProgress(indicator, tenantDesignerChatBusy.message);
       messages.appendChild(indicator);
       messages.scrollTop = messages.scrollHeight;
     }

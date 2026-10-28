@@ -796,9 +796,11 @@ class VisualPlanContractTests(VisualPlanContractBase):
         with self.app.test_request_context('/'):
             module.g.visual_plan_job_kind = 'site_chat'
             module.g.visual_plan_job_progress = lambda **kwargs: reported.append(kwargs)
-            module._visual_plan_report_site_chat_progress(3, 82)
+            module._visual_plan_report_site_chat_progress(3)
             module._visual_plan_report_site_chat_timing('interview_model_ms', module.time.perf_counter() - 0.01)
-        self.assertEqual(reported[0]['progress'], 82)
+        # The published state is the checklist row, not a percentage: an
+        # authored 82 told the client nothing about which step was running.
+        self.assertNotIn('progress', reported[0])
         self.assertEqual(reported[0]['todos'][3]['status'], 'active')
         self.assertGreaterEqual(reported[1]['timing']['interview_model_ms'], 0)
 
@@ -820,7 +822,7 @@ class VisualPlanContractTests(VisualPlanContractBase):
         with self.app.test_request_context('/'):
             module.g.visual_plan_job_kind = 'site_generate'
             module.g.visual_plan_job_progress = lambda **kwargs: reported.append(kwargs)
-            module._visual_plan_site_report_progress(42, todos, checkpoints, 'current-input')
+            module._visual_plan_site_report_progress(todos, checkpoints, 'current-input')
         self.assertEqual(reported[0]['checkpoint']['svgRenderRevision'],
                          module._VISUAL_PLAN_SITE_RENDER_REVISION)
         self.assertEqual(reported[0]['checkpoint']['svgInputSignature'], 'current-input')
