@@ -365,6 +365,21 @@
       );
     }
 
+    function updateCoverBackgroundHtml(html, coverImage) {
+      if (!html || !coverImage) return String(html || '');
+      // The stored cover owns its photo as a real element, so the client can
+      // delete it and the deletion sticks. Only follow the approved image when
+      // that element still exists — never plant it again on every render.
+      if (!/data-cover-background\s*=\s*["']?1/i.test(String(html))) {
+        return String(html || '');
+      }
+      const safeCover = String(coverImage).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      return String(html).replace(
+        /(data-cover-background\s*=\s*["']?1["']?[^>]*?background-image\s*:\s*url\()([^)]*)(\))/i,
+        (match, head, url, tail) => head + safeCover + tail
+      );
+    }
+
     function stripReservedSlideHeaderSpacing(tag) {
       const styleMatch = /style\s*=\s*(["'])([\s\S]*?)\1/i.exec(tag);
       if (!styleMatch) return tag;
@@ -549,10 +564,7 @@
       if (coverImage && slideType === 'section_divider') {
         cleanHtml = forceSectionDividerBackgroundHtml(cleanHtml, coverImage);
       } else if (coverImage && (slideType === 'cover' || cleanHtml.includes('class="slide cover"') || cleanHtml.includes("class='slide cover'"))) {
-        if (!cleanHtml.includes(coverImage) && !cleanHtml.includes('background-image')) {
-          const bgDiv = '<div aria-hidden="true" data-slide-live-only="1" style="position:absolute;inset:0;z-index:0;background-image:url(\'' + coverImage.replace(/'/g, "\\'") + '\');background-size:cover;background-position:center;"></div>';
-          cleanHtml = cleanHtml.replace(/(<div[^>]*class=["']slide[^"']*["'][^>]*>)/i, '$1' + bgDiv);
-        }
+        cleanHtml = updateCoverBackgroundHtml(cleanHtml, coverImage);
       }
 
       // Moodboard slide auto-inject fallback if images exist but tokens weren't placed
@@ -946,6 +958,11 @@
       // not leave an empty full-slide layer behind.
       const deleteTarget = watermarkOverlayOf(rawTarget) || rawTarget;
       if (!deleteTarget.parentElement) return;
+      if (deleteTarget.getAttribute && deleteTarget.getAttribute('data-cover-background') === '1') {
+        // Removing the cover photo is a deliberate edit: the save/renumber path
+        // must not plant it back on the next open.
+        slideData.coverBackgroundRemoved = true;
+      }
       pushSlideEditHistory(index);
       deleteTarget.parentElement.removeChild(deleteTarget);
       slideData.html = rawRoot.outerHTML;

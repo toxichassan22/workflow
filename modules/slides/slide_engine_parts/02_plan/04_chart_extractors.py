@@ -429,6 +429,29 @@ def _slide_source_data_note(slide, project_data, offer_lang=None):
     return ''
 
 
+def _exec_badge_text(value):
+    """A multi-select value as one readable chip instead of a JSON array."""
+    if isinstance(value, (list, tuple)):
+        parts = [str(item) for item in value]
+    else:
+        text = str(value or '').strip()
+        if text.startswith('['):
+            try:
+                decoded = json.loads(text)
+                parts = [str(item) for item in decoded] if isinstance(decoded, list) else [text]
+            except (TypeError, ValueError):
+                parts = [text]
+        else:
+            parts = re.split(r'[،,|]', text)
+    cleaned = []
+    for part in parts:
+        part = str(part or '').strip().strip('"\'')
+        part = re.sub(r'^[^:]{1,30}::', '', part)
+        if part and part not in cleaned:
+            cleaned.append(part)
+    return '، '.join(cleaned)
+
+
 def _exec_badges_strip(source, primary, accent):
     """Location/type/area chips shown on the first executive page only."""
     badges = []
@@ -437,7 +460,7 @@ def _exec_badges_strip(source, primary, accent):
     loc = ' — '.join(p for p in (city, district) if p)
     if loc:
         badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:#334155;padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">الموقع: {html_lib.escape(loc)}</span>')
-    prop_type = str(source.get('property_type') or source.get('project_type') or '').strip()
+    prop_type = _exec_badge_text(source.get('property_type') or source.get('project_type')).strip()
     if prop_type:
         badges.append(f'<span style="background:#f8fafc;border:1px solid #cbd5e1;color:{primary};padding:4px 12px;border-radius:6px;font-size:12px;font-weight:700;">نوع المشروع: {html_lib.escape(prop_type)}</span>')
     land_area = str(source.get('approved_financial_area') or source.get('land_area') or '').strip()
@@ -470,49 +493,61 @@ def _exec_text_chunks(text, target=620):
 
 
 def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
-    """Editorial block: dark lead section + numbered rows with highlighted figures.
+    """Editorial block: a brand lead panel + numbered topic cards.
 
     Executive slides carry no images or maps; ext_token is accepted for
     backwards compatibility but never rendered.
     """
-    """Editorial block: dark lead section + numbered rows with highlighted figures."""
     rows = list(rows or [])
     if not rows:
         rows = [('', '')]
     compact = len(rows) <= 2
+    roomy = len(rows) <= 3
 
     lead_label, lead_value = rows[0]
     lead_columns = 'column-count:2;column-gap:34px;' if len(str(lead_value or '')) > 320 else ''
     lead_label_html = (
-        f'<span style="font-size:{19 if compact else 17}px;font-weight:800;color:#ffffff;">{html_lib.escape(str(lead_label))}</span>'
+        f'<span style="font-size:{17 if compact else 15}px;font-weight:800;color:#ffffff;">'
+        f'{html_lib.escape(str(lead_label))}</span>'
     ) if lead_label else ''
     lead_html = (
-        f'<div style="background:{primary};border-radius:12px;padding:{24 if compact else 20}px 28px;'
-        f'box-sizing:border-box;position:relative;overflow:hidden;">'
-        f'<div style="display:flex;align-items:baseline;gap:14px;margin-bottom:{12 if compact else 8}px;">'
-        f'<span style="font-size:30px;font-weight:800;color:{accent};line-height:1;">{row_offset + 1:02d}</span>'
+        f'<div data-exec-lead="1" style="position:relative;overflow:hidden;border-radius:16px;'
+        f'padding:{26 if compact else 22}px 30px;box-sizing:border-box;'
+        f'background:linear-gradient(135deg,{primary} 0%,{_mix_hex_colors(primary, accent, 0.45)} 100%);">'
+        f'<div style="position:absolute;inset-inline-start:0;top:0;bottom:0;width:6px;background:{accent};"></div>'
+        f'<div aria-hidden="true" style="position:absolute;inset-inline-end:22px;top:2px;'
+        f'font-size:78px;font-weight:900;line-height:1;color:rgba(255,255,255,0.10);">'
+        f'{row_offset + 1:02d}</div>'
+        f'<div style="position:relative;display:flex;align-items:center;gap:14px;'
+        f'margin-bottom:{12 if compact else 9}px;">'
+        f'<span style="font-size:{26 if compact else 23}px;font-weight:800;color:{accent};line-height:1;">'
+        f'{row_offset + 1:02d}</span>'
         f'{lead_label_html}'
-        f'<span style="flex:1;border-bottom:1px solid rgba(255,255,255,0.22);transform:translateY(-6px);"></span>'
+        f'<span style="flex:1;height:1px;background:rgba(255,255,255,0.28);"></span>'
         f'</div>'
-        f'<div style="font-size:{14 if compact else 13.5}px;line-height:1.85;color:#eef2f7;text-align:justify;{lead_columns}">'
-        f'{_market_rich_text(lead_value, accent)}</div>'
+        f'<div style="position:relative;font-size:{15.5 if roomy else 14}px;line-height:1.9;'
+        f'color:#eef2f7;text-align:justify;{lead_columns}">{_market_rich_text(lead_value, accent)}</div>'
         f'</div>'
     )
 
     def render_topic(index, label, value):
         label_html = (
-            f'<span style="font-size:{15.5 if compact else 14}px;font-weight:800;color:{primary};white-space:nowrap;">{html_lib.escape(str(label))}</span>'
+            f'<span style="font-size:{15.5 if compact else 14.5}px;font-weight:800;color:{primary};'
+            f'white-space:nowrap;">{html_lib.escape(str(label))}</span>'
         ) if label else ''
         text_len = len(re.sub(r'\s+', ' ', str(value or '')).strip())
         columns = 'column-count:2;column-gap:30px;' if text_len > 420 else ''
         return (
-            f'<div data-exec-topic="{index}" style="padding:{14 if compact else 11}px 2px 0;">'
-            f'<div style="display:flex;align-items:baseline;gap:12px;">'
-            f'<span style="font-size:{24 if compact else 21}px;font-weight:800;color:{accent};line-height:1;min-width:34px;">{index:02d}</span>'
+            f'<div data-exec-topic="{index}" style="background:#f8fafc;border:1px solid #e2e8f0;'
+            f'border-radius:14px;padding:{18 if roomy else 13}px {20 if roomy else 18}px;box-sizing:border-box;">'
+            f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">'
+            f'<span style="display:inline-flex;align-items:center;justify-content:center;'
+            f'min-width:34px;height:34px;border-radius:10px;background:#ffffff;border:1px solid {accent};'
+            f'color:{accent};font-size:14px;font-weight:800;line-height:1;">{index:02d}</span>'
             f'{label_html}'
-            f'<span style="flex:1;border-bottom:1px solid #e2e8f0;transform:translateY(-5px);"></span>'
+            f'<span style="flex:1;height:1px;background:#e2e8f0;"></span>'
             f'</div>'
-            f'<div style="margin-top:{8 if compact else 5}px;font-size:{13 if compact else 12.5}px;line-height:{1.85 if compact else 1.72};'
+            f'<div style="font-size:{13.6 if roomy else 12.8}px;line-height:{1.85 if roomy else 1.75};'
             f'color:#334155;text-align:justify;{columns}">{_market_rich_text(value, accent)}</div>'
             f'</div>'
         )
@@ -521,7 +556,10 @@ def _exec_editorial_body(rows, row_offset, primary, accent, ext_token=''):
         render_topic(row_offset + idx + 1, label, value)
         for idx, (label, value) in enumerate(rows[1:], 1)
     )
-    return f'<div data-exec-analysis="1" style="display:flex;flex-direction:column;gap:{14 if compact else 10}px;">{lead_html}{topics_html}</div>'
+    return (
+        f'<div data-exec-analysis="1" style="display:flex;flex-direction:column;'
+        f'gap:{14 if compact else 11}px;">{lead_html}{topics_html}</div>'
+    )
 
 
 def _build_executive_summary_slide(slide, source, branding=None, slide_num=None, total_slides=None):
@@ -591,7 +629,9 @@ def _build_executive_opportunity_slide(slide, source, branding=None, slide_num=N
     if row_offset == 0 and (slide or {}).get('market_row_start') is None:
         content_source = str((slide or {}).get('content_source') or '')
         if ':' not in content_source:
-            pages = _budget_row_pages(all_rows)
+            pages = _budget_row_pages(
+                all_rows, page_budget=_EXEC_PAGE_BUDGET_PX,
+                max_topics=_EXEC_MAX_TOPICS_PER_PAGE)
             if pages:
                 rows = pages[0][1]
     body_content = _exec_editorial_body(rows, row_offset, primary, accent)

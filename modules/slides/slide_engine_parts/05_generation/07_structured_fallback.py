@@ -215,9 +215,9 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         return _build_location_summary_slide(slide, source, branding)
     if re.fullmatch(r'executive_content\.summary(?::\d+:\d+)?', content_source):
         return _build_executive_summary_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
-    if content_source == 'executive_content.opportunity':
+    if re.fullmatch(r'executive_content\.opportunity(?::\d+:\d+)?', content_source):
         return _build_executive_opportunity_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
-    if content_source == 'executive_content.features':
+    if re.fullmatch(r'executive_content\.features(?::\d+:\d+)?', content_source):
         return _build_executive_features_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if re.fullmatch(r'market_study_data\.scope', content_source):
         return _build_market_scope_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
@@ -229,7 +229,7 @@ def _build_structured_fallback_slide(slide, project_data, branding, slide_num=No
         return _build_market_sources_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
     if content_source == 'market_study_data.swot':
         return _build_market_swot_slide(slide, source, branding, slide_num=slide_num, total_slides=total_slides)
-    if content_source in {
+    if content_source_base(content_source) in {
         'executive_content.risks', 'market_study_data.risk_analysis',
         'market_study_data.risk_register', 'market_study_data.risks',
         'market_study_data.summary.risks',

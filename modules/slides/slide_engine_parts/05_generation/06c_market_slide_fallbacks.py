@@ -522,25 +522,27 @@ def _build_market_swot_slide(slide, source, branding=None, slide_num=None, total
 def _build_market_risk_slide(slide, source, branding=None, slide_num=None, total_slides=None):
     """Render approved risks as a clear risk-to-mitigation register."""
     source = source if isinstance(source, dict) else {}
-    _risk_source, items = _risk_analysis_source(source)
+    _risk_source, all_items = _risk_analysis_source(source)
+    items, row_offset = _market_rows_for_slide(slide, _risk_source, all_items)
+    items = list(items)
     primary = normalize_hex_color((branding or {}).get('primary_color'), '#0b1f33')
     accent = normalize_hex_color((branding or {}).get('accent_color'), '#c59a58')
     title = html_lib.escape(str((slide or {}).get('title') or 'تحليل المخاطر وطرق المعالجة'))
     project_title = html_lib.escape(str(source.get('project_name') or source.get('projectName') or 'THE VIEW'))
-    dense = len(items) >= 7
-    cell_padding = '8px 12px' if dense else '12px 14px'
-    body_size = '10.8px' if dense else '12px'
+    dense = len(items) >= 6
+    cell_padding = '10px 14px' if dense else '16px 18px'
+    body_size = '11.5px' if dense else '13.5px'
     row_html = []
-    for index, item in enumerate(items, 1):
+    for index, item in enumerate(items, row_offset + 1):
         risk = _market_value_html(item.get('risk'))
         mitigation = _market_value_html(item.get('mitigation')) if item.get('mitigation') else 'غير محددة في البيانات المعتمدة'
         background = '#ffffff' if index % 2 else '#f8fafc'
         row_html.append(
             f'<div data-risk-row="{index}" style="display:grid;grid-template-columns:1fr 1.35fr;gap:0;'
             f'background:{background};border-bottom:1px solid #dbe4ee;align-items:stretch;">'
-            f'<div style="padding:{cell_padding};border-right:3px solid #d7a4a4;color:#27364a;font-size:{body_size};line-height:1.5;">'
-            f'<div style="font-size:10px;font-weight:800;color:#b45309;margin-bottom:4px;" dir="ltr">{index:02d}</div>{risk}</div>'
-            f'<div style="padding:{cell_padding};border-right:1px solid #e2e8f0;color:#334155;font-size:{body_size};line-height:1.5;">{mitigation}</div>'
+            f'<div style="padding:{cell_padding};border-right:3px solid #d7a4a4;color:#27364a;font-size:{body_size};line-height:1.7;">'
+            f'<div style="font-size:10.5px;font-weight:800;color:#b45309;margin-bottom:5px;" dir="ltr">{index:02d}</div>{risk}</div>'
+            f'<div style="padding:{cell_padding};border-right:1px solid #e2e8f0;color:#334155;font-size:{body_size};line-height:1.7;">{mitigation}</div>'
             '</div>'
         )
     if not row_html:

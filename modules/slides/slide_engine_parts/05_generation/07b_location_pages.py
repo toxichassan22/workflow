@@ -388,16 +388,33 @@ _SITE_ANALYSIS_PARAGRAPH_GAP = 12
 _SITE_ANALYSIS_READING_PX = 300
 
 
-def _site_analysis_text_style(paragraphs):
+def _site_analysis_text_style(paragraphs, columns=1):
     """Type size that fills the reading card without clipping it."""
     length = len(' '.join(paragraphs))
-    lines = max(1, math.ceil(length / _SITE_ANALYSIS_COLUMN_CHARS))
+    lines = max(1, math.ceil(length / (_SITE_ANALYSIS_COLUMN_CHARS * max(1, columns))))
     gaps = max(0, len(paragraphs) - 1) * _SITE_ANALYSIS_PARAGRAPH_GAP
     for font, line_height in ((15.0, 1.95), (14.2, 1.92), (13.4, 1.88),
                               (12.6, 1.84), (11.8, 1.8), (11.0, 1.76)):
         if lines * font * line_height + gaps <= _SITE_ANALYSIS_READING_PX:
             return font, line_height
     return 10.4, 1.72
+
+
+def _collapse_duplicate_site_analysis_pages(items):
+    """The full reading page duplicates its own paginated slices — keep the slices."""
+    items = list(items or [])
+    sliced = any(
+        isinstance(item, dict)
+        and str(item.get('content_source') or '').strip().startswith('site_analysis:')
+        for item in items
+    )
+    if not sliced:
+        return items
+    return [
+        item for item in items
+        if not (isinstance(item, dict)
+                and str(item.get('content_source') or '').strip() == 'site_analysis')
+    ]
 
 
 def _location_context_rows(value, en=False, limit=4):
@@ -482,7 +499,9 @@ def _build_location_summary_slide(slide, project_data, branding=None):
         (token for token in tokens if token.upper().startswith('##MAP_')), '')
     has_map = bool(map_token)
 
-    font, line_height = _site_analysis_text_style(paragraphs)
+    page_chars = len(' '.join(paragraphs))
+    columns = 2 if page_chars > 900 else 1
+    font, line_height = _site_analysis_text_style(paragraphs, columns)
     if paragraphs:
         text_body = ''.join(
             '<div data-site-analysis-text="1" style="font-size:' + str(font) + 'px;'
@@ -493,6 +512,11 @@ def _build_location_summary_slide(slide, project_data, branding=None):
             + html_lib.escape(paragraph) + '</div>'
             for index, paragraph in enumerate(paragraphs)
         )
+        if columns == 2:
+            text_body = (
+                '<div data-site-analysis-columns="2" style="column-count:2;'
+                'column-gap:28px;column-rule:1px solid #eef2f6;">' + text_body + '</div>'
+            )
     else:
         text_body = (
             '<div data-site-analysis-text="1" style="font-size:12.5px;color:#94a3b8;">'

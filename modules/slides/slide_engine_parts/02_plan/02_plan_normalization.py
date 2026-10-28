@@ -1,34 +1,33 @@
 
 
 # One designed reading page holds about this much prose before the card would
-# clip, so a shorter reading stays on a single page instead of arriving as two
-# half-empty cards.
-_SITE_ANALYSIS_PAGE_CHARS = 780
+# clip. The cap is a hard ceiling: a page is packed until the next block would
+# cross it, so no slice can arrive longer than the card and lose its tail.
+_SITE_ANALYSIS_PAGE_CHARS = 650
 
 
 def _site_analysis_page_ranges(blocks):
-    """Split the approved reading into balanced page slices.
+    """Split the approved reading into page slices that never exceed the cap.
 
     The blocks are the ones the page builder renders, so every slice selects
     exactly what the plan measured. A reading that fits one page is not
-    paginated at all, and a longer one divides into balanced pages: the old
-    half/full cut left the last page carrying a stray line.
+    paginated at all; a longer one fills each page up to the ceiling before
+    opening the next, instead of balancing page totals past what a card holds.
     """
+    blocks = list(blocks or [])
     total = sum(len(str(block or '')) + 1 for block in blocks)
     if total <= _SITE_ANALYSIS_PAGE_CHARS:
         return [(0, None)]
-    page_count = max(2, math.ceil(total / _SITE_ANALYSIS_PAGE_CHARS))
-    target = total / page_count
     ranges = []
     start = 0
     used = 0
     for index, block in enumerate(blocks):
-        used += len(str(block or '')) + 1
-        if (used >= target and len(ranges) < page_count - 1
-                and index + 1 < len(blocks)):
-            ranges.append((start, index + 1))
-            start = index + 1
+        length = len(str(block or '')) + 1
+        if used and used + length > _SITE_ANALYSIS_PAGE_CHARS:
+            ranges.append((start, index))
+            start = index
             used = 0
+        used += length
     ranges.append((start, None))
     return ranges
 
@@ -682,11 +681,19 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             'content_source': 'market_study_data.swot', 'bullets': [],
         })
     if risk_items:
-        add('swot_risks', {
-            'title': 'Risk Analysis & Mitigation' if lang == OFFER_LANG_ENGLISH else 'تحليل المخاطر وطرق المعالجة', 'type': 'content', 'design_style': 'risk',
-            'content_density': 'high', 'requires_image': False,
-            'content_source': risk_source, 'bullets': [],
-        })
+        risk_title = ('Risk Analysis & Mitigation' if lang == OFFER_LANG_ENGLISH
+                      else 'تحليل المخاطر وطرق المعالجة')
+        risk_pages = _risk_page_ranges(risk_items)
+        for page_index, (start, end) in enumerate(risk_pages):
+            page_title = risk_title if page_index == 0 else (
+                risk_title + (' (continued)' if lang == OFFER_LANG_ENGLISH else ' — تابع'))
+            page_source = risk_source if len(risk_pages) == 1 else '%s:%d:%d' % (
+                risk_source, start, len(risk_items) if end is None else end)
+            add('swot_risks', {
+                'title': page_title, 'type': 'content', 'design_style': 'risk',
+                'content_density': 'high', 'requires_image': False,
+                'content_source': page_source, 'bullets': [],
+            })
     if phases and not groups.get('timeline'):
         add('timeline', {
             'title': 'Timeline & Development Phases' if lang == OFFER_LANG_ENGLISH else 'الجدول الزمني ومراحل التطوير',
@@ -736,7 +743,9 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
         if has_opp:
             opp_slide = existing_by_source.get('executive_content.opportunity') or {}
             opp_rows = [('', chunk) for chunk in _exec_text_chunks(str(executive.get('opportunity') or ''))]
-            opp_pages = _budget_row_pages(opp_rows) or [(0, opp_rows)]
+            opp_pages = _budget_row_pages(
+                opp_rows, page_budget=_EXEC_PAGE_BUDGET_PX,
+                max_topics=_EXEC_MAX_TOPICS_PER_PAGE) or [(0, opp_rows)]
             for start, page_rows in opp_pages:
                 add('executive_summary', exec_page_slide(
                     opp_slide, 'executive_content.opportunity',
@@ -789,29 +798,32 @@ def _ensure_required_plan_content(groups, project_data=None, images=None, tenant
             if not blocks:
                 blocks = [part.strip() for part in re.split(r'\r?\n\s*\r?\n', value) if part.strip()] or [value]
             ranges = _site_analysis_page_ranges(blocks)
-            if len(ranges) > 1:
-                pages = []
-                for page_index, (start, end) in enumerate(ranges):
-                    first = page_index == 0
-                    pages.append({
-                        'title': title,
-                        'type': 'content',
-                        'design_style': summary_style if first else 'editorial',
-                        'content_density': 'medium',
-                        'requires_image': bool(summary_tokens) and first,
-                        'content_source': 'site_analysis:%d:%s' % (
-                            start, '' if end is None else end),
-                        'image_tokens': summary_tokens if first else [],
-                        'bullets': [],
-                        'section_key': 'location',
-                    })
-                groups['location'] = [
-                    s for s in groups.get('location', [])
-                    if not str(s.get('content_source') or '').startswith('site_analysis')
-                    and not summary_match(str(s.get('title') or ''))
-                ]
-                groups['location'].extend(pages)
-                continue
+            pages = []
+            for page_index, (start, end) in enumerate(ranges):
+                first = page_index == 0
+                page_source = ('site_analysis' if len(ranges) == 1 else
+                               'site_analysis:%d:%s' % (start, '' if end is None else end))
+                pages.append({
+                    'title': title,
+                    'type': 'content',
+                    'design_style': summary_style if first else 'editorial',
+                    'content_density': 'medium',
+                    'requires_image': bool(summary_tokens) and first,
+                    'content_source': page_source,
+                    'image_tokens': summary_tokens if first else [],
+                    'bullets': [],
+                    'section_key': 'location',
+                })
+            # The approved reading has one owner: the paginated slices. Keeping
+            # a planner page that carries the whole text next to them shipped
+            # the same words twice and clipped the full copy.
+            groups['location'] = [
+                s for s in groups.get('location', [])
+                if not str(s.get('content_source') or '').startswith('site_analysis')
+                and not summary_match(str(s.get('title') or ''))
+            ]
+            groups['location'].extend(pages)
+            continue
 
         existing = next((slide for slide in groups.get(section_key, [])
                          if slide.get('content_source') == content_source or summary_match(str(slide.get('title') or ''))), None)

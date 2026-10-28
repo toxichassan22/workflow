@@ -42,11 +42,6 @@ class MeetingRequirementsTestsPart20(MeetingRequirementsTests):
             ('market_study_data.summary', 'market'),
             ('market_study_data.scope', 'market'),
             ('market_study_data.one_block_summary', 'market'),
-            ('executive_content.summary', 'executive_summary'),
-            ('executive_content.opportunity', 'executive_summary'),
-            ('executive_content.features', 'executive_summary'),
-            ('executive_content.risks', 'swot_risks'),
-            ('market_study_data.risk_analysis', 'swot_risks'),
         ):
             self.assertEqual(
                 engine.slide_content_renderer(
@@ -72,6 +67,19 @@ class MeetingRequirementsTestsPart20(MeetingRequirementsTests):
             ('location_detail', 'location', {}, None),
             ('site_analysis', 'location', {}, None),
             ('site_analysis:0:2', 'location', {}, None),
+            # The risk register is a fixed, paginated register: one crowded
+            # model page used to clip the approved risks.
+            ('executive_content.risks', 'swot_risks', {}, None),
+            ('executive_content.risks:0:2', 'swot_risks', {}, None),
+            ('market_study_data.risk_analysis', 'swot_risks', {}, None),
+            # The executive editorial pages keep their designed layout and
+            # measured pagination on every slice.
+            ('executive_content.summary', 'executive_summary', {}, None),
+            ('executive_content.summary:0:2', 'executive_summary', {}, None),
+            ('executive_content.opportunity', 'executive_summary', {}, None),
+            ('executive_content.opportunity:4:8', 'executive_summary', {}, None),
+            ('executive_content.features', 'executive_summary', {}, None),
+            ('executive_content.features:6:11', 'executive_summary', {}, None),
         ):
             slide = {'section_key': section, 'content_source': source}
             slide.update(extra)
@@ -106,27 +114,57 @@ class MeetingRequirementsTestsPart20(MeetingRequirementsTests):
         self.assertNotIn('data-market-analysis="1"', html)
         self.assertIn('تركيب تحريري', html)
 
-    def test_the_risk_register_reaches_the_model_instead_of_being_injected(self):
+    def test_the_risk_register_is_rendered_and_paginated_without_the_model(self):
         engine = self.application_module.slide_engine
         project = self._market_project()
         captured = []
 
         def fake_chat(system, user_msg, **kwargs):
             captured.append(user_msg)
-            return {'choices': [{'message': {
-                'content': '<div class="slide" dir="rtl"><h2>المخاطر</h2>'
-                           '<p>سجل مصمم</p></div>'}}]}
+            return {'choices': [{'message': {'content': '<div class="slide"></div>'}}]}
 
         slide = {
             'title': 'تحليل المخاطر وطرق المعالجة', 'type': 'content',
             'section_key': 'swot_risks', 'design_style': 'risk',
             'content_source': 'executive_content.risks',
         }
-        engine.generate_single_slide(
+        html = engine.generate_single_slide(
             'sys', slide, 9, 12, {'primary_color': '#0b1f33'}, fake_chat,
             project_data=project)
-        self.assertTrue(captured)
-        self.assertIn('تأخر الروابط', captured[0])
+        self.assertFalse(captured)
+        self.assertIn('data-risk-row=', html)
+        self.assertIn('تأخر الروابط', html)
+
+        risks = [
+            {'risk': 'خطر رقم %d %s' % (index, 'تفصيل ' * 30),
+             'mitigation': 'معالجة ' * 20}
+            for index in range(7)
+        ]
+        long_project = {
+            'project_name': 'مشروع الاختبار',
+            'executive_content': json.dumps({'risks': risks}, ensure_ascii=False),
+        }
+        plan = engine.normalize_presentation_plan({
+            'slides': [
+                {'title': 'الغلاف', 'type': 'cover'},
+                {'title': 'محتويات العرض', 'type': 'index'},
+                {'title': 'الخاتمة', 'type': 'closing'},
+            ],
+        }, project_data=long_project)
+        risk_slides = [
+            item for item in plan['slides']
+            if item.get('section_key') == 'swot_risks'
+            and item.get('design_style') == 'risk'
+        ]
+        self.assertGreaterEqual(len(risk_slides), 2)
+        self.assertIn(':0:', str(risk_slides[0].get('content_source')))
+        self.assertIn('تابع', risk_slides[1].get('title'))
+        first_html = engine._build_market_risk_slide(risk_slides[0], long_project, {})
+        second_html = engine._build_market_risk_slide(risk_slides[1], long_project, {})
+        self.assertLessEqual(first_html.count('data-risk-row='), 4)
+        self.assertIn('خطر رقم 0', first_html)
+        self.assertNotIn('خطر رقم 0 ', second_html)
+        self.assertNotIn('خطر رقم 1 ', second_html)
 
     def test_the_source_register_shows_the_source_and_its_link_only(self):
         engine = self.application_module.slide_engine

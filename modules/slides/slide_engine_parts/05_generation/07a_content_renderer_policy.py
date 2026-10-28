@@ -24,17 +24,6 @@ AI_DESIGNED_CONTENT_SOURCES = (
     'market_study_data.summary',
     'market_study_data.scope',
     'market_study_data.one_block_summary',
-    # The executive content: brief, opportunity, features.
-    'executive_content.summary',
-    'executive_content.opportunity',
-    'executive_content.features',
-    # The risk register: every risk against its mitigation, composed as a
-    # designed page instead of a flat list.
-    'executive_content.risks',
-    'market_study_data.risk_analysis',
-    'market_study_data.risk_register',
-    'market_study_data.risks',
-    'market_study_data.summary.risks',
 )
 
 # The page is drawn by a fixed template. Reason: the content is reference
@@ -58,6 +47,19 @@ DETERMINISTIC_CONTENT_SOURCES = (
     # paragraph or a bare key/value grid on a white slide.
     'location_detail',
     'site_analysis',
+    # The risk register: every risk against its mitigation, in the fixed
+    # register that paginates instead of letting one crowded page clip.
+    'executive_content.risks',
+    'market_study_data.risk_analysis',
+    'market_study_data.risk_register',
+    'market_study_data.risks',
+    'market_study_data.summary.risks',
+    # The executive content: brief, opportunity and features keep the designed
+    # editorial layout (brand lead panel + numbered topic cards) and its
+    # measured pagination on every page.
+    'executive_content.summary',
+    'executive_content.opportunity',
+    'executive_content.features',
 )
 
 
@@ -82,6 +84,9 @@ def slide_content_renderer(slide, project_data=None):
     # 1. A source the model must compose wins over every template.
     if is_ai_designed_content_source(source):
         return CONTENT_RENDERER_AI
+
+    if content_source_base(source) in DETERMINISTIC_CONTENT_SOURCES:
+        return CONTENT_RENDERER_DETERMINISTIC
 
     # 2. The financial section is the approved report: its tables are the
     #    numbers the client signed off, so the model may not redraw them.

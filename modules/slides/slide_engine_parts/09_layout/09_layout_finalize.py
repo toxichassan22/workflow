@@ -539,6 +539,12 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['section_key'] = section_key
             if slide_type == 'section_divider' and section_key in PRESENTATION_SECTION_ORDER:
                 current_section = section_key
+        if slide_type == 'cover' and not item.get('coverBackgroundRemoved'):
+            cover_target = (creative_images.get('cover') or project_data.get('cover')
+                            or project_data.get('mainImageData') or '')
+            if cover_target:
+                item['html'] = _ensure_cover_background_element(
+                    item.get('html') or '', cover_target)
         if preserve_html or _designer_preserves_html(item):
             item['_designer_keep_html'] = True
             item['is_custom'] = True
@@ -550,6 +556,7 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
         normalized.append(item)
 
     normalized = _collapse_duplicate_timeline_gantts(normalized)
+    normalized = _collapse_duplicate_site_analysis_pages(normalized)
     refresh_index_entries({'slides': normalized}, offer_lang=lang)
     for index, item in enumerate(normalized, 1):
         slide_type = str(item.get('type') or 'content')

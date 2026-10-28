@@ -286,6 +286,33 @@ def _extract_cover_image_url(project_data, creative_images=None):
     return ''
 
 
+def _ensure_cover_background_element(html, cover_url):
+    """Persist the approved cover photo as the slide's own layer.
+
+    The preview used to plant it on every render, so deleting it never stuck.
+    Writing it into the slide HTML once makes it editable and removable, and a
+    slide that already draws a background (or the client removed this layer)
+    is left untouched.
+    """
+    cover = _usable_slide_image_url(cover_url)
+    if not html or not cover:
+        return html
+    source = str(html)
+    if 'data-cover-background' in source:
+        return source
+    if re.search(r'background-image\s*:\s*url\(', source, re.IGNORECASE):
+        return source
+    background = (
+        '<div data-cover-background="1" aria-hidden="true" style="position:absolute;'
+        'inset:0;z-index:0;background-image:url(\'' + _css_url(cover) + '\');'
+        'background-size:cover;background-position:center center;background-repeat:no-repeat;"></div>'
+    )
+    return re.sub(
+        r'(<div\b[^>]*\bclass=["\'][^"\']*\bslide\b[^"\']*["\'][^>]*>)',
+        lambda match: match.group(1) + background,
+        source, count=1, flags=re.IGNORECASE)
+
+
 def _force_section_divider_background(html, cover_url):
     """Make a divider use the deck's real cover even when its saved CSS is empty or stale."""
     cover = _usable_slide_image_url(cover_url)

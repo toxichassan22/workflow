@@ -1491,6 +1491,39 @@ def _risk_items_from_value(value):
     return result
 
 
+_RISK_PAGE_BUDGET_PX = 470
+_RISK_MAX_ROWS_PER_PAGE = 4
+
+
+def _risk_row_height(item):
+    """Estimated register row height from the risk and mitigation lengths."""
+    risk = str((item or {}).get('risk') or '')
+    mitigation = str((item or {}).get('mitigation') or '')
+    risk_lines = max(1, math.ceil(len(risk) / 52))
+    mitigation_lines = max(1, math.ceil(len(mitigation) / 72))
+    return 46 + max(risk_lines, mitigation_lines) * 20
+
+
+def _risk_page_ranges(items):
+    """Split the risk register so no page overflows the slide band."""
+    items = list(items or [])
+    if not items:
+        return []
+    ranges = []
+    start = 0
+    used = 0
+    for index, item in enumerate(items):
+        height = _risk_row_height(item)
+        if used and (used + height > _RISK_PAGE_BUDGET_PX
+                     or index - start >= _RISK_MAX_ROWS_PER_PAGE):
+            ranges.append((start, index))
+            start = index
+            used = 0
+        used += height
+    ranges.append((start, None))
+    return ranges
+
+
 def _risk_analysis_source(project_data):
     """Choose the most complete approved risk source for the risk register."""
     source = project_data if isinstance(project_data, dict) else {}
@@ -1555,10 +1588,11 @@ def _market_summary_topic_height(label, value, lead=False):
     return 54 + lines * 21
 
 
-def _budget_row_pages(rows, first_budget=None):
+def _budget_row_pages(rows, first_budget=None, page_budget=None, max_topics=None):
     """Pack (label, text) rows into pages by estimated rendered height."""
     rows = list(rows or [])
-    budget = _MARKET_PAGE_BUDGET_PX
+    budget = _MARKET_PAGE_BUDGET_PX if page_budget is None else page_budget
+    limit = _MARKET_MAX_TOPICS_PER_PAGE if max_topics is None else max_topics
     first_budget = budget if first_budget is None else first_budget
     pages = []
     index = 0
@@ -1567,7 +1601,7 @@ def _budget_row_pages(rows, first_budget=None):
         page_budget = first_budget if start == 0 else budget
         used = _market_summary_topic_height(rows[index][0], rows[index][1], lead=True)
         index += 1
-        while (index < len(rows) and index - start < _MARKET_MAX_TOPICS_PER_PAGE
+        while (index < len(rows) and index - start < limit
                and used + _market_summary_topic_height(rows[index][0], rows[index][1]) <= page_budget):
             used += _market_summary_topic_height(rows[index][0], rows[index][1])
             index += 1
@@ -1649,9 +1683,17 @@ def _executive_summary_sections(project_data):
     return sections
 
 
+_EXEC_PAGE_BUDGET_PX = 500
+_EXEC_MAX_TOPICS_PER_PAGE = 4
+
+
 def _executive_summary_pages(project_data):
-    """Pack executive-summary sections into pages by estimated rendered height."""
-    return _budget_row_pages(_executive_summary_sections(project_data))
+    """Pack executive-summary sections into pages the designed cards can hold."""
+    return _budget_row_pages(
+        _executive_summary_sections(project_data),
+        page_budget=_EXEC_PAGE_BUDGET_PX,
+        max_topics=_EXEC_MAX_TOPICS_PER_PAGE,
+    )
 
 
 def _market_source_pages(market):

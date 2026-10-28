@@ -1,3 +1,22 @@
+def _drop_ungenerated_slides(slides_data):
+    """Entries with no HTML were never generated; an export must skip them.
+
+    Renumbering rebuilt them as section openers, which is how exporting an
+    incomplete deck produced a run of duplicate divider pages instead of the
+    pages that actually exist.
+    """
+    kept = []
+    dropped = 0
+    for item in slides_data if isinstance(slides_data, list) else []:
+        if isinstance(item, dict) and not str(item.get('html') or '').strip():
+            dropped += 1
+            continue
+        kept.append(item)
+    if dropped:
+        print(f'[EXPORT] skipped {dropped} ungenerated slide entries')
+    return kept
+
+
 def _export_html_from_slides(slides_data):
     """Join the deck for export, making sure every entry contributes exactly one page.
 
@@ -114,6 +133,7 @@ def api_export():
                 except Exception as e:
                     print(f"[EXPORT] failed to load slides_data: {e}")
 
+            slides_data = _drop_ungenerated_slides(slides_data)
             if slides_data:
                 slides_data = slide_engine.renumber_presentation_slides(
                     slides_data, branding=branding, project_data=render_project_data, tenant_id=g.tenant_id,
@@ -188,6 +208,7 @@ def api_export():
                 except Exception as e:
                     print(f"[EXPORT] failed to load slides_data for PPTX: {e}")
 
+            slides_data = _drop_ungenerated_slides(slides_data)
             if not slides_data:
                 return jsonify({'error': 'slidesData is required for PPTX export'}), 400
             slides_data = slide_engine.renumber_presentation_slides(
