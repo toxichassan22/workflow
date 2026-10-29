@@ -10,15 +10,33 @@ const vm = require('node:vm');
 const { test } = require('node:test');
 
 const root = path.resolve(__dirname, '..', '..');
-const source = [
-  'assets/js/03-executive-classification.js',
-  'assets/js/04-market.js',
-  'assets/js/04a-market-section.js',
-  'assets/js/05-market-competitors.js',
-  'assets/js/05-market-competitors/01_project_data_snapshot.js',
-  'assets/js/05a-market-jobs.js',
-  'assets/js/05a-market-summary-chat.js'
-].map(file => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
+
+// The bundle order lives with the app parts, so the test reads it from there.
+// A hand-written list went stale the moment a module was split into part files
+// (04-market.js -> 04-market/01_scope.js), and the harness then ran against
+// source that was missing a helper the chat calls.
+function readJsOrder() {
+  const collect = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return collect(full);
+    return entry.name.endsWith('.py') ? [full] : [];
+  });
+  const files = [path.join(root, 'app.py'), ...collect(path.join(root, 'app_parts'))];
+  const appSource = files.map(file => fs.readFileSync(file, 'utf8')).join('\n');
+  const match = appSource.match(/FRONTEND_JS_ORDER\s*=\s*\(([\s\S]*?)\)/);
+  assert.ok(match, 'FRONTEND_JS_ORDER is missing from the app parts');
+  return [...match[1].matchAll(/'([^']+)'/g)].map(part => part[1]);
+}
+
+// Everything the summary chat reaches: the shared classification module, then
+// the market form, scope, competitor and job modules, in bundle order.
+const MARKET_MODULES = /^(03-executive-classification|04-market|04a-market-section|05-market-competitors|05a-market)/;
+const source = readJsOrder()
+  .filter(name => MARKET_MODULES.test(name))
+  .map(name => fs.readFileSync(path.join(root, 'assets', 'js', name), 'utf8'))
+  .join('\n');
+assert.ok(source.includes('function sendMarketSummaryChat'),
+  'the market modules must come from FRONTEND_JS_ORDER');
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function fakeSourceRow(row) {
@@ -238,16 +256,22 @@ test('sendMarketSummaryChat posts the axis state and stores both turns', async (
 test('sendMarketSummaryChat always auto-routes: axis stays empty and history is capped', async () => {
   const { context, chatInput } = fixture();
   const state = context.getMarketStudyState();
+  const seeded = 100;
   state.summaryChat = {
-    general: Array.from({ length: 20 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: 'م' + i }))
+    general: Array.from({ length: seeded }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: 'م' + i }))
   };
   context.setMarketStudyState(state);
   chatInput.value = 'رسالة جديدة';
   await context.sendMarketSummaryChat();
   const request = context.requests[0];
+  const history = request.payload.history;
   assert.equal(request.payload.axis, '');
-  assert.equal(request.payload.history.length, 12);
-  assert.deepEqual(Object.keys(request.payload.history[0]).sort(), ['content', 'role']);
+  // The keep window is 40 turns: the oldest seeded turns never go over the
+  // wire, and the turn being sent is not echoed back in its own history.
+  assert.equal(history.length, 39);
+  assert.equal(history[0].content, 'م61');
+  assert.equal(history[history.length - 1].content, 'م99');
+  assert.deepEqual(Object.keys(history[0]).sort(), ['content', 'role']);
 });
 
 test('the detected axis echoes back on the assistant turn as a tag', async () => {
