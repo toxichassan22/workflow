@@ -700,9 +700,15 @@ class VisualPlanContractTests(VisualPlanContractBase):
         self.assertEqual(chat_call.call_count, 3)
         self.assertTrue(all(call.kwargs.get('model') == module.VISUAL_PLAN_SITE_MODEL
                             for call in chat_call.call_args_list))
+        # The interview splits its own effort (high on a fresh ask, medium when
+        # continuing); the scene and the edit run at the configured text effort.
+        # The owner replaced the hardcoded 'max' here on 2026-10-28, so the test
+        # follows TEXT_REASONING_EFFORT instead of pinning the old value.
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('reasoning_effort'), 'high')
-        self.assertEqual(chat_call.call_args_list[1].kwargs.get('reasoning_effort'), 'max')
-        self.assertEqual(chat_call.call_args_list[2].kwargs.get('reasoning_effort'), 'max')
+        self.assertEqual(chat_call.call_args_list[1].kwargs.get('reasoning_effort'),
+                         module.TEXT_REASONING_EFFORT)
+        self.assertEqual(chat_call.call_args_list[2].kwargs.get('reasoning_effort'),
+                         module.TEXT_REASONING_EFFORT)
         self.assertEqual(chat_call.call_args_list[0].kwargs.get('max_tokens'), 66000)
         self.assertEqual(chat_call.call_args_list[1].kwargs.get('max_tokens'), 66000)
         self.assertEqual(chat_call.call_args_list[2].kwargs.get('max_tokens'), 66000)
