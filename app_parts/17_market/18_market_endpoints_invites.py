@@ -1046,10 +1046,20 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
             'resumeState': resume_state,
         })
 
+        def stop_if_cancelled():
+            """Leave at the next phase boundary, before the next paid step."""
+            if not run_control.current_run_cancelled():
+                return
+            _write_market_job(tenant_id, job_id, {
+                **run_control.cancelled_job_patch(), 'kind': kind,
+            })
+            raise run_control.RunCancelledError()
+
         def report(_pct, message):
             # The stage message is what the job publishes; the percentage the
             # workers compute for their own budget is not a measurement of the
             # study, so it must not reach the job document.
+            stop_if_cancelled()
             _write_market_job(tenant_id, job_id, {
                 'status': 'running',
                 'success': True,
@@ -1091,6 +1101,14 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
                     trace_writer=trace_writer)
             else:
                 payload = _execute_market_summary(data, tenant_id, progress=report)
+            # A stop that landed after the executor's last report still wins:
+            # the study is closed as cancelled, never published as a result
+            # the client asked not to produce.
+            if run_control.current_run_cancelled():
+                _write_market_job(tenant_id, job_id, {
+                    **run_control.cancelled_job_patch(), 'kind': kind,
+                })
+                return
             status = 'completed' if payload.get('success') else 'failed'
             _write_market_job(tenant_id, job_id, {
                 **payload,
@@ -1099,6 +1117,12 @@ def _market_job_worker(app, tenant_id, kind, data, job_id, actor=None):
                 'message': payload.get('error') or 'اكتملت دراسة السوق',
             })
         except Exception as exc:
+            if (getattr(exc, 'error_code', None) == run_control.CANCELLED_ERROR_CODE
+                    or run_control.current_run_cancelled()):
+                _write_market_job(tenant_id, job_id, {
+                    **run_control.cancelled_job_patch(), 'kind': kind,
+                })
+                return
             if getattr(exc, 'fatal_ai_error', False):
                 _write_market_job(tenant_id, job_id, {
                     'status': 'failed',

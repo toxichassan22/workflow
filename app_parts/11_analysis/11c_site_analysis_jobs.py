@@ -86,6 +86,11 @@ def _site_analysis_job_worker(flask_app, tenant_id, data, job_id):
             if lat is None or lng is None:
                 raise ValueError('لا توجد إحداثيات للموقع')
             result = _site_analysis_result(data, project_data, lat, lng, source)
+            if run_control.current_run_cancelled():
+                _write_job(_SITE_ANALYSIS_JOB_NAMESPACE, tenant_id, job_id,
+                           {**run_control.cancelled_job_patch(),
+                            'message': 'تم إيقاف تحليل الموقع'})
+                return
             _write_job(_SITE_ANALYSIS_JOB_NAMESPACE, tenant_id, job_id, {
                 'status': 'completed',
                 'success': True,
@@ -117,4 +122,9 @@ def api_site_analysis_job(job_id):
             'error': 'المهمة غير موجودة أو انتهت صلاحيتها',
             'failureReason': 'job_not_found',
         }), 404
+    # A stop is reported from the moment it lands; the worker publishes its own
+    # terminal cancelled state when it reaches its next checkpoint.
+    if (str(job.get('status') or '') in ('queued', 'running')
+            and run_control.is_run_cancelled(job_id, g.tenant_id)):
+        job = {**job, **run_control.cancelled_job_patch()}
     return jsonify(job)

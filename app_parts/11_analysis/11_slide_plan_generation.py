@@ -347,7 +347,10 @@ def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images,
                 progress=report_plan_step,
             )
             succeeded = bool(payload.get('success'))
-            cancelled = payload.get('error_code') == run_control.CANCELLED_ERROR_CODE
+            # A stop that landed after the planner's last provider call must
+            # still close the job as cancelled, not as a finished plan.
+            cancelled = (payload.get('error_code') == run_control.CANCELLED_ERROR_CODE
+                         or run_control.current_run_cancelled())
             _write_job('.plan_jobs', tenant_id, job_id, {
                 **payload,
                 **(task_progress.payload('slide_plan', 'ready', complete=True) if succeeded else {}),
@@ -479,7 +482,7 @@ def api_slide_plan_job(job_id):
             'error': 'المهمة غير موجودة أو انتهت صلاحيتها',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(_public_job(job))
+    return jsonify(_public_job(job, job_id, g.tenant_id))
 
 
 def _generation_map_marker_side(images, project_data, view='overview'):
@@ -990,7 +993,7 @@ def api_generate_slide_single_job_status(job_id):
             'error': 'المهمة غير موجودة أو انتهت صلاحيتها',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(_public_job(job))
+    return jsonify(_public_job(job, job_id, g.tenant_id))
 
 
 @app.route('/api/generate-slides', methods=['POST'])

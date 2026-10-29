@@ -292,6 +292,20 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
             g.visual_plan_job_deadline = time.time() + _visual_plan_job_timeout_seconds(kind)
         g.visual_plan_job_kind = kind
         def report_progress(todos=None, checkpoint=None, timing=None):
+            # A stop lands between phases, before the next paid step; writing
+            # the terminal state here is what ends the job, not the browser.
+            if run_control.current_run_cancelled():
+                try:
+                    stopped = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
+                except Exception:
+                    stopped = {}
+                stopped.update(run_control.cancelled_job_patch())
+                stopped['httpStatus'] = 409
+                stopped['result'] = {'success': False, 'cancelled': True,
+                                     'error': run_control.CANCELLED_MESSAGE,
+                                     'error_code': run_control.CANCELLED_ERROR_CODE}
+                _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, stopped)
+                raise run_control.RunCancelledError()
             try:
                 current = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
             except Exception:
@@ -333,6 +347,7 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                                       'error': 'انتهت مهلة معالجة ' + _visual_plan_job_subject(kind) + '.',
                                       'error_code': 'PLANS_JOB_EXPIRED'}, 503
                 else:
+                    run_control.raise_if_current_cancelled()
                     result, status = _visual_plan_execute(kind, data, slot_id)
             if time.time() >= g.visual_plan_job_deadline:
                 result, status = {'success': False,
@@ -345,10 +360,12 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
                     _bill_tenant_unbilled_usage_async(tenant_id)
                 return
             result_state = 'completed' if result.get('success') else 'failed'
+            cancelled = (run_control.current_run_cancelled()
+                         or result.get('error_code') == run_control.CANCELLED_ERROR_CODE)
             active_index = next((index for index, item in enumerate(final_job.get('todos') or [])
                                  if isinstance(item, dict) and item.get('status') == 'active'), None)
-            final_job.update({'status': 'completed' if result.get('success') else 'failed',
-                              'success': bool(result.get('success')),
+            final_job.update({'status': 'cancelled' if cancelled else result_state,
+                              'success': False if cancelled else bool(result.get('success')),
                               'todos': _visual_plan_job_terminal_todos(
                                   kind, result_state, current_todos=final_job.get('todos'),
                                   active_index=active_index),
@@ -361,6 +378,15 @@ def _visual_plan_job_worker(flask_app, actor, data, kind, slot_id, job_id):
             failed_job = _read_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id) or {}
             existing_result = failed_job.get('result') if isinstance(failed_job.get('result'), dict) else {}
             if failed_job.get('status') == 'failed' and existing_result.get('error_code') == 'PLANS_JOB_EXPIRED':
+                return
+            if (getattr(error, 'error_code', None) == run_control.CANCELLED_ERROR_CODE
+                    or run_control.current_run_cancelled()):
+                failed_job.update(run_control.cancelled_job_patch())
+                failed_job['httpStatus'] = 409
+                failed_job['result'] = {'success': False, 'cancelled': True,
+                                        'error': run_control.CANCELLED_MESSAGE,
+                                        'error_code': run_control.CANCELLED_ERROR_CODE}
+                _write_job(_VISUAL_PLAN_JOB_NAMESPACE, tenant_id, job_id, failed_job)
                 return
             active_index = next((index for index, item in enumerate(failed_job.get('todos') or [])
                                  if isinstance(item, dict) and item.get('status') == 'active'), None)
@@ -474,6 +500,19 @@ def api_visual_concept_plan_job(job_id):
             except (TypeError, ValueError):
                 pass
         _write_job(_VISUAL_PLAN_JOB_NAMESPACE, g.tenant_id, job_id, job)
+    # The stop is the client's own command; report it at once instead of
+    # waiting for the worker to reach its next checkpoint.
+    if (str(job.get('status') or '') in ('queued', 'running')
+            and run_control.is_run_cancelled(job_id, g.tenant_id)):
+        job = dict(job)
+        job.update({
+            'status': 'cancelled',
+            'success': False,
+            'httpStatus': 409,
+            'result': {'success': False, 'cancelled': True,
+                       'error': run_control.CANCELLED_MESSAGE,
+                       'error_code': run_control.CANCELLED_ERROR_CODE},
+        })
     return jsonify({key: job[key] for key in
                     ('status', 'success', 'progress', 'todos', 'checkpoint', 'result', 'httpStatus',
                      'timeoutSeconds', 'createdAt', 'updatedAt', 'timings', 'partial') if key in job})

@@ -78,10 +78,8 @@
         });
         if (res && res.jobId && !res.extractedData) {
           const jobId = res.jobId;
-          // The stop button reaches this analysis through its run handle.
-          if (typeof resetTenantGenerationStop === 'function' && typeof tenantActiveGenerationRuns !== 'undefined' && tenantActiveGenerationRuns.size === 0) {
-            resetTenantGenerationStop();
-          }
+          // The stop button reaches this analysis through its run handle. A
+          // stop latched while the start request was in flight must survive it.
           registerTenantGenerationRun(jobId);
           updateLoaderStep(res.message || 'بدأ التحليل في الخلفية...');
           const started = Date.now();
@@ -529,11 +527,9 @@
         }, 90000, 'انتهت مهلة تحليل بيانات الموقع؛ لم يتم توليد الخرائط بعد.');
         if (data && data.jobId && !data.fields) {
           // The sweep runs in a job: the stop button reaches it through the
-          // run handle, and the browser only polls for the answer.
+          // run handle, and the browser only polls for the answer. A stop
+          // latched while the start request was in flight must survive it.
           const jobId = String(data.jobId);
-          if (typeof resetTenantGenerationStop === 'function' && typeof tenantActiveGenerationRuns !== 'undefined' && tenantActiveGenerationRuns.size === 0) {
-            resetTenantGenerationStop();
-          }
           registerTenantGenerationRun(jobId);
           const started = Date.now();
           while (Date.now() - started < 15 * 60 * 1000) {

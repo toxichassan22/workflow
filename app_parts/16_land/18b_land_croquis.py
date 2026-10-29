@@ -46,12 +46,17 @@ def _land_job_worker(app, tenant_id, data, job_id):
             if not isinstance(payload, dict):
                 payload = {}
             payload.pop('rawText', None)
-            status = 'completed' if payload.get('success') else 'failed'
+            stopped = (run_control.current_run_cancelled()
+                       or payload.get('error_code') == run_control.CANCELLED_ERROR_CODE)
+            status = ('cancelled' if stopped else
+                      ('completed' if payload.get('success') else 'failed'))
             _write_land_job(tenant_id, job_id, {
                 **payload,
+                **(run_control.cancelled_job_patch() if stopped else {}),
                 'status': status,
                 'httpStatus': http_status,
-                'message': payload.get('error') or 'اكتمل التحليل',
+                'message': (run_control.CANCELLED_MESSAGE if stopped else
+                            (payload.get('error') or 'اكتمل التحليل')),
             })
         except Exception as exc:
             cancelled = (run_control.current_run_cancelled() or
@@ -151,7 +156,7 @@ def api_extract_croquis_job(job_id):
             'error': 'مهمة التحليل غير موجودة',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(_public_job(job))
+    return jsonify(_public_job(job, job_id, g.tenant_id))
 
 
 def _execute_extract_croquis():

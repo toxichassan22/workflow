@@ -81,6 +81,24 @@ class RunControlRegistryTests(unittest.TestCase):
         self.assertIsNone(run_control.cancel_path(self.run_id, '../../other'))
         self.assertFalse(run_control.cancel_run(self.run_id, '../other'))
 
+    def test_a_cancelled_run_publishes_a_terminal_job_state(self):
+        """The stop is a state the job document can carry, not just a marker."""
+        patch_fields = run_control.cancelled_job_patch()
+        self.assertEqual(patch_fields.get('status'), 'cancelled')
+        self.assertFalse(patch_fields.get('success'))
+        self.assertTrue(patch_fields.get('cancelled'))
+        self.assertEqual(patch_fields.get('error_code'), run_control.CANCELLED_ERROR_CODE)
+
+    def test_a_phase_boundary_check_stops_a_cancelled_run(self):
+        run_control.bind_run(self.run_id, self.tenant)
+        try:
+            run_control.raise_if_current_cancelled()  # a live run passes
+            run_control.cancel_run(self.run_id, self.tenant)
+            with self.assertRaises(run_control.RunCancelledError):
+                run_control.raise_if_current_cancelled()
+        finally:
+            run_control.unbind_run()
+
     def test_clearing_a_cancel_makes_the_run_live_again(self):
         run_control.cancel_run(self.run_id, self.tenant)
         self.assertTrue(run_control.clear_run_cancel(self.run_id, self.tenant))
@@ -334,6 +352,62 @@ class RunControlRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertTrue(response.get_json().get('cancelled'))
 
+    def test_a_stopped_job_reads_as_stopped_before_its_worker_notices(self):
+        """A reload or a second tab must not keep waiting for a stopped job."""
+        application_module = self.application_module
+        job_id = 'market-job-0001'
+        application_module._write_market_job(self.tenant_id, job_id, {
+            'status': 'running', 'success': True, 'kind': 'summary',
+            'message': 'جاري البحث في المصادر الرسمية',
+        })
+        run_control.cancel_run(job_id, self.tenant_id)
+        client = self.app.test_client()
+        response = client.get(f'/api/market-study/jobs/{job_id}', headers=self._headers())
+        body = response.get_json()
+        self.assertEqual(response.status_code, 200, body)
+        self.assertEqual(body.get('status'), 'cancelled')
+        self.assertFalse(body.get('success'))
+        self.assertFalse(body.get('canResume'))
+
+    def test_a_finished_job_keeps_its_result_even_if_a_stop_lands_late(self):
+        """A stop in the last moment must not erase a study already written."""
+        application_module = self.application_module
+        job_id = 'market-job-0002'
+        application_module._write_market_job(self.tenant_id, job_id, {
+            'status': 'completed', 'success': True, 'kind': 'summary',
+            'message': 'اكتملت دراسة السوق', 'study': {'headline': 'نتيجة جاهزة'},
+        })
+        run_control.cancel_run(job_id, self.tenant_id)
+        client = self.app.test_client()
+        body = client.get(f'/api/market-study/jobs/{job_id}',
+                          headers=self._headers()).get_json()
+        self.assertEqual(body.get('status'), 'completed', body)
+        self.assertTrue(body.get('success'))
+        self.assertEqual((body.get('study') or {}).get('headline'), 'نتيجة جاهزة')
+
+    def test_a_market_worker_leaves_at_its_next_checkpoint(self):
+        """The stop must end the server work too, not only the browser poll."""
+        application_module = self.application_module
+        job_id = 'market-job-0003'
+        phases = []
+
+        def fake_competitors(data, tenant_id, progress=None):
+            phases.append('before-stop')
+            progress(20, 'جاري البحث في المصادر الرسمية')
+            phases.append('after-stop')
+            return {'success': True, 'competitors': []}
+
+        run_control.cancel_run(job_id, self.tenant_id)
+        with patch.object(application_module, '_execute_market_competitors',
+                          side_effect=fake_competitors):
+            application_module._market_job_worker(
+                self.app, self.tenant_id, 'competitors', {}, job_id)
+        self.assertEqual(phases, ['before-stop'],
+                         'no phase after the stop may run')
+        job = application_module._read_market_job(self.tenant_id, job_id)
+        self.assertEqual(job.get('status'), 'cancelled')
+        self.assertTrue(job.get('cancelled'))
+
     def test_the_stop_endpoint_rejects_an_unusable_run_id(self):
         client = self.app.test_client()
         for hostile in ('short', 'run.id', 'run%20id'):
@@ -545,6 +619,17 @@ class RunControlClientTests(unittest.TestCase):
     def test_the_slide_loop_registers_its_run_so_the_stop_reaches_it(self):
         self.assertIn('registerTenantGenerationRun', self.source)
         self.assertIn('releaseTenantGenerationRun', self.source)
+
+    def test_releasing_a_run_does_not_clear_the_stop(self):
+        """Clearing it here let a stopped deck start every remaining slide."""
+        snippet = self.source.split('function releaseTenantGenerationRun', 1)[1]
+        snippet = snippet.split('function tenantGenerationRunsInFlight', 1)[0]
+        self.assertNotIn('tenantGenerationStopRequested = false', snippet)
+
+    def test_a_run_that_arrives_after_the_stop_is_cancelled_at_once(self):
+        self.assertIn(
+            'if (tenantGenerationStopRequested) cancelTenantGenerationRun(String(runId));',
+            self.source)
 
     def test_a_stopped_run_never_launches_another_slide(self):
         self.assertIn('tenantGenerationStopRequested', self.source)

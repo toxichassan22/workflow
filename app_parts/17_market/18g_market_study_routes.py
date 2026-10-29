@@ -113,7 +113,7 @@ def api_market_study_job(job_id):
             'error': 'مهمة دراسة السوق غير موجودة',
             'failureReason': 'job_not_found',
         }), 404
-    public_job = _public_job(job)
+    public_job = _public_job(job, job_id, g.tenant_id)
     public_job['jobId'] = job_id
     if str(job.get('kind') or '') == 'summary':
         public_job['researchTraceUrl'] = f'/api/market-study/jobs/{job_id}/trace'

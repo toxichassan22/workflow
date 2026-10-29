@@ -283,6 +283,34 @@ def current_run_cancelled():
     return is_run_cancelled(run_id, tenant_id)
 
 
+def raise_if_current_cancelled():
+    """Stop the bound run at a phase boundary, not only inside an AI call.
+
+    The AI layer already refuses a cancelled call, but a long job also spends
+    time between calls — searching, rendering, pricing. A worker that reaches
+    one of those boundaries must leave instead of starting the next phase.
+    """
+    if current_run_cancelled():
+        raise RunCancelledError()
+
+
+def cancelled_job_patch():
+    """The job-document fields a stopped run publishes.
+
+    A status endpoint overlays these while the cancel marker exists, so a
+    second tab (or a reload) reads the task as stopped even before the worker
+    reaches its next checkpoint. Without it the document stayed ``running``
+    and every client kept waiting for a result nobody was producing.
+    """
+    return {
+        'status': 'cancelled',
+        'success': False,
+        'error': CANCELLED_MESSAGE,
+        'error_code': CANCELLED_ERROR_CODE,
+        'cancelled': True,
+    }
+
+
 def run_can_be_cancelled(usage_ctx=None):
     """True when a run handle is attached to this call.
 

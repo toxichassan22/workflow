@@ -15,9 +15,8 @@
         ? Number(pollOpts.intervalMs) : MARKET_JOB_POLL_INTERVAL_MS;
       const started = Date.now();
       let res = null;
-      if (typeof resetTenantGenerationStop === 'function' && typeof tenantActiveGenerationRuns !== 'undefined' && tenantActiveGenerationRuns.size === 0) {
-        resetTenantGenerationStop();
-      }
+      // A stop latched while the start request was still in flight must survive
+      // this registration — the flow resets it when a new action begins.
       // The stop button reaches this study through its run handle.
       registerTenantGenerationRun(jobId);
       try {
@@ -39,7 +38,11 @@
       } finally {
         releaseTenantGenerationRun(jobId);
       }
-      if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) {
+      // Either the client stopped waiting or the server already published the
+      // stop; both must answer as cancelled so the caller reports a stopped
+      // task instead of a failed one.
+      if ((typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested)
+          || (res && res.status === 'cancelled')) {
         return {
           success: false,
           status: 'cancelled',

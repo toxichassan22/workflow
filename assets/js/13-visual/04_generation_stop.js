@@ -47,14 +47,22 @@ function interruptiblePollSleep(ms) {
 function registerTenantGenerationRun(runId) {
   if (!runId) return;
   tenantActiveGenerationRuns.add(String(runId));
+  // The handle arrived after the user already stopped — the start request was
+  // still in flight when the X was pressed. It is cancelled the moment it has
+  // a name, otherwise the stop would have missed the only handle that matters.
+  if (tenantGenerationStopRequested) cancelTenantGenerationRun(String(runId));
 }
 
+// Releasing a handle says "this run is no longer being waited on" — it does
+// NOT say "the user changed their mind". Clearing the stop here is what made a
+// stopped job keep going: the deck's launcher re-checked the flag the moment
+// the cancelled slice released its handle, saw it false, and started every
+// remaining slide. The flag stays latched until the next action begins
+// (resetTenantGenerationStop, called by showLoader/stoppable and by each
+// generation entry point).
 function releaseTenantGenerationRun(runId) {
   if (!runId) return;
   tenantActiveGenerationRuns.delete(String(runId));
-  if (tenantActiveGenerationRuns.size === 0) {
-    tenantGenerationStopRequested = false;
-  }
 }
 
 function tenantGenerationRunsInFlight() {
@@ -96,14 +104,22 @@ function setTenantGenerationStopVisible(visible) {
 // the card is following.
 async function closeGenerationPopup() {
   const runs = tenantGenerationRunsInFlight();
-  if (runs.length) {
+  const stopControl = document.getElementById('globalLoaderStopButton');
+  const stoppable = !!(stopControl && stopControl.style && stopControl.style.display !== 'none');
+  // A generation loader carries the stop control even before its first job id
+  // arrives; closing it is still the user asking for that work to end, so the
+  // stop is recorded and the late handle is cancelled when it lands.
+  if (runs.length || stoppable) {
     stopTenantGeneration();
   }
   hideLoader();
 }
 
 async function stopTenantGeneration() {
-  if (tenantGenerationStopRequested) return;
+  // A second press must still reach a handle that appeared after the first one
+  // (the start request was already in flight when the user clicked), so the
+  // command is not short-circuited — it is only announced once.
+  const alreadyRequested = tenantGenerationStopRequested;
   tenantGenerationStopRequested = true;
   triggerTenantGenerationStopEvent();
   const runs = tenantGenerationRunsInFlight();
@@ -120,7 +136,7 @@ async function stopTenantGeneration() {
   // The server has to learn about the stop before it starts the next paid
   // call, so the requests go out in parallel immediately.
   Promise.all(runs.map(runId => cancelTenantGenerationRun(runId).catch(() => false)));
-  toast(WFT('gen.stop_requested', 'تم إرسال طلب الإيقاف'));
+  if (!alreadyRequested) toast(WFT('gen.stop_requested', 'تم إرسال طلب الإيقاف'));
 }
 
 // A queued operation answers 202 {jobId} and finishes inside a worker. Poll
@@ -142,6 +158,9 @@ async function pollTenantGenerationJob(jobId, statusPath, options = {}) {
     job = await apiWithTimeout(
       'GET', statusPath + encodeURIComponent(jobId), null, requestTimeout,
       options.statusTimeoutMessage || WFT('gen.job_status_timeout', 'تعذر الاتصال بحالة المهمة.'));
+    // A stopped job is a stop, not a failure: the caller reports it as one
+    // even when the job document carries the stop as its error text.
+    if (job?.status === 'cancelled') break;
     if (job?.error && !job?.result) {
       return { success: false, error: job.error, error_code: job.error_code };
     }
@@ -164,9 +183,6 @@ async function pollTenantGenerationJob(jobId, statusPath, options = {}) {
 // Post an operation that may be queued, then wait for its job. The run
 // handle is registered so the stop button can reach it while it runs.
 async function runTenantGenerationJob(method, path, body, statusPath, options = {}) {
-  if (tenantActiveGenerationRuns.size === 0) {
-    resetTenantGenerationStop();
-  }
   const initial = await api(method, path, body);
   if (!initial || !initial.jobId) return initial;
   registerTenantGenerationRun(initial.jobId);

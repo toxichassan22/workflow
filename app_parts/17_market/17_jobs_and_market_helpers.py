@@ -300,15 +300,28 @@ def _market_job_can_resume(job):
     return bool(isinstance(researchers, dict) and researchers)
 
 
-def _public_job(job):
-    """Job file minus server-only internals before it is returned to a client."""
+def _public_job(job, job_id=None, tenant_id=None):
+    """Job file minus server-only internals before it is returned to a client.
+
+    A stopped run is reported as stopped from the moment the stop lands, not
+    when its worker happens to notice: the marker is the client's own command
+    coming back to it, so a second tab or a reload must not keep reading the
+    job as running.
+    """
     if not isinstance(job, dict):
         return job
     out = {k: v for k, v in job.items() if k not in _JOB_INTERNAL_KEYS}
     state = out.get('agentState')
     if isinstance(state, dict) and 'slides' in state:
         out['agentState'] = {k: v for k, v in state.items() if k != 'slides'}
-    out['canResume'] = _market_job_can_resume(job)
+    # Only a job that has not published its own result may be reported as
+    # stopped: a stop pressed in the last moment must not erase a finished
+    # study the worker already wrote.
+    stopped = (str(out.get('status') or '') in ('queued', 'running')
+               and bool(job_id and tenant_id and run_control.is_run_cancelled(job_id, tenant_id)))
+    out['canResume'] = False if stopped else _market_job_can_resume(job)
+    if stopped:
+        out.update(run_control.cancelled_job_patch())
     return out
 
 
