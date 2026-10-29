@@ -2223,7 +2223,10 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn("id = 'section-executive-content'", index_source)
         self.assertIn('data-key="executive_content"', index_source)
         self.assertIn("function generateExecutiveContentBlock(key)", index_source)
-        self.assertIn("api('POST', '/api/executive-content/generate'", index_source)
+        # The block call carries a run handle so the progress card's stop can
+        # end it; the endpoint and the block key are what the assertion owns.
+        self.assertIn("apiStoppable('POST', '/api/executive-content/generate'", index_source)
+        self.assertIn("block: key,", index_source)
         self.assertIn("createProjectSectionHeader('section-executive-content', 'المحتوى التنفيذي')", index_source)
         self.assertIn("function collectExecutiveContentFacts()", index_source)
         self.assertIn("function collectExecutiveTeamFacts()", index_source)

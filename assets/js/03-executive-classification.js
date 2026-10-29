@@ -483,11 +483,16 @@
       if (button) button.disabled = true;
       showLoader('توليد ' + spec.label, 'جاري صياغة النص من المدخلات المعتمدة...', 18);
       try {
-        const res = await api('POST', '/api/executive-content/generate', {
+        const res = await apiStoppable('POST', '/api/executive-content/generate', {
           block: key,
           facts: collectExecutiveContentFacts(),
           currentText: state[key]
         });
+        if (res && res.cancelled) {
+          // The turn was stopped: the current text stays exactly as it is.
+          if (note) note.textContent = WFT('gen.job_cancelled', 'تم إيقاف المهمة');
+          return;
+        }
         if (!res || !res.success) {
           const message = (res && res.error) || 'تعذر توليد النص. لم يُستبدل النص الحالي.';
           if (note) note.textContent = message;

@@ -403,6 +403,9 @@ def _best_use_job_worker(flask_app, actor, data, kind, job_id):
             g.tenant = db.get_tenant_by_id(tenant_id)
             if g.user_id:
                 g.user_permissions = db.get_user_permissions(g.user_id, g.user_role)
+            # The stop button reaches this proposal through its own job id, so
+            # a stopped run spends nothing more after the click.
+            run_control.bind_run(job_id, tenant_id)
             _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {'status': 'running',
                                                                   'draftId': data['draftId']})
             draft, error = _best_use_draft(data)
@@ -416,14 +419,20 @@ def _best_use_job_worker(flask_app, actor, data, kind, job_id):
                 readiness = _best_use_readiness(draft)
                 result, status = readiness if readiness else _best_use_execute(draft, data, kind,
                                                                                job=(tenant_id, job_id))
+            cancelled = (run_control.current_run_cancelled()
+                         or (isinstance(result, dict)
+                             and result.get('error_code') == run_control.CANCELLED_ERROR_CODE))
             _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {
-                'status': 'completed' if status < 400 else 'failed',
+                'status': ('cancelled' if cancelled else
+                           ('completed' if status < 400 else 'failed')),
                 'draftId': data['draftId'], 'result': result, 'httpStatus': status})
     except Exception:
         app.logger.exception('Best Use job failed')
         result, status = _best_use_error('BEST_USE_PROVIDER_FAILED', 503)
         _write_job(_BEST_USE_JOB_NAMESPACE, tenant_id, job_id, {
             'status': 'failed', 'draftId': data['draftId'], 'result': result, 'httpStatus': status})
+    finally:
+        run_control.unbind_run()
 
 
 def _best_use_start(kind):
@@ -482,10 +491,17 @@ def api_best_use_job(job_id):
     job = _read_job(_BEST_USE_JOB_NAMESPACE, g.tenant_id, job_id)
     if not job:
         return jsonify({'success': False, 'error_code': 'JOB_NOT_FOUND'}), 404
+    # The stop is the client's own command: report it at once instead of
+    # letting the poller wait for a worker that is already leaving. It comes
+    # before the draft lookup — a stopped job has no answer to give.
+    if (str(job.get('status') or '') in {'queued', 'running'}
+            and run_control.is_run_cancelled(job_id, g.tenant_id)):
+        return jsonify({**run_control.cancelled_job_patch(), 'status': 'cancelled',
+                        'jobId': job_id}), 409
     draft, error = _best_use_draft({'draftId': job.get('draftId')})
     if error is not None:
         return error
-    if job.get('status') in {'completed', 'failed'}:
+    if job.get('status') in {'completed', 'failed', 'cancelled'}:
         return jsonify({**(job.get('result') or {}), 'status': job['status'], 'jobId': job_id}), job.get('httpStatus', 200)
     if time.time() - float(job.get('updatedAt') or 0) > 300:
         result, status = _best_use_error('BEST_USE_JOB_INTERRUPTED', 503)

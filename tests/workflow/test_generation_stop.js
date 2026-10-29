@@ -60,6 +60,8 @@ vm.runInContext(source + [
   await testANewActionClearsTheLatchedStop();
   await testClosingAPlainLoaderDoesNotStopAnything();
   await testTheVisibleStopControlLatchesEvenWithNoRunYet();
+  await testAnInlineRequestCarriesItsOwnRunHandle();
+  await testAStoppedInlineRequestReadsAsStoppedNotFailed();
   console.log('Generation stop harness passed: X cancels, latches, and catches late runs.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
@@ -69,6 +71,52 @@ function reset() {
   toasts.length = 0;
   context.resetTenantGenerationStop();
   elements.globalLoaderStopButton.style.display = 'none';
+}
+
+async function testAnInlineRequestCarriesItsOwnRunHandle() {
+  reset();
+  const original = context.api;
+  let captured = null;
+  context.api = async (method, url, body, isFile, options) => {
+    // Only this request: a cancel posted by an earlier case may still be in
+    // flight and must not be mistaken for the call under test.
+    if (url !== '/api/generate-images') return { success: true };
+    captured = { method, url, options, runs: context.__runs() };
+    return { success: true };
+  };
+  try {
+    const response = await context.apiStoppable('POST', '/api/generate-images', { a: 1 });
+    assert.equal(response.success, true);
+    assert.equal(captured.method, 'POST');
+    assert.equal(captured.url, '/api/generate-images');
+    const runId = captured.options.headers['X-Run-Id'];
+    assert.match(runId, /^[A-Za-z0-9-]{8,64}$/,
+      'the handle must satisfy the server run-id rule');
+    assert.deepEqual(Array.from(captured.runs), [runId],
+      'the run is registered while the call is in flight, so X can cancel it');
+    assert.equal(context.__runs().length, 0, 'the handle is released after the answer');
+  } finally {
+    context.api = original;
+  }
+}
+
+async function testAStoppedInlineRequestReadsAsStoppedNotFailed() {
+  reset();
+  const original = context.api;
+  context.api = async () => ({
+    success: false, error_code: 'RUN_CANCELLED', cancelled: true,
+    partial: { cover: 'cover.png' },
+  });
+  try {
+    const response = await context.apiStoppable('POST', '/api/generate-images', {});
+    assert.equal(response.cancelled, true, 'a stopped request is a stop, not a failure');
+    assert.equal(response.status, 'cancelled');
+    assert.equal(response.partial.cover, 'cover.png',
+      'the images already produced are handed back, not thrown away');
+    assert.equal(context.__runs().length, 0);
+  } finally {
+    context.api = original;
+  }
 }
 
 function testClosingWithARunCancelsIt() {

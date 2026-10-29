@@ -954,6 +954,10 @@ def api_generate_images():
     # the spend lands outside the project total while still billing the key.
     img_ctx = _usage_ctx_optional('image', data)
 
+    # A stop that landed before the first call must reach no provider at all.
+    if run_control.current_run_cancelled():
+        return _cancelled_run_response(images)
+
     # 1. Cover image. The wizard requests moodboard-only images at its next step.
     if include_cover:
         print("[IMAGES] Generating cover image...")
@@ -981,6 +985,10 @@ def api_generate_images():
         moodboard_prompts.append(f"Angle {len(moodboard_prompts)+1} view of {project_name} in {location}{ref_style}. Professional architectural photography.")
 
     for i, prompt in enumerate(moodboard_prompts):
+        # The user stopped the set: the images already produced are kept, and
+        # no further paid image is requested.
+        if run_control.current_run_cancelled():
+            return _cancelled_run_response(images)
         # A spend-capacity refusal will not heal inside this loop — stop
         # before the remaining prompts burn more dead provider calls.
         last_err = last_images_api_error()

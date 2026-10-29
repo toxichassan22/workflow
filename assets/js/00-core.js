@@ -452,11 +452,20 @@
           };
           let res = null;
           try {
-            res = await api('POST', '/api/generate-images', payload);
+            res = await apiStoppable('POST', '/api/generate-images', payload);
           } catch (e) {
             res = (e && (e.body || e.response || e.data || e.message)) || null;
           }
-          if (res && res.success && res.images) {
+          if (res && res.cancelled) {
+            // The set was stopped: the images already produced are kept and
+            // no further image is requested.
+            const partial = res.partial || {};
+            if (partial.cover && includeCover !== false) tenantCreativeImages.cover = partial.cover;
+            const done = Array.isArray(partial.moodboard) ? partial.moodboard.filter(Boolean) : [];
+            if (done.length) tenantCreativeImages.moodboard = done;
+            tenantCreativeImages.last_error = null;
+            toast(WFT('gen.stopped_toast', 'تم إيقاف التوليد'));
+          } else if (res && res.success && res.images) {
             if (includeCover !== false) tenantCreativeImages.cover = res.images.cover || tenantCreativeImages.cover;
             tenantCreativeImages.moodboard = res.images.moodboard || tenantCreativeImages.moodboard;
             tenantCreativeImages.images_signature = imagesSignature();

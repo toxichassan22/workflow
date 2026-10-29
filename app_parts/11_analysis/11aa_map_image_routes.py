@@ -5,6 +5,10 @@ def api_generate_single_map_image():
     _billing_guard = _require_billing_balance('map_image')
     if _billing_guard is not None:
         return _billing_guard
+    # A stop pressed before the render starts must not spend the provider call
+    # or replace the map the client already has.
+    if run_control.current_run_cancelled():
+        return _cancelled_run_response()
     map_type = str(data.get('mapType') or '').strip().lower()
     if map_type not in {'overview', 'landmarks', 'access', 'catchment'}:
         return jsonify({'success': False, 'error': 'نوع خريطة غير صالح'}), 400

@@ -108,6 +108,40 @@ def _tenant_key(tenant_id):
     return text
 
 
+REQUEST_RUN_HEADER = 'X-Run-Id'
+
+
+def request_run_id(header_value):
+    """The run handle a long synchronous request carries, or None.
+
+    A queued job has a server-issued handle the client polls. A request that
+    does its work inline — a set of images, a landmark sweep — has no such
+    handle, so the client brings its own id and the stop button cancels it
+    like any other run.
+    """
+    text = str(header_value or '').strip()
+    return text if _valid_run_id(text) else None
+
+
+def _thread_tenant():
+    """The tenant of the bound run, falling back to the request's own.
+
+    A before_request hook binds the run before authentication has run, so the
+    tenant is only known once ``g`` is filled. Reading it lazily keeps the
+    stop working for inline requests without binding a second time.
+    """
+    tenant = getattr(_THREAD, 'tenant_id', None)
+    if tenant:
+        return tenant
+    try:
+        from flask import g, has_app_context
+    except Exception:
+        return None
+    if not has_app_context():
+        return None
+    return getattr(g, 'tenant_id', None)
+
+
 def cancel_path(run_id, tenant_id=None):
     """The marker path for one run, or None when the handle is unusable."""
     if not _valid_run_id(run_id):
@@ -221,7 +255,7 @@ def unbind_run():
 
 def current_run():
     """The run this thread is executing, as (run_id, tenant_id)."""
-    return (getattr(_THREAD, 'run_id', None), getattr(_THREAD, 'tenant_id', None))
+    return (getattr(_THREAD, 'run_id', None), _thread_tenant())
 
 
 def _resolve_run(usage_ctx=None):
@@ -233,7 +267,7 @@ def _resolve_run(usage_ctx=None):
     if not run_id:
         run_id = getattr(_THREAD, 'run_id', None)
     if not tenant_id:
-        tenant_id = getattr(_THREAD, 'tenant_id', None)
+        tenant_id = _thread_tenant()
     return run_id, tenant_id
 
 

@@ -408,6 +408,72 @@ class RunControlRouteTests(unittest.TestCase):
         self.assertEqual(job.get('status'), 'cancelled')
         self.assertTrue(job.get('cancelled'))
 
+    def test_an_inline_request_carries_the_run_its_client_sent(self):
+        """A request with no job id is stoppable through its own handle."""
+        application_module = self.application_module
+        run_id = 'inline-images-run-01'
+        run_control.cancel_run(run_id, self.tenant_id)
+        called = []
+
+        def fake_image(prompt, usage_ctx=None):
+            called.append(prompt)
+            return 'image-b64'
+
+        client = self.app.test_client()
+        with patch.object(application_module, 'call_image_api', side_effect=fake_image), \
+                patch.object(application_module, 'call_image_api_with_reference',
+                             side_effect=fake_image):
+            response = client.post(
+                '/api/generate-images',
+                headers={**self._headers(), run_control.REQUEST_RUN_HEADER: run_id},
+                json={'projectData': {'project_name': 'اختبار'}, 'count': 3})
+        body = response.get_json()
+        self.assertEqual(response.status_code, 409, body)
+        self.assertTrue(body.get('cancelled'), body)
+        self.assertEqual(body.get('error_code'), run_control.CANCELLED_ERROR_CODE)
+        self.assertEqual(called, [], 'no paid image may be requested for a stopped run')
+
+    def test_a_stopped_best_use_proposal_reads_as_stopped(self):
+        """The proposal is a paid agent run; its job id is its stop handle."""
+        application_module = self.application_module
+        job_id = 'best-use-job-0001'
+        application_module._write_job('.best_use_jobs', self.tenant_id, job_id, {
+            'status': 'running', 'draftId': 'draft-does-not-matter', 'updatedAt': 0,
+        })
+        run_control.cancel_run(job_id, self.tenant_id)
+        client = self.app.test_client()
+        response = client.get(f'/api/best-use/jobs/{job_id}', headers=self._headers())
+        body = response.get_json()
+        self.assertEqual(response.status_code, 409, body)
+        self.assertEqual(body.get('status'), 'cancelled')
+        self.assertTrue(body.get('cancelled'))
+
+    def test_a_landmark_sweep_stops_before_the_next_geocode(self):
+        """Every resolved landmark is a paid Maps call: a stop must end the loop."""
+        application_module = self.application_module
+        run_id = 'inline-landmarks-run-01'
+        run_control.cancel_run(run_id, self.tenant_id)
+        geocoded = []
+
+        def fake_geocode(query, **kwargs):
+            geocoded.append(query)
+            return {'success': False}
+
+        client = self.app.test_client()
+        with patch.object(application_module.maps_service, 'geocode_address',
+                          side_effect=fake_geocode):
+            response = client.post(
+                '/api/preview-map-data',
+                headers={**self._headers(), run_control.REQUEST_RUN_HEADER: run_id},
+                json={
+                    'projectData': {'location_lat': 24.7, 'location_lng': 46.6},
+                    'selectedLandmarks': [{'name': 'معلم بلا إحداثيات'}],
+                })
+        body = response.get_json()
+        self.assertEqual(response.status_code, 409, body)
+        self.assertTrue(body.get('cancelled'), body)
+        self.assertEqual(geocoded, [], 'no landmark may be geocoded after the stop')
+
     def test_the_stop_endpoint_rejects_an_unusable_run_id(self):
         client = self.app.test_client()
         for hostile in ('short', 'run.id', 'run%20id'):

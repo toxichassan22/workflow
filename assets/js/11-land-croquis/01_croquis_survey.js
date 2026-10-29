@@ -397,7 +397,11 @@
       showLoader('تحليل الموقع بالذكاء الاصطناعي', 'جاري تجهيز بيانات الموقع...', 5);
       try {
         updateLoaderStep('جاري إرسال بيانات الموقع للتحليل...');
-        const data = await api('POST', '/api/site-analysis', { projectData: analysisProjectData });
+        const data = await apiStoppable('POST', '/api/site-analysis', { projectData: analysisProjectData });
+        if (data && data.cancelled) {
+          toast(WFT('gen.job_cancelled', 'تم إيقاف المهمة'));
+          return;
+        }
         if (data.success && data.analysis) {
           const filledFields = data.fields && typeof data.fields === 'object' ? data.fields : {};
           const clientOnlyFields = new Set(['approved_financial_area', 'approved_financial_area_sqm', 'approved_floor_count', 'approved_floors', 'approved_coverage_ratio', 'approved_floor_area_ratio']);
@@ -917,13 +921,20 @@
         // static tiles) and used to wait without a timeout, so a stalled request
         // left the loader up forever. 240s matches how long a cold full
         // regeneration can actually take; the abort also frees the worker.
-        const data = await apiWithTimeout('POST', '/api/generate-map-image', {
+        const data = await apiStoppable('POST', '/api/generate-map-image', {
           projectData: payload,
           mapType,
           presentationId: tenantPresentationId,
           highlightSite: shouldHighlightTenantSite(),
           regenSeed
-        }, 240000, 'استغرق توليد الخريطة وقتًا أطول من المتوقع؛ أعد المحاولة.');
+        }, {
+          timeoutMs: 240000,
+          timeoutMessage: 'استغرق توليد الخريطة وقتًا أطول من المتوقع؛ أعد المحاولة.'
+        });
+        if (data && data.cancelled) {
+          toast(WFT('gen.job_cancelled', 'تم إيقاف المهمة'));
+          return false;
+        }
         if (!data.success) {
           toast(data.error || 'تعذر إعادة توليد الخريطة');
           return false;

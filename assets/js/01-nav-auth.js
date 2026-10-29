@@ -131,6 +131,10 @@
       const headers = {};
       if (token) headers['Authorization'] = 'Bearer ' + token;
       if (!isFile && body && typeof body !== 'undefined') headers['Content-Type'] = 'application/json';
+      // Extra headers are how a long inline request names its run handle.
+      if (requestOptions.headers && typeof requestOptions.headers === 'object') {
+        Object.assign(headers, requestOptions.headers);
+      }
       const opts = { method, headers, signal: requestOptions.signal };
       if (body && !isFile) {
         const wire = await gzipIfLarge(JSON.stringify(body), headers);

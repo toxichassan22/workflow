@@ -13,6 +13,46 @@
 RUN_CANCEL_PERMISSIONS = ('create_presentation', 'generate_images', 'generate_maps')
 
 
+def _cancelled_run_response(partial=None):
+    """The answer an inline generation gives when its run was stopped.
+
+    It is a stop, not a failure: the client reads ``cancelled`` and shows the
+    task as stopped, and whatever the request already produced rides in
+    ``partial`` instead of being thrown away.
+    """
+    payload = run_control.cancelled_job_patch()
+    if partial is not None:
+        payload['partial'] = partial
+    return jsonify(payload), 409
+
+
+@app.before_request
+def _bind_request_run():
+    """Put an inline request under the run handle its client sent.
+
+    A queued job is stoppable because the server issued its id. A request that
+    does the paid work inline — a set of images, a landmark sweep, one text —
+    used to be unstoppable: the client's stop had no handle to name, so the
+    work ran to the end even after the card was closed. The client now brings
+    the id in ``X-Run-Id``; binding it here makes every provider call inside
+    the request refuse to start once that id is cancelled.
+    """
+    if request.method != 'POST':
+        return None
+    run_id = run_control.request_run_id(request.headers.get(run_control.REQUEST_RUN_HEADER))
+    if not run_id:
+        return None
+    run_control.bind_run(run_id, None)
+    return None
+
+
+@app.teardown_request
+def _unbind_request_run(_exc=None):
+    """The thread goes back to the pool unbound, so the next request starts clean."""
+    run_control.unbind_run()
+    return None
+
+
 def _run_cancel_allowed():
     """Cancelling needs the same authority as starting a generation."""
     if getattr(g, 'is_admin', False):

@@ -165,6 +165,8 @@ def api_preview_map_data():
     landmarks_warning = None
 
     if not landmarks:
+        if run_control.current_run_cancelled():
+            return _cancelled_run_response()
         places = maps_service.get_nearby_landmarks(lat, lng, radius=landmark_radius_m, max_results=20, include_all=True, usage_ctx=maps_service.maps_usage_ctx('places', g.tenant_id, data=data), language=preview_lang)
         if places.get('success'):
             landmarks = places['landmarks']
@@ -184,6 +186,10 @@ def api_preview_map_data():
 
     location_context = project_data.get('location_detail') or project_data.get('location_address') or project_data.get('location', '')
     for lm in landmarks:
+        # Every iteration is a paid geocode: a stopped request must not keep
+        # resolving points nobody will see.
+        if run_control.current_run_cancelled():
+            return _cancelled_run_response()
         if lm.get('lat') is None or lm.get('lng') is None:
             query = f"{lm['name']}, {location_context}" if location_context else lm['name']
             geo = maps_service.geocode_address(query, tenant_id=g.tenant_id, usage_ctx=maps_service.maps_usage_ctx('geocode', g.tenant_id, data=data))
@@ -208,6 +214,8 @@ def api_preview_map_data():
     geocoded = [lm for lm in landmarks if lm.get('lat') is not None and lm.get('lng') is not None]
     matrix = []
     if data.get('calculateDriving') and geocoded:
+        if run_control.current_run_cancelled():
+            return _cancelled_run_response({'lat': lat, 'lng': lng, 'landmarks': landmarks})
         matrix = maps_service.get_drive_matrix((lat, lng), geocoded, usage_ctx=maps_service.maps_usage_ctx('matrix', g.tenant_id, data=data), language=preview_lang)
         for i, lm in enumerate(geocoded):
             if i < len(matrix) and matrix[i]:
@@ -736,6 +744,8 @@ def api_site_analysis():
     )
     filled_fields = {}
     if needs_enrichment:
+        if run_control.current_run_cancelled():
+            return _cancelled_run_response()
         try:
             # Same metering scope as analyze-site: every Google call inside
             # _collect_site_fields bills to this tenant/draft instead of
@@ -755,6 +765,11 @@ def api_site_analysis():
         if enriched_fields.get(key) not in (None, '', [], {}) and project_data.get(key) in (None, '', [], {}):
             project_data[key] = enriched_fields[key]
             filled_fields[key] = enriched_fields[key]
+
+    # The paid sweep finishes between phases: a stop that landed while it ran
+    # must not be answered with a second paid call.
+    if run_control.current_run_cancelled():
+        return _cancelled_run_response(filled_fields or None)
 
     offer_lang = slide_engine.resolve_offer_lang(project_data)
     system_prompt, prompt = build_site_analysis_prompts(project_data, offer_lang)
@@ -812,6 +827,10 @@ def api_site_analysis():
 
             analysis = _analysis_text(
                 _fallback_call(SITE_ANALYSIS_MAX_TOKENS), 'SITE-ANALYSIS-FALLBACK', _fallback_call)
+        # The stop may have landed while the text was being written: the
+        # answer belongs to nobody who asked for it any more.
+        if run_control.current_run_cancelled():
+            return _cancelled_run_response(filled_fields or None)
         warnings = [value for value in (
             enrichment_diagnostics.get('nearby_landmarks_error'),
             enrichment_diagnostics.get('nearby_landmarks_warning'),

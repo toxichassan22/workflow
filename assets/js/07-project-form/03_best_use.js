@@ -477,14 +477,26 @@
 
     async function bestUseAwaitJob(response, draftId) {
       if (!response?.success || !response.jobId) return response;
-      const deadline = Date.now() + 310000;
-      while (Date.now() < deadline && tenantProjectData?.draftId === draftId) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        response = await api('GET', '/api/best-use/jobs/' + response.jobId);
-        if (!response?.success || response.status === 'completed' || response.status === 'failed') return response;
-        updateLoaderStep(WFT('best_use.processing', 'تحليل بيانات الأرض والسوق والتوزيع'));
+      const jobId = String(response.jobId);
+      // The proposal is a paid agent run: its job id is the handle the stop
+      // button cancels, so the loop leaves with it instead of waiting.
+      if (typeof registerTenantGenerationRun === 'function') registerTenantGenerationRun(jobId);
+      const stopped = () => ({ success: false, cancelled: true, status: 'cancelled',
+        error: WFT('gen.job_cancelled', 'تم إيقاف المهمة'), error_code: 'RUN_CANCELLED' });
+      try {
+        const deadline = Date.now() + 310000;
+        while (Date.now() < deadline && tenantProjectData?.draftId === draftId) {
+          if (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested) return stopped();
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          response = await api('GET', '/api/best-use/jobs/' + jobId);
+          if (response?.status === 'cancelled' || response?.cancelled) return stopped();
+          if (!response?.success || response.status === 'completed' || response.status === 'failed') return response;
+          updateLoaderStep(WFT('best_use.processing', 'تحليل بيانات الأرض والسوق والتوزيع'));
+        }
+        return { success: false, error_code: 'BEST_USE_JOB_INTERRUPTED' };
+      } finally {
+        if (typeof releaseTenantGenerationRun === 'function') releaseTenantGenerationRun(jobId);
       }
-      return { success: false, error_code: 'BEST_USE_JOB_INTERRUPTED' };
     }
 
     function runBestUseAction(action) {

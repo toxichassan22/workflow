@@ -169,8 +169,10 @@
         // so the server can re-check the interior-section approval it gates on.
         payload.sectionApprovals = { ...(tenantVisualConceptState.sectionApprovals || {}) };
         payload.instruction = String(visualConceptSketchOf(slotId).instruction || '').slice(0, 2000);
-        const response = await apiWithTimeout('POST', '/api/visual-concept/sketch', payload, 180000,
-          WFT('vcsketch.timeout', 'انتهت مهلة توليد السكتش؛ أعد المحاولة.'));
+        const response = await apiStoppable('POST', '/api/visual-concept/sketch', payload, {
+          timeoutMs: 180000,
+          timeoutMessage: WFT('vcsketch.timeout', 'انتهت مهلة توليد السكتش؛ أعد المحاولة.')
+        });
         hideLoader();
         if (!response?.success || !response.sketch) {
           visualConceptSketchOf(slotId).status = previousImage ? 'review' : 'pending';

@@ -784,11 +784,15 @@
       showLoader('جاري جلب معلومات المعالم', 'يتم حساب المسافة ومدة القيادة من Google Maps...');
       try {
         const formData = await collectTenantFormData();
-        const data = await api('POST', '/api/preview-map-data', {
+        const data = await apiStoppable('POST', '/api/preview-map-data', {
           projectData: { ...tenantProjectData, ...formData },
           selectedLandmarks,
           calculateDriving: true
         });
+        if (data && data.cancelled) {
+          toast(WFT('gen.job_cancelled', 'تم إيقاف المهمة'));
+          return;
+        }
         if (!data.success) {
           toast(data.error || 'تعذر جلب معلومات المعالم');
           return;
@@ -822,8 +826,9 @@
     async function fetchNearbyLandmarks() {
       const formData = await collectTenantFormData();
       showLoader('جاري معاينة وحساب بيانات الخريطة والمعالم', '');
-      const data = await api('POST', '/api/preview-map-data', { projectData: formData });
+      const data = await apiStoppable('POST', '/api/preview-map-data', { projectData: formData });
       hideLoader();
+      if (data && data.cancelled) return;
 
       const box = document.getElementById('landmarksPreview');
       if (!box) return;

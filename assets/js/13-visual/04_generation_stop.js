@@ -139,6 +139,47 @@ async function stopTenantGeneration() {
   if (!alreadyRequested) toast(WFT('gen.stop_requested', 'تم إرسال طلب الإيقاف'));
 }
 
+// A long request that does its work inline has no job id to stop. The client
+// brings one: the run is registered before the call goes out, the server binds
+// it from X-Run-Id, and the stop button cancels it like a queued job — so the
+// next paid provider call inside the request is refused instead of the work
+// running to the end after the card was closed.
+async function apiStoppable(method, path, body, requestOptions = {}) {
+  const runId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+    ? crypto.randomUUID()
+    : ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  registerTenantGenerationRun(runId);
+  const options = {
+    ...requestOptions,
+    headers: { ...(requestOptions.headers || {}), 'X-Run-Id': runId },
+  };
+  const timeoutMs = Number(requestOptions.timeoutMs) || 0;
+  let response = null;
+  try {
+    response = timeoutMs > 0
+      ? await apiWithTimeout(method, path, body, timeoutMs,
+        requestOptions.timeoutMessage, options)
+      : await api(method, path, body, false, options);
+  } finally {
+    releaseTenantGenerationRun(runId);
+  }
+  const stopped = (response && (response.cancelled === true
+    || response.error_code === 'RUN_CANCELLED'
+    || response.errorCode === 'RUN_CANCELLED'))
+    || (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested);
+  if (stopped) {
+    return {
+      success: false,
+      status: 'cancelled',
+      cancelled: true,
+      partial: response && response.partial,
+      error: WFT('gen.job_cancelled', 'تم إيقاف المهمة'),
+      error_code: 'RUN_CANCELLED'
+    };
+  }
+  return response;
+}
+
 // A queued operation answers 202 {jobId} and finishes inside a worker. Poll
 // the persisted job and hand back the same shape a synchronous call would
 // have returned — a failed job yields its stored {success:false,error}.
