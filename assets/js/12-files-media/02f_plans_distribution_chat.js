@@ -128,7 +128,7 @@
     // browser polls, so the hosting edge never sees a request that stays open
     // for minutes.
     async function visualConceptDistributionChatJob(payload, onStep) {
-      const initial = await api('POST', '/api/visual-concept/plans-distribution-chat', payload);
+      const initial = await apiStoppable('POST', '/api/visual-concept/plans-distribution-chat', payload);
       if (!initial || initial.success === false) {
         return initial || { success: false, error: '' };
       }

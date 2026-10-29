@@ -155,6 +155,15 @@
 
     async function apiWithTimeout(method, path, body, timeoutMs = 75000, timeoutMessage = 'انتهت مهلة الطلب؛ أعد المحاولة لاحقًا.', requestOptions = {}) {
       const controller = new AbortController();
+      // A caller that brings its own signal (the stop button's) must still be
+      // able to cut this request; the timeout controller follows it.
+      const external = requestOptions.signal;
+      if (external) {
+        if (external.aborted) controller.abort();
+        else if (external.addEventListener) {
+          external.addEventListener('abort', () => controller.abort(), { once: true });
+        }
+      }
       let timer;
       const timeoutResponse = new Promise(resolve => {
         timer = setTimeout(() => {

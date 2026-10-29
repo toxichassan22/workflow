@@ -362,7 +362,7 @@
           role: item.role, content: String(item.text || '').slice(0, 4000)
         }));
         payload.memory = memory;
-        const data = await api('POST', '/api/visual-concept/plans-conflict-chat', payload);
+        const data = await apiStoppable('POST', '/api/visual-concept/plans-conflict-chat', payload);
         if (data && data.reply) reply = data.reply;
         else if (data && data.error) reply = data.error;
         memory = String(data?.memory || memory || '').slice(0, PLANS_CHAT_MEMORY_MAX_CHARS);

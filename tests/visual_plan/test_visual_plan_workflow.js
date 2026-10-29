@@ -24,7 +24,8 @@ const formSectionsSource = fs.readFileSync(path.resolve(__dirname,
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function fixture(includeVisualPage = false) {
-  const context = vm.createContext({
+  let context = null;
+  context = vm.createContext({
     console, Intl, setTimeout, clearTimeout, setInterval, clearInterval, window: {},
     document: { addEventListener() {}, getElementById: () => null, querySelector: () => null,
       querySelectorAll: () => [] },
@@ -38,6 +39,12 @@ function fixture(includeVisualPage = false) {
     }[ch])),
     WFT: (key, fallback, params = {}) => fallback.replace(/\{([^}]+)\}/g,
       (match, name) => params[name] ?? match),
+    // The client sends every paid plans call through the stoppable wrapper;
+    // the harness forwards it to whichever api() the case installed.
+    apiStoppable: (method, path, body, options = {}) => context.api(method, path, body, false, options),
+    apiWithTimeout: (method, path, body, timeoutMs, timeoutMessage, options = {}) =>
+      context.api(method, path, body, false, options),
+    AbortController,
     setDraftDirty() {}, renderVisualConceptPage() {},
     resetTenantGenerationStop() {},
     trDynamicI18n: value => value,

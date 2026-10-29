@@ -126,7 +126,10 @@
     // same shape a synchronous call would have returned — a failure job yields
     // its stored {success:false,error} result instead of hanging the caller.
     async function visualConceptPlanJobApi(method, path, body) {
-      const initial = await api(method, path, body);
+      // Every plans endpoint — including the ones that answer inline — runs
+      // under a run handle so the stop reaches it. A queued answer hands back
+      // its own job id, which is registered below as before.
+      const initial = await apiStoppable(method, path, body);
       if (!initial || !initial.jobId) {
         if (initial?.success === false) failVisualConceptPlanJobUi(initial.error || '');
         return initial;
@@ -305,7 +308,7 @@
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         const stamp = visualConceptPlanInputStamp();
-        const response = await api('POST', '/api/visual-concept/plans-verify', payload);
+        const response = await apiStoppable('POST', '/api/visual-concept/plans-verify', payload);
         hideLoader();
         if (stamp !== visualConceptPlanInputStamp()) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
         if (!response?.success) { toast(response?.error || WFT('plans.verify_failed', 'تعذر التحقق من التضارب')); return; }
@@ -414,7 +417,7 @@
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
         const seedRowsStamp = visualConceptDistributionRowsStamp(visualConceptPlansWorkflowState().distribution.rows);
-        const response = await api('POST', '/api/visual-concept/plans-distribution', payload);
+        const response = await apiStoppable('POST', '/api/visual-concept/plans-distribution', payload);
         hideLoader();
         if (seedRowsStamp !== visualConceptDistributionRowsStamp(visualConceptPlansWorkflowState().distribution.rows)) {
           toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.'));
@@ -456,7 +459,7 @@
         payload.revision = revision;
         payload.distribution = { rows: seedWorkflow.distribution.rows };
         const seedRowsStamp = visualConceptDistributionRowsStamp(seedWorkflow.distribution.rows);
-        const response = await api('POST', '/api/visual-concept/plans-distribution', payload);
+        const response = await apiStoppable('POST', '/api/visual-concept/plans-distribution', payload);
         hideLoader();
         if (seedRowsStamp !== visualConceptDistributionRowsStamp(visualConceptPlansWorkflowState().distribution.rows)
             || String(visualConceptPlansWorkflowState().distributionRevision || '').trim() !== revision) {
@@ -493,7 +496,7 @@
         const seedRowsStamp = visualConceptDistributionRowsStamp(seedWorkflow.distribution.rows);
         payload.mode = mode || 'local';
         payload.distribution = { rows: seedWorkflow.distribution.rows };
-        const response = await api('POST', '/api/visual-concept/plans-distribution-check', payload);
+        const response = await apiStoppable('POST', '/api/visual-concept/plans-distribution-check', payload);
         if (!silent) hideLoader();
         const currentRowsStamp = visualConceptDistributionRowsStamp(visualConceptPlansWorkflowState().distribution.rows);
         if (seedRowsStamp !== currentRowsStamp) return;
@@ -554,7 +557,7 @@
       const initialNotes = String(workflow.clientNotes || '').trim();
       try {
         const payload = await collectVisualConceptPlansWorkflowPayload();
-        const response = await api('POST', '/api/visual-concept/plans-notes-acknowledge', payload);
+        const response = await apiStoppable('POST', '/api/visual-concept/plans-notes-acknowledge', payload);
         const currentNotes = String(visualConceptPlansWorkflowState().clientNotes || '').trim();
         if (initialNotes !== currentNotes) { toast(WFT('plans.stale_response', 'تغيرت البيانات أثناء المعالجة.')); return; }
         if (!response?.success || !response.notesAck) {

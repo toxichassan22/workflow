@@ -729,6 +729,8 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "gen.stopped_title": "Generation stopped",
   "gen.stopped_detail": "{n} slides were saved and the deck can be resumed later.",
   "gen.stopped_toast": "Generation stopped",
+  "gen.stopped_with_produced": "Generation stopped — {done} of {total} images were saved",
+  "gen.stopped_rows_unchanged": "Task stopped — the landmarks table was not changed",
   "gen.job_timeout": "The task timed out.",
   "gen.job_status_timeout": "Could not reach the task status.",
   "loader.writing_content": "Writing the content and building the design...",

@@ -319,7 +319,9 @@ def _public_job(job, job_id=None, tenant_id=None):
     # study the worker already wrote.
     stopped = (str(out.get('status') or '') in ('queued', 'running')
                and bool(job_id and tenant_id and run_control.is_run_cancelled(job_id, tenant_id)))
-    out['canResume'] = False if stopped else _market_job_can_resume(job)
+    # A stopped study stays resumable when it saved research state: the stop
+    # ends the run, not the work the client can continue from.
+    out['canResume'] = _market_job_can_resume(job)
     if stopped:
         out.update(run_control.cancelled_job_patch())
     return out

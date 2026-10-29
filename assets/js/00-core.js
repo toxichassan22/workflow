@@ -464,7 +464,13 @@
             const done = Array.isArray(partial.moodboard) ? partial.moodboard.filter(Boolean) : [];
             if (done.length) tenantCreativeImages.moodboard = done;
             tenantCreativeImages.last_error = null;
-            toast(WFT('gen.stopped_toast', 'تم إيقاف التوليد'));
+            // What was produced stays, and the card says how much that is —
+            // "stopped" alone leaves the owner guessing what they now have.
+            const produced = done.length + (partial.cover && includeCover !== false ? 1 : 0);
+            const expected = (includeCover !== false ? 1 : 0) + (Number(payload.count) || 0);
+            toast(WFT('gen.stopped_with_produced',
+              'تم إيقاف التوليد — حُفظت {done} صورة من {total}',
+              { done: produced, total: expected }));
           } else if (res && res.success && res.images) {
             if (includeCover !== false) tenantCreativeImages.cover = res.images.cover || tenantCreativeImages.cover;
             tenantCreativeImages.moodboard = res.images.moodboard || tenantCreativeImages.moodboard;

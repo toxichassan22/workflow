@@ -63,6 +63,18 @@ class GenerationSettlementTests(ScopeTestBase):
         self.assertEqual(response.status_code, 200, response.get_json())
         self.assertEqual(response.get_json()['result']['status'], 'consumed')
 
+    def test_a_stopped_job_releases_its_hold_instead_of_consuming_it(self):
+        """The stop button's finish must free the escrow, never spend it."""
+        approval_id, job_id = self._approved_run('finish-cancelled')
+        with patch.object(db, 'settle_generation_approval',
+                          return_value={'status': 'released'}) as settle:
+            response = self.client.post(
+                f'/api/generation-jobs/{job_id}/finish',
+                headers=self.admin_headers, json={'status': 'cancelled'})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertFalse(settle.call_args.kwargs.get('consumed'),
+                         'a stopped run must release its reservation, not consume it')
+
     def test_finish_reports_settlement_failure_instead_of_success(self):
         approval_id, job_id = self._approved_run('finish-fail')
         with self.app.app_context():

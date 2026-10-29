@@ -790,7 +790,8 @@
           calculateDriving: true
         });
         if (data && data.cancelled) {
-          toast(WFT('gen.job_cancelled', 'تم إيقاف المهمة'));
+          toast(WFT('gen.stopped_rows_unchanged',
+            'تم إيقاف المهمة — لم يتغيّر جدول المعالم'));
           return;
         }
         if (!data.success) {
@@ -828,7 +829,11 @@
       showLoader('جاري معاينة وحساب بيانات الخريطة والمعالم', '');
       const data = await apiStoppable('POST', '/api/preview-map-data', { projectData: formData });
       hideLoader();
-      if (data && data.cancelled) return;
+      if (data && data.cancelled) {
+        toast(WFT('gen.stopped_rows_unchanged',
+          'تم إيقاف المهمة — لم يتغيّر جدول المعالم'));
+        return;
+      }
 
       const box = document.getElementById('landmarksPreview');
       if (!box) return;

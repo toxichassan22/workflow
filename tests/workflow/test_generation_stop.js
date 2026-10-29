@@ -28,7 +28,7 @@ const elements = {
 };
 
 const context = {
-  console, Number, String, Boolean, Promise, JSON, Object, Math, Date,
+  console, Number, String, Boolean, Promise, JSON, Object, Math, Date, AbortController,
   setTimeout: () => 0,
   clearTimeout: () => {},
   document: {
@@ -62,6 +62,7 @@ vm.runInContext(source + [
   await testTheVisibleStopControlLatchesEvenWithNoRunYet();
   await testAnInlineRequestCarriesItsOwnRunHandle();
   await testAStoppedInlineRequestReadsAsStoppedNotFailed();
+  await testStoppingAbortsTheRequestInFlight();
   console.log('Generation stop harness passed: X cancels, latches, and catches late runs.');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 
@@ -114,6 +115,32 @@ async function testAStoppedInlineRequestReadsAsStoppedNotFailed() {
     assert.equal(response.partial.cover, 'cover.png',
       'the images already produced are handed back, not thrown away');
     assert.equal(context.__runs().length, 0);
+  } finally {
+    context.api = original;
+  }
+}
+
+async function testStoppingAbortsTheRequestInFlight() {
+  reset();
+  const original = context.api;
+  let seenSignal = null;
+  context.api = async (method, url, body, isFile, options) => {
+    if (url !== '/api/preview-map-data') return { success: true };
+    seenSignal = options.signal;
+    // A real fetch rejects when its signal aborts and api() turns that into an
+    // error object; the stop must still read as a stop, not a network failure.
+    return await new Promise(resolve => {
+      options.signal.addEventListener('abort', () => resolve({ error: 'Network error: aborted' }));
+    });
+  };
+  try {
+    const pending = context.apiStoppable('POST', '/api/preview-map-data', {});
+    await context.stopTenantGeneration();
+    const response = await pending;
+    assert.equal(seenSignal.aborted, true,
+      'the request itself is cut, not only the work behind it');
+    assert.equal(response.cancelled, true);
+    assert.equal(response.error_code, 'RUN_CANCELLED');
   } finally {
     context.api = original;
   }

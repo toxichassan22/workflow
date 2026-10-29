@@ -71,14 +71,37 @@ function tenantGenerationRunsInFlight() {
 
 async function cancelTenantGenerationRun(runId) {
   if (!runId) return false;
+  // The request in flight is let go before the server is asked: the answer is
+  // already unwanted, and waiting for it would keep the page blocked.
+  abortTenantGenerationRun(runId);
   releaseTenantGenerationRun(runId);
   const res = await api('POST', '/api/runs/' + encodeURIComponent(String(runId)) + '/cancel', null);
   return !!(res && res.success);
 }
 
+// A running request is held by its run handle so the stop can cut the browser
+// side too: the server refuses the next paid call, and the page stops waiting
+// for an answer nobody wants any more.
+const tenantGenerationAborts = new Map();
+
+function registerTenantGenerationAbort(runId, controller) {
+  if (!runId || !controller) return;
+  tenantGenerationAborts.set(String(runId), controller);
+}
+
+function abortTenantGenerationRun(runId) {
+  const key = String(runId || '');
+  const controller = key ? tenantGenerationAborts.get(key) : null;
+  if (!controller) return false;
+  tenantGenerationAborts.delete(key);
+  try { controller.abort(); } catch (error) { /* already finished */ }
+  return true;
+}
+
 function resetTenantGenerationStop() {
   tenantGenerationStopRequested = false;
   tenantActiveGenerationRuns.clear();
+  tenantGenerationAborts.clear();
   const stopButton = document.getElementById('liveGenStopButton');
   if (stopButton) {
     stopButton.disabled = false;
@@ -148,11 +171,14 @@ async function apiStoppable(method, path, body, requestOptions = {}) {
   const runId = (typeof crypto !== 'undefined' && crypto.randomUUID)
     ? crypto.randomUUID()
     : ('run-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10));
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  if (controller) registerTenantGenerationAbort(runId, controller);
   registerTenantGenerationRun(runId);
   const options = {
     ...requestOptions,
     headers: { ...(requestOptions.headers || {}), 'X-Run-Id': runId },
   };
+  if (controller) options.signal = controller.signal;
   const timeoutMs = Number(requestOptions.timeoutMs) || 0;
   let response = null;
   try {
@@ -161,11 +187,13 @@ async function apiStoppable(method, path, body, requestOptions = {}) {
         requestOptions.timeoutMessage, options)
       : await api(method, path, body, false, options);
   } finally {
+    tenantGenerationAborts.delete(String(runId));
     releaseTenantGenerationRun(runId);
   }
-  const stopped = (response && (response.cancelled === true
-    || response.error_code === 'RUN_CANCELLED'
-    || response.errorCode === 'RUN_CANCELLED'))
+  const stopped = (controller && controller.signal.aborted)
+    || (response && (response.cancelled === true
+      || response.error_code === 'RUN_CANCELLED'
+      || response.errorCode === 'RUN_CANCELLED'))
     || (typeof tenantGenerationStopRequested !== 'undefined' && tenantGenerationStopRequested);
   if (stopped) {
     return {
