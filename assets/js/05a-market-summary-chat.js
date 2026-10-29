@@ -320,6 +320,7 @@
       const composer = '<div class="market-summary-chat-composer">' +
         '<textarea id="marketSummaryChatInput" rows="2" maxlength="4000" dir="auto"' +
         ' placeholder="' + escapeHtml(WFT('summary_chat.message', 'الرسالة')) + '"' +
+        ' data-i18n-ph="summary_chat.message"' +
         (composerDisabled ? ' disabled' : '') + ' data-section-lock-ignore="1"></textarea>' +
         '<div class="market-summary-chat-composer-foot">' +
         '<label class="market-summary-chat-research"><input type="checkbox" id="marketSummaryChatResearch"' +

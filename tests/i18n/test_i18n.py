@@ -276,6 +276,11 @@ AR_RE = re.compile(r'[\u0600-\u06FF]')
 # `name`, and an attribute name stays glued to its value ('selected>لا').
 GLUE_RE = re.compile(r"^[)\]}>\"'`\\\s]+")
 ATTR_GLUE_RE = re.compile(r'^(?:selected|hidden|checked|disabled)\s*>\s*')
+# A tag opened through string concatenation leaves its tail in the text chunk:
+# `'<button ... onclick="f(1, \'approved\')">اعتماد</button>'` splits into
+# `', \approved\)">اعتماد` under the `<tag>` split. Everything before the `">`
+# is the attribute, so the rendered text node starts after it.
+ATTR_TAIL_RE = re.compile(r'^[^<>]*?["\']\s*>\s*')
 CODEISH_RE = re.compile(
     r'(=>|===|!==|\|\||&&|\$\{|const |let |var |return |function |'
     r'\.(?=[a-zA-Z_$])|;[^\u0600-\u06FF]|[a-zA-Z_$]\s*=)')
@@ -288,6 +293,9 @@ def _deglue(value):
         value = value.replace("\\'", "'").replace('\\"', '"')
         value = GLUE_RE.sub('', value)
         value = ATTR_GLUE_RE.sub('', value)
+        tail = ATTR_TAIL_RE.match(value)
+        if tail and not AR_RE.search(tail.group(0)):
+            value = value[tail.end():]
         value = _normalize(value)
     return value
 
@@ -378,6 +386,15 @@ def extract_untranslated_units():
         # A separator or one glyph is chrome punctuation the whole-text pass
         # can never own, so it is not a translatable string.
         if len(value) <= 2:
+            continue
+        # An alternation ('أمامي|امامي|front') is a matcher, not rendered text:
+        # an English twin would break the match, so it is code.
+        parts = value.split('|')
+        if len(parts) > 1 and all(' ' not in part for part in parts):
+            continue
+        # A digit alphabet ('٠١٢٣٤٥٦٧٨٩') is a lookup table for numeral
+        # normalisation: there is nothing to translate.
+        if re.fullmatch(r'[\u0660-\u0669\u06F0-\u06F9]+', value):
             continue
         out.append(value)
     return sorted(out)
@@ -649,6 +666,39 @@ class I18nFoundationTests(unittest.TestCase):
             self.assertEqual(
                 auto.get(ar), en,
                 'en_auto[%r] should stay %r' % (ar, en))
+
+    def test_screen_strings_discovered_by_coverage_carry_english(self):
+        """Every Arabic label the coverage pass found has an English twin.
+
+        The coverage baseline is empty now, so an EN_AUTO entry these labels
+        depend on is the only thing standing between them and an Arabic label
+        in the English UI. A sample of them is pinned here.
+        """
+        auto = read_en_auto()
+        for ar, en in (('أحياء النطاق', 'Catchment districts'),
+                       ('طريقة الإدخال', 'Entry method'),
+                       ('معاينة المخطط', 'Plan preview'),
+                       ('وسيط سعر المتر', 'Median price per square metre'),
+                       ('إغلاق وإيقاف المهمة', 'Close and stop the task')):
+            self.assertEqual(
+                auto.get(ar), en,
+                'en_auto[%r] should be %r' % (ar, en))
+
+    def test_extractor_separates_glue_and_matchers_from_real_text(self):
+        """Code around a text node is not itself an untranslatable unit.
+
+        A button built through concatenation leaves the attribute tail in the
+        text chunk; a regex alternation and a numeral alphabet are code. If
+        any of them reaches the coverage list it can only be "fixed" by an
+        EN_AUTO entry that would break the code that reads it.
+        """
+        self.assertEqual(
+            _markup_units('\', \\approved\\)">اعتماد'), {'اعتماد'})
+        self.assertEqual(
+            _markup_units('<b title="حذف">حذف</b>'), {'حذف'})
+        self.assertNotIn('أمامي|امامي|front', extract_untranslated_units())
+        self.assertNotIn(
+            '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹', extract_untranslated_units())
 
     def test_i18n_js_parses_as_javascript(self):
         node = shutil.which('node')

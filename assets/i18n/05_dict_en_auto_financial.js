@@ -580,5 +580,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "قيمة المرابحة المحسوبة": "Calculated Murabaha value",
   "هل تكلفة الصندوق ضمن المشروع؟": "Is fund cost included in project?",
   "هل تكلفة الصندوق ضمن المشروع": "Fund cost included in project",
-  "إجمالي تكلفة المشروع شامل تكاليف الصندوق": "Total project cost including fund costs"
+  "إجمالي تكلفة المشروع شامل تكاليف الصندوق": "Total project cost including fund costs",
+  "أطوال حدود الأرض في جدول الاتجاهات ناقصة أو غير واضحة": "The plot boundary lengths in the directions table are missing or unclear"
 }/*I18N_EN_AUTO_END*/);

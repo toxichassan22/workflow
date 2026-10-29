@@ -68,5 +68,14 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "plans.step_active": "in progress",
   "plans.distribution_chat_failed_unreadable": "The model sent an answer that could not be read — the layout did not change.",
   "plans.distribution_chat_failed_empty": "The model sent no answer — the layout did not change.",
-  "plans.distribution_chat_failed_timeout": "The layout request ran out of time."
+  "plans.distribution_chat_failed_timeout": "The layout request ran out of time.",
+  "plans.site_reset_confirm": "Only the plan chat and the previous assistant context will be cleared. The checks, distribution, approvals and plans stay as they are. Do you want to start over?",
+  "plans.chat_new_message": "New message",
+  "plans.chat_notes_placeholder": "Plan notes and conditions...",
+  "plans.still_processing": "The plan is still being processed.",
+  "plans.image_edited": "The plan was edited.",
+  "financial.notes_updated": "The notes were updated in the financial study",
+  "financial.parking_chat_placeholder": "Your message",
+  "market.summary_resume_title": "Resuming the market summary",
+  "market.research_log_failed": "Could not download the research log"
 }/*I18N_EN_END*/);

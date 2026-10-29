@@ -126,7 +126,7 @@
           <h4>محادثة الاقتراح</h4>
           <div id="financialParkingChatLog" class="financial-parking-chat-log" role="log" aria-live="polite"></div>
           <div class="financial-parking-chat-compose">
-            <textarea id="financialParkingChatInput" rows="2" placeholder="رسالتك" oninput="event.stopPropagation()"></textarea>
+            <textarea id="financialParkingChatInput" rows="2" placeholder="رسالتك" data-i18n-ph="financial.parking_chat_placeholder" oninput="event.stopPropagation()"></textarea>
             <button type="button" id="financialParkingChatSend" class="btn ghost" onclick="sendFinancialParkingChat()">إرسال</button>
           </div>
           <div id="financialParkingChatStatus" class="tenant-hint" role="status" aria-live="polite"></div>

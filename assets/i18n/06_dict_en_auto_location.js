@@ -197,7 +197,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "تعذر حفظ حالة الخريطة على الخادم": "Could not save the map state on the server",
   "تم اعتماد الإحداثيات:": "Coordinates approved:",
   "حدث خطأ أثناء تحليل الملفات:": "An error occurred while analysing the files:",
-
   "لم يتم تحديث أي حقل:": "No field was updated:",
   "6.8 سنة": "6.8 years",
   "قطعة 1234 / مخطط 4050 — حي النرجس": "Plot 1234 / Plan 4050 — Al Narjis District",
@@ -220,5 +219,9 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "العودة إلى المحادثة": "Return to chat",
   "تعذر الحصول على إجابة الآن.": "Could not get an answer right now.",
   "اكتب السؤال أولاً": "Enter the question first",
-  "تعذر الحصول على إجابة": "Could not get an answer"
+  "تعذر الحصول على إجابة": "Could not get an answer",
+  "بدء التحليل": "Start analysis",
+  "تصغير أدق": "Zoom out precisely",
+  "تكبير أدق": "Zoom in precisely",
+  "جاري تحليل بيانات الموقع...": "Analysing the site data..."
 }/*I18N_EN_AUTO_END*/);

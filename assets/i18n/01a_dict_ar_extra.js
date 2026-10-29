@@ -69,5 +69,14 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "plans.step_active": "قيد التنفيذ",
   "plans.distribution_chat_failed_unreadable": "ما جا رد مفهوم من النموذج — لم يتغير التوزيع.",
   "plans.distribution_chat_failed_empty": "لم يرد النموذج بجواب — لم يتغير التوزيع.",
-  "plans.distribution_chat_failed_timeout": "انتهت مهلة تنفيذ الطلب على التوزيع."
+  "plans.distribution_chat_failed_timeout": "انتهت مهلة تنفيذ الطلب على التوزيع.",
+  "plans.site_reset_confirm": "سيتم مسح محادثة المخطط وسياق المساعد السابق فقط. ستبقى نتائج الفحص والتوزيع والاعتمادات والمخططات كما هي. هل تريد البدء من جديد؟",
+  "plans.chat_new_message": "رسالة جديدة",
+  "plans.chat_notes_placeholder": "ملاحظات وشروط المخطط...",
+  "plans.still_processing": "معالجة المخطط ما زالت قيد التنفيذ.",
+  "plans.image_edited": "تم تعديل المخطط.",
+  "financial.notes_updated": "تم تحديث الإيضاحات في الدراسة المالية",
+  "financial.parking_chat_placeholder": "رسالتك",
+  "market.summary_resume_title": "استكمال ملخص السوق",
+  "market.research_log_failed": "تعذر تنزيل سجل البحث"
 }/*I18N_AR_END*/);

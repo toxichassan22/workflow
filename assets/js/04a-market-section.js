@@ -74,7 +74,7 @@
             <label>أحياء النطاق</label>
             <div id="marketCompetitorDistrictChips" class="market-scope-chips"></div>
             <div class="market-scope-add">
-              <input id="marketCompetitorDistrictInput" type="text" placeholder="اسم الحي">
+              <input id="marketCompetitorDistrictInput" type="text" placeholder="اسم الحي" data-i18n-ph="market.summary_scope_district_name">
               <button type="button" class="btn ghost small" onclick="addMarketCompetitorDistrict()">إضافة حي</button>
             </div>
           </div>

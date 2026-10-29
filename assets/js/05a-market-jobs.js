@@ -87,7 +87,7 @@
         const response = await fetch(
           '/api/market-study/jobs/' + encodeURIComponent(id) + '/trace', { headers });
         if (!response.ok) {
-          toast('تعذر تنزيل سجل البحث');
+          toast(WFT('market.research_log_failed', 'تعذر تنزيل سجل البحث'));
           return;
         }
         const url = URL.createObjectURL(await response.blob());
@@ -412,7 +412,7 @@
       const currentSummary = marketSummaryState(priorState.summary);
       const currentSwot = { ...(priorState.swot || {}) };
       const currentOneBlock = String(priorState.one_block_summary || '').trim();
-      showLoader('استكمال ملخص السوق', 'جاري استكمال مراحل الدراسة المحفوظة...', 12,
+      showLoader(WFT('market.summary_resume_title', 'استكمال ملخص السوق'), 'جاري استكمال مراحل الدراسة المحفوظة...', 12,
         { stoppable: true });
       try {
         const onProgress = reportMarketJobProgress;

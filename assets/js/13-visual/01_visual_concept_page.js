@@ -441,19 +441,19 @@
 
     async function restartVisualConceptSitePlan() {
       if (!hasPermission('generate_images')) {
-        toast('لا تملك صلاحية توليد المخططات');
+        toast(WFT('plans.permission', 'لا تملك صلاحية توليد المخططات'));
         return false;
       }
       if (visualConceptPlansResetBusy()) {
-        toast('معالجة المخطط ما زالت قيد التنفيذ.');
+        toast(WFT('plans.still_processing', 'معالجة المخطط ما زالت قيد التنفيذ.'));
         return false;
       }
       if (visualConceptSlotLocked('plan_site')) {
         showVisualConceptLockNotice(visualConceptLockMessage('plan_site'));
         return false;
       }
-      if (typeof confirm !== 'function' || !confirm(
-        'سيتم مسح محادثة المخطط وسياق المساعد السابق فقط. ستبقى نتائج الفحص والتوزيع والاعتمادات والمخططات كما هي. هل تريد البدء من جديد؟')) {
+      if (typeof confirm !== 'function' || !confirm(WFT('plans.site_reset_confirm',
+        'سيتم مسح محادثة المخطط وسياق المساعد السابق فقط. ستبقى نتائج الفحص والتوزيع والاعتمادات والمخططات كما هي. هل تريد البدء من جديد؟'))) {
         return false;
       }
 
@@ -838,7 +838,7 @@
           applyVisualConceptSiteAssistantResponse(response);
           if (input) input.value = '';
           renderVisualConceptPage();
-          if (response.image) toast('تم تعديل المخطط.');
+          if (response.image) toast(WFT('plans.image_edited', 'تم تعديل المخطط.'));
           return;
         }
         if (editImage && response?.needsClarification) {

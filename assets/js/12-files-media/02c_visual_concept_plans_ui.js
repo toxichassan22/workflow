@@ -269,6 +269,9 @@
       const remove = image && !approved
         ? '<button type="button" class="btn danger small" data-visual-action="delete-image" data-visual-slot="plan_site">حذف الصورة</button>'
         : '';
+      const composerPlaceholder = conversationStarted
+        ? WFT('plans.chat_new_message', 'رسالة جديدة')
+        : WFT('plans.chat_notes_placeholder', 'ملاحظات وشروط المخطط...');
       return '<article class="visual-concept-card visual-plan-site-card" data-visual-slot="plan_site">' +
         '<div class="visual-concept-head"><h3>' + escapeHtml(title) + '</h3><span class="visual-concept-status ' + escapeHtml(slot.status || 'pending') + '">' + escapeHtml(status) + '</span></div>' +
         '<div class="visual-plan-site-layout">' +
@@ -276,7 +279,8 @@
         restart +
         '<div class="visual-plan-site-messages" role="log" aria-live="polite">' + chat + assistantStatus + '</div>' +
         '<div data-plans-workflow-todos>' + (typeof visualConceptPlanTodoMarkup === 'function' ? visualConceptPlanTodoMarkup(workflow.jobTodos, workflow.jobError) : '') + '</div>' +
-        '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="' + (conversationStarted ? 'رسالة جديدة' : 'ملاحظات وشروط المخطط...') + '" ' + (!canCompose ? 'disabled' : '') + '></textarea>' +
+        '<div class="visual-plan-site-composer"><textarea data-visual-chat="plan_site" rows="2" placeholder="' +
+        escapeHtml(composerPlaceholder) + '" ' + (!canCompose ? 'disabled' : '') + '></textarea>' +
         '<button type="button" class="btn primary small" data-visual-action="chat" data-visual-slot="plan_site" ' + (!canCompose ? 'disabled' : '') + '>إرسال</button></div>' +
         '</section>' +
         '<aside class="visual-plan-site-preview-panel"><h4>معاينة المخطط</h4>' + preview +

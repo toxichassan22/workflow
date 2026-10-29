@@ -176,5 +176,12 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "استكمال الهيكل وأعمال الكهرباء والميكانيكا": "Structure completion, electrical and mechanical works",
   "التشطيبات والأعمال الخارجية": "Finishes and external works",
   "الاختبارات والتسليم والتسويق": "Testing, handover and marketing",
-  "الحد/الاستخدام": "Limit / use"
+  "الحد/الاستخدام": "Limit / use",
+  "أمامي": "Front",
+  "الجنوبي": "South",
+  "الشرقي": "East",
+  "الشمالي": "North",
+  "الغربي": "West",
+  "جانبي": "Side",
+  "محدّث تلقائيًا": "Updated automatically"
 }/*I18N_EN_AUTO_END*/);

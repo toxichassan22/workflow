@@ -80,7 +80,7 @@
         model.inputs.financialClarifications = text;
       }
       triggerAutoSaveDraft();
-      toast('تم تحديث الإيضاحات في الدراسة المالية');
+      toast(WFT('financial.notes_updated', 'تم تحديث الإيضاحات في الدراسة المالية'));
     }
 
     function slideEditableSafeHtml(element) {
