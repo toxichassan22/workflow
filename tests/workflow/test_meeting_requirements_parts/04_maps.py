@@ -907,8 +907,11 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         self.assertFalse(retired & set(module.LAND_ANALYSIS_SITE_CONTEXT_KEYS))
         # The four retired scalars left the site-analysis whitelist entirely; land_area
         # survives only as a stored-value fallback inside the visual-concept readers.
+        # Match the quoted key, not the bare word: `total_built_area` is a live
+        # computed area and answering to it would keep the retired field alive by
+        # accident only if someone re-quoted it.
         for key in ('built_area', 'building_system', 'infrastructure', 'secondary_roads'):
-            self.assertNotIn(key, app_source)
+            self.assertNotRegex(app_source, r'''['"]%s['"]''' % key)
         self.assertNotIn("'land_area', 'built_area'", app_source)
 
         index_source = read_frontend_text()

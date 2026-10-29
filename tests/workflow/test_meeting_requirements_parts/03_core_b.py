@@ -2,6 +2,13 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
 
     def test_location_map_slides_are_rehomed_from_visual_sections(self):
         engine = self.application_module.slide_engine
+        # Maps only survive normalization when the project has the approved
+        # image behind them: a token with nothing to show ships an empty card.
+        map_images = {'map_placeholders': {
+            '##MAP_OVERVIEW##': '/uploads/maps/overview.png',
+            '##MAP_ACCESS##': '/uploads/maps/access.png',
+            '##MAP_CATCHMENT##': '/uploads/maps/catchment.png',
+            '##MAP_LANDMARKS##': '/uploads/maps/landmarks.png'}}
         plan = engine.normalize_presentation_plan({'slides': [
             {'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'},
             {'title': 'مرجع الموقع العام', 'type': 'map_overview', 'section_key': 'interior'},
@@ -10,7 +17,7 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
             {'title': 'الخريطة', 'type': 'content', 'section_key': 'plans',
              'content_source': 'location_polygon'},
             {'title': 'الخاتمة', 'type': 'closing'},
-        ]}, {'project_name': 'المشروع', 'location_address': 'جدة'}, {})
+        ]}, {'project_name': 'المشروع', 'location_address': 'جدة'}, map_images)
         map_slides = [slide for slide in plan['slides']
                       if slide.get('type', '').startswith('map_')]
         self.assertEqual({slide.get('section_key') for slide in map_slides}, {'location'})
@@ -216,7 +223,7 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
                 {'title': 'الخاتمة', 'type': 'closing', 'section_key': 'closing'},
             ]},
             project,
-            {},
+            {'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'}},
         )
         site_slides = [s for s in plan['slides'] if str(s.get('content_source', '')).startswith('site_analysis')]
         self.assertEqual(len(site_slides), 2)
@@ -409,7 +416,9 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
             'executive_content': json.dumps({'summary': 'الملخص التنفيذي'}, ensure_ascii=False),
             '_map_marker_side': 'right',
         }
-        normalized = engine.normalize_presentation_plan(plan, project, {})
+        normalized = engine.normalize_presentation_plan(
+            plan, project,
+            {'map_placeholders': {'##MAP_OVERVIEW##': '/uploads/maps/overview.png'}})
         exec_summary = next(item for item in normalized['slides']
                             if str(item.get('content_source') or '').startswith('executive_content.summary'))
         # The executive summary section is text-only: no maps or images are

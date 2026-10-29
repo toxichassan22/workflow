@@ -660,6 +660,17 @@ def _run_market_competitors(data, tenant_id=None, progress=None,
     _verify_competitor_rows(merged, payload, data, tenant_id=tenant_id,
                             progress=report, evidence_pool=evidence_pool,
                             deadline=deadline, band=(52, 70))
+    # A verification pass the provider refused outright (no tenant key, an
+    # exhausted wallet) is the job's failure: the rows read search_not_run and
+    # the reason travels with them instead of the run looking clean.
+    verification_fatal = ''
+    for row in merged:
+        if not row.pop('verify_provider_fatal', False):
+            continue
+        verification_fatal = verification_fatal or str(
+            row.get('verify_provider_error') or '').strip()
+    if verification_fatal and not provider_error:
+        provider_error = verification_fatal
     for row in merged:
         market_study.canonicalize_competitor_source_urls(row)
         _drop_foreign_competitor_urls(row)

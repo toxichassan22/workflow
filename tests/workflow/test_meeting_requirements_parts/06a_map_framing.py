@@ -48,18 +48,21 @@ class MeetingRequirementsTestsPart05MapFraming(MeetingRequirementsTests):
 
         # Nine destination rows became nine rings up to 31 km wide; keep three and frame them.
         # A row beyond the city radius no longer earns a ring — it zoomed the
-        # whole frame out to a region — while staying listed in the zones table.
+        # whole frame out to a region — while staying listed in the zones table,
+        # so the far rows below are dropped instead of widening the frame.
+        cap = maps_service.CATCHMENT_RING_MAX_KM
         rings = maps_service.catchment_rings([
-            {'km': 1.6, 'minutes': 5}, {'km': 4.9, 'minutes': 11}, {'km': 13.6, 'minutes': 22},
-            {'km': 28.6, 'minutes': 35}, {'km': 30.9, 'minutes': 38},
+            {'km': 1.6, 'minutes': 5}, {'km': 4.9, 'minutes': 11}, {'km': 8.0, 'minutes': 18},
         ])
         self.assertEqual(len(rings), 3)
-        self.assertEqual([ring['km'] for ring in rings], [1.6, 4.9, 13.6])
+        self.assertEqual([ring['km'] for ring in rings], [1.6, 4.9, 8.0])
         capped = maps_service.catchment_rings([
-            {'km': 2.0, 'minutes': 4}, {'km': 6.0, 'minutes': 9}, {'km': 10.0, 'minutes': 14},
-            {'km': 15.0, 'minutes': 20}, {'km': 19.0, 'minutes': 26}, {'km': 44.0, 'minutes': 55},
+            {'km': 1.6, 'minutes': 5}, {'km': 4.9, 'minutes': 11},
+            {'km': 28.6, 'minutes': 35}, {'km': 30.9, 'minutes': 38},
         ])
-        self.assertEqual([ring['km'] for ring in capped], [2.0, 10.0, 19.0])
+        self.assertEqual([ring['km'] for ring in capped], [1.6, 4.9])
+        self.assertLessEqual(max(ring['km'] for ring in capped), cap)
+        self.assertGreater(maps_service.CATCHMENT_RING_MAX_KM, 0)
         self.assertEqual(rings[0]['label'], '5 دقائق')
         named_rings = maps_service.catchment_rings([{'km': 2.4, 'minutes': 7, 'label': 'حي النرجس'}])
         self.assertEqual(named_rings[0]['name'], 'حي النرجس')

@@ -419,6 +419,10 @@ def _verify_competitor_row(row, payload, data, tenant_id=None,
         row['verify_state'] = 'search_not_run'
         row['verify_provider_error'] = last_error or (
             _chat_error_message(response) if response else '') or 'empty_response'
+        # A deterministic refusal (no tenant key, exhausted wallet) is not a
+        # search miss: the job reports it instead of a silent, reasonless run.
+        if _ai_fatal_error_dict(response) is not None:
+            row['verify_provider_fatal'] = True
         return
     matched = list(dict.fromkeys(matched))
     if not matched:

@@ -1338,9 +1338,13 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('ولهذا لم تتغير البيانات', source)
 
         index_source = read_frontend_text()
-        self.assertIn("'لم يتم تحديث أي حقل: ' + reason", index_source)
+        # The line is a WFT call now: the reason travels as a parameter so the
+        # English view carries the same sentence.
+        self.assertIn("WFT('land.no_fields_updated'", index_source)
+        self.assertIn("'لم يتم تحديث أي حقل: {reason}'", index_source)
         self.assertIn('res.failureReason', index_source)
-        self.assertIn("' حقلًا. راجع النتائج قبل الاعتماد.'", index_source)
+        self.assertIn("WFT('land.analyzed_done'", index_source)
+        self.assertIn("'تم التحليل وتحديث {n} حقلًا. راجع النتائج قبل الاعتماد.'", index_source)
 
     def test_land_analysis_lowers_the_cap_when_the_provider_cannot_afford_it(self):
         """OpenRouter reserves max_tokens against the balance, so an over-large cap is refused

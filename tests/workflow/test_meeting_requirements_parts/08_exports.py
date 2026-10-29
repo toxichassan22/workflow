@@ -277,7 +277,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertNotIn('البنية التحتية', prompt)
         self.assertIn('فرص الاستثمار', prompt)
         self.assertIn('المعالم القريبة ومعالم المدينة', prompt)
-        self.assertEqual(call_ai.call_args.kwargs['reasoning_effort'], 'max')
+        # The owner replaced the hardcoded effort with the configured one.
+        self.assertEqual(call_ai.call_args.kwargs['reasoning_effort'],
+                         self.application_module.TEXT_REASONING_EFFORT)
         self.assertEqual(call_ai.call_args.kwargs['max_tokens'], self.application_module.SITE_ANALYSIS_MAX_TOKENS)
 
     def test_site_analysis_falls_back_to_openrouter_when_primary_ai_response_fails(self):
@@ -553,7 +555,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('function persistVisualConceptDraftState()', index_source)
         self.assertIn('saveProjectAsDraft', index_source)
         self.assertIn("visualConceptPlanJobApi('POST', '/api/visual-concept/prompt'", index_source)
-        self.assertIn("apiWithTimeout('POST', '/api/visual-concept/generate'", index_source)
+        # The paid call is a job now: the browser posts it, then polls.
+        self.assertIn("runTenantGenerationJob('POST', '/api/visual-concept/generate'", index_source)
         self.assertIn('visual-concept-stack', index_source)
         self.assertIn('.visual-concept-preview img {', index_source)
         self.assertIn('object-fit: contain', index_source)
@@ -600,12 +603,13 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('id="visualConceptPlansWorkflow"', index_source)
         self.assertIn('data-visual-plans-tab="generate"', index_source)
         self.assertIn('data-visual-plans-tab="upload"', index_source)
-        self.assertIn("api('POST', '/api/visual-concept/plans-verify'", index_source)
+        self.assertIn("apiStoppable('POST', '/api/visual-concept/plans-verify'", index_source)
         self.assertNotIn("api('POST', '/api/visual-concept/plans-boundary'", index_source)
-        self.assertIn("api('POST', '/api/visual-concept/plans-distribution'", index_source)
-        self.assertIn("api('POST', '/api/visual-concept/plans-distribution-check'", index_source)
+        self.assertIn("apiStoppable('POST', '/api/visual-concept/plans-distribution'", index_source)
+        self.assertIn("apiStoppable('POST', '/api/visual-concept/plans-distribution-check'", index_source)
         self.assertIn("visualConceptPlanJobApi('POST', '/api/visual-concept/plans-prompts'", index_source)
-        self.assertIn("const conflicts = checks.filter(item => item.result === 'متعارض')", index_source)
+        # Advisory notices are not conflicts any more, so the filter carries it.
+        self.assertIn("const conflicts = checks.filter(item => item.result === 'متعارض'", index_source)
         self.assertIn('const canApprove = checks.length > 0 || verification.canProceed', index_source)
         # Verification conflicts approve the same way distribution ones do:
         # through the responsibility warning, never through a dead button.
@@ -749,7 +753,7 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         check_start = index_source.index('async function checkVisualConceptPlansDistribution(')
         check_body = index_source[check_start:index_source.index('function approveVisualConceptPlansDistribution()', check_start)]
         self.assertLess(
-            check_body.index("api('POST', '/api/visual-concept/plans-distribution-check'"),
+            check_body.index("apiStoppable('POST', '/api/visual-concept/plans-distribution-check'"),
             check_body.index('const workflow = visualConceptPlansWorkflowState()'))
         # The distribution conversation writes its table and its findings onto
         # the live workflow — they reach the draft, and approval sees them.
@@ -759,27 +763,32 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         chat_start = index_source.index('async function sendVisualConceptDistributionChat(')
         chat_body = index_source[chat_start:index_source.index(
             'function startVisualConceptDistributionChat()', chat_start)]
-        self.assertIn('await visualConceptDistributionChatJob(payload)', chat_body)
+        self.assertIn('await visualConceptDistributionChatJob(payload', chat_body)
         job_start = index_source.index('async function visualConceptDistributionChatJob(')
         job_body = index_source[job_start:index_source.index(
             'async function sendVisualConceptDistributionChat(', job_start)]
         self.assertLess(
-            job_body.index("api('POST', '/api/visual-concept/plans-distribution-chat'"),
+            job_body.index("apiStoppable('POST', '/api/visual-concept/plans-distribution-chat'"),
             job_body.index("api('GET', '/api/visual-concept/plans-jobs/'"))
         # The answer lands on the live workflow before the state is read back.
         self.assertLess(
             chat_body.index('const state = visualConceptPlansWorkflowState()'),
             chat_body.index('state.distribution = normalizeVisualConceptPlansWorkflow('))
         # The conversation is a pure audit: it reviews the table and the client
-        # edits it by hand — no auto-repair pass exists anywhere.
-        self.assertNotIn("action === 'check-distribution')", index_source)
+        # edits it by hand — no auto-repair pass exists anywhere. The conflict
+        # check sits behind its own button, so its action name is expected.
         self.assertNotIn('checkAndRepairVisualConceptPlansDistribution', index_source)
         self.assertNotIn('repairVisualConceptPlansDistribution', index_source)
         self.assertNotIn('plans-distribution-repair', index_source)
-        # The proposal, the notes, the revision and the conflict check are one
-        # conversation now — the separate controls are gone.
-        self.assertNotIn('async function proposeVisualConceptPlansDistribution()', index_source)
-        self.assertNotIn('async function reviseVisualConceptPlansDistribution()', index_source)
+        # The workflow keeps its explicit buttons (propose, apply a revision,
+        # check) beside the conflict conversation, and each one is wired to a
+        # rendered control — a name with no handler is what must not exist.
+        for action, handler in (
+                ('propose-distribution', 'proposeVisualConceptPlansDistribution'),
+                ('revise-distribution', 'reviseVisualConceptPlansDistribution'),
+                ('check-distribution', 'checkVisualConceptPlansDistribution')):
+            self.assertIn('data-plans-workflow-action="%s"' % action, index_source)
+            self.assertIn("action === '%s') %s(" % (action, handler), index_source)
         self.assertIn('startVisualConceptDistributionChat', index_source)
         # Findings belong to sol's review: the table lands with the review that
         # came with it, and approval needs aiReviewed with no confirmed blockers.
@@ -1080,10 +1089,13 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'projectData': plan_facts,
             })
         self.assertEqual(plan.status_code, 200, plan.get_json())
-        self.assertEqual(plan.get_json()['slotId'], 'plan_site')
-        self.assertEqual(plan.get_json()['image'], '/uploads/creative/plan.png')
-        self.assertEqual(plan.get_json()['engine'], 'surveyed_geometry')
-        self.assertEqual(plan.get_json()['scene']['token'], plan_workflow['scene']['token'])
+        # The site plan is drawn by the site assistant now, so the payload is
+        # its answer: the assistant state plus either the drawing or the
+        # blocking question — never a silent empty reply.
+        body = plan.get_json()
+        self.assertIn('assistantState', body)
+        self.assertTrue(body.get('svgCode') or body.get('needsClarification'), body)
+        self.assertIn('scene', body)
 
         # Named style references map to elements: the meta reader aligns each
         # label with its image so "reference N" means the same thing in the
@@ -1440,7 +1452,9 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         """
         source = read_frontend_text()
         start = source.index('function forceSectionDividerBackgroundHtml')
-        body = source[start:source.index('function processSlideHtmlClient', start)]
+        # Stop at the next function: the slice must be this function's own body,
+        # not every helper between it and processSlideHtmlClient.
+        body = source[start:source.index('function updateCoverBackgroundHtml', start)]
         self.assertNotIn('!important', body)
         self.assertIn('data-section-divider-background', body)
         # The client can drop the background, and the chat can drop it too:
@@ -1633,7 +1647,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         # The distribution runs on the slide model at maximum effort: placing
         # components over buildings and floors is a spatial decision.
         self.assertEqual(propose_call.call_args.kwargs['model'], module.VISUAL_PLAN_DISTRIBUTION_MODEL)
-        self.assertEqual(propose_call.call_args.kwargs['reasoning_effort'], 'max')
+        self.assertEqual(propose_call.call_args.kwargs['reasoning_effort'],
+                         module.TEXT_REASONING_EFFORT)
         distribution = proposal.get_json()['distribution']
         self.assertEqual(len(distribution['rows']), 3)
         totals = {row['component']: row for row in distribution['totals']}
@@ -1714,7 +1729,8 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         # The review rides the same distribution brain — the model that placed
         # the components is the model that judges them.
         self.assertEqual(review_call.call_args.kwargs['model'], module.VISUAL_PLAN_DISTRIBUTION_MODEL)
-        self.assertEqual(review_call.call_args.kwargs['reasoning_effort'], 'max')
+        self.assertEqual(review_call.call_args.kwargs['reasoning_effort'],
+                         module.TEXT_REASONING_EFFORT)
         self.assertEqual(ai_checked.get_json()['issues'][0]['title'], 'المواقف')
 
         # sol may also dismiss a finding as a false alarm: the deterministic
@@ -1974,9 +1990,11 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertFalse(any(c['item'] == 'تجاوز سقف الأدوار الموثق' for c in checks))
 
     def test_plans_render_independently_from_the_sealed_scene(self):
-        """The three diagrams render the same sealed engineering scene in any
-        order — shared surveyed geometry, no image gates another image, and a
-        hand-edited scene fails the signature check outright."""
+        """The uses and massing diagrams are vector drawings of the approved
+        distribution: they render in any order, without any sealed scene, and
+        no image gates another image. The site plan is the one drawing bound to
+        the sealed scene, and a scene edited outside the edit path fails the
+        signature check instead of being drawn."""
         module = self.application_module
         client = self.app.test_client()
         points = [
@@ -2000,12 +2018,22 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
                 'building': 'A', 'floor_range': '1-12', 'component': 'شقق',
                 'units_per_floor': 1, 'floor_area_sqm': 150, 'circulation': ''}]},
         }
+        svg_reply = {'choices': [{'message': {'content': (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 60">'
+            '<text x="4" y="20">Floors</text></svg>')}}]}
 
-        gated = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
-            'slotId': 'plan_uses', 'prompt': 'PROMPT', 'projectData': project_data,
-            'plansWorkflow': workflow})
-        self.assertEqual(gated.status_code, 400, gated.get_json())
-        self.assertEqual(gated.get_json()['error_code'], 'PLANS_SCENE_REQUIRED')
+        # No scene at all: each diagram draws the approved distribution itself.
+        with patch.object(module, 'call_openrouter_chat', return_value=svg_reply), \
+                patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
+            for slot, engine in (('plan_massing', 'svg_massing'), ('plan_uses', 'svg_stacking')):
+                response = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
+                    'slotId': slot, 'prompt': 'PROMPT', 'projectData': project_data,
+                    'plansWorkflow': workflow})
+                self.assertEqual(response.status_code, 200, (slot, response.get_json()))
+                body = response.get_json()
+                self.assertEqual(body['image'], '/uploads/creative/out.png')
+                self.assertEqual(body['engine'], engine)
+                self.assertTrue(body.get('svgCode'), slot)
 
         layout = {'buildings': [{'id': 'b1', 'footprint': [[60, 8], [75, 8], [75, 18], [60, 18]]}]}
         with patch.object(module, 'call_openrouter_chat', return_value={
@@ -2019,34 +2047,28 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertEqual(scene['buildings'][0]['footprint'], layout['buildings'][0]['footprint'])
         sealed_workflow = {**workflow, 'scene': scene}
 
-        with patch.object(module, 'call_images_api', return_value='data:image/png;base64,OUT'), \
+        # The site plan follows that sealed scene through its own renderer.
+        with patch.object(module, 'call_openrouter_chat', return_value=svg_reply), \
                 patch.object(module, 'persist_generated_image', return_value='/uploads/creative/out.png'):
-            for slot in ('plan_massing', 'plan_uses'):
-                response = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
-                    'slotId': slot, 'prompt': 'PROMPT', 'projectData': project_data,
-                    'plansWorkflow': sealed_workflow})
-                self.assertEqual(response.status_code, 200, (slot, response.get_json()))
-                self.assertEqual(response.get_json()['image'], '/uploads/creative/out.png')
-                self.assertEqual(response.get_json()['engine'], 'surveyed_geometry')
-                self.assertEqual(response.get_json()['scene']['token'], scene['token'])
-
-            # Plan 1 renders the same sealed scene through its own renderer.
             with self.app.test_request_context():
                 module.g.tenant_id = self.tenant_a
                 site = module._visual_plan_render_response({
                     'projectData': project_data, 'plansWorkflow': sealed_workflow}, 'plan_site')
-            self.assertTrue(site['success'])
-            self.assertEqual(site['scene']['token'], scene['token'])
+        self.assertTrue(site['success'])
+        self.assertEqual(site['scene']['token'], scene['token'])
+        self.assertEqual(site['engine'], 'surveyed_geometry')
 
         # The gate trusts the sealed contract, not posted order or images: a
         # footprint moved outside the edit path breaks the token.
         tampered = json.loads(json.dumps(scene))
         tampered['buildings'][0]['footprint'][0] = [0, 0]
-        refused = client.post('/api/visual-concept/generate', headers=self._headers(self.token_a), json={
-            'slotId': 'plan_uses', 'prompt': 'PROMPT', 'projectData': project_data,
-            'plansWorkflow': {**sealed_workflow, 'scene': tampered}})
-        self.assertEqual(refused.status_code, 400, refused.get_json())
-        self.assertEqual(refused.get_json()['error_code'], 'PLANS_SCENE_INVALID')
+        with self.app.test_request_context():
+            module.g.tenant_id = self.tenant_a
+            with self.assertRaises(module.visual_plan_geometry.PlanGeometryError) as caught:
+                module._visual_plan_render_response({
+                    'projectData': project_data,
+                    'plansWorkflow': {**sealed_workflow, 'scene': tampered}}, 'plan_site')
+        self.assertEqual(caught.exception.code, 'PLANS_SCENE_INVALID')
 
     def test_sbc_evidence_search_is_bounded_and_scored(self):
         module = self.application_module
