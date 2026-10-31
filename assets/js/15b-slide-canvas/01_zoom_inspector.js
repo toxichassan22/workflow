@@ -535,8 +535,22 @@
       toast(canvasText('ca.elements_ungrouped', 'تم فك التجميع'));
     }
 
-    function slideInspectorRow(label, control) {
-      return '<div class="slide-inspector-row"><label>' + escapeHtml(label) + '</label>' + control + '</div>';
+    let slideInspectorGroup = '';
+
+    function slideInspectorField(label, control) {
+      return '<label class="slide-inspector-field"><span class="slide-inspector-field-label">'
+        + escapeHtml(label) + '</span>' + control + '</label>';
+    }
+
+    function slideInspectorChip(label, group) {
+      return '<button type="button" class="slide-inspector-chip' + (slideInspectorGroup === group ? ' is-active' : '')
+        + '" data-slide-inspector-group="' + group + '" onclick="toggleSlideInspectorGroup(\'' + group + '\')">'
+        + escapeHtml(label) + '</button>';
+    }
+
+    function toggleSlideInspectorGroup(group) {
+      slideInspectorGroup = slideInspectorGroup === group ? '' : group;
+      renderSlideInspector(activeSlideIndex);
     }
 
     function slideInspectorButton(label, action, active) {
@@ -643,177 +657,199 @@
         + escapeHtml(canvasText('ca.close', 'إغلاق')) + '</button></span></div>');
       parts.push('<div class="slide-inspector-body">');
 
-      parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-        + escapeHtml(canvasText('ca.position', 'الموضع')) + '</div><div class="slide-inspector-fields">');
       if (!multi && rect) {
-        parts.push(slideInspectorRow(canvasText('ca.x', 'الموضع X'),
-          '<input type="number" id="inspectorX" value="' + rect.x + '" onchange="moveSlideSelectionTo(' + index + ', \'x\', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.y', 'الموضع Y'),
-          '<input type="number" id="inspectorY" value="' + rect.y + '" onchange="moveSlideSelectionTo(' + index + ', \'y\', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.w', 'العرض'),
-          '<input type="number" id="inspectorW" value="' + rect.width + '" onchange="resizeSlideSelection(' + index + ', Number(this.value), 0)">'));
-        parts.push(slideInspectorRow(canvasText('ca.h', 'الارتفاع'),
-          '<input type="number" id="inspectorH" value="' + rect.height + '" onchange="resizeSlideSelection(' + index + ', 0, Number(this.value))">'));
+        parts.push('<div class="slide-inspector-rowline">'
+          + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.position', 'الموضع')) + '</span>'
+          + slideInspectorField('X', '<input type="number" id="inspectorX" value="' + rect.x
+            + '" onchange="moveSlideSelectionTo(' + index + ', \'x\', Number(this.value))">')
+          + slideInspectorField('Y', '<input type="number" id="inspectorY" value="' + rect.y
+            + '" onchange="moveSlideSelectionTo(' + index + ', \'y\', Number(this.value))">')
+          + slideInspectorField(canvasText('ca.w', 'العرض'), '<input type="number" id="inspectorW" value="' + rect.width
+            + '" onchange="resizeSlideSelection(' + index + ', Number(this.value), 0)">')
+          + slideInspectorField(canvasText('ca.h', 'الارتفاع'), '<input type="number" id="inspectorH" value="' + rect.height
+            + '" onchange="resizeSlideSelection(' + index + ', 0, Number(this.value))">')
+          + '</div>');
       }
-      parts.push(slideInspectorRow(canvasText('ca.opacity', 'الشفافية'),
-        '<input type="number" min="1" max="100" step="1" value="' + opacity + '" onchange="commitSlideElementOpacity(' + index + ', Number(this.value))">'));
-      parts.push(slideInspectorRow(canvasText('ca.rotation', 'الدوران'),
-        '<input type="number" min="-180" max="180" step="1" value="' + Math.round(rotation) + '" onchange="setSlideSelectionRotation(' + index + ', Number(this.value))">'));
-      parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.layer', 'الطبقة')) + '</label>'
-        + '<div class="slide-inspector-actions">'
-        + slideInspectorButton(canvasText('ca.front', 'أمام'), 'adjustSlideElementLayer(' + index + ', 1)')
-        + slideInspectorButton(canvasText('ca.back', 'خلف'), 'adjustSlideElementLayer(' + index + ', -1)')
-        + '</div></div>');
-      parts.push('</div></div>');
-
-      parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-        + escapeHtml(canvasText('ca.align', 'محاذاة')) + '</div><div class="slide-inspector-fields">');
-      parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.horizontal', 'أفقي')) + '</label>'
-        + '<div class="slide-inspector-actions">'
-        + slideInspectorButton(canvasText('ca.right', 'يمين'), 'alignSlideSelection(' + index + ', \'right\', \'\')')
-        + slideInspectorButton(canvasText('ca.center', 'وسط'), 'alignSlideSelection(' + index + ', \'center\', \'\')')
-        + slideInspectorButton(canvasText('ca.left', 'يسار'), 'alignSlideSelection(' + index + ', \'left\', \'\')')
-        + '</div></div>');
-      parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.vertical', 'رأسي')) + '</label>'
-        + '<div class="slide-inspector-actions">'
-        + slideInspectorButton(canvasText('ca.top', 'أعلى'), 'alignSlideSelection(' + index + ', \'\', \'top\')')
-        + slideInspectorButton(canvasText('ca.middle', 'منتصف'), 'alignSlideSelection(' + index + ', \'\', \'middle\')')
-        + slideInspectorButton(canvasText('ca.bottom', 'أسفل'), 'alignSlideSelection(' + index + ', \'\', \'bottom\')')
-        + '</div></div>');
-      if (multi) {
-        parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.distribute', 'توزيع')) + '</label>'
-          + '<div class="slide-inspector-actions">'
-          + slideInspectorButton(canvasText('ca.distribute_h', 'أفقي'), 'distributeSlideSelection(' + index + ', \'x\')')
-          + slideInspectorButton(canvasText('ca.distribute_v', 'رأسي'), 'distributeSlideSelection(' + index + ', \'y\')')
-          + '</div></div>');
-      }
-      parts.push('</div></div>');
 
       if (kind === 'text') {
         const fontSize = slideStyleNumber(slideElementInlineValue(primary, 'fontSize', '16px'), 16);
-        const lineHeight = slideStyleNumber(slideElementInlineValue(primary, 'lineHeight', 'normal'), 0);
-        const letterSpacing = slideStyleNumber(slideElementInlineValue(primary, 'letterSpacing', 'normal'), 0);
         const fontWeight = parseInt(slideElementInlineValue(primary, 'fontWeight', '400'), 10) || 400;
         const textAlign = String(slideElementInlineValue(primary, 'textAlign', 'right') || 'right');
         const color = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'color', '')) || '#1e293b') : '#1e293b';
-        parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-          + escapeHtml(canvasText('ca.text', 'النص')) + '</div><div class="slide-inspector-fields">');
-        parts.push(slideInspectorRow(canvasText('ca.font_size', 'حجم الخط'),
-          '<input type="number" min="8" max="200" value="' + fontSize
-          + '" onchange="setSlideSelectionFontSize(' + index + ', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.weight', 'الوزن'),
-          '<select onchange="setSlideSelectionFontWeight(' + index + ', Number(this.value))">'
-          + '<option value="400"' + (fontWeight < 600 ? ' selected' : '') + '>' + escapeHtml(canvasText('ca.normal', 'عادي')) + '</option>'
-          + '<option value="700"' + (fontWeight >= 600 ? ' selected' : '') + '>' + escapeHtml(canvasText('ca.bold', 'عريض')) + '</option>'
-          + '</select>'));
-        parts.push(slideInspectorRow(canvasText('ca.text_align', 'محاذاة النص'),
-          '<select onchange="setSlideSelectionTextAlign(' + index + ', this.value)">'
-          + ['right', 'center', 'left'].map(value => '<option value="' + value + '"'
-            + (textAlign === value ? ' selected' : '') + '>'
-            + escapeHtml({ right: canvasText('ca.right', 'يمين'), center: canvasText('ca.center', 'وسط'), left: canvasText('ca.left', 'يسار') }[value])
-            + '</option>').join('') + '</select>'));
-        parts.push(slideInspectorRow(canvasText('ca.line_height', 'تباعد الأسطر'),
-          '<input type="number" min="0.8" max="3" step="0.1" value="' + (lineHeight || 1.6)
-          + '" onchange="setSlideSelectionLineHeight(' + index + ', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.letter_spacing', 'تباعد الحروف'),
-          '<input type="number" min="-5" max="20" step="0.5" value="' + letterSpacing
-          + '" onchange="setSlideSelectionLetterSpacing(' + index + ', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.text_color', 'لون النص'),
-          '<input type="color" value="' + color + '" onchange="setSlideSelectionTextColor(' + index + ', this.value)">'));
-        parts.push(slideInspectorRow(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'textShadow', primary)));
-        parts.push('</div></div>');
+        parts.push('<div class="slide-inspector-rowline">'
+          + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.text', 'النص')) + '</span>'
+          + slideInspectorField(canvasText('ca.font_size', 'حجم الخط'),
+            '<input type="number" min="8" max="200" value="' + fontSize
+            + '" onchange="setSlideSelectionFontSize(' + index + ', Number(this.value))">')
+          + slideInspectorField(canvasText('ca.weight', 'الوزن'),
+            '<select onchange="setSlideSelectionFontWeight(' + index + ', Number(this.value))">'
+            + '<option value="400"' + (fontWeight < 600 ? ' selected' : '') + '>' + escapeHtml(canvasText('ca.normal', 'عادي')) + '</option>'
+            + '<option value="700"' + (fontWeight >= 600 ? ' selected' : '') + '>' + escapeHtml(canvasText('ca.bold', 'عريض')) + '</option>'
+            + '</select>')
+          + slideInspectorField(canvasText('ca.text_align', 'محاذاة النص'),
+            '<select onchange="setSlideSelectionTextAlign(' + index + ', this.value)">'
+            + ['right', 'center', 'left'].map(value => '<option value="' + value + '"'
+              + (textAlign === value ? ' selected' : '') + '>'
+              + escapeHtml({ right: canvasText('ca.right', 'يمين'), center: canvasText('ca.center', 'وسط'), left: canvasText('ca.left', 'يسار') }[value])
+              + '</option>').join('') + '</select>')
+          + slideInspectorField(canvasText('ca.text_color', 'لون النص'),
+            '<input type="color" value="' + color + '" onchange="setSlideSelectionTextColor(' + index + ', this.value)">')
+          + '</div>');
       }
 
       if (kind === 'image') {
         const fit = String(slideElementInlineValue(primary, 'objectFit', '') || '').toLowerCase();
         const radius = slideStyleNumber(slideElementInlineValue(primary, 'borderRadius', '0px'), 0);
-        const borderWidth = slideStyleNumber(slideElementInlineValue(primary, 'borderWidth', '0px'), 0);
-        const borderColor = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'borderColor', '')) || '#dbe3ea') : '#dbe3ea';
-        parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-          + escapeHtml(canvasText('ca.image', 'الصورة')) + '</div><div class="slide-inspector-fields">');
-        parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.image_file', 'الملف')) + '</label>'
+        parts.push('<div class="slide-inspector-rowline">'
+          + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.image', 'الصورة')) + '</span>'
           + '<div class="slide-inspector-actions">'
           + slideInspectorButton(canvasText('ca.replace_image', 'استبدال'), 'openSlideImagePicker(' + index + ')')
-          + '</div></div>');
-        parts.push(slideInspectorRow(canvasText('ca.fit', 'الملاءمة'),
-          '<select onchange="setSlideSelectionImageFit(' + index + ', this.value)">'
-          + '<option value="cover"' + (fit === 'cover' ? ' selected' : '') + '>' + escapeHtml(canvasText('ca.cover', 'ملء')) + '</option>'
-          + '<option value="contain"' + (fit === 'contain' ? ' selected' : '') + '>' + escapeHtml(canvasText('ca.contain', 'احتواء')) + '</option>'
-          + '</select>'));
-        parts.push(slideInspectorRow(canvasText('ca.radius', 'الزوايا'),
-          '<input type="number" min="0" max="200" value="' + radius
-          + '" onchange="setSlideSelectionBorderRadius(' + index + ', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.border_width', 'سماكة الحدود'),
-          '<input type="number" min="0" max="20" value="' + borderWidth
-          + '" onchange="setSlideSelectionBorderWidth(' + index + ', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.border_color', 'الحدود'),
-          '<input type="color" value="' + borderColor + '" onchange="setSlideSelectionBorderColor(' + index + ', this.value)">'));
-        parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.aspect_lock', 'قفل النسبة')) + '</label>'
-          + '<div class="slide-inspector-actions">'
-          + slideInspectorButton(hasSlideAspectLock(index) ? canvasText('ca.locked', 'مقفل') : canvasText('ca.unlocked', 'مفتوح'),
-            'toggleSlideAspectLock(' + index + ')', hasSlideAspectLock(index))
-          + '</div></div>');
-        parts.push(slideInspectorRow(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'boxShadow', primary)));
-        parts.push('</div></div>');
+          + '</div>'
+          + slideInspectorField(canvasText('ca.fit', 'الملاءمة'),
+            '<select onchange="setSlideSelectionImageFit(' + index + ', this.value)">'
+            + '<option value="cover"' + (fit === 'cover' ? ' selected' : '') + '>' + escapeHtml(canvasText('ca.cover', 'ملء')) + '</option>'
+            + '<option value="contain"' + (fit === 'contain' ? ' selected' : '') + '>' + escapeHtml(canvasText('ca.contain', 'احتواء')) + '</option>'
+            + '</select>')
+          + slideInspectorField(canvasText('ca.radius', 'الزوايا'),
+            '<input type="number" min="0" max="200" value="' + radius
+            + '" onchange="setSlideSelectionBorderRadius(' + index + ', Number(this.value))">')
+          + '</div>');
       }
 
       if (kind === 'shape') {
         const fill = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'backgroundColor', '')) || '#ffffff') : '#ffffff';
         const borderColor = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'borderColor', '')) || '#dbe3ea') : '#dbe3ea';
-        const borderWidth = slideStyleNumber(slideElementInlineValue(primary, 'borderWidth', '0px'), 0);
         const radius = slideStyleNumber(slideElementInlineValue(primary, 'borderRadius', '0px'), 0);
-        parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-          + escapeHtml(canvasText('ca.shape', 'الشكل')) + '</div><div class="slide-inspector-fields">');
-        parts.push(slideInspectorRow(canvasText('ca.fill', 'التعبئة'),
-          '<input type="color" value="' + fill + '" onchange="setSlideSelectionFill(' + index + ', this.value)">'));
-        parts.push(slideInspectorRow(canvasText('ca.border_width', 'سماكة الحدود'),
-          '<input type="number" min="0" max="20" value="' + borderWidth
-          + '" onchange="setSlideSelectionBorderWidth(' + index + ', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.border_color', 'الحدود'),
-          '<input type="color" value="' + borderColor + '" onchange="setSlideSelectionBorderColor(' + index + ', this.value)">'));
-        parts.push(slideInspectorRow(canvasText('ca.radius', 'الزوايا'),
-          '<input type="number" min="0" max="200" value="' + radius
-          + '" onchange="setSlideSelectionBorderRadius(' + index + ', Number(this.value))">'));
-        parts.push(slideInspectorRow(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'boxShadow', primary)));
-        parts.push('</div></div>');
+        parts.push('<div class="slide-inspector-rowline">'
+          + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.shape', 'الشكل')) + '</span>'
+          + slideInspectorField(canvasText('ca.fill', 'التعبئة'),
+            '<input type="color" value="' + fill + '" onchange="setSlideSelectionFill(' + index + ', this.value)">')
+          + slideInspectorField(canvasText('ca.border_color', 'الحدود'),
+            '<input type="color" value="' + borderColor + '" onchange="setSlideSelectionBorderColor(' + index + ', this.value)">')
+          + slideInspectorField(canvasText('ca.radius', 'الزوايا'),
+            '<input type="number" min="0" max="200" value="' + radius
+            + '" onchange="setSlideSelectionBorderRadius(' + index + ', Number(this.value))">')
+          + '</div>');
       }
 
       if (kind === 'table') {
         const sampleCell = primary.querySelector && primary.querySelector('td,th');
         const cellFill = sampleCell && typeof cssColorToHex === 'function'
           ? (cssColorToHex(sampleCell.style.backgroundColor || window.getComputedStyle(sampleCell).backgroundColor) || '#ffffff') : '#ffffff';
-        const borderColor = sampleCell && typeof cssColorToHex === 'function'
-          ? (cssColorToHex(sampleCell.style.borderColor || window.getComputedStyle(sampleCell).borderColor) || '#dbe3ea') : '#dbe3ea';
-        parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-          + escapeHtml(canvasText('tb.table', 'جدول')) + '</div><div class="slide-inspector-fields">');
-        parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.add_row', 'صف جديد')) + '</label>'
+        parts.push('<div class="slide-inspector-rowline">'
+          + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('tb.table', 'جدول')) + '</span>'
           + '<div class="slide-inspector-actions">'
           + slideInspectorButton(canvasText('ca.add_row', 'صف جديد'), 'runSlideTableAction(' + index + ', \'rowadd\')')
           + slideInspectorButton(canvasText('ca.del_row', 'حذف صف'), 'runSlideTableAction(' + index + ', \'rowdel\')')
           + slideInspectorButton(canvasText('ca.add_col', 'عمود جديد'), 'runSlideTableAction(' + index + ', \'coladd\')')
           + slideInspectorButton(canvasText('ca.del_col', 'حذف عمود'), 'runSlideTableAction(' + index + ', \'coldel\')')
-          + '</div></div>');
-        parts.push(slideInspectorRow(canvasText('ca.cell_fill', 'لون الخلية'),
-          '<input type="color" value="' + cellFill + '" onchange="setSlideInspectorTableCellColor(' + index + ', this.value)">'));
-        parts.push(slideInspectorRow(canvasText('ca.table_border', 'حدود الجدول'),
-          '<input type="color" value="' + borderColor + '" onchange="setSlideInspectorTableBorderColor(' + index + ', this.value)">'));
-        parts.push('</div></div>');
+          + '</div>'
+          + slideInspectorField(canvasText('ca.cell_fill', 'لون الخلية'),
+            '<input type="color" value="' + cellFill + '" onchange="setSlideInspectorTableCellColor(' + index + ', this.value)">')
+          + '</div>');
       }
 
-      parts.push('<div class="slide-inspector-section"><div class="slide-inspector-actions">'
-        + slideInspectorButton(canvasText('ca.duplicate_element', 'تكرار'), 'duplicateSelectedSlideElements(' + index + ')')
-        + slideInspectorButton(canvasText('ca.copy', 'نسخ'), 'copySelectedSlideElements(' + index + ')')
-        + slideInspectorButton(canvasText('ca.paste', 'لصق'), 'pasteSlideElements(' + index + ')')
-        + slideInspectorButton(canvasText('ca.group', 'مجموعة'), 'groupSelectedSlideElements(' + index + ')')
-        + slideInspectorButton(canvasText('ca.ungroup', 'فك المجموعة'), 'ungroupSelectedSlideElements(' + index + ')')
-        + slideInspectorButton(canvasText('ca.delete_element', 'حذف العناصر'), 'deleteSelectedSlideElements(' + index + ')')
-        + '</div></div>');
+      parts.push('<div class="slide-inspector-rowline slide-inspector-chips">'
+        + slideInspectorChip(canvasText('ca.align', 'محاذاة'), 'align')
+        + slideInspectorChip(canvasText('ca.more', 'مزيد'), 'more')
+        + slideInspectorChip(canvasText('ca.actions', 'إجراءات'), 'actions')
+        + '</div>');
+
+      if (slideInspectorGroup === 'align') {
+        parts.push('<div class="slide-inspector-rowline slide-inspector-group" data-slide-inspector-open="align">'
+          + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.horizontal', 'أفقي')) + '</span>'
+          + '<div class="slide-inspector-actions">'
+          + slideInspectorButton(canvasText('ca.right', 'يمين'), 'alignSlideSelection(' + index + ', \'right\', \'\')')
+          + slideInspectorButton(canvasText('ca.center', 'وسط'), 'alignSlideSelection(' + index + ', \'center\', \'\')')
+          + slideInspectorButton(canvasText('ca.left', 'يسار'), 'alignSlideSelection(' + index + ', \'left\', \'\')')
+          + '</div>'
+          + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.vertical', 'رأسي')) + '</span>'
+          + '<div class="slide-inspector-actions">'
+          + slideInspectorButton(canvasText('ca.top', 'أعلى'), 'alignSlideSelection(' + index + ', \'\', \'top\')')
+          + slideInspectorButton(canvasText('ca.middle', 'منتصف'), 'alignSlideSelection(' + index + ', \'\', \'middle\')')
+          + slideInspectorButton(canvasText('ca.bottom', 'أسفل'), 'alignSlideSelection(' + index + ', \'\', \'bottom\')')
+          + '</div>'
+          + (multi ? '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.distribute', 'توزيع')) + '</span>'
+            + '<div class="slide-inspector-actions">'
+            + slideInspectorButton(canvasText('ca.distribute_h', 'أفقي'), 'distributeSlideSelection(' + index + ', \'x\')')
+            + slideInspectorButton(canvasText('ca.distribute_v', 'رأسي'), 'distributeSlideSelection(' + index + ', \'y\')')
+            + '</div>' : '')
+          + '</div>');
+      }
+
+      if (slideInspectorGroup === 'more') {
+        let extras = '';
+        if (kind === 'text') {
+          const lineHeight = slideStyleNumber(slideElementInlineValue(primary, 'lineHeight', 'normal'), 0);
+          const letterSpacing = slideStyleNumber(slideElementInlineValue(primary, 'letterSpacing', 'normal'), 0);
+          extras = slideInspectorField(canvasText('ca.line_height', 'تباعد الأسطر'),
+            '<input type="number" min="0.8" max="3" step="0.1" value="' + (lineHeight || 1.6)
+            + '" onchange="setSlideSelectionLineHeight(' + index + ', Number(this.value))">')
+            + slideInspectorField(canvasText('ca.letter_spacing', 'تباعد الحروف'),
+              '<input type="number" min="-5" max="20" step="0.5" value="' + letterSpacing
+              + '" onchange="setSlideSelectionLetterSpacing(' + index + ', Number(this.value))">')
+            + slideInspectorField(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'textShadow', primary));
+        } else if (kind === 'image') {
+          const borderWidth = slideStyleNumber(slideElementInlineValue(primary, 'borderWidth', '0px'), 0);
+          const borderColor = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'borderColor', '')) || '#dbe3ea') : '#dbe3ea';
+          extras = slideInspectorField(canvasText('ca.border_width', 'سماكة الحدود'),
+            '<input type="number" min="0" max="20" value="' + borderWidth
+            + '" onchange="setSlideSelectionBorderWidth(' + index + ', Number(this.value))">')
+            + slideInspectorField(canvasText('ca.border_color', 'الحدود'),
+              '<input type="color" value="' + borderColor + '" onchange="setSlideSelectionBorderColor(' + index + ', this.value)">')
+            + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.aspect_lock', 'قفل النسبة')) + '</span>'
+            + '<div class="slide-inspector-actions">'
+            + slideInspectorButton(hasSlideAspectLock(index) ? canvasText('ca.locked', 'مقفل') : canvasText('ca.unlocked', 'مفتوح'),
+              'toggleSlideAspectLock(' + index + ')', hasSlideAspectLock(index))
+            + '</div>'
+            + slideInspectorField(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'boxShadow', primary));
+        } else if (kind === 'shape') {
+          const borderWidth = slideStyleNumber(slideElementInlineValue(primary, 'borderWidth', '0px'), 0);
+          extras = slideInspectorField(canvasText('ca.border_width', 'سماكة الحدود'),
+            '<input type="number" min="0" max="20" value="' + borderWidth
+            + '" onchange="setSlideSelectionBorderWidth(' + index + ', Number(this.value))">')
+            + slideInspectorField(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'boxShadow', primary));
+        } else if (kind === 'table') {
+          const sampleCell = primary.querySelector && primary.querySelector('td,th');
+          const borderColor = sampleCell && typeof cssColorToHex === 'function'
+            ? (cssColorToHex(sampleCell.style.borderColor || window.getComputedStyle(sampleCell).borderColor) || '#dbe3ea') : '#dbe3ea';
+          extras = slideInspectorField(canvasText('ca.table_border', 'حدود الجدول'),
+            '<input type="color" value="' + borderColor + '" onchange="setSlideInspectorTableBorderColor(' + index + ', this.value)">');
+        }
+        parts.push('<div class="slide-inspector-rowline slide-inspector-group" data-slide-inspector-open="more">'
+          + slideInspectorField(canvasText('ca.opacity', 'الشفافية'),
+            '<input type="number" min="1" max="100" step="1" value="' + opacity
+            + '" onchange="commitSlideElementOpacity(' + index + ', Number(this.value))">')
+          + slideInspectorField(canvasText('ca.rotation', 'الدوران'),
+            '<input type="number" min="-180" max="180" step="1" value="' + Math.round(rotation)
+            + '" onchange="setSlideSelectionRotation(' + index + ', Number(this.value))">')
+          + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.layer', 'الطبقة')) + '</span>'
+          + '<div class="slide-inspector-actions">'
+          + slideInspectorButton(canvasText('ca.front', 'أمام'), 'adjustSlideElementLayer(' + index + ', 1)')
+          + slideInspectorButton(canvasText('ca.back', 'خلف'), 'adjustSlideElementLayer(' + index + ', -1)')
+          + '</div>'
+          + extras
+          + '</div>');
+      }
+
+      if (slideInspectorGroup === 'actions') {
+        parts.push('<div class="slide-inspector-rowline slide-inspector-group" data-slide-inspector-open="actions">'
+          + '<div class="slide-inspector-actions">'
+          + slideInspectorButton(canvasText('ca.duplicate_element', 'تكرار'), 'duplicateSelectedSlideElements(' + index + ')')
+          + slideInspectorButton(canvasText('ca.copy', 'نسخ'), 'copySelectedSlideElements(' + index + ')')
+          + slideInspectorButton(canvasText('ca.paste', 'لصق'), 'pasteSlideElements(' + index + ')')
+          + slideInspectorButton(canvasText('ca.group', 'مجموعة'), 'groupSelectedSlideElements(' + index + ')')
+          + slideInspectorButton(canvasText('ca.ungroup', 'فك المجموعة'), 'ungroupSelectedSlideElements(' + index + ')')
+          + slideInspectorButton(canvasText('ca.delete_element', 'حذف العناصر'), 'deleteSelectedSlideElements(' + index + ')')
+          + '</div></div>');
+      }
 
       parts.push('</div>');
       host.innerHTML = parts.join('');
     }
 
     function closeSlideInspector() {
+      slideInspectorGroup = '';
       document.querySelectorAll('.slide-inline-inspector').forEach(host => {
         host.innerHTML = '';
         host.hidden = true;

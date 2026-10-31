@@ -192,6 +192,8 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "ca.front": "أمام",
   "ca.back": "خلف",
   "ca.align": "محاذاة",
+  "ca.more": "مزيد",
+  "ca.actions": "إجراءات",
   "ca.right": "يمين",
   "ca.center": "وسط",
   "ca.left": "يسار",

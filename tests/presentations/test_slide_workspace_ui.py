@@ -331,7 +331,8 @@ class SlidesCanvasEditingTests(unittest.TestCase):
     def test_canvas_labels_are_translated_in_both_dictionaries(self):
         ar = (ROOT / 'assets' / 'i18n' / '01a_dict_ar_extra.js').read_text(encoding='utf-8')
         en = (ROOT / 'assets' / 'i18n' / '01b_dict_en_extra.js').read_text(encoding='utf-8')
-        for key in ('ca.inspector', 'ca.zoom_fit', 'ca.image', 'ca.shape', 'ca.text'):
+        for key in ('ca.inspector', 'ca.zoom_fit', 'ca.image', 'ca.shape', 'ca.text',
+                    'ca.more', 'ca.actions'):
             self.assertIn('"%s":' % key, ar)
             self.assertIn('"%s":' % key, en)
 
@@ -573,6 +574,42 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn('function setSlideSelectionShadow(', self.source)
         self.assertIn('function toggleSlideInlineInspector(btn)', self.source)
         self.assertIn('is-collapsed', self.source)
+
+    def test_inspector_stays_compact_and_folds_the_rest_behind_chips(self):
+        render = self.source.split('function renderSlideInspector(index)', 1)[1]
+        render = render.split('function closeSlideInspector', 1)[0]
+        # Default surface: one geometry row and one row for the selected type.
+        self.assertIn('slide-inspector-rowline', render)
+        self.assertIn("canvasText('ca.position', 'الموضع')", render)
+        for chip in ("slideInspectorChip(canvasText('ca.align', 'محاذاة'), 'align')",
+                     "slideInspectorChip(canvasText('ca.more', 'مزيد'), 'more')",
+                     "slideInspectorChip(canvasText('ca.actions', 'إجراءات'), 'actions')"):
+            self.assertIn(chip, render)
+        # Everything past the default rows is emitted only when its chip is open.
+        for group in ('align', 'more', 'actions'):
+            self.assertIn("slideInspectorGroup === '" + group + "'", render)
+        default_part = render.split("slideInspectorGroup === 'more'", 1)[0]
+        self.assertNotIn("canvasText('ca.opacity'", default_part)
+        self.assertNotIn("canvasText('ca.rotation'", default_part)
+        more = render.split("slideInspectorGroup === 'more'", 1)[1]
+        more = more.split("slideInspectorGroup === 'actions'", 1)[0]
+        for token in ("canvasText('ca.opacity'", "canvasText('ca.rotation'", "canvasText('ca.layer'"):
+            self.assertIn(token, more)
+        actions = render.split("slideInspectorGroup === 'actions'", 1)[1]
+        self.assertIn('duplicateSelectedSlideElements(', actions)
+        self.assertIn('deleteSelectedSlideElements(', actions)
+        self.assertIn('function toggleSlideInspectorGroup(group)', self.source)
+        self.assertIn('let slideInspectorGroup', self.source)
+        css = (ROOT / 'assets' / 'css' / 'base' / '10_slide_canvas.css').read_text(encoding='utf-8')
+        for token in ('.slide-inspector-rowline', '.slide-inspector-field',
+                      '.slide-inspector-chip', '.slide-inspector-group'):
+            self.assertIn(token, css)
+        # The global input rule sets min-height:42px; the compact fields must
+        # override it or every row grows back to a full-height input.
+        field_css = css.split('#tenantSlidesPage .slide-inspector-field input[type="number"]', 1)[1]
+        field_css = field_css.split('}', 1)[0]
+        self.assertIn('min-height: 0', field_css)
+        self.assertIn('height: 22px', field_css)
 
     def test_selection_geometry_uses_the_painted_scale(self):
         self.assertIn('function slideRenderedScale(stage)', self.source)

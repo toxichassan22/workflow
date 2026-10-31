@@ -191,6 +191,8 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "ca.front": "Front",
   "ca.back": "Back",
   "ca.align": "Align",
+  "ca.more": "More",
+  "ca.actions": "Actions",
   "ca.right": "Right",
   "ca.center": "Center",
   "ca.left": "Left",
