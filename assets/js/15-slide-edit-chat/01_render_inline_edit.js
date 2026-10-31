@@ -338,7 +338,7 @@
         container.id = 'slide-card-' + i;
         container.dataset.slideId = s && s.id ? String(s.id) : '';
         container.style.cssText = 'margin-bottom:24px; position:relative;';
-        container.onclick = () => selectTenantSlide(i);
+        container.onclick = () => { if (activeSlideIndex !== i) selectTenantSlide(i); };
         if (hasPermission('create_presentation')) {
           const editControls = document.createElement('div');
           editControls.className = 'ge-slide-edit-controls';

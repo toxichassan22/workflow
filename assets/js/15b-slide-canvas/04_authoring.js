@@ -322,7 +322,9 @@
       const rawRoot = rawDoc.querySelector('.slide');
       const path = slideElementPath(slide, liveWrapper);
       const rawWrapper = rawRoot && path ? findSlideRawTarget(rawRoot, liveWrapper, path) : null;
-      const rawTable = rawWrapper ? rawWrapper.querySelector('table') : null;
+      const rawTable = rawWrapper
+        ? (rawWrapper.tagName === 'TABLE' ? rawWrapper : rawWrapper.querySelector('table'))
+        : null;
       if (!rawRoot || !rawWrapper || !rawTable) return null;
       return { stage, session, slide, slideData, rawDoc, rawRoot, liveWrapper, rawWrapper, liveTable, rawTable };
     }
@@ -533,25 +535,50 @@
     }
 
     function bindSlideTableEditing(stage, index) {
-      if (!stage || stage.dataset.tableEditingBound === '1') return;
-      stage.dataset.tableEditingBound = '1';
-      stage.addEventListener('pointerdown', event => {
-        const cell = event.target.closest
-          ? event.target.closest('[data-slide-table] td, [data-slide-table] th') : null;
-        if (!cell) return;
+      const card = stage && (stage.closest('.ge-slide-card') || stage);
+      if (!card || card.dataset.tableEditingBound === '1') return;
+      card.dataset.tableEditingBound = '1';
+      let lastCellTap = null;
+      card.addEventListener('pointerdown', event => {
+        if (event.button !== 0) return;
         const session = getSlideEditSession(index);
         if (!session) return;
-        const row = cell.parentElement ? cell.parentElement.rowIndex : 0;
-        session.tableCell = { row, col: cell.cellIndex };
-      }, true);
-      stage.addEventListener('dblclick', event => {
+        const now = Date.now();
+        if (lastCellTap && now - lastCellTap.at <= 500
+          && Math.abs(event.clientX - lastCellTap.x) <= 10
+          && Math.abs(event.clientY - lastCellTap.y) <= 10
+          && lastCellTap.cell.isConnected) {
+          // Selecting the table inserts controls above it. A native double-click
+          // would land on those controls instead of the cell, so the second tap
+          // on the same spot opens the cell recorded by the first one.
+          event.preventDefault();
+          event.stopPropagation();
+          const cell = lastCellTap.cell;
+          lastCellTap = null;
+          beginSlideTableCellEdit(stage, index, cell);
+          return;
+        }
         const cell = event.target.closest
           ? event.target.closest('[data-slide-table] td, [data-slide-table] th') : null;
-        if (!cell || !getSlideEditSession(index)) return;
+        if (!cell) { lastCellTap = null; return; }
+        const row = cell.parentElement ? cell.parentElement.rowIndex : 0;
+        session.tableCell = { row, col: cell.cellIndex };
+        lastCellTap = { cell, at: now, x: event.clientX, y: event.clientY };
+      }, true);
+      card.addEventListener('dblclick', event => {
+        const session = getSlideEditSession(index);
+        let cell = event.target.closest
+          ? event.target.closest('[data-slide-table] td, [data-slide-table] th') : null;
+        if (!cell && session && session.tableCell) {
+          const box = event.target.closest ? event.target.closest('[data-slide-table]') : null;
+          const table = box && (box.tagName === 'TABLE' ? box : box.querySelector('table'));
+          cell = table ? slideTableCellAt(table, session.tableCell.row, session.tableCell.col) : null;
+        }
+        if (!cell || !session) return;
         event.preventDefault();
         event.stopPropagation();
         beginSlideTableCellEdit(stage, index, cell);
-      });
+      }, true);
     }
 
     function beginSlideTableCellEdit(stage, index, cell) {

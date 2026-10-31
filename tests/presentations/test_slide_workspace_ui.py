@@ -519,12 +519,21 @@ class SlidesAuthoringTests(unittest.TestCase):
             self.assertIn('function ' + fn, self.source)
         self.assertIn("[data-slide-table] td, [data-slide-table] th", self.source)
         self.assertIn('data-slide-table', self.source)
-        self.assertIn("stage.addEventListener('dblclick'", self.source)
+        self.assertIn("card.addEventListener('dblclick'", self.source)
         # A cell edits on double-click; a single click selects the table.
         inline = self.source.split('function enableSlideInlineEditing(stage, index)', 1)[1]
         inline = inline.split('function slidePathIgnores', 1)[0]
+        self.assertIn('markSlideTablesForPointerEditing(slide);', inline)
         self.assertIn("el.closest('[data-slide-table]')", inline)
         self.assertIn('bindSlideTableEditing(stage, index)', inline)
+        # A generated table is the table element itself, not a manual wrapper.
+        context = self.source.split('function slideTableContext(index)', 1)[1]
+        context = context.split('function slideTableActiveCell', 1)[0]
+        self.assertIn("rawWrapper.tagName === 'TABLE' ? rawWrapper", context)
+        bind = self.source.split('function bindSlideTableEditing(stage, index)', 1)[1]
+        bind = bind.split('function beginSlideTableCellEdit', 1)[0]
+        self.assertIn('lastCellTap', bind)
+        self.assertIn('beginSlideTableCellEdit(stage, index, cell)', bind)
 
     def test_slide_background_and_visibility(self):
         for fn in ('setSlideBackgroundColor(', 'clearSlideBackground(',
@@ -610,6 +619,15 @@ class SlidesAuthoringTests(unittest.TestCase):
         field_css = field_css.split('}', 1)[0]
         self.assertIn('min-height: 0', field_css)
         self.assertIn('height: 22px', field_css)
+
+    def test_selecting_an_element_keeps_the_canvas_under_the_pointer(self):
+        self.assertIn('function holdSlideStagePosition(stage, anchorTop)', self.source)
+        select = self.source.split('function selectSlideElement(stage, index, target, path)', 1)[1]
+        select = select.split('function restoreSlideEditSelection', 1)[0]
+        self.assertIn('holdSlideStagePosition(stage, anchorTop)', select)
+        self.assertIn("container.onclick = () => { if (activeSlideIndex !== i) selectTenantSlide(i); }",
+                      self.source)
+        self.assertIn("kind === 'table' && host.previousElementSibling !== stage", self.source)
 
     def test_selection_geometry_uses_the_painted_scale(self):
         self.assertIn('function slideRenderedScale(stage)', self.source)

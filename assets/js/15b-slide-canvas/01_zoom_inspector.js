@@ -641,6 +641,16 @@
       }
       const primary = pairs[0].target;
       const kind = inspectorTargetKind(primary);
+      if (stage && host.parentElement === stage.parentElement) {
+        // A table needs its own cells under the pointer for the double-click.
+        // Its inspector sits after the slide, never between the table and the
+        // next click that lands on a cell.
+        if (kind === 'table' && host.previousElementSibling !== stage) {
+          stage.parentElement.insertBefore(host, stage.nextSibling);
+        } else if (kind !== 'table' && host.nextElementSibling !== stage) {
+          stage.parentElement.insertBefore(host, stage);
+        }
+      }
       const rect = slideElementRectInSlide(stage, primary);
       const multi = pairs.length > 1;
       const opacity = typeof slideElementOpacityPct === 'function' ? slideElementOpacityPct(primary) : 100;

@@ -769,17 +769,29 @@
       return nodes;
     }
 
+    /* Generated tables arrive as ordinary <table> elements. Giving each one the
+       table marker makes a single click select the table as one shape and keeps
+       its cells out of inline text editing; the cell edits on double-click. */
+    function markSlideTablesForPointerEditing(slide) {
+      if (!slide || !slide.querySelectorAll) return;
+      slide.querySelectorAll('table').forEach(table => {
+        if (table.closest('[data-slide-table]')) return;
+        table.setAttribute('data-slide-table', '1');
+      });
+    }
+
     function enableSlideInlineEditing(stage, index) {
       const slide = stage.querySelector('.slide');
       if (!slide) return;
       const enabled = hasPermission('create_presentation') && !!slideInlineEditStates[index];
+      markSlideTablesForPointerEditing(slide);
       const seen = new Set();
       collectSlideTextNodes(slide).forEach(node => {
         const el = node.parentElement;
         if (!el || seen.has(el)) return;
         seen.add(el);
-        // A table cell edits on double-click only: a single click selects the
-        // table itself, the PowerPoint gesture, so the table tools stay reachable.
+        // Every table is one shape on a single click, manual or generated; its
+        // cells only enter text editing on the double-click handler below.
         if (el.closest && el.closest('[data-slide-table]')) return;
         if (enabled) {
           if (el.hasAttribute('contenteditable')) return;

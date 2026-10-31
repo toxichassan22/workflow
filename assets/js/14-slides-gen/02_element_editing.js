@@ -112,12 +112,32 @@
       if (slide) slide.querySelectorAll('.slide-snap-guide').forEach(el => el.remove());
     }
 
+    /* Selection opens the inspector above the stage; keep the canvas still so
+       the next click still lands on the element the user aimed at. */
+    function holdSlideStagePosition(stage, anchorTop) {
+      const wrap = document.getElementById('tenantSlidesMain');
+      if (!wrap || !stage || stage.isConnected === false) return;
+      const settle = () => {
+        if (!stage.isConnected) return;
+        const shift = stage.getBoundingClientRect().top - anchorTop;
+        if (Math.abs(shift) <= 0.5) return;
+        const behavior = wrap.style.scrollBehavior;
+        wrap.style.scrollBehavior = 'auto';
+        wrap.scrollTop += shift;
+        wrap.style.scrollBehavior = behavior;
+      };
+      settle();
+      requestAnimationFrame(settle);
+      setTimeout(settle, 80);
+    }
+
     function selectSlideElement(stage, index, target, path) {
       const session = getSlideEditSession(index);
       if (!session || !stage || !target) return;
       if (!path || !path.length) return;
       const slide = stage.querySelector('.slide');
       if (slide && target === slide) return;
+      const anchorTop = stage.getBoundingClientRect().top;
       clearSlideElementSelection(stage);
       session.sel = {
         path: (path || []).slice(),
@@ -129,6 +149,7 @@
       target.classList.add('slide-element-selected');
       positionSlideEditHandles(stage, target);
       syncSlideElementToolbar(index);
+      holdSlideStagePosition(stage, anchorTop);
     }
 
     function restoreSlideEditSelection(stage, index) {

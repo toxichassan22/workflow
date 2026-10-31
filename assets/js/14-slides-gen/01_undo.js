@@ -529,7 +529,7 @@
       container.id = 'slide-card-' + index;
       container.dataset.slideId = slide.id ? String(slide.id) : '';
       container.style.cssText = 'margin-bottom:24px; position:relative;';
-      container.onclick = () => selectTenantSlide(index);
+      container.onclick = () => { if (activeSlideIndex !== index) selectTenantSlide(index); };
       if (hasPermission('create_presentation')) {
         const editControls = document.createElement('div');
         editControls.className = 'ge-slide-edit-controls';
