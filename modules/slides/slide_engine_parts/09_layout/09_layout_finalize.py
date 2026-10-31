@@ -518,10 +518,12 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['section_key'] = 'index'
         else:
             section_key = _slide_section_key(item, current_section)
-            # A designer/client-edited page keeps its own type and title. The
-            # legacy repairs below only own pages nobody has edited.
+            # A designer/client-edited page keeps its own title. The legacy
+            # divider-title repair below only owns pages nobody has edited; a
+            # misclassified divider holding a real body is restored for every
+            # page (that is a type/photo repair, not a redesign).
             preserved_design = _designer_preserves_html(item)
-            if _restore_misclassified_section_divider(item, section_key) and not preserved_design:
+            if _restore_misclassified_section_divider(item, section_key):
                 slide_type = 'content'
                 item['type'] = 'content'
                 item.pop('design_style', None)

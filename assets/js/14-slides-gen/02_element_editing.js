@@ -579,12 +579,47 @@
       return Math.max(0, Math.min(100, Math.round(slideElementOpacityProduct(el, true) * 100)));
     }
 
+    /* A child can never be more visible than a faded ancestor. When the
+       requested value is brighter than the wrapper that holds it, the wrapper's
+       inline opacity is lifted first — otherwise the field snapped back to the
+       ancestor's value and the element could never be brightened again. */
+    function liftSlideOpacityAncestors(target, desired) {
+      let product = slideElementOpacityProduct(target, false);
+      let node = target.parentElement;
+      while (product + 0.001 < desired && node && node.nodeType === 1) {
+        if (node.classList && node.classList.contains('slide')) break;
+        const value = parseFloat(window.getComputedStyle(node).opacity);
+        if (isFinite(value) && value < 1) {
+          const above = slideElementOpacityProduct(node, false) || 1;
+          const needed = Math.min(1, desired / (above || 1));
+          if (needed > value) {
+            node.style.opacity = String(Math.round(needed * 1000) / 1000);
+            product = slideElementOpacityProduct(target, false);
+          }
+        }
+        node = node.parentElement;
+      }
+      return product;
+    }
+
     function applySlideElementEffectiveOpacity(target, pct) {
-      const parent = slideElementOpacityProduct(target, false);
       const desired = Math.max(1, Math.min(100, Math.round(Number(pct) || 100))) / 100;
+      const parent = liftSlideOpacityAncestors(target, desired);
       const own = parent > 0 ? Math.min(1, desired / parent) : 1;
       target.style.opacity = String(Math.round(own * 1000) / 1000);
       return Math.max(0, Math.min(100, Math.round(Math.min(desired, parent || desired) * 100)));
+    }
+
+    /* A lifted wrapper lives on the live node; mirror the whole ancestor chain
+       into the stored copy so the change survives the next render and save. */
+    function mirrorSlideAncestorOpacity(slide, rawRoot, liveLayer) {
+      let node = liveLayer && liveLayer.parentElement;
+      while (node && node !== slide && node.nodeType === 1) {
+        const path = slideElementPath(slide, node);
+        const rawNode = path && path.length ? elementAtSlidePath(rawRoot, path) : null;
+        if (rawNode && rawNode.style) rawNode.style.opacity = node.style.opacity;
+        node = node.parentElement;
+      }
     }
 
     function previewSlideElementOpacity(index, pct) {
@@ -618,6 +653,7 @@
       const rawLayer = watermarkOverlayOf(rawTarget) || rawTarget;
       const actual = applySlideElementEffectiveOpacity(liveLayer, pct);
       rawLayer.style.opacity = liveLayer.style.opacity;
+      mirrorSlideAncestorOpacity(slide, rawRoot, liveLayer);
       slideData.html = rawRoot.outerHTML;
       markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
