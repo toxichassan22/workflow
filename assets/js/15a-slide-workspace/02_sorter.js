@@ -50,6 +50,15 @@
       return boundary;
     }
 
+    // The + hangs on its card's inline-start edge. In RTL that edge faces the
+    // previous card, so the gap it marks is BEFORE this card; in LTR the same
+    // edge faces the next card, so the gap is after it. Inserting anywhere
+    // else put the new slide one slot past the gap the client clicked.
+    function sorterInsertIndex(index, isRtl) {
+      const base = Number.isFinite(Number(index)) ? Math.max(0, Math.floor(Number(index))) : 0;
+      return isRtl ? base : base + 1;
+    }
+
     // Final array index of the dragged slide for a "before"/"after" drop on the
     // cell at targetIndex, or at the end. -1 means the slot is impossible.
     function sorterDropFinalIndex(from, targetIndex, mode, total) {
@@ -194,6 +203,21 @@
         if (String(cells[index].dataset.slideId || '') === wanted) return cells[index];
       }
       return null;
+    }
+
+    // The editor list was display:none while the sorter was showing, so a
+    // scroll issued in the same tick as the view switch is measured against a
+    // hidden container and settles back on the cover. Apply the selection
+    // immediately, then reveal the card once the editor has real layout.
+    function sorterOpenSlideInEditor(index) {
+      setSlidesWorkspaceView('edit');
+      selectTenantSlide(index, true);
+      const reveal = () => selectTenantSlide(index);
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => requestAnimationFrame(reveal));
+      } else {
+        reveal();
+      }
     }
 
     function sorterHighlightActive(grid) {
@@ -374,8 +398,7 @@
         card.ondblclick = () => {
           const current = Number(cell.dataset.sorterIndex);
           if (!Number.isFinite(current)) return;
-          setSlidesWorkspaceView('edit');
-          selectTenantSlide(current);
+          sorterOpenSlideInEditor(current);
         };
         card.ondragstart = event => {
           tenantSorterDragId = String(slide.id || '');
@@ -449,6 +472,23 @@
         label.className = 'ge-sorter-label';
         label.innerHTML = '<span class="ge-thumb-num">' + (index + 1) + '</span>'
           + '<span class="ge-thumb-title">' + escapeHtml(slide.title || sorterText('ws.no_title', 'شريحة بدون عنوان')) + '</span>';
+        if (hasPermission('create_presentation') && tenantSlidesData.length > 1) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'ge-sorter-delete';
+          const removeLabel = sorterText('ws.delete', 'حذف');
+          remove.textContent = removeLabel;
+          remove.title = removeLabel;
+          remove.setAttribute('aria-label', removeLabel);
+          remove.onclick = event => {
+            event.stopPropagation();
+            const current = Number(cell.dataset.sorterIndex);
+            if (!Number.isFinite(current)) return;
+            if (typeof deleteSlide === 'function') deleteSlide(current);
+          };
+          remove.ondblclick = event => event.stopPropagation();
+          label.appendChild(remove);
+        }
         card.appendChild(label);
 
         const insert = document.createElement('button');
@@ -461,8 +501,8 @@
           event.stopPropagation();
           const current = Number(cell.dataset.sorterIndex);
           if (!Number.isFinite(current)) return;
-          const index = current;
-          if (typeof openSlideInsertMenu === 'function') openSlideInsertMenu(insert, index + 1);
+          const at = sorterInsertIndex(current, sorterIsRtl(grid));
+          if (typeof openSlideInsertMenu === 'function') openSlideInsertMenu(insert, at);
         };
 
         cell.appendChild(card);

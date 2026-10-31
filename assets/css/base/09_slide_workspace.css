@@ -787,6 +787,39 @@
   opacity: 1;
 }
 
+#tenantSlidesPage .ge-sorter-label .ge-thumb-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A word, not a glyph: the card carries its own delete action. */
+#tenantSlidesPage .ge-sorter-delete {
+  flex-shrink: 0;
+  margin-inline-start: auto;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--danger, #b33a3a);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 1px 5px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+#tenantSlidesPage .ge-sorter-cell:hover .ge-sorter-delete,
+#tenantSlidesPage .ge-sorter-delete:focus-visible {
+  opacity: 1;
+}
+
+#tenantSlidesPage .ge-sorter-delete:hover {
+  background: rgba(179, 58, 58, .1);
+}
+
 #tenantSlidesPage .ge-sorter-add-cell {
   display: flex;
   align-items: center;

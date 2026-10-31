@@ -130,7 +130,18 @@ class SlidesSorterTests(unittest.TestCase):
         self.assertIn('ondragstart', self.source)
         self.assertIn('ondrop', self.source)
         self.assertIn('ge-sorter-insert', self.source)
-        self.assertIn("openSlideInsertMenu(insert, index + 1)", self.source)
+        # The + hangs on the inline-start edge, so the gap it marks is before
+        # its card in RTL and after it in LTR. insert + 1 added one too far.
+        self.assertIn('function sorterInsertIndex(index, isRtl)', self.source)
+        self.assertIn('sorterInsertIndex(current, sorterIsRtl(grid))', self.source)
+        self.assertIn('openSlideInsertMenu(insert, at)', self.source)
+        self.assertNotIn('openSlideInsertMenu(insert, index + 1)', self.source)
+
+    def test_sorter_deletes_and_opens_the_clicked_slide(self):
+        self.assertIn('ge-sorter-delete', self.source)
+        self.assertIn('deleteSlide(current)', self.source)
+        self.assertIn('function sorterOpenSlideInEditor(index)', self.source)
+        self.assertIn('sorterOpenSlideInEditor(current)', self.source)
 
 
 class DesignerChatPanelTests(unittest.TestCase):

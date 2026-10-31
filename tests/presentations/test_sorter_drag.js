@@ -208,6 +208,9 @@ const documentStub = {
 
 let activeIndex = 0;
 const moves = [];
+const insertCalls = [];
+const deleteCalls = [];
+const events = [];
 const ctx = {
   console,
   document: documentStub,
@@ -217,10 +220,15 @@ const ctx = {
   WFT: (key, fallback) => fallback,
   escapeHtml: value => String(value),
   hasPermission: () => true,
-  selectTenantSlide: index => { activeIndex = index; ctx.activeSlideIndex = index; },
-  setSlidesWorkspaceView: () => {},
+  selectTenantSlide: (index, skipScroll) => {
+    activeIndex = index;
+    ctx.activeSlideIndex = index;
+    events.push('select:' + index + ':' + (skipScroll ? 'quiet' : 'scroll'));
+  },
+  setSlidesWorkspaceView: view => { events.push('view:' + view); },
   fillSlideThumbnailCanvas: canvas => { canvas.dataset.filled = '1'; },
-  openSlideInsertMenu: () => {},
+  openSlideInsertMenu: (anchor, index) => { insertCalls.push(index); },
+  deleteSlide: index => { deleteCalls.push(index); },
   tenantSlidesView: 'sorter',
   tenantSlidesData: [],
   activeSlideIndex: 0,
@@ -264,6 +272,9 @@ function setup(ids) {
   ctx.activeSlideIndex = 0;
   activeIndex = 0;
   moves.length = 0;
+  insertCalls.length = 0;
+  deleteCalls.length = 0;
+  events.length = 0;
   const box = new FakeNode('div');
   box._isRoot = true;
   boxes.tenantSlidesSorter = box;
@@ -465,4 +476,56 @@ function dropOn(grid, cell, clientX) {
   assert.equal(moves.length, 0);
 }
 
-console.log('Sorter drag harness passed: landing gap, RTL side math, in-place reorder, cancelled drag.');
+// The + sits on its card's inline-start edge: in RTL that gap is the space
+// BEFORE that card, so the new slide belongs at the card's own index. In LTR
+// the same edge is the gap after it, so the index moves one further.
+{
+  const { grid } = setup(['a', 'b', 'c']);
+  const insertOf = cell => cell.querySelector('.ge-sorter-insert');
+  insertOf(cellFor(grid, 'b')).onclick({ stopPropagation() {} });
+  assert.deepEqual(insertCalls, [1], 'RTL + inserts before the card it belongs to');
+  insertCalls.length = 0;
+  insertOf(cellFor(grid, 'a')).onclick({ stopPropagation() {} });
+  assert.deepEqual(insertCalls, [0], 'RTL + on the first card inserts at the start');
+}
+
+{
+  documentStub.dir = 'ltr';
+  ctx.getComputedStyle = () => ({ direction: 'ltr' });
+  const { grid } = setup(['a', 'b', 'c']);
+  cellFor(grid, 'b').querySelector('.ge-sorter-insert').onclick({ stopPropagation() {} });
+  assert.deepEqual(insertCalls, [2], 'LTR + inserts after the card it belongs to');
+  documentStub.dir = 'rtl';
+  ctx.getComputedStyle = () => ({ direction: 'rtl' });
+}
+
+// Every card can delete itself, and the last slide keeps the existing guard.
+{
+  const { grid } = setup(['a', 'b', 'c']);
+  const cellB = cellFor(grid, 'b');
+  const remove = cellB.querySelector('.ge-sorter-delete');
+  assert.ok(remove, 'every sorter card carries a delete action');
+  assert.equal(remove.textContent, 'حذف', 'the delete action is a word, not an icon');
+  remove.onclick({ stopPropagation() {} });
+  assert.deepEqual(deleteCalls, [1], 'delete addresses the card own live index');
+  assert.equal(events.length, 0, 'deleting does not select or switch the view');
+}
+
+{
+  const { grid } = setup(['only']);
+  assert.equal(cellFor(grid, 'only').querySelector('.ge-sorter-delete'), null,
+    'the last slide cannot be deleted');
+}
+
+// Double-click opens the editor on the clicked card: the selection is applied
+// immediately, and the reveal scroll runs only after the editor has layout.
+{
+  const { grid } = setup(['a', 'b', 'c', 'd']);
+  cardOf(cellFor(grid, 'c')).ondblclick();
+  assert.deepEqual(events, ['view:edit', 'select:2:quiet', 'select:2:scroll'],
+    'the editor opens on the clicked slide after the view is laid out');
+  assert.equal(ctx.activeSlideIndex, 2);
+}
+
+console.log('Sorter harness passed: landing gap, RTL side math, in-place reorder, cancelled drag, '
+  + 'direction-aware insert, sorter delete, editor jump.');
