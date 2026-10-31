@@ -312,8 +312,10 @@
           return;
         }
         const now = thumb.getBoundingClientRect();
-        const dx = Math.round((first.left - now.left) * 10) / 10;
-        const dy = Math.round((first.top - now.top) * 10) / 10;
+        // Rects are painted, transforms are layout: convert before animating.
+        const zoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
+        const dx = Math.round((first.left - now.left) / zoom * 10) / 10;
+        const dy = Math.round((first.top - now.top) / zoom * 10) / 10;
         if (!dx && !dy) return;
         try {
           thumb.animate(

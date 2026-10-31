@@ -820,3 +820,13 @@ class SlidesWorkspaceDensityTests(unittest.TestCase):
         self.assertIn('const zoom = typeof wfRootZoom', menu)
         self.assertIn("menu.style.position = 'fixed';", menu)
         self.assertIn("menu.style.visibility = 'hidden';", menu)
+        sorter = (ROOT / 'assets' / 'js' / '15a-slide-workspace'
+                  / '02_sorter.js').read_text(encoding='utf-8')
+        ghost = sorter.split('function sorterSpawnGhost', 1)[1]
+        ghost = ghost.split('function sorterReconcileGrid', 1)[0]
+        self.assertIn('(rect.width / zoom)', ghost)
+        # FLIP deltas come from painted rects but drive layout transforms.
+        self.assertGreaterEqual(sorter.count('/ zoom * 10) / 10'), 2)
+        deck_flip = self.source.split('function animateTenantDeckChange', 1)[1]
+        deck_flip = deck_flip.split('function renderTenantSlides()', 1)[0]
+        self.assertIn('/ zoom * 10) / 10', deck_flip)

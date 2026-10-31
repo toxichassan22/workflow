@@ -100,9 +100,10 @@
           const transform = getComputedStyle(element).transform;
           if (transform && transform !== 'none' && typeof DOMMatrixReadOnly === 'function') {
             const matrix = new DOMMatrixReadOnly(transform);
+            const zoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
             return {
-              left: rect.left - matrix.m41,
-              top: rect.top - matrix.m42,
+              left: rect.left - matrix.m41 * zoom,
+              top: rect.top - matrix.m42 * zoom,
               width: rect.width,
               height: rect.height
             };
@@ -135,8 +136,10 @@
         if (!first || !el.isConnected || typeof el.animate !== 'function') return;
         const rect = el.getBoundingClientRect();
         if (!rect || !(rect.width || rect.height)) return;
-        const dx = Math.round((first.left - rect.left) * 10) / 10;
-        const dy = Math.round((first.top - rect.top) * 10) / 10;
+        // Rects are painted, transforms are layout: convert before animating.
+        const zoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
+        const dx = Math.round((first.left - rect.left) / zoom * 10) / 10;
+        const dy = Math.round((first.top - rect.top) / zoom * 10) / 10;
         if (!dx && !dy) return;
         try {
           el.animate(
@@ -533,10 +536,13 @@
       ghost.classList.add('ge-sorter-ghost');
       ghost.dataset.slideId = '';
       ghost.style.position = 'absolute';
-      ghost.style.left = (rect.left - gridRect.left) + 'px';
-      ghost.style.top = (rect.top - gridRect.top) + 'px';
-      ghost.style.width = rect.width + 'px';
-      ghost.style.height = rect.height + 'px';
+      // The grid is the containing block, so these are layout lengths while the
+      // captured rects are painted ones.
+      const zoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
+      ghost.style.left = ((rect.left - gridRect.left) / zoom) + 'px';
+      ghost.style.top = ((rect.top - gridRect.top) / zoom) + 'px';
+      ghost.style.width = (rect.width / zoom) + 'px';
+      ghost.style.height = (rect.height / zoom) + 'px';
       ghost.style.pointerEvents = 'none';
       ghost.style.zIndex = '6';
       grid.appendChild(ghost);
@@ -615,8 +621,10 @@
         const first = before.get(id);
         if (!cell || !first || !cell.isConnected) return;
         const rect = sorterLayoutRect(cell);
-        const dx = Math.round((first.left - rect.left) * 10) / 10;
-        const dy = Math.round((first.top - rect.top) * 10) / 10;
+        // Rects are painted, transforms are layout: convert before animating.
+        const zoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
+        const dx = Math.round((first.left - rect.left) / zoom * 10) / 10;
+        const dy = Math.round((first.top - rect.top) / zoom * 10) / 10;
         if (!dx && !dy) return;
         try {
           cell.animate(
