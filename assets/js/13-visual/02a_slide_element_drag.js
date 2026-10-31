@@ -220,6 +220,11 @@
       stage.addEventListener('pointerdown', function handleSlidePointerDown(event) {
         if (event.button !== 0) return;
         if (slideElementDragActive) return;
+        // Text editing and native controls own their pointer events. Starting a
+        // marquee here would preventDefault and steal the caret from the
+        // contenteditable the user just clicked.
+        if (event.target.closest && event.target.closest(
+          '[contenteditable]:not([contenteditable="false"]), input, textarea, select, button, a[href], [role="textbox"]')) return;
         const target = slideDragTarget(slide, event.target);
         if (!target) {
           if (typeof startSlideMarqueeSelection === 'function' && getSlideEditSession(index)) {

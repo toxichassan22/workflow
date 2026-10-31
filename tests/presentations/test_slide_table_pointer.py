@@ -23,12 +23,19 @@ def _block(path, name, end):
     return source[start:stop]
 
 
+def _tail(path, name):
+    source = path.read_text(encoding='utf-8')
+    return source[source.index('function ' + name):]
+
+
 def _client_script():
     return '\n'.join([
         "var slideInlineEditStates = {0: true};",
         "var slideElementEditStates = {0: true};",
         "var slideEditSessions = {0: {}};",
+        "var slideElementDragActive = false;",
         "window.__editedCell = null;",
+        "window.__marqueeStarted = false;",
         "function hasPermission() { return true; }",
         "function autoFitSlideContent() {}",
         "function getSlideEditSession(index) { return slideEditSessions[index] || null; }",
@@ -37,6 +44,10 @@ def _client_script():
         "function slideChromeOf() { return null; }",
         "function watermarkOverlayOf() { return null; }",
         "function slideNodeIsVisualShape() { return false; }",
+        "function slideElementPath() { return [0]; }",
+        "function canvasSession() { return {}; }",
+        "function startSlideMarqueeSelection() { window.__marqueeStarted = true; }",
+        "function clearSlideSnapGuides() {}",
         "function stopEditEvent() {}",
         "function onInlineEditKey() {}",
         "function onInlineEditPaste() {}",
@@ -50,6 +61,7 @@ def _client_script():
         _block(SLIDE_PROGRESS, 'markSlideTablesForPointerEditing', 'function slidePathIgnores'),
         _block(AUTHORING, 'bindSlideTableEditing', 'function beginSlideTableCellEdit'),
         _block(ELEMENT_DRAG, 'slideDragTarget', 'function findSlideRawTarget'),
+        _tail(ELEMENT_DRAG, 'enableSlideElementDragging'),
     ])
 
 
@@ -71,6 +83,7 @@ PAGE = """<!doctype html><html dir="rtl"><head><meta charset="utf-8">
     <div class="tenant-slide-stage">
       <div class="slide">
         <p id="body-copy">نص عادي</p>
+        <span id="editable-text" contenteditable="plaintext-only">نص قابل للتعديل</span>
         <div id="table-frame">
           <div id="table-title">جدول بنود التكلفة</div>
           <table id="generated-table"><thead><tr><th>المرحلة</th><th>المدة</th></tr></thead>
@@ -172,6 +185,25 @@ class SlideTablePointerTests(unittest.TestCase):
             return window.__editedCell?.id || '';
         }""")
         self.assertEqual(edited, 'cell-a')
+
+    def test_contenteditable_text_keeps_native_pointer_behavior(self):
+        state = self.page.evaluate("""() => {
+            const stage = document.querySelector('.tenant-slide-stage');
+            const text = document.getElementById('editable-text');
+            enableSlideElementDragging(stage, 0);
+            const rect = text.getBoundingClientRect();
+            const event = new PointerEvent('pointerdown', {
+                bubbles: true, cancelable: true, button: 0,
+                clientX: rect.left + 5, clientY: rect.top + 5
+            });
+            text.dispatchEvent(event);
+            return {
+                prevented: event.defaultPrevented,
+                marquee: window.__marqueeStarted
+            };
+        }""")
+        self.assertFalse(state['prevented'])
+        self.assertFalse(state['marquee'])
 
 
 if __name__ == '__main__':
