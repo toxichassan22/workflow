@@ -820,7 +820,10 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertIn("'tenantSlidesData', 'tenantSlidePlan', 'pageDrafts', 'tenantCreativeImages', 'designerChat'", index_source)
         self.assertNotIn('chatPayload.projectData = { ...tenantProjectData, tenantSlidesData };', index_source)
         self.assertIn("'saved': False", app_source)
-        self.assertIn('class="slide-toolbar-chat-context"', index_source)
+        # The deck page reads as context | view switch | actions; the old
+        # «مصمم الشرائح» chip and the flat toolbar are gone on purpose.
+        self.assertIn('slide-workspace-header', index_source)
+        self.assertNotIn('class="slide-toolbar-chat-context"', index_source)
         self.assertIn('class="ge-chat-panel-status"', index_source)
         self.assertNotIn('id="tenantChatSlide"', index_source)
         self.assertIn('function openTenantChatImagePreview(src)', index_source)

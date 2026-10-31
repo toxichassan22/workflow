@@ -628,7 +628,11 @@
 
     async function requestPresentationApproval(presId) {
       const data = await api('POST', '/api/presentations/' + presId + '/request-approval');
-      if (data.success) { toast('تم إرسال طلب التعميد'); }
+      if (data.success) {
+        tenantPresentationStatus = 'pending_approval';
+        if (typeof renderSlidesHeader === 'function') renderSlidesHeader();
+        toast('تم إرسال طلب التعميد');
+      }
       else { toast(data.error || 'فشل'); }
     }
 

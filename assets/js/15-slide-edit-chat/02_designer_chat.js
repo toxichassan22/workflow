@@ -679,13 +679,27 @@
       if (!hasPermission('create_presentation')) return;
       if (tenantSlidesData.length <= 1) { toast('لا يمكن حذف آخر شريحة'); return; }
       if (!confirm(WFT('gen.slide_delete_confirm', 'حذف الشريحة {n}؟', { n: index + 1 }))) return;
+      const deletedId = String((tenantSlidesData[index] && tenantSlidesData[index].id) || '');
       beginPresentationUndoChange();
+      const wasActive = activeSlideIndex;
+      const wasChat = tenantChatSlideIndex;
       tenantSlidesData.splice(index, 1);
-      activeSlideIndex = Math.min(activeSlideIndex, tenantSlidesData.length - 1);
-      tenantChatSlideIndex = Math.min(tenantChatSlideIndex, tenantSlidesData.length - 1);
+      // Follow the slide, not the position: a delete above the open slide keeps
+      // it open (index - 1); deleting the open slide promotes the next one.
+      activeSlideIndex = index < wasActive
+        ? Math.max(0, wasActive - 1)
+        : (index === wasActive ? Math.min(index, tenantSlidesData.length - 1) : Math.min(wasActive, tenantSlidesData.length - 1));
+      tenantChatSlideIndex = index < wasChat
+        ? Math.max(0, wasChat - 1)
+        : Math.min(wasChat, tenantSlidesData.length - 1);
+      if (typeof tenantSlideSelectionIds !== 'undefined' && deletedId) {
+        tenantSlideSelectionIds = tenantSlideSelectionIds.filter(id => id !== deletedId);
+      }
       renumberTenantSlides();
       renderTenantSlides();
+      selectTenantSlide(activeSlideIndex, true);
       triggerAutoSaveDraft();
+      if (typeof renderTenantSlidesSorter === 'function') renderTenantSlidesSorter();
       toast('تم حذف الشريحة');
     }
 
@@ -696,6 +710,7 @@
       const button = document.getElementById('presentationSaveButton');
       if (button) { button.disabled = true; button.textContent = 'جاري الحفظ...'; }
       tenantPresentationSavePromise = (async () => {
+        let targetId = presentationId || '';
         let currentRevision = initialRevision;
         let attempts = 0;
         while (attempts < 2) {
@@ -704,15 +719,24 @@
           // Slides travel once as slidesData; the server ignores the embedded
           // copy inside projectData, so do not send it twice on the wire.
           const { tenantSlidesData: _embeddedSlides, ...projectDataBody } = snapshot;
-          const response = await api(presentationId ? 'PUT' : 'POST',
-            '/api/presentations' + (presentationId ? '/' + encodeURIComponent(presentationId) : ''), {
+          const response = await api(targetId ? 'PUT' : 'POST',
+            '/api/presentations' + (targetId ? '/' + encodeURIComponent(targetId) : ''), {
               title, projectData: projectDataBody, slidesData: snapshot.tenantSlidesData,
               slideCount: snapshot.tenantSlidesData.length,
-              ...(presentationId ? { expectedRevision: currentRevision } : {}),
+              ...(targetId ? { expectedRevision: currentRevision } : {}),
               changeSource: provenance ? 'ai' : 'manual', provenance,
               operation: options.operation || 'save'
             });
           if (!response?.success) {
+            // A draft+scope owns exactly one presentation. A create that lands on
+            // an existing scope is a regeneration of that file, so adopt it and
+            // save into it instead of failing forever on the same refusal.
+            if (response?.error_code === 'PRESENTATION_SCOPE_EXISTS' && !targetId
+                && response.presentationId && attempts === 1) {
+              targetId = String(response.presentationId);
+              currentRevision = Number(response.currentRevision) || 0;
+              continue;
+            }
             if (response?.error_code === 'PRESENTATION_REVISION_CONFLICT') {
               const serverRevision = Number(response.currentRevision);
               const isInteractive = typeof options.interactive !== 'undefined' ? options.interactive : !options.silent;
@@ -732,9 +756,10 @@
             throw saveError;
           }
           if (!presentationId || tenantPresentationId === presentationId) {
-            tenantPresentationId = response.presentationId || presentationId;
+            tenantPresentationId = response.presentationId || targetId;
             tenantPresentationRevision = Number(response.revision) || 0;
             tenantPresentationTitle = title;
+            tenantPresentationStatus = String(response.status || 'draft');
             tenantProjectMode = 'presentation';
             clearPresentationUndoProvenance();
             setSlidesEditorInfo(title, tenantSlidesData.length);
@@ -865,202 +890,3 @@
       checkpointPresentationUndo();
       return true;
     }
-
-
-    /* ── Designer-chat job persistence: busy indicator, workspace-keyed
-       job storage and restore/reset helpers. ── */
-
-
-    // The indicator carries the step word only: the server publishes no measured
-    // fraction for a chat turn, so there is no number to put in it.
-    function updateDesignerChatBusy(message) {
-      if (!tenantDesignerChatBusy) return;
-      if (message) tenantDesignerChatBusy.message = String(message);
-      const indicator = document.getElementById('tenantChatTypingIndicator');
-      if (indicator) setInlineLoaderProgress(indicator, tenantDesignerChatBusy.message);
-      updateDesignerChatStatus();
-    }
-
-    function clearDesignerChatBusy(workspaceKey = '') {
-      if (workspaceKey && tenantDesignerChatBusy?.workspaceKey
-        && tenantDesignerChatBusy.workspaceKey !== workspaceKey) return;
-      tenantDesignerChatBusy = null;
-      document.querySelectorAll('[data-designer-was-disabled]').forEach(button => {
-        button.disabled = button.dataset.designerWasDisabled === 'true';
-        delete button.dataset.designerWasDisabled;
-      });
-      const indicator = document.getElementById('tenantChatTypingIndicator');
-      if (indicator) indicator.remove();
-      if (typeof clearDesignerSlideActivity === 'function') clearDesignerSlideActivity();
-      updateDesignerChatStatus();
-    }
-
-    function restoreDesignerChatBusyIndicator() {
-      if (!tenantDesignerChatBusy) return;
-      const messages = document.getElementById('tenantChatMessages');
-      if (!messages) return;
-      if (document.getElementById('tenantChatTypingIndicator')) return;
-      const hint = messages.querySelector('.tenant-hint');
-      if (hint) hint.remove();
-      const indicator = document.createElement('div');
-      indicator.id = 'tenantChatTypingIndicator';
-      indicator.className = 'tenant-chat-message assistant typing';
-      showInlineLoader(indicator, tenantDesignerChatBusy.message);
-      setInlineLoaderProgress(indicator, tenantDesignerChatBusy.message);
-      messages.appendChild(indicator);
-      messages.scrollTop = messages.scrollHeight;
-    }
-
-    function designerChatWorkspaceKey(presentationId = tenantPresentationId, projectData = tenantProjectData) {
-      const tenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
-      const draftId = projectData && (projectData.draftId || projectData.draft_id);
-      const workspaceId = presentationId
-        ? 'presentation:' + String(presentationId)
-        : (draftId ? 'draft:' + String(draftId) : '');
-      return tenantId && workspaceId ? String(tenantId) + '|' + workspaceId : '';
-    }
-
-    function designerChatWorkspaceSignature() {
-      let serialized = '';
-      try {
-        serialized = JSON.stringify({ slides: tenantSlidesData, creativeImages: tenantCreativeImages });
-      } catch (error) {
-        serialized = String(tenantSlidesData.length);
-      }
-      let hash = 2166136261;
-      for (let index = 0; index < serialized.length; index++) {
-        hash ^= serialized.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
-      }
-      return serialized.length + ':' + (hash >>> 0).toString(16);
-    }
-
-    function readTenantDesignerJobs() {
-      try {
-        const parsed = JSON.parse(localStorage.getItem(T_DESIGNER_JOBS_KEY) || '{}');
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-      } catch (error) {
-        return {};
-      }
-    }
-
-    function persistTenantDesignerJob(metadata) {
-      if (!metadata || !metadata.jobId || !metadata.workspaceKey) return;
-      const jobs = readTenantDesignerJobs();
-      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-      Object.keys(jobs).forEach(key => {
-        if (!jobs[key] || Number(jobs[key].startedAt || 0) < cutoff) delete jobs[key];
-      });
-      jobs[metadata.workspaceKey] = {
-        jobId: String(metadata.jobId),
-        workspaceKey: String(metadata.workspaceKey),
-        presentationId: metadata.presentationId || null,
-        draftId: metadata.draftId || null,
-        message: String(metadata.message || '').slice(0, 2000),
-        target: String(metadata.target || 'auto'),
-        scope: String(metadata.scope || metadata.target || 'auto'),
-        indexes: Array.isArray(metadata.indexes) ? metadata.indexes.slice(0, 30) : [],
-        slideIndex: Number.isInteger(Number(metadata.slideIndex)) ? Number(metadata.slideIndex) : 0,
-        hadAttachment: !!metadata.hadAttachment,
-        workspaceSignature: String(metadata.workspaceSignature || ''),
-        slideSignatures: (metadata.slideSignatures && typeof metadata.slideSignatures === 'object')
-          ? { ...metadata.slideSignatures } : null,
-        creativeSignatures: (metadata.creativeSignatures && typeof metadata.creativeSignatures === 'object')
-          ? { ...metadata.creativeSignatures } : null,
-        appliedSeq: Number(metadata.appliedSeq) || 0,
-        startedAt: Number(metadata.startedAt || Date.now()),
-        updatedAt: Number(metadata.updatedAt || Date.now()),
-        status: String(metadata.status || 'queued'),
-        cancelRequested: !!metadata.cancelRequested
-      };
-      try {
-        localStorage.setItem(T_DESIGNER_JOBS_KEY, JSON.stringify(jobs));
-      } catch (error) {
-        console.warn('[DESIGNER JOB] Could not persist active job', error);
-      }
-    }
-
-    function currentTenantDesignerJob() {
-      const workspaceKey = designerChatWorkspaceKey();
-      if (!workspaceKey) return null;
-      const job = readTenantDesignerJobs()[workspaceKey];
-      return job && job.workspaceKey === workspaceKey ? job : null;
-    }
-
-    function clearTenantDesignerJob(metadata) {
-      if (!metadata || !metadata.workspaceKey) return;
-      const jobs = readTenantDesignerJobs();
-      const current = jobs[metadata.workspaceKey];
-      if (current && (!metadata.jobId || String(current.jobId) === String(metadata.jobId))) {
-        delete jobs[metadata.workspaceKey];
-        try {
-          localStorage.setItem(T_DESIGNER_JOBS_KEY, JSON.stringify(jobs));
-        } catch (error) {
-          console.warn('[DESIGNER JOB] Could not clear completed job', error);
-        }
-      }
-    }
-
-    function tenantDesignerJobMatchesWorkspace(metadata) {
-      return !!metadata && metadata.workspaceKey === designerChatWorkspaceKey();
-    }
-
-    function tenantDesignerServerJobMatches(metadata, serverJob) {
-      if (!metadata || !serverJob || typeof serverJob !== 'object') return true;
-      const sameWhenPresent = (expected, actual) => !expected || !actual || String(expected) === String(actual);
-      return sameWhenPresent(metadata.jobId, serverJob.jobId)
-        && sameWhenPresent(metadata.presentationId, serverJob.presentationId)
-        && sameWhenPresent(metadata.draftId, serverJob.draftId);
-    }
-
-    function tenantDesignerJobCanApply(metadata) {
-      // A job keyed by slide id defers drift handling to the merge at apply
-      // time — an edit on a slide the run never touched must not fail it.
-      if (metadata?.slideSignatures) return true;
-      return !metadata?.workspaceSignature
-        || metadata.workspaceSignature === designerChatWorkspaceSignature();
-    }
-
-    function designerChatPersistence(presentationId = tenantPresentationId) {
-      return {
-        presentationId: presentationId || null,
-        messages: tenantDesignerMessages.slice(-DESIGNER_CHAT_HISTORY_KEPT * 2).map(item => ({
-          role: item.role === 'user' ? 'user' : 'assistant',
-          content: String(item.content || '').slice(0, 2000),
-          slides: Array.isArray(item.slides) ? item.slides : []
-        })),
-        memory: tenantDesignerChatMemory || '',
-        focusIndexes: tenantChatFocusIndexes || []
-      };
-    }
-
-    function restoreDesignerChat(source, expectedPresentationId = null) {
-      const stored = source && typeof source === 'object' ? (source.designerChat || {}) : {};
-      const storedPresentationId = stored && stored.presentationId ? String(stored.presentationId) : '';
-      const presentationMatches = !expectedPresentationId || !storedPresentationId
-        || storedPresentationId === String(expectedPresentationId);
-      tenantDesignerMessages = Array.isArray(stored.messages)
-        && presentationMatches
-        ? stored.messages.filter(item => item && typeof item.content === 'string').map(item => ({
-          role: item.role === 'user' ? 'user' : 'assistant',
-          content: String(item.content).slice(0, 2000),
-          slides: Array.isArray(item.slides) ? item.slides : []
-        })).slice(-DESIGNER_CHAT_HISTORY_KEPT * 2)
-        : [];
-      tenantDesignerChatMemory = presentationMatches && typeof stored.memory === 'string'
-        ? stored.memory.slice(0, 40000) : '';
-      tenantChatFocusIndexes = presentationMatches && Array.isArray(stored.focusIndexes)
-        ? stored.focusIndexes.map(Number).filter(value => Number.isInteger(value) && value >= 1).slice(0, 30)
-        : [];
-    }
-
-    function resetDesignerChatForNewPresentation() {
-      tenantDesignerMessages = [];
-      tenantDesignerChatMemory = '';
-      tenantChatFocusIndexes = [];
-      tenantChatSlideScope = 'auto';
-      tenantProjectData.designerChat = designerChatPersistence(null);
-      renderTenantDesignerChat();
-    }
-    let tenantChatSlideIndex = 0;
-    let tenantChatSlideScope = 'auto';

@@ -307,9 +307,10 @@ PROJECT_FILE_EXTENSIONS = {
 PROJECT_FILE_TYPES = {'land_document', 'land_image', 'croquis', 'building_license',
                       'regulation_reference', 'team_logo', 'competitor_logo', 'visual_reference',
                       'conceptual_plan', 'project_logo', 'recharge_receipt', 'recharge_invoice',
-                      'ticket_attachment'}
+                      'slide_image', 'ticket_attachment'}
 # Types that must be real images: they are rendered in <img> thumbnails, where a PDF shows nothing.
-PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'competitor_logo', 'visual_reference', 'project_logo'}
+PROJECT_IMAGE_ONLY_TYPES = {'land_image', 'team_logo', 'competitor_logo', 'visual_reference',
+                            'project_logo', 'slide_image'}
 PROJECT_FILE_MAX_BYTES = 30 * 1024 * 1024
 # d10: the upload `fileType` resolves to a file_type_registry rule; where a rule
 # exists it governs the accepted extensions and the size ceiling, and the

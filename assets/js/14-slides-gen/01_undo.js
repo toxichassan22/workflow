@@ -56,9 +56,13 @@
     }
 
     function presentationUndoAvailable() {
+      // Only a session that actually holds local steps owns the undo; an open
+      // session with nothing to undo must not disable the deck-level undo.
+      const sessionHasSteps = Object.keys(slideEditSessions)
+        .some(key => Array.isArray(slideEditSessions[key]?.undo) && slideEditSessions[key].undo.length);
       return !!document.getElementById('tenantSlidesPage')?.classList.contains('active')
         && hasPermission('create_presentation') && !presentationUndoBusy()
-        && !Object.keys(slideEditSessions).length;
+        && !sessionHasSteps;
     }
 
     function updatePresentationUndoButtons() {
@@ -74,6 +78,7 @@
       presentationUndoPending = false;
       presentationUndoHistory = [capturePresentationUndo()];
       presentationUndoPosition = 0;
+      if (typeof restorePersistedUndoHistory === 'function') restorePersistedUndoHistory();
       updatePresentationUndoButtons();
     }
 
@@ -104,6 +109,7 @@
         || size > PRESENTATION_UNDO_MAX_CHARS)) size -= presentationUndoHistory.shift().data.length;
       presentationUndoPosition = presentationUndoHistory.length - 1;
       updatePresentationUndoButtons();
+      if (typeof persistPresentationUndoHistory === 'function') persistPresentationUndoHistory();
       return true;
     }
 
@@ -189,10 +195,12 @@
       const card = event.target?.closest?.('.ge-slide-card');
       const index = card ? Number(String(card.id).replace('slide-card-', '')) : activeSlideIndex;
       const session = getSlideEditSession(index);
-      if (session) {
+      if (session && (session.undo.length || session.redo.length)) {
         event.preventDefault();
         if (redo) redoSlideEdit(index); else undoSlideEdit(index);
-      } else if (!Object.keys(slideEditSessions).length) {
+      } else {
+        // No session step to undo: fall through to the deck history, which is
+        // available while the session stays open.
         const changed = redo ? redoPresentationChange() : undoPresentationChange();
         if (changed) event.preventDefault();
       }
@@ -279,6 +287,7 @@
       slideElementEditStates[index] = false;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       triggerAutoSaveDraft();
+      if (typeof closeSlideInspector === 'function') closeSlideInspector();
       refreshSingleSlideCard(index);
       if (keep === true && presentationUndoPosition >= 0) {
         // Approval changes edit metadata, not deck content; merge it into the
@@ -548,6 +557,8 @@
       enableSlideInlineEditing(stage, index);
       enableSlideElementDragging(stage, index);
       restoreSlideEditSelection(stage, index);
+      if (typeof applyTenantCanvasZoom === 'function') applyTenantCanvasZoom(tenantCanvasZoom, true);
+      if (typeof refreshSlideThumbnail === 'function') refreshSlideThumbnail(index);
       try {
         wrap.style.scrollBehavior = 'auto';
         wrap.scrollTop = savedScrollTop;
@@ -568,44 +579,72 @@
       const hasSel = !!session.sel;
       const dis = hasSel ? '' : ' disabled';
       const watermarkChecked = isWatermarkVisible(tenantSlidesData[index] && tenantSlidesData[index].html) ? ' checked' : '';
-      return '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('الجلسة') + '</span>'
+      // Each element kind carries its own tools: text controls never appear on an
+      // image and image controls never appear on a shape. The deck groups stay.
+      const selectionKind = (typeof slideToolbarSelectionKind === 'function')
+        ? slideToolbarSelectionKind(index) : '';
+      const textTools = (!selectionKind || selectionKind === 'text')
+        ? '<div class="slide-edit-group is-contextual" data-slide-edit-group="text">'
+          + '<span class="slide-edit-group-title">' + trDynamicI18n('تنسيق النص') + '</span>'
+          + '<div class="slide-edit-group-items">'
+          + '<button type="button" data-slide-edit-act="fontup"' + dis + '>' + trDynamicI18n('تكبير') + '</button>'
+          + '<button type="button" data-slide-edit-act="fontdown"' + dis + '>' + trDynamicI18n('تصغير') + '</button>'
+          + '<button type="button" data-slide-edit-act="bold"' + dis + '>' + trDynamicI18n('عريض') + '</button>'
+          + '<button type="button" data-slide-edit-act="alignright"' + dis + '>' + canvasText('ca.right', 'يمين') + '</button>'
+          + '<button type="button" data-slide-edit-act="aligncenter"' + dis + '>' + canvasText('ca.center', 'وسط') + '</button>'
+          + '<button type="button" data-slide-edit-act="alignleft"' + dis + '>' + canvasText('ca.left', 'يسار') + '</button>'
+          + '</div></div>'
+        : '';
+      const imageTools = selectionKind === 'image'
+        ? '<div class="slide-edit-group is-contextual" data-slide-edit-group="image">'
+          + '<span class="slide-edit-group-title">' + canvasText('ca.image', 'الصورة') + '</span>'
+          + '<div class="slide-edit-group-items">'
+          + '<button type="button" data-slide-edit-act="fitcover">' + canvasText('ca.cover', 'ملء') + '</button>'
+          + '<button type="button" data-slide-edit-act="fitcontain">' + canvasText('ca.contain', 'احتواء') + '</button>'
+          + '<button type="button" data-slide-edit-act="replaceimg">' + canvasText('ca.replace_image', 'استبدال') + '</button>'
+          + '</div></div>'
+        : '';
+      const shapeTools = selectionKind === 'shape'
+        ? '<div class="slide-edit-group is-contextual" data-slide-edit-group="shape">'
+          + '<span class="slide-edit-group-title">' + canvasText('ca.shape', 'الشكل') + '</span>'
+          + '<div class="slide-edit-group-items">'
+          + '<button type="button" data-slide-edit-act="shadow">' + canvasText('ca.toggle_shadow', 'تبديل الظل') + '</button>'
+          + '</div></div>'
+        : '';
+      return '<div class="slide-edit-group" data-slide-edit-group="session"><span class="slide-edit-group-title">' + trDynamicI18n('الجلسة') + '</span>'
         + '<div class="slide-edit-group-items">'
         + '<button type="button" class="active" data-slide-edit-act="commit">' + trDynamicI18n('اعتماد') + '</button>'
         + '<button type="button" data-slide-edit-act="cancel">' + trDynamicI18n('الغاء') + '</button>'
         + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('السجل') + '</span>'
+        + '<div class="slide-edit-group" data-slide-edit-group="record"><span class="slide-edit-group-title">' + trDynamicI18n('السجل') + '</span>'
         + '<div class="slide-edit-group-items">'
         + '<button type="button" data-slide-edit-act="undo"' + (canUndo ? '' : ' disabled') + '>' + trDynamicI18n('تراجع') + '</button>'
         + '<button type="button" data-slide-edit-act="redo"' + (canRedo ? '' : ' disabled') + '>' + trDynamicI18n('تقدم') + '</button>'
         + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('إضافة') + '</span>'
+        + '<div class="slide-edit-group" data-slide-edit-group="add"><span class="slide-edit-group-title">' + trDynamicI18n('إضافة') + '</span>'
         + '<div class="slide-edit-group-items">'
         + '<button type="button" data-slide-edit-act="addtext">' + trDynamicI18n('إضافة نص') + '</button>'
         + '<button type="button" data-slide-edit-act="addimage">' + trDynamicI18n('إضافة صورة') + '</button>'
         + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('العلامة المائية') + '</span>'
+        + '<div class="slide-edit-group" data-slide-edit-group="watermark"><span class="slide-edit-group-title">' + trDynamicI18n('العلامة المائية') + '</span>'
         + '<div class="slide-edit-group-items"><label class="slide-edit-watermark">'
         + '<input type="checkbox" data-slide-edit-watermark="toggle"' + watermarkChecked + '>' + trDynamicI18n('إظهار العلامة المائية')
         + '</label></div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('تنسيق النص') + '</span>'
-        + '<div class="slide-edit-group-items">'
-        + '<button type="button" data-slide-edit-act="fontup"' + dis + '>' + trDynamicI18n('تكبير') + '</button>'
-        + '<button type="button" data-slide-edit-act="fontdown"' + dis + '>' + trDynamicI18n('تصغير') + '</button>'
-         + '<button type="button" data-slide-edit-act="bold"' + dis + '>' + trDynamicI18n('عريض') + '</button>'
-         + '<button type="button" data-slide-edit-act="del"' + dis + '>' + trDynamicI18n('حذف العنصر') + '</button>'
-        + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('الطبقة') + '</span>'
+        + textTools + imageTools + shapeTools
+        + '<div class="slide-edit-group" data-slide-edit-group="common"><span class="slide-edit-group-title">' + trDynamicI18n('الطبقة') + '</span>'
         + '<div class="slide-edit-group-items">'
         + '<button type="button" data-slide-edit-act="front"' + dis + '>' + trDynamicI18n('أمام') + '</button>'
         + '<button type="button" data-slide-edit-act="back"' + dis + '>' + trDynamicI18n('خلف') + '</button>'
+        + '<button type="button" data-slide-edit-act="dup"' + dis + '>' + canvasText('ca.duplicate_element', 'تكرار') + '</button>'
+        + '<button type="button" data-slide-edit-act="del"' + dis + '>' + trDynamicI18n('حذف العنصر') + '</button>'
         + '</div></div>'
-        + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('الشفافية') + '</span>'
+        + '<div class="slide-edit-group" data-slide-edit-group="opacity"><span class="slide-edit-group-title">' + trDynamicI18n('الشفافية') + '</span>'
         + '<div class="slide-edit-group-items">'
         + '<input type="range" min="5" max="100" step="5" value="100" data-slide-edit-opacity="range"'
         + dis + ' style="width:110px" aria-label="' + trDynamicI18n('الشفافية') + '">'
         + '<span data-slide-edit-opacity-readout style="font-size:12px;min-width:38px;text-align:center">100%</span>'
         + '</div></div>'
-       + '<div class="slide-edit-group"><span class="slide-edit-group-title">' + trDynamicI18n('الألوان') + '</span>'
+        + '<div class="slide-edit-group" data-slide-edit-group="colors"><span class="slide-edit-group-title">' + trDynamicI18n('الألوان') + '</span>'
         + '<div class="slide-edit-group-items">'
         + '<label class="slide-edit-color">' + trDynamicI18n('لون النص') + '<input type="color" data-slide-edit-color="color" value="#1e293b"'
         + dis + '><input type="text" data-slide-edit-hex="color" value="#1e293b" maxlength="7" spellcheck="false" placeholder="#000000"'
@@ -670,6 +709,14 @@
           else if (act === 'del') deleteSelectedSlideElement(index);
           else if (act === 'front') adjustSlideElementLayer(index, 1);
           else if (act === 'back') adjustSlideElementLayer(index, -1);
+          else if (act === 'dup' && typeof duplicateSelectedSlideElements === 'function') duplicateSelectedSlideElements(index);
+          else if (act === 'alignright' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'right');
+          else if (act === 'aligncenter' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'center');
+          else if (act === 'alignleft' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'left');
+          else if (act === 'fitcover' && typeof setSlideSelectionImageFit === 'function') setSlideSelectionImageFit(index, 'cover');
+          else if (act === 'fitcontain' && typeof setSlideSelectionImageFit === 'function') setSlideSelectionImageFit(index, 'contain');
+          else if (act === 'replaceimg') openSlideImagePicker(index);
+          else if (act === 'shadow' && typeof toggleSlideSelectionShadow === 'function') toggleSlideSelectionShadow(index);
         });
       });
       editControls.querySelectorAll('[data-slide-edit-watermark="toggle"]').forEach(inp => {

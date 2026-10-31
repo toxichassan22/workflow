@@ -1,0 +1,461 @@
+/* Canvas editing: zoom bar, inspector, snapping guides, multi-selection. */
+
+#tenantSlidesPage .slides-canvas-zoom {
+  position: fixed;
+  bottom: 18px;
+  right: 232px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .96);
+  border: 1px solid #dbe3ea;
+  box-shadow: 0 6px 20px rgba(7, 24, 44, .16);
+  z-index: 640;
+  direction: rtl;
+}
+
+#tenantSlidesPage .slides-canvas-zoom button {
+  border: 0;
+  background: #eef2f6;
+  color: #07182C;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  border-radius: 999px;
+  padding: 5px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#tenantSlidesPage .slides-canvas-zoom button:hover {
+  background: #dce7ef;
+}
+
+#tenantSlidesPage .slides-canvas-zoom-readout {
+  min-width: 42px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  color: #07182C;
+  direction: ltr;
+}
+
+#tenantSlidesPage.slides-view-sorter .slides-canvas-zoom {
+  display: none;
+}
+
+#tenantSlidesPage .slide-inspector {
+  position: fixed;
+  top: 92px;
+  left: 16px;
+  width: 238px;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #dbe3ea;
+  border-radius: 13px;
+  box-shadow: 0 14px 40px rgba(7, 24, 44, .16);
+  z-index: 645;
+  direction: rtl;
+  padding: 10px;
+  display: none;
+}
+
+#tenantSlidesPage .slide-inspector.is-open {
+  display: block;
+}
+
+#tenantSlidesPage .slide-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid #eef2f6;
+}
+
+#tenantSlidesPage .slide-inspector-title {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #07182C;
+}
+
+#tenantSlidesPage .slide-inspector-close {
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+#tenantSlidesPage .slide-inspector-section {
+  border-top: 1px dashed #e8eef4;
+  padding: 7px 0 3px;
+}
+
+#tenantSlidesPage .slide-inspector-section:first-of-type {
+  border-top: 0;
+}
+
+#tenantSlidesPage .slide-inspector-section-title {
+  font-size: 9.5px;
+  font-weight: 800;
+  color: #64748b;
+  margin-bottom: 5px;
+}
+
+#tenantSlidesPage .slide-inspector-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 5px;
+}
+
+#tenantSlidesPage .slide-inspector-row label {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: #475569;
+  margin: 0;
+  font-weight: 700;
+}
+
+#tenantSlidesPage .slide-inspector-row input[type="number"],
+#tenantSlidesPage .slide-inspector-row input[type="text"] {
+  width: 66px;
+  padding: 3px 5px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid #dbe3ea;
+  direction: ltr;
+  text-align: center;
+}
+
+#tenantSlidesPage .slide-inspector-row input[type="color"] {
+  width: 34px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid #dbe3ea;
+  border-radius: 6px;
+  background: #fff;
+}
+
+#tenantSlidesPage .slide-inspector-row select {
+  width: 96px;
+  padding: 3px 5px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid #dbe3ea;
+  background: #fff;
+}
+
+#tenantSlidesPage .slide-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+#tenantSlidesPage .slide-inspector-actions button {
+  border: 1px solid #dbe3ea;
+  background: #f8fafc;
+  color: #07182C;
+  font: inherit;
+  font-size: 9.5px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+#tenantSlidesPage .slide-inspector-actions button:hover {
+  border-color: #17C8E3;
+  background: #E8F8FB;
+}
+
+#tenantSlidesPage .slide-inspector-actions button.is-active {
+  background: #07182C;
+  border-color: #07182C;
+  color: #fff;
+}
+
+#tenantSlidesPage .slide-inspector-hint {
+  font-size: 9.5px;
+  color: #94a3b8;
+  line-height: 1.6;
+}
+
+#tenantSlidesPage .slide-element-selected {
+  outline: 2px solid #17C8E3 !important;
+  outline-offset: 2px;
+}
+
+#tenantSlidesPage .slide-element-multiselected {
+  outline: 1.5px dashed #0FA9C4 !important;
+  outline-offset: 2px;
+}
+
+/* Snapping guides drawn inside the slide while an element is dragged. */
+#tenantSlidesPage .slide-snap-guide {
+  position: absolute;
+  background: #E11D8F;
+  opacity: .85;
+  pointer-events: none;
+  z-index: 400;
+}
+
+#tenantSlidesPage .slide-snap-guide.is-vertical {
+  width: 1px;
+  top: 0;
+  bottom: 0;
+}
+
+#tenantSlidesPage .slide-snap-guide.is-horizontal {
+  height: 1px;
+  left: 0;
+  right: 0;
+}
+
+#tenantSlidesPage .slide-rotation-handle {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #0FA9C4;
+  z-index: 310;
+  cursor: grab;
+  box-sizing: border-box;
+}
+
+#tenantSlidesPage .slide-rotation-handle::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: #0FA9C4;
+}
+
+#tenantSlidesPage .slide-edit-group.is-contextual {
+  border-color: #BFEFF6;
+  background: #F4FCFE;
+}
+
+#tenantSlidesPage .slide-edit-group[data-slide-edit-group="text"] .slide-edit-group-title,
+#tenantSlidesPage .slide-edit-group[data-slide-edit-group="image"] .slide-edit-group-title,
+#tenantSlidesPage .slide-edit-group[data-slide-edit-group="shape"] .slide-edit-group-title {
+  color: #0A6C7D;
+}
+
+#tenantSlidesPage .slide-edit-controls .slide-edit-group.is-hidden {
+  display: none;
+}
+
+/* On a narrow viewport the inspector docks at the bottom instead of covering
+   the canvas entirely. */
+@media (max-width: 900px) {
+  #tenantSlidesPage .slide-inspector {
+    top: auto;
+    bottom: 70px;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: 45vh;
+  }
+
+  #tenantSlidesPage .slides-canvas-zoom {
+    right: 8px;
+  }
+}
+
+/* A zoom above 100% makes the card wider than the reading column: the canvas
+   scrolls sideways instead of clipping the slide. */
+#tenantSlidesPage .ge-main {
+  overflow: auto;
+}
+
+/* ── Share dialog ─────────────────────────────────────────────────────── */
+#presentationShareModal {
+  position: fixed;
+  inset: 0;
+  z-index: 10060;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(5, 11, 20, .62);
+}
+
+#presentationShareModal.is-open {
+  display: flex;
+}
+
+#presentationShareModal .share-card {
+  width: min(560px, 100%);
+  max-height: 84vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px;
+  direction: rtl;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .35);
+}
+
+#presentationShareModal .share-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+#presentationShareModal .share-head h3 {
+  margin: 0;
+  font-size: 17px;
+  color: #07182C;
+}
+
+#presentationShareModal .share-close {
+  border: 1px solid #dbe3ea;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+#presentationShareModal .share-create {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #F7F9FC;
+  border: 1px solid #e2e8f0;
+}
+
+#presentationShareModal .share-create label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  margin: 2px 0 0;
+}
+
+#presentationShareModal .share-create input,
+#presentationShareModal .share-create select {
+  width: 100%;
+  border: 1px solid #dbe3ea;
+  border-radius: 8px;
+  padding: 8px 9px;
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+}
+
+#presentationShareModal .share-create-btn {
+  margin-top: 6px;
+  font-size: 12px;
+  padding: 9px;
+}
+
+#presentationShareModal .share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+#presentationShareModal .share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+#presentationShareModal .share-row.is-revoked,
+#presentationShareModal .share-row.is-expired {
+  background: #f8fafc;
+  opacity: .8;
+}
+
+#presentationShareModal .share-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#presentationShareModal .share-status {
+  font-size: 11px;
+  font-weight: 800;
+  color: #0A6C7D;
+}
+
+#presentationShareModal .share-row.is-revoked .share-status,
+#presentationShareModal .share-row.is-expired .share-status {
+  color: #94a3b8;
+}
+
+#presentationShareModal .share-meta {
+  font-size: 10px;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+#presentationShareModal .share-row-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+#presentationShareModal .share-row-actions button {
+  border: 1px solid #dbe3ea;
+  background: #f8fafc;
+  color: #07182C;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+#presentationShareModal .share-row-actions button:hover {
+  border-color: #17C8E3;
+  background: #E8F8FB;
+}
+
+#presentationShareModal .share-row-actions button.is-danger {
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #9f1239;
+}
+
+#presentationShareModal .share-empty {
+  padding: 14px;
+  text-align: center;
+  font-size: 12px;
+  color: #64748b;
+  border: 1px dashed #dbe3ea;
+  border-radius: 10px;
+}
+
+#presentationShareModal .share-empty.is-error {
+  color: #b3261e;
+  border-color: #fecaca;
+  background: #fff5f5;
+}

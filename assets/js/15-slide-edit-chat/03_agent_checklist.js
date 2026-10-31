@@ -6,9 +6,21 @@
     let tenantDesignerPendingPlan = null;
     let tenantDesignerRunTasks = null;
     let tenantDesignerCancelling = false;
+    let tenantDesignerChecklistCollapsed = false;
 
     function designerAgentText(key, fallback, params) {
       return (typeof WFT === 'function') ? WFT(key, fallback, params) : fallback;
+    }
+
+    function toggleDesignerChecklistCard() {
+      tenantDesignerChecklistCollapsed = !tenantDesignerChecklistCollapsed;
+      renderDesignerChecklist();
+    }
+
+    function designerChecklistProgress(tasks) {
+      const list = Array.isArray(tasks) ? tasks : [];
+      const done = list.filter(task => ['success', 'failed', 'skipped'].includes(String(task?.status || ''))).length;
+      return { done, total: list.length, percent: list.length ? Math.round((done / list.length) * 100) : 0 };
     }
 
     function designerTaskStatusLabel(status) {
@@ -94,7 +106,11 @@
       const pending = !!tenantDesignerPendingPlan;
       const running = !!tenantDesignerChatBusy;
       const failedCount = tasks.filter(t => ['failed', 'skipped'].includes(String(t?.status))).length;
+      const progress = designerChecklistProgress(tasks);
       const rows = designerTasksInDeckOrder(tasks).map(designerTaskRowHtml).join('');
+      // A plan starts open; confirming it folds the card into one progress line
+      // so the chat keeps its room while the tasks run.
+      if (running && !pending) tenantDesignerChecklistCollapsed = true;
       let actions = '';
       if (pending) {
         actions = '<div class="tenant-designer-checklist-actions">' +
@@ -116,14 +132,26 @@
           designerAgentText('designer_agent.retry_failed', 'إعادة المهام المتعثرة ({n})', { n: failedCount }) + '</button>' +
           '</div>';
       }
+      const title = pending
+        ? designerAgentText('designer_agent.pending_plan', 'خطة التنفيذ المقترحة')
+        : designerAgentText('designer_agent.run_tasks', 'مهام التنفيذ');
+      const toggleLabel = tenantDesignerChecklistCollapsed
+        ? designerAgentText('ws.plan_expand', 'توسيع')
+        : designerAgentText('ws.plan_collapse', 'طي');
       // The rows scroll inside their own track so a long plan never pushes the
       // confirm/cancel buttons below the fold — actions must stay reachable.
       box.innerHTML = '<div class="tenant-designer-checklist-card">' +
-        '<div class="tenant-designer-checklist-title">' +
-        (pending ? designerAgentText('designer_agent.pending_plan', 'خطة التنفيذ المقترحة')
-                 : designerAgentText('designer_agent.run_tasks', 'مهام التنفيذ')) +
-        '</div><div class="tenant-designer-checklist-rows">' + rows +
-        '</div>' + actions + '</div>';
+        '<div class="tenant-designer-checklist-head" onclick="toggleDesignerChecklistCard()">' +
+        '<span class="tenant-designer-checklist-title">' + escapeHtml(title) + '</span>' +
+        '<span class="tenant-designer-checklist-count">' + progress.done + ' / ' + progress.total + '</span>' +
+        '<button type="button" class="tenant-designer-checklist-toggle"' +
+        ' onclick="event.stopPropagation(); toggleDesignerChecklistCard()">' + escapeHtml(toggleLabel) + '</button>' +
+        '</div>' +
+        '<div class="tenant-designer-checklist-progress"><div class="tenant-designer-checklist-progress-fill" style="width:'
+        + progress.percent + '%"></div></div>' +
+        '<div class="tenant-designer-checklist-rows' + (tenantDesignerChecklistCollapsed ? '" style="display:none' : '')
+        + '">' + rows + '</div>' + actions + '</div>';
+      box.classList.toggle('is-collapsed', tenantDesignerChecklistCollapsed);
       box.hidden = false;
     }
 
@@ -131,6 +159,7 @@
       tenantDesignerPendingPlan = null;
       tenantDesignerRunTasks = null;
       tenantDesignerCancelling = false;
+      tenantDesignerChecklistCollapsed = false;
       renderDesignerChecklist();
       if (typeof clearDesignerSlideActivity === 'function') clearDesignerSlideActivity();
     }
@@ -141,6 +170,7 @@
       tenantDesignerPendingPlan = null;
       tenantDesignerRunTasks = null;
       tenantDesignerCancelling = false;
+      tenantDesignerChecklistCollapsed = false;
       renderDesignerChecklist();
       if (typeof clearDesignerSlideActivity === 'function') clearDesignerSlideActivity();
     }
@@ -158,6 +188,7 @@
         tasks: Array.isArray(reply.pendingPlan.tasks) ? reply.pendingPlan.tasks : []
       };
       tenantDesignerRunTasks = tenantDesignerPendingPlan.tasks;
+      tenantDesignerChecklistCollapsed = false;
       // plan_pending carries the id-annotated deck so the confirm echoes the
       // same ids back. Merge ids positionally — content is untouched.
       if (Array.isArray(reply.slidesData) && reply.slidesData.length === tenantSlidesData.length) {
@@ -240,6 +271,8 @@
       if (!plan) return;
       if (tenantDesignerChatBusy || currentTenantDesignerJob()) return;
       tenantDesignerPendingPlan = null;
+      tenantDesignerChecklistCollapsed = true;
+      renderDesignerChecklist();
       // Queued slides lock at confirm — the first poll would only repaint the
       // same marks a beat later.
       if (typeof applyDesignerSlideActivity === 'function') applyDesignerSlideActivity();

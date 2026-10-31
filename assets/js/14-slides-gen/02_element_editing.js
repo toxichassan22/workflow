@@ -43,6 +43,7 @@
       card.querySelectorAll('[data-slide-edit-opacity-readout]').forEach(el => {
         el.textContent = opacityPct + '%';
       });
+      if (typeof renderSlideInspector === 'function') renderSlideInspector(index);
     }
 
     let slideImageFileInput = null;
@@ -85,8 +86,12 @@
 
     function clearSlideElementSelection(stage) {
       if (!stage) return;
-      stage.querySelectorAll('.slide-element-selected').forEach(el => el.classList.remove('slide-element-selected'));
-      stage.querySelectorAll('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn').forEach(el => el.remove());
+      stage.querySelectorAll('.slide-element-selected, .slide-element-multiselected')
+        .forEach(el => el.classList.remove('slide-element-selected', 'slide-element-multiselected'));
+      stage.querySelectorAll('.slide-resize-handle, .slide-move-handle, .slide-element-delete-btn, .slide-rotation-handle')
+        .forEach(el => el.remove());
+      const slide = stage.querySelector('.slide');
+      if (slide) slide.querySelectorAll('.slide-snap-guide').forEach(el => el.remove());
     }
 
     function selectSlideElement(stage, index, target, path) {
@@ -102,6 +107,7 @@
           ? (target.getAttribute('data-company-logo-placement')
             || target.getAttribute('data-team-logo-placement') || '') : ''
       };
+      session.multi = [session.sel];
       target.classList.add('slide-element-selected');
       positionSlideEditHandles(stage, target);
       syncSlideElementToolbar(index);
@@ -231,6 +237,9 @@
           startSlideElementResize(stage, index, slide, target, def.dir, scale, event);
         });
       });
+      if (typeof attachSlideRotationHandle === 'function') {
+        attachSlideRotationHandle(stage, index, slide, target, x, y, w);
+      }
     }
 
     /* Free resize in any direction: the edge opposite the drag stays visually
@@ -301,12 +310,23 @@
         if (dir.indexOf('n') !== -1) newH = base.height - dh;
         newW = Math.max(24, Math.min(1280, Math.round(newW)));
         newH = Math.max(24, Math.min(720, Math.round(newH)));
-        if (touchW) target.style.width = newW + 'px';
-        if (touchH) {
-          if (isImage) target.style.height = newH + 'px';
-          else {
-            target.style.minHeight = newH + 'px';
-            if (explicitHeight) target.style.height = newH + 'px';
+        const aspectLock = isImage && slideEditSessions[index] && slideEditSessions[index].aspectLock;
+        if (aspectLock && base.width > 0 && base.height > 0) {
+          if (touchW && !touchH) newH = Math.round(newW * (base.height / base.width));
+          else if (touchH && !touchW) newW = Math.round(newH * (base.width / base.height));
+          else newH = Math.round(newW * (base.height / base.width));
+          newW = Math.max(24, Math.min(1280, newW));
+          newH = Math.max(24, Math.min(720, newH));
+          target.style.width = newW + 'px';
+          target.style.height = newH + 'px';
+        } else {
+          if (touchW) target.style.width = newW + 'px';
+          if (touchH) {
+            if (isImage) target.style.height = newH + 'px';
+            else {
+              target.style.minHeight = newH + 'px';
+              if (explicitHeight) target.style.height = newH + 'px';
+            }
           }
         }
         const m = measure();

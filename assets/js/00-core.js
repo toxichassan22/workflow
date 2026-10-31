@@ -506,12 +506,14 @@
 
     function updateDesignerChatStatus() {
       const status = document.querySelector('#tenantSlidesChat .ge-chat-panel-status');
-      if (!status) return;
-      if (tenantDesignerChatBusy && tenantDesignerChatBusy.message) {
-        status.textContent = tenantDesignerChatBusy.message;
-      } else {
-        status.textContent = 'جاهز للتعديل';
+      if (status) {
+        if (tenantDesignerChatBusy && tenantDesignerChatBusy.message) {
+          status.textContent = tenantDesignerChatBusy.message;
+        } else {
+          status.textContent = WFT('ws.chat_ready', 'جاهز للتعديل');
+        }
       }
+      if (typeof renderTenantComposerState === 'function') renderTenantComposerState();
     }
 
     function setDesignerChatBusy(message, workspaceKey = designerChatWorkspaceKey()) {

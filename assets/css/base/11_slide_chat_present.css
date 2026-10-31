@@ -1,0 +1,443 @@
+/* Chat panel, folded plan card and present mode (split from 09 to keep
+   each stylesheet under the file-size limit). */
+
+/* ── Chat panel: identity, collapse, resize, composer ──────────────────── */
+#tenantSlidesPage .ge-right-panel {
+  position: relative;
+  width: var(--chat-width, 340px);
+  min-width: 260px;
+  max-width: 560px;
+  background: #F7F9FC;
+  border-right: 1px solid #dfe7ee;
+  box-shadow: none;
+}
+
+#tenantSlidesPage .ge-right-panel.is-collapsed {
+  width: 44px !important;
+  min-width: 44px;
+}
+
+#tenantSlidesPage .ge-right-panel.is-collapsed .ge-chat-panel-status,
+#tenantSlidesPage .ge-right-panel.is-collapsed .tenant-chat-messages,
+#tenantSlidesPage .ge-right-panel.is-collapsed .tenant-chat-composer,
+#tenantSlidesPage .ge-right-panel.is-collapsed .ge-chat-resize,
+#tenantSlidesPage .ge-right-panel.is-collapsed .ge-chat-new,
+#tenantSlidesPage .ge-right-panel.is-collapsed .ge-chat-delete,
+#tenantSlidesPage .ge-right-panel.is-collapsed .ge-chat-collapse {
+  display: none !important;
+}
+
+#tenantSlidesPage .ge-chat-reopen {
+  display: none;
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 1px solid #dfe7ee;
+  border-radius: 999px;
+  background: #fff;
+  color: #07182C;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 6px 4px;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+}
+
+#tenantSlidesPage .ge-right-panel.is-collapsed .ge-chat-reopen {
+  display: block;
+}
+
+#tenantSlidesPage .ge-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 42px;
+  padding: 6px 8px !important;
+  background: #07182C;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+
+#tenantSlidesPage .ge-chat-panel-status {
+  flex: 1;
+  min-width: 0;
+  color: rgba(255, 255, 255, .82);
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tenantSlidesPage .ge-panel-header button {
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, .24);
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, .86);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#tenantSlidesPage .ge-panel-header button:hover {
+  background: rgba(255, 255, 255, .14);
+}
+
+#tenantSlidesPage .ge-chat-resize {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 30;
+}
+
+#tenantSlidesPage .ge-chat-resize:hover {
+  background: rgba(23, 200, 227, .35);
+}
+
+#tenantSlidesPage .tenant-chat-messages {
+  background: #F7F9FC !important;
+  padding: 12px 11px !important;
+  gap: 9px !important;
+}
+
+#tenantSlidesPage .tenant-chat-message {
+  max-width: 92%;
+  padding: 8px 11px;
+  border-radius: 13px;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#tenantSlidesPage .tenant-chat-message.user {
+  align-self: flex-start;
+  background: #07182C;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+#tenantSlidesPage .tenant-chat-message.assistant {
+  align-self: flex-end;
+  background: #fff;
+  color: #1e293b;
+  border: 1px solid #e2e8f0;
+  border-bottom-left-radius: 4px;
+}
+
+#tenantSlidesPage .tenant-chat-message.typing {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+#tenantSlidesPage .tenant-chat-composer {
+  background: #F7F9FC;
+  border-top: 1px solid #e2e8f0;
+  padding: 8px 9px 10px;
+}
+
+#tenantSlidesPage .tenant-chat-input-row {
+  border: 1px solid #dbe3ea;
+  border-radius: 12px;
+  background: #fff;
+  padding: 5px;
+}
+
+#tenantSlidesPage .tenant-chat-input-row:focus-within {
+  border-color: #17C8E3;
+  box-shadow: 0 0 0 2px rgba(23, 200, 227, .16);
+}
+
+#tenantSlidesPage .tenant-chat-entry-row textarea {
+  font-size: 12px;
+}
+
+#tenantSlidesPage .tenant-chat-attachment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 2px;
+  min-height: 0;
+}
+
+#tenantSlidesPage .tenant-chat-attachment-item {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #dbe3ea;
+  background: #fff;
+}
+
+#tenantSlidesPage .tenant-chat-attachment-item.is-doc {
+  width: auto;
+  max-width: 140px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #475569;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tenantSlidesPage .tenant-chat-attachment-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border: 0;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+#tenantSlidesPage .tenant-chat-attachment-remove {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  border: 0;
+  background: rgba(7, 24, 44, .78);
+  color: #fff;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 0;
+  cursor: pointer;
+}
+
+/* ── The plan travels as a folded card inside the message flow ─────────── */
+#tenantSlidesPage .tenant-designer-checklist {
+  align-self: stretch;
+  max-width: 100%;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-card {
+  border: 1px solid #dbe3ea;
+  border-radius: 12px;
+  background: #fff;
+  padding: 8px 10px;
+  gap: 6px;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #334155;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 800;
+  color: #0A6C7D;
+  direction: ltr;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-toggle {
+  flex-shrink: 0;
+  border: 1px solid #dbe3ea;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  font-size: 9.5px;
+  font-weight: 700;
+  border-radius: 6px;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: #e8eef4;
+  overflow: hidden;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-progress-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #07182C, #17C8E3);
+  transition: width .3s ease;
+}
+
+#tenantSlidesPage .tenant-designer-checklist.is-collapsed .tenant-designer-checklist-rows {
+  display: none;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-rows {
+  max-height: min(240px, 32vh);
+}
+
+#tenantSlidesPage .tenant-designer-checklist-actions {
+  margin-top: 2px;
+}
+
+#tenantSlidesPage .tenant-designer-checklist-actions .btn {
+  font-size: 11px;
+  padding: 5px 11px;
+  border-radius: 8px;
+}
+
+/* ── Present mode ─────────────────────────────────────────────────────── */
+#tenantPresentOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  background: #050B14;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#tenantPresentOverlay.is-open {
+  display: flex;
+}
+
+#tenantPresentOverlay .present-stage {
+  position: relative;
+  width: 1280px;
+  height: 720px;
+  transform-origin: center center;
+  background: #fff;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, .55);
+}
+
+#tenantPresentOverlay .present-stage .slide {
+  width: 1280px !important;
+  height: 720px !important;
+  margin: 0 !important;
+  transform: none !important;
+}
+
+#tenantPresentOverlay .present-stage .slide * {
+  box-sizing: border-box;
+}
+
+#tenantPresentOverlay .present-controls {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, .82);
+  border: 1px solid rgba(255, 255, 255, .14);
+  transition: opacity .25s ease;
+  z-index: 12010;
+}
+
+#tenantPresentOverlay.controls-hidden .present-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+
+#tenantPresentOverlay .present-controls button {
+  border: 0;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 6px 13px;
+  cursor: pointer;
+}
+
+#tenantPresentOverlay .present-controls button:hover {
+  background: rgba(255, 255, 255, .24);
+}
+
+#tenantPresentOverlay .present-counter {
+  color: rgba(255, 255, 255, .82);
+  font-size: 11px;
+  font-weight: 800;
+  direction: ltr;
+  min-width: 54px;
+  text-align: center;
+}
+
+/* ── Responsive ───────────────────────────────────────────────────────── */
+@media (max-width: 1100px) {
+  #tenantSlidesPage .slide-workspace-header {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  #tenantSlidesPage .slide-header-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  #tenantSlidesPage .slide-header-view-switch {
+    justify-self: flex-start;
+  }
+}
+
+@media (max-width: 900px) {
+  #tenantSlidesPage .ge-sidebar {
+    width: 100%;
+    max-height: 120px;
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px;
+  }
+
+  #tenantSlidesPage .ge-sidebar .ge-thumb {
+    min-width: 150px;
+    margin-bottom: 0;
+  }
+
+  #tenantSlidesPage .ge-sidebar-head,
+  #tenantSlidesPage .ge-thumb-add {
+    display: none;
+  }
+
+  #tenantSlidesPage .ge-right-panel {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none;
+  }
+}
+
+#tenantSlidesPage .tenant-chat-entry-row [hidden] {
+  display: none !important;
+}

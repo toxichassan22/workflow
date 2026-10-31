@@ -10,6 +10,7 @@
       setTenantDraftRevision(p.draftRevision);
       tenantPresentationProvenance = null;
       tenantPresentationTitle = p.title || '';
+      tenantPresentationStatus = p.status || 'draft';
       tenantProjectMode = 'presentation';
       tenantProjectData = { ...(p.projectData || {}) };
       // Keep saving to the draft this presentation was generated from. Without an

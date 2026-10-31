@@ -1,40 +1,86 @@
 /* 15-slide-edit-chat.js - index.html lines 24651-26147, shared global scope, classic scripts in order */
 
-    function addSlideImageFromDevice(index, file) {
+    async function uploadSlideImageFile(file) {
+      const form = new FormData();
+      form.append('file', file, file.name);
+      form.append('fileType', 'slide_image');
+      if (tenantProjectData?.draftId) form.append('draftId', tenantProjectData.draftId);
+      const response = await api('POST', '/api/project-files', form, true);
+      if (!response?.success || !response.file?.id) {
+        throw new Error(response?.error || WFT('slide.image_upload_failed', 'تعذر رفع الصورة'));
+      }
+      return publishProjectFileImageUrl(response.file.id);
+    }
+
+    // Images used to be stored as base64 data URIs inside the slide HTML, which
+    // ballooned the saved deck and the export. They now land as durable project
+    // files; the slide carries a normal URL.
+    async function addSlideImageFromDevice(index, file) {
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html || !file) return;
       if (!getSlideEditSession(index)) return;
-      if (!String(file.type || '').startsWith('image/')) { toast('الملف المختار ليس صورة'); return; }
-      if (file.size > 4 * 1024 * 1024) { toast('حجم الصورة كبير (الحد 4 ميجا)'); return; }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const url = String(reader.result || '');
-        if (!url.startsWith('data:image/')) { toast('تعذر قراءة الصورة'); return; }
-        const current = tenantSlidesData[index];
-        if (!current || !current.html || !getSlideEditSession(index)) return;
-        const rawDoc = new DOMParser().parseFromString(current.html, 'text/html');
-        const rawRoot = rawDoc.querySelector('.slide');
-        if (!rawRoot) return;
+      if (!String(file.type || '').startsWith('image/')) {
+        toast(WFT('slide.image_required', 'الملف المختار ليس صورة'));
+        return;
+      }
+      if (file.size > 4 * 1024 * 1024) {
+        toast(WFT('slide.image_too_large', 'حجم الصورة كبير (الحد 4 ميجا)'));
+        return;
+      }
+      showLoader(WFT('slide.image_uploading', 'رفع الصورة'), WFT('slide.image_uploading_hint', 'يتم حفظ الصورة في ملفات المشروع...'));
+      let url = '';
+      try {
+        url = await uploadSlideImageFile(file);
+      } catch (error) {
+        hideLoader();
+        toast(error?.message || WFT('slide.image_upload_failed', 'تعذر رفع الصورة'));
+        return;
+      }
+      hideLoader();
+      const current = tenantSlidesData[index];
+      const session = getSlideEditSession(index);
+      if (!current || !current.html || !session) return;
+      const rawDoc = new DOMParser().parseFromString(current.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      if (!rawRoot) return;
+      // An image already selected is replaced in place instead of stacking a
+      // second image over it.
+      const stage = slideStageForIndex(index);
+      const liveSlide = stage ? stage.querySelector('.slide') : null;
+      const selected = session.sel && liveSlide ? elementAtSlidePath(liveSlide, session.sel.path) : null;
+      const selectedImage = selected && (selected.tagName === 'IMG'
+        ? selected : selected.querySelector && selected.querySelector('img'));
+      if (selectedImage && liveSlide && liveSlide.contains(selectedImage)) {
         pushSlideEditHistory(index);
-        const wrap = rawDoc.createElement('div');
-        wrap.setAttribute('data-slide-imagebox', '1');
-        wrap.setAttribute('style', 'position:absolute;top:180px;right:390px;width:500px;'
-          + 'box-sizing:border-box;z-index:5;');
-        const img = rawDoc.createElement('img');
-        img.setAttribute('src', url);
-        img.setAttribute('alt', '');
-        img.setAttribute('style', 'display:block;width:100%;height:auto;border-radius:10px;');
-        wrap.appendChild(img);
-        rawRoot.appendChild(wrap);
+        const rawImage = findSlideRawTarget(rawRoot, selectedImage, slideElementPath(liveSlide, selectedImage));
+        if (!rawImage) return;
+        selectedImage.setAttribute('src', url);
+        rawImage.setAttribute('src', url);
         current.html = rawRoot.outerHTML;
         tenantProjectData.tenantSlidesData = tenantSlidesData;
         touchSlideEditSession(index);
         triggerAutoSaveDraft();
         refreshSingleSlideCard(index);
-        toast('تمت إضافة الصورة');
-      };
-      reader.onerror = () => toast('تعذر قراءة الصورة');
-      reader.readAsDataURL(file);
+        toast(WFT('slide.image_replaced', 'تم استبدال الصورة'));
+        return;
+      }
+      pushSlideEditHistory(index);
+      const wrap = rawDoc.createElement('div');
+      wrap.setAttribute('data-slide-imagebox', '1');
+      wrap.setAttribute('style', 'position:absolute;top:180px;right:390px;width:500px;'
+        + 'box-sizing:border-box;z-index:5;');
+      const img = rawDoc.createElement('img');
+      img.setAttribute('src', url);
+      img.setAttribute('alt', '');
+      img.setAttribute('style', 'display:block;width:100%;height:auto;border-radius:10px;');
+      wrap.appendChild(img);
+      rawRoot.appendChild(wrap);
+      current.html = rawRoot.outerHTML;
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      refreshSingleSlideCard(index);
+      toast(WFT('slide.image_added', 'تمت إضافة الصورة'));
     }
 
     function onSlideEditableFocus(event) {
@@ -170,10 +216,13 @@
     }
 
     function setSlidesEditorInfo(title, count) {
-      const editorInfo = document.getElementById('slidesEditorInfo');
-      if (!editorInfo) return;
       const name = String(title || '').trim();
-      editorInfo.innerHTML = name ? '<span>عرض:</span> ' + escapeHtml(name) + ' | <span>' + (count || 0) + '</span> <span>شريحة</span>' : '';
+      if (name) tenantPresentationTitle = name;
+      const editorInfo = document.getElementById('slidesEditorInfo');
+      if (editorInfo) {
+        editorInfo.textContent = name ? name + ' | ' + (count || tenantSlidesData.length || 0) : '';
+      }
+      if (typeof renderSlidesHeader === 'function') renderSlidesHeader();
     }
 
     // Opening a saved presentation leaves its slides, its thumbnails and its title in this page's
@@ -221,10 +270,20 @@
       // tenantSlidesData only holds the committed prefix. Rebuilding here would
       // wipe the in-flight cards and flash the deck away mid-run.
       if (isGeneratingTenantSlides) return;
+      // Rebuilding the list changes every card's height; the scroll events that
+      // follow must not move the open slide through the scroll-spy.
+      isProgrammaticScrolling = true;
       // Manual edit flows (تعديل/اعتماد/تراجع/تقدم/الغاء) re-render the whole list.
-      // Clearing the container resets scrollTop to 0, which looked like a 3-4 slide
-      // jump. Preserve the exact pixel so the view stays fixed on the same slide.
+      // The skeleton pass renders short cards, so a raw scrollTop restore lands on
+      // a later slide once the real cards grow — the 4-5 slide jump after a delete.
+      // Anchor on the active card instead and put it back at the same offset after
+      // every card has its final height.
       const savedScrollTop = wrap.scrollTop;
+      const wrapRect = wrap.getBoundingClientRect();
+      const anchorCard = wrap.querySelector('.ge-slide-card.active-slide');
+      const anchorId = anchorCard ? String(anchorCard.dataset.slideId || '') : '';
+      const anchorOffset = anchorCard ? (anchorCard.getBoundingClientRect().top - wrapRect.top) : null;
+      if (typeof initScrollSpy === 'function') initScrollSpy();
       renumberTenantSlides();
       try { syncSlideEditSessionsAfterRender(); } catch (err) {}
       // If branding hasn't loaded yet (failed/slow earlier), retry it and re-render
@@ -297,6 +356,7 @@
 
       renderTenantSlidesSidebar();
       renderTenantDesignerChat();
+      if (typeof applyTenantCanvasZoom === 'function') applyTenantCanvasZoom(tenantCanvasZoom, true);
       setTimeout(tgrRefit, 0);
 
       // Phase 2: batch-process heavy slide rendering off the main-thread bottleneck
@@ -320,7 +380,19 @@
         cursor = end;
         if (cursor < containers.length) {
           renderTenantSlides._batchTimer = setTimeout(processBatch, 0);
+        } else if (anchorId && anchorOffset !== null) {
+          const nextCard = Array.from(wrap.querySelectorAll('.ge-slide-card'))
+            .find(card => card.dataset.slideId === anchorId);
+          if (nextCard) {
+            const delta = (nextCard.getBoundingClientRect().top - wrap.getBoundingClientRect().top) - anchorOffset;
+            try {
+              wrap.style.scrollBehavior = 'auto';
+              wrap.scrollTop += delta;
+              wrap.style.scrollBehavior = '';
+            } catch (err) { /* ignore */ }
+          }
         }
+        setTimeout(() => { isProgrammaticScrolling = false; }, 300);
       }
       renderTenantSlides._batchTimer = setTimeout(processBatch, 0);
       if (typeof reapplyDesignerSlideActivity === 'function') reapplyDesignerSlideActivity();
@@ -357,43 +429,8 @@
       renderTenantSlides();
       selectTenantSlide(toIdx);
       triggerAutoSaveDraft();
+      if (typeof renderTenantSlidesSorter === 'function') renderTenantSlidesSorter();
       toast(WFT('gen.slide_moved', 'تم نقل الشريحة {from} إلى الموقع {to} بنجاح', { from: fromIdx + 1, to: toIdx + 1 }));
-    }
-
-    function renderTenantSlidesSidebar(force) {
-      const sidebar = document.getElementById('tenantSlidesSidebar');
-      if (!sidebar) return;
-      // Mid-generation the sidebar holds plan thumbnails keyed thumb-slide-i;
-      // rebuilding it from the committed prefix would drop the in-flight ones.
-      if (isGeneratingTenantSlides && !force) return;
-      sidebar.innerHTML = '';
-
-      tenantSlidesData.forEach((s, i) => {
-        const thumb = document.createElement('div');
-        thumb.className = 'ge-thumb' + (i === activeSlideIndex ? ' active' : '');
-        thumb.onclick = () => selectTenantSlide(i);
-
-        const moveUpBtn = i > 0 ? '<button type="button" class="ge-thumb-move" title="تحريك لأعلى" aria-label="تحريك لأعلى" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i - 1) + ')">أعلى</button>' : '';
-        const moveDownBtn = i < tenantSlidesData.length - 1 ? '<button type="button" class="ge-thumb-move" title="تحريك لأسفل" aria-label="تحريك لأسفل" onclick="event.stopPropagation(); moveTenantSlide(' + i + ', ' + (i + 1) + ')">أسفل</button>' : '';
-        const regenerateBtn = hasPermission('create_presentation')
-          ? '<button type="button" class="ge-thumb-regenerate" title="إعادة توليد هذه الشريحة فقط" aria-label="إعادة توليد هذه الشريحة فقط"' +
-            ((isGeneratingTenantSlides || isRegeneratingTenantSlide) ? ' disabled' : '') +
-            ' onclick="event.stopPropagation(); regenerateTenantSlide(' + i + ')">إعادة توليد</button>'
-          : '';
-        const deleteBtn = hasPermission('create_presentation') && tenantSlidesData.length > 1
-          ? '<button type="button" class="ge-thumb-delete" title="حذف الشريحة" aria-label="حذف الشريحة" onclick="event.stopPropagation(); deleteSlide(' + i + ')">حذف</button>'
-          : '';
-        const backgroundBtn = hasPermission('create_presentation') && tenantSlideHasBackground(s)
-          ? '<button type="button" class="ge-thumb-delete" title="' + escapeHtml(WFT('gen.slide_no_background', 'بدون خلفية')) + '" aria-label="' + escapeHtml(WFT('gen.slide_no_background', 'بدون خلفية')) + '"' +
-            ' onclick="event.stopPropagation(); removeTenantSlideBackground(' + i + ')">' + escapeHtml(WFT('gen.slide_no_background', 'بدون خلفية')) + '</button>'
-          : '';
-
-        thumb.innerHTML = '<span class="ge-thumb-num">' + (i + 1) + '</span>' +
-          '<span class="ge-thumb-title" title="' + escapeHtml(s.title || '') + '">' + escapeHtml(s.title || 'شريحة بدون عنوان') + '</span>' +
-          '<div class="ge-thumb-actions">' + moveUpBtn + moveDownBtn + regenerateBtn + backgroundBtn + deleteBtn + '</div>';
-        sidebar.appendChild(thumb);
-      });
-      if (typeof reapplyDesignerSlideActivity === 'function') reapplyDesignerSlideActivity();
     }
 
     let isProgrammaticScrolling = false;
@@ -495,8 +532,9 @@
     }
 
     function initScrollSpy() {
-      const mainWrap = document.getElementById('tenantSlidesMainWrap');
-      if (!mainWrap) return;
+      const mainWrap = document.getElementById('tenantSlidesMain');
+      if (!mainWrap || mainWrap.dataset.scrollSpyBound === '1') return;
+      mainWrap.dataset.scrollSpyBound = '1';
 
       mainWrap.addEventListener('scroll', () => {
         if (isProgrammaticScrolling) return;
@@ -557,11 +595,16 @@
       const messages = document.getElementById('tenantChatMessages');
       if (!messages) return;
       if (tenantChatSlideIndex >= tenantSlidesData.length) tenantChatSlideIndex = 0;
+      // The plan card lives inside the message flow; the innerHTML rebuild below
+      // would drop it, so detached and re-appended afterwards.
+      const checklist = document.getElementById('tenantDesignerChecklist');
 
       if (!tenantDesignerMessages.length) {
         messages.innerHTML = '<div class="tenant-hint">' + trDynamicI18n('لا توجد تعديلات بعد.') + '</div>';
+        if (checklist) messages.appendChild(checklist);
         restoreDesignerChatBusyIndicator();
         updateDesignerChatStatus();
+        if (typeof renderTenantComposerState === 'function') renderTenantComposerState();
         return;
       }
       messages.innerHTML = tenantDesignerMessages.map(message => {
@@ -575,9 +618,11 @@
           galleryHtml +
           escapeHtml(message.content) + '</div>';
       }).join('');
+      if (checklist) messages.appendChild(checklist);
       restoreDesignerChatBusyIndicator();
       messages.scrollTop = messages.scrollHeight;
       updateDesignerChatStatus();
+      if (typeof renderTenantComposerState === 'function') renderTenantComposerState();
     }
     // Chat logs are excluded from auto-translate (user/AI content), so the
     // empty state above is resolved at build time; refresh it on toggle.
@@ -619,106 +664,6 @@
       if (!input) return;
       input.style.height = 'auto';
       input.style.height = Math.min(input.scrollHeight, 140) + 'px';
-    }
-
-    let tenantChatAttachedImage = null;
-    let tenantChatAttachedImages = [];
-    let tenantChatAttachedDocs = [];
-    const TENANT_CHAT_IMAGE_LIMIT = 4 * 1024 * 1024;
-    const TENANT_CHAT_MAX_IMAGES = 3;
-    const TENANT_CHAT_MAX_DOCS = 2;
-
-    function renderTenantChatAttachment() {
-      const box = document.getElementById('tenantChatAttachment');
-      const name = document.getElementById('tenantChatAttachmentName');
-      if (!box) return;
-      const list = tenantChatAttachedImages.length ? tenantChatAttachedImages : (tenantChatAttachedImage ? [tenantChatAttachedImage] : []);
-      const all = list.concat(tenantChatAttachedDocs);
-      box.hidden = !all.length;
-      if (!all.length) {
-        if (name) name.textContent = '';
-        return;
-      }
-      if (name) name.textContent = all.map(item => item.name).join('، ');
-    }
-
-    function openTenantChatImagePreview(src) {
-      if (!src) return;
-      const previous = document.getElementById('tenantChatLightbox');
-      if (previous) previous.remove();
-      const modal = document.createElement('div');
-      modal.id = 'tenantChatLightbox';
-      modal.className = 'tenant-chat-lightbox';
-      modal.innerHTML = '<div class="tenant-chat-lightbox-card">' +
-        '<button type="button" class="tenant-chat-lightbox-close" aria-label="إغلاق الصورة">إغلاق</button>' +
-        '<img src="' + escapeHtml(src) + '" alt="صورة مرفقة">' +
-        '</div>';
-      modal.addEventListener('click', event => {
-        if (event.target === modal || event.target.closest('.tenant-chat-lightbox-close')) modal.remove();
-      });
-      document.body.appendChild(modal);
-    }
-
-    function clearTenantChatAttachment() {
-      tenantChatAttachedImage = null;
-      tenantChatAttachedImages = [];
-      tenantChatAttachedDocs = [];
-      const input = document.getElementById('tenantChatImageFile');
-      if (input) input.value = '';
-      renderTenantChatAttachment();
-    }
-
-    // The attach button used to open the training page's file input, and the designer never
-    // received the image: the picked file was only ever read by the training chat.
-    function attachTenantChatImage(input) {
-      const picked = input && input.files ? Array.from(input.files).slice(0, TENANT_CHAT_MAX_IMAGES) : [];
-      if (!picked.length) return;
-      const images = [];
-      const docs = [];
-      for (const file of picked) {
-        if (String(file.type || '') === 'application/pdf') {
-          if (file.size > TENANT_CHAT_IMAGE_LIMIT) {
-            toast('حجم الملف أكبر من 4 م.ب');
-            clearTenantChatAttachment();
-            return;
-          }
-          docs.push(file);
-          continue;
-        }
-        if (!String(file.type || '').startsWith('image/')) {
-          toast(WFT('chat.attachment_unsupported_type', 'نوع الملف غير مدعوم — أرفق صورة أو PDF'));
-          clearTenantChatAttachment();
-          return;
-        }
-        if (file.size > TENANT_CHAT_IMAGE_LIMIT) {
-          toast('حجم الصورة أكبر من 4 م.ب');
-          clearTenantChatAttachment();
-          return;
-        }
-        images.push(file);
-      }
-      const readFile = file => new Promise(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => resolve({ name: file.name, dataUri: String(reader.result || '') });
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(file);
-      });
-      Promise.all(images.concat(docs).map(readFile)).then(results => {
-        const imageItems = results.slice(0, images.length)
-          .filter(item => item && String(item.dataUri || '').startsWith('data:image/'));
-        const docItems = results.slice(images.length)
-          .filter(item => item && String(item.dataUri || '').startsWith('data:application/pdf'))
-          .slice(0, TENANT_CHAT_MAX_DOCS);
-        if (!imageItems.length && !docItems.length) {
-          toast(WFT('chat.attachment_read_failed', 'تعذر قراءة الملف المرفق'));
-          clearTenantChatAttachment();
-          return;
-        }
-        tenantChatAttachedImages = imageItems.slice(0, TENANT_CHAT_MAX_IMAGES);
-        tenantChatAttachedImage = tenantChatAttachedImages[0] || null;
-        tenantChatAttachedDocs = docItems;
-        renderTenantChatAttachment();
-      });
     }
 
     // The server compresses the older turns into one memory string and reports which slides the
