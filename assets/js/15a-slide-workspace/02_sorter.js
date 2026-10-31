@@ -340,12 +340,308 @@
       sorterApplyDrop(grid, slot);
     }
 
+    function sorterRenderCellLabel(cell, slide, index) {
+      const label = cell.querySelector('.ge-sorter-label');
+      if (!label) return;
+      const titleText = slide.title || sorterText('ws.no_title', 'شريحة بدون عنوان');
+      const number = label.querySelector('.ge-thumb-num');
+      if (number) number.textContent = String(index + 1);
+      const title = label.querySelector('.ge-thumb-title');
+      if (title) {
+        title.textContent = titleText;
+        title.setAttribute('title', titleText);
+      }
+      let remove = label.querySelector('.ge-sorter-delete');
+      const canDelete = hasPermission('create_presentation') && tenantSlidesData.length > 1;
+      if (canDelete && !remove) {
+        remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'ge-sorter-delete';
+        remove.onclick = event => {
+          event.stopPropagation();
+          const current = Number(cell.dataset.sorterIndex);
+          if (!Number.isFinite(current)) return;
+          if (typeof deleteSlide === 'function') deleteSlide(current);
+        };
+        remove.ondblclick = event => event.stopPropagation();
+        label.appendChild(remove);
+      } else if (!canDelete && remove) {
+        remove.remove();
+        remove = null;
+      }
+      if (remove) {
+        const removeLabel = sorterText('ws.delete', 'حذف');
+        remove.textContent = removeLabel;
+        remove.title = removeLabel;
+        remove.setAttribute('aria-label', removeLabel);
+      }
+    }
+
+    function sorterBuildCell(grid, slide, index) {
+      const cell = document.createElement('div');
+      cell.className = 'ge-sorter-cell';
+      cell.dataset.slideId = String(slide.id || '');
+      cell.dataset.sorterIndex = String(index);
+
+      const card = document.createElement('div');
+      card.className = 'ge-sorter-card' + (index === activeSlideIndex ? ' active' : '')
+        + (slide.hidden ? ' is-hidden' : '');
+      card.dataset.slideId = String(slide.id || '');
+      card.dataset.sorterIndex = String(index);
+      card.draggable = hasPermission('create_presentation');
+      card.onclick = () => {
+        const current = Number(cell.dataset.sorterIndex);
+        if (!Number.isFinite(current)) return;
+        selectTenantSlide(current);
+        sorterHighlightActive(grid);
+      };
+      card.ondblclick = () => {
+        const current = Number(cell.dataset.sorterIndex);
+        if (!Number.isFinite(current)) return;
+        sorterOpenSlideInEditor(current);
+      };
+      card.ondragstart = event => {
+        tenantSorterDragId = String(slide.id || '');
+        tenantSorterDropHandled = false;
+        tenantSorterLastLeaveAt = 0;
+        const rect = card.getBoundingClientRect();
+        tenantSorterDragCardHeight = Math.round(rect && rect.height ? rect.height : 0);
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', tenantSorterDragId);
+          try { event.dataTransfer.setDragImage(card, 16, 16); } catch (error) { /* ignore */ }
+        }
+        // Nothing is mutated inside dragstart itself: Chromium drops the
+        // native drop phase when the grid changes during that callback. The
+        // gap takes the card's own slot on the next frame instead, so the
+        // grid still never reflows a full cell when the drag begins.
+        const showHomeGap = () => {
+          cell.classList.add('is-dragging-source');
+          if (tenantSorterPlaceholder || !tenantSorterDragId) return;
+          const home = sorterCreatePlaceholder();
+          home.dataset.slotKey = 'home';
+          tenantSorterPlaceholder = home;
+          grid.insertBefore(home, cell);
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(showHomeGap);
+        else showHomeGap();
+      };
+      card.ondragend = event => {
+        const handled = tenantSorterDropHandled;
+        // Chromium skips the native drop when the preview reflowed the grid
+        // under a resting pointer. A real release is announced by a
+        // dragleave right before dragend; an Escape cancel has none, so the
+        // fallback below only commits when that signal is fresh.
+        const released = (Date.now() - tenantSorterLastLeaveAt) <= 40;
+        tenantSorterDropHandled = false;
+        if (!handled && released && tenantSorterDragId) {
+          let inside = false;
+          try {
+            const under = event && typeof document.elementFromPoint === 'function'
+              ? document.elementFromPoint(event.clientX, event.clientY)
+              : null;
+            inside = !!(under && grid.contains(under));
+          } catch (error) { /* ignore */ }
+          if (inside) {
+            const slot = sorterResolveDropSlot(grid, document.elementFromPoint(event.clientX, event.clientY), event.clientX, event.clientY)
+              || tenantSorterLastSlot;
+            sorterApplyDrop(grid, slot);
+            return;
+          }
+        }
+        tenantSorterDragId = '';
+        tenantSorterLastSlot = null;
+        tenantSorterDragCardHeight = 0;
+        const placeholder = tenantSorterPlaceholder;
+        tenantSorterPlaceholder = null;
+        cell.classList.remove('is-dragging-source');
+        sorterFlipCells(grid, () => {
+          if (placeholder && placeholder.isConnected) placeholder.remove();
+        });
+      };
+
+      const frame = document.createElement('div');
+      frame.className = 'ge-thumb-frame';
+      const canvas = document.createElement('div');
+      canvas.className = 'ge-thumb-canvas';
+      canvas.dataset.thumbIndex = String(index);
+      frame.appendChild(canvas);
+      card.appendChild(frame);
+
+      const label = document.createElement('div');
+      label.className = 'ge-sorter-label';
+      const number = document.createElement('span');
+      number.className = 'ge-thumb-num';
+      number.textContent = String(index + 1);
+      label.appendChild(number);
+      const title = document.createElement('span');
+      title.className = 'ge-thumb-title';
+      label.appendChild(title);
+      card.appendChild(label);
+
+      const insert = document.createElement('button');
+      insert.type = 'button';
+      insert.className = 'ge-sorter-insert';
+      insert.textContent = '+';
+      insert.title = sorterText('ws.add_after', 'إضافة شريحة');
+      insert.setAttribute('aria-label', sorterText('ws.add_after', 'إضافة شريحة'));
+      insert.onclick = event => {
+        event.stopPropagation();
+        const current = Number(cell.dataset.sorterIndex);
+        if (!Number.isFinite(current)) return;
+        const at = sorterInsertIndex(current, sorterIsRtl(grid));
+        if (typeof openSlideInsertMenu === 'function') openSlideInsertMenu(insert, at);
+      };
+
+      cell.appendChild(card);
+      cell.appendChild(insert);
+      sorterRenderCellLabel(cell, slide, index);
+      return cell;
+    }
+
+    function sorterSyncCellContent(cell, slide, index) {
+      const id = String(slide.id || '');
+      cell.dataset.slideId = id;
+      cell.dataset.sorterIndex = String(index);
+      const card = cell.querySelector('.ge-sorter-card');
+      if (card) {
+        card.dataset.slideId = id;
+        card.dataset.sorterIndex = String(index);
+        card.classList.toggle('active', index === activeSlideIndex);
+        card.classList.toggle('is-hidden', !!slide.hidden);
+        card.draggable = hasPermission('create_presentation');
+      }
+      sorterRenderCellLabel(cell, slide, index);
+    }
+
+    function sorterAnimateEnter(cell) {
+      const card = cell.querySelector('.ge-sorter-card') || cell;
+      try {
+        card.animate(
+          [{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'scale(1)' }],
+          { duration: 220, easing: 'cubic-bezier(.2, .8, .2, 1)' }
+        );
+      } catch (error) { /* ignore */ }
+    }
+
+    // The removed card is gone from the layout immediately; a cloned ghost
+    // holds its old spot for one short fade so the delete reads as an action
+    // instead of a flash.
+    function sorterSpawnGhost(grid, cell, rect, gridRect) {
+      const ghost = cell.cloneNode(true);
+      ghost.classList.remove('ge-sorter-cell');
+      ghost.classList.add('ge-sorter-ghost');
+      ghost.dataset.slideId = '';
+      ghost.style.position = 'absolute';
+      ghost.style.left = (rect.left - gridRect.left) + 'px';
+      ghost.style.top = (rect.top - gridRect.top) + 'px';
+      ghost.style.width = rect.width + 'px';
+      ghost.style.height = rect.height + 'px';
+      ghost.style.pointerEvents = 'none';
+      ghost.style.zIndex = '6';
+      grid.appendChild(ghost);
+      try {
+        ghost.animate(
+          [{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.92)' }],
+          { duration: 180, easing: 'ease-out' }
+        );
+      } catch (error) { /* ignore */ }
+      const drop = () => { if (ghost.parentNode) ghost.remove(); };
+      if (typeof setTimeout === 'function') setTimeout(drop, 200);
+      return ghost;
+    }
+
+    // Inserts and deletes move through the existing grid: the cards that stay
+    // keep their nodes and painted thumbnails, the change animates, and the
+    // cards that remain slide to their new slots (FLIP). Returns false when
+    // the deck was replaced wholesale, where a clean rebuild is the honest
+    // answer.
+    function sorterReconcileGrid(grid) {
+      const cells = Array.from(grid.querySelectorAll('.ge-sorter-cell:not(.ge-sorter-add-cell)'));
+      const desired = tenantSlidesData.map(slide => String((slide && slide.id) || ''));
+      if (!cells.length || !desired.length || desired.some(id => !id)) return false;
+      const existing = new Map();
+      cells.forEach(cell => {
+        const id = String(cell.dataset.slideId || '');
+        if (id) existing.set(id, cell);
+      });
+      if (!desired.some(id => existing.has(id))) return false;
+      const reduceMotion = sorterPrefersReducedMotion();
+      const gridRect = grid.getBoundingClientRect();
+      const before = new Map();
+      if (!reduceMotion) {
+        cells.forEach(cell => {
+          const id = String(cell.dataset.slideId || '');
+          if (!id) return;
+          const rect = sorterLayoutRect(cell);
+          if (rect && (rect.width || rect.height)) before.set(id, rect);
+        });
+      }
+      const keep = new Set(desired);
+      cells.forEach(cell => {
+        const id = String(cell.dataset.slideId || '');
+        if (keep.has(id)) return;
+        if (!reduceMotion && before.has(id)) sorterSpawnGhost(grid, cell, before.get(id), gridRect);
+        if (cell.parentNode === grid) cell.remove();
+      });
+
+      const addCell = grid.querySelector('.ge-sorter-add-cell');
+      const entering = [];
+      desired.forEach((id, index) => {
+        const slide = tenantSlidesData[index];
+        let cell = existing.get(id) || null;
+        if (cell) {
+          sorterSyncCellContent(cell, slide, index);
+        } else {
+          cell = sorterBuildCell(grid, slide, index);
+          entering.push(cell);
+        }
+        grid.insertBefore(cell, addCell || null);
+      });
+      sorterSyncCellIndexes(grid);
+
+      entering.forEach(cell => {
+        const canvas = cell.querySelector('.ge-thumb-canvas');
+        const slide = tenantSlidesData[Number(cell.dataset.sorterIndex)];
+        if (canvas && slide && typeof fillSlideThumbnailCanvas === 'function') {
+          fillSlideThumbnailCanvas(canvas, slide);
+        }
+        if (!reduceMotion) sorterAnimateEnter(cell);
+      });
+      if (reduceMotion) return true;
+
+      desired.forEach(id => {
+        const cell = existing.get(id);
+        const first = before.get(id);
+        if (!cell || !first || !cell.isConnected) return;
+        const rect = sorterLayoutRect(cell);
+        const dx = Math.round((first.left - rect.left) * 10) / 10;
+        const dy = Math.round((first.top - rect.top) * 10) / 10;
+        if (!dx && !dy) return;
+        try {
+          cell.animate(
+            [{ transform: 'translate(' + dx + 'px, ' + dy + 'px)' }, { transform: 'translate(0, 0)' }],
+            { duration: 200, easing: 'cubic-bezier(.2, .8, .2, 1)' }
+          );
+        } catch (error) { /* ignore */ }
+      });
+      return true;
+    }
+
+    let tenantSorterRendered = false;
+
     function renderTenantSlidesSorter() {
       if (tenantSorterSuppressRender) return;
       const box = document.getElementById('tenantSlidesSorter');
       if (!box) return;
       box.hidden = tenantSlidesView !== 'sorter';
       if (box.hidden) return;
+      const liveGrid = box.querySelector('.ge-sorter-grid');
+      if (tenantSorterRendered && liveGrid
+        && liveGrid.querySelector('.ge-sorter-cell:not(.ge-sorter-add-cell)')
+        && sorterReconcileGrid(liveGrid)) {
+        return;
+      }
       tenantSorterDragId = '';
       tenantSorterLastSlot = null;
       tenantSorterDragCardHeight = 0;
@@ -378,148 +674,26 @@
       grid.ondrop = event => sorterHandleGridDrop(grid, event);
 
       tenantSlidesData.forEach((slide, index) => {
-        const cell = document.createElement('div');
-        cell.className = 'ge-sorter-cell';
-        cell.dataset.slideId = String(slide.id || '');
-        cell.dataset.sorterIndex = String(index);
-
-        const card = document.createElement('div');
-        card.className = 'ge-sorter-card' + (index === activeSlideIndex ? ' active' : '')
-          + (slide.hidden ? ' is-hidden' : '');
-        card.dataset.slideId = String(slide.id || '');
-        card.dataset.sorterIndex = String(index);
-        card.draggable = hasPermission('create_presentation');
-        card.onclick = () => {
-          const current = Number(cell.dataset.sorterIndex);
-          if (!Number.isFinite(current)) return;
-          selectTenantSlide(current);
-          sorterHighlightActive(grid);
-        };
-        card.ondblclick = () => {
-          const current = Number(cell.dataset.sorterIndex);
-          if (!Number.isFinite(current)) return;
-          sorterOpenSlideInEditor(current);
-        };
-        card.ondragstart = event => {
-          tenantSorterDragId = String(slide.id || '');
-          tenantSorterDropHandled = false;
-          tenantSorterLastLeaveAt = 0;
-          const rect = card.getBoundingClientRect();
-          tenantSorterDragCardHeight = Math.round(rect && rect.height ? rect.height : 0);
-          if (event.dataTransfer) {
-            event.dataTransfer.effectAllowed = 'move';
-            event.dataTransfer.setData('text/plain', tenantSorterDragId);
-            try { event.dataTransfer.setDragImage(card, 16, 16); } catch (error) { /* ignore */ }
-          }
-          // Nothing is mutated inside dragstart itself: Chromium drops the
-          // native drop phase when the grid changes during that callback. The
-          // gap takes the card's own slot on the next frame instead, so the
-          // grid still never reflows a full cell when the drag begins.
-          const showHomeGap = () => {
-            cell.classList.add('is-dragging-source');
-            if (tenantSorterPlaceholder || !tenantSorterDragId) return;
-            const home = sorterCreatePlaceholder();
-            home.dataset.slotKey = 'home';
-            tenantSorterPlaceholder = home;
-            grid.insertBefore(home, cell);
-          };
-          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(showHomeGap);
-          else showHomeGap();
-        };
-        card.ondragend = event => {
-          const handled = tenantSorterDropHandled;
-          // Chromium skips the native drop when the preview reflowed the grid
-          // under a resting pointer. A real release is announced by a
-          // dragleave right before dragend; an Escape cancel has none, so the
-          // fallback below only commits when that signal is fresh.
-          const released = (Date.now() - tenantSorterLastLeaveAt) <= 40;
-          tenantSorterDropHandled = false;
-          if (!handled && released && tenantSorterDragId) {
-            let inside = false;
-            try {
-              const under = event && typeof document.elementFromPoint === 'function'
-                ? document.elementFromPoint(event.clientX, event.clientY)
-                : null;
-              inside = !!(under && grid.contains(under));
-            } catch (error) { /* ignore */ }
-            if (inside) {
-              const slot = sorterResolveDropSlot(grid, document.elementFromPoint(event.clientX, event.clientY), event.clientX, event.clientY)
-                || tenantSorterLastSlot;
-              sorterApplyDrop(grid, slot);
-              return;
-            }
-          }
-          tenantSorterDragId = '';
-          tenantSorterLastSlot = null;
-          tenantSorterDragCardHeight = 0;
-          const placeholder = tenantSorterPlaceholder;
-          tenantSorterPlaceholder = null;
-          cell.classList.remove('is-dragging-source');
-          sorterFlipCells(grid, () => {
-            if (placeholder && placeholder.isConnected) placeholder.remove();
-          });
-        };
-
-        const frame = document.createElement('div');
-        frame.className = 'ge-thumb-frame';
-        const canvas = document.createElement('div');
-        canvas.className = 'ge-thumb-canvas';
-        canvas.dataset.thumbIndex = String(index);
-        frame.appendChild(canvas);
-        card.appendChild(frame);
-
-        const label = document.createElement('div');
-        label.className = 'ge-sorter-label';
-        label.innerHTML = '<span class="ge-thumb-num">' + (index + 1) + '</span>'
-          + '<span class="ge-thumb-title">' + escapeHtml(slide.title || sorterText('ws.no_title', 'شريحة بدون عنوان')) + '</span>';
-        if (hasPermission('create_presentation') && tenantSlidesData.length > 1) {
-          const remove = document.createElement('button');
-          remove.type = 'button';
-          remove.className = 'ge-sorter-delete';
-          const removeLabel = sorterText('ws.delete', 'حذف');
-          remove.textContent = removeLabel;
-          remove.title = removeLabel;
-          remove.setAttribute('aria-label', removeLabel);
-          remove.onclick = event => {
-            event.stopPropagation();
-            const current = Number(cell.dataset.sorterIndex);
-            if (!Number.isFinite(current)) return;
-            if (typeof deleteSlide === 'function') deleteSlide(current);
-          };
-          remove.ondblclick = event => event.stopPropagation();
-          label.appendChild(remove);
-        }
-        card.appendChild(label);
-
-        const insert = document.createElement('button');
-        insert.type = 'button';
-        insert.className = 'ge-sorter-insert';
-        insert.textContent = '+';
-        insert.title = sorterText('ws.add_after', 'إضافة شريحة');
-        insert.setAttribute('aria-label', sorterText('ws.add_after', 'إضافة شريحة'));
-        insert.onclick = event => {
-          event.stopPropagation();
-          const current = Number(cell.dataset.sorterIndex);
-          if (!Number.isFinite(current)) return;
-          const at = sorterInsertIndex(current, sorterIsRtl(grid));
-          if (typeof openSlideInsertMenu === 'function') openSlideInsertMenu(insert, at);
-        };
-
-        cell.appendChild(card);
-        cell.appendChild(insert);
+        const cell = sorterBuildCell(grid, slide, index);
         grid.appendChild(cell);
-
-        if (tenantSorterObserver) tenantSorterObserver.observe(canvas);
-        else if (typeof fillSlideThumbnailCanvas === 'function') fillSlideThumbnailCanvas(canvas, slide);
+        const canvas = cell.querySelector('.ge-thumb-canvas');
+        if (tenantSorterObserver && canvas) tenantSorterObserver.observe(canvas);
+        else if (canvas && typeof fillSlideThumbnailCanvas === 'function') fillSlideThumbnailCanvas(canvas, slide);
       });
 
       const addCell = document.createElement('div');
       addCell.className = 'ge-sorter-cell ge-sorter-add-cell';
-      addCell.innerHTML = '<button type="button" onclick="openSlideInsertMenu(this, ' + tenantSlidesData.length
-        + ')">' + escapeHtml(sorterText('ws.add_slide', 'إضافة شريحة')) + '</button>';
+      const addButton = document.createElement('button');
+      addButton.type = 'button';
+      addButton.textContent = sorterText('ws.add_slide', 'إضافة شريحة');
+      addButton.onclick = () => {
+        if (typeof openSlideInsertMenu === 'function') openSlideInsertMenu(addButton, tenantSlidesData.length);
+      };
+      addCell.appendChild(addButton);
       grid.appendChild(addCell);
 
       box.appendChild(grid);
+      tenantSorterRendered = true;
     }
 
     document.addEventListener('wf:lang', () => {

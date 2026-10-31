@@ -70,16 +70,38 @@ class SorterDragContractTests(unittest.TestCase):
         pure = self.source.split('/* SORTER_PURE_BEGIN */', 1)[1].split('/* SORTER_PURE_END */', 1)[0]
         self.assertIn('function sorterInsertIndex(index, isRtl)', pure)
         self.assertIn('return isRtl ? base : base + 1;', pure)
+        build = self.source.split('function sorterBuildCell(grid, slide, index)', 1)[1]
+        build = build.split('function sorterSyncCellContent', 1)[0]
+        self.assertIn('sorterInsertIndex(current, sorterIsRtl(grid))', build)
+        self.assertIn('openSlideInsertMenu(insert, at)', build)
+        self.assertNotIn('openSlideInsertMenu(insert, index + 1)', self.source)
+
+    def test_add_and_delete_reconcile_the_live_grid(self):
         render = self.source.split('function renderTenantSlidesSorter()', 1)[1]
-        self.assertIn('sorterInsertIndex(current, sorterIsRtl(grid))', render)
-        self.assertIn('openSlideInsertMenu(insert, at)', render)
-        self.assertNotIn('openSlideInsertMenu(insert, index + 1)', render)
+        render = render.split('document.addEventListener(\'wf:lang\'', 1)[0]
+        self.assertIn('sorterReconcileGrid(liveGrid)', render)
+        # The live grid is reconciled before any destructive rebuild.
+        self.assertLess(render.index('sorterReconcileGrid(liveGrid)'), render.index("box.innerHTML = '';"))
+        reconcile = self.source.split('function sorterReconcileGrid(grid)', 1)[1]
+        reconcile = reconcile.split('function renderTenantSlidesSorter()', 1)[0]
+        self.assertIn('sorterSyncCellContent(cell, slide, index)', reconcile)
+        self.assertIn('sorterBuildCell(grid, slide, index)', reconcile)
+        self.assertIn('sorterSpawnGhost(grid, cell', reconcile)
+        self.assertIn('sorterAnimateEnter(cell)', reconcile)
+        self.assertIn('grid.insertBefore(cell, addCell || null)', reconcile)
+        build = self.source.split('function renderTenantSlidesSorter()', 1)[1]
+        self.assertIn('const cell = sorterBuildCell(grid, slide, index);', build)
+        self.assertIn('openSlideInsertMenu(addButton, tenantSlidesData.length)', build)
+        self.assertNotIn('onclick="openSlideInsertMenu(this,', build)
 
     def test_cards_delete_themselves_and_open_the_clicked_slide(self):
-        render = self.source.split('function renderTenantSlidesSorter()', 1)[1]
-        self.assertIn("remove.className = 'ge-sorter-delete'", render)
-        self.assertIn('deleteSlide(current)', render)
-        self.assertIn('sorterOpenSlideInEditor(current)', render)
+        label = self.source.split('function sorterRenderCellLabel(cell, slide, index)', 1)[1]
+        label = label.split('function sorterBuildCell', 1)[0]
+        self.assertIn("remove.className = 'ge-sorter-delete'", label)
+        self.assertIn('deleteSlide(current)', label)
+        build = self.source.split('function sorterBuildCell(grid, slide, index)', 1)[1]
+        build = build.split('function sorterSyncCellContent', 1)[0]
+        self.assertIn('sorterOpenSlideInEditor(current)', build)
         dbl = self.source.split('function sorterOpenSlideInEditor(index)', 1)[1]
         dbl = dbl.split('function sorterHighlightActive', 1)[0]
         self.assertIn('setSlidesWorkspaceView(\'edit\');', dbl)

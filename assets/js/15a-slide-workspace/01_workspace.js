@@ -255,6 +255,70 @@
         + duplicate + hide + select + '</span>';
     }
 
+    // A rebuilt rail re-uses the thumbnails it already painted, so adding or
+    // deleting a slide never flashes the rail: the canvas HTML is kept with
+    // the slide HTML it was painted from and dropped when that changes.
+    const tenantSidebarThumbCache = new Map();
+    let tenantSidebarRendered = false;
+
+    // Held inside the rail so the scoped thumb styles still apply; fixed
+    // coordinates keep it where the thumb was on screen.
+    function sidebarSpawnGhost(host, node, rect) {
+      if (!host || !node || !rect) return null;
+      const ghost = node.cloneNode(true);
+      ghost.classList.add('ge-thumb-ghost');
+      ghost.style.position = 'fixed';
+      ghost.style.left = rect.left + 'px';
+      ghost.style.top = rect.top + 'px';
+      ghost.style.width = rect.width + 'px';
+      ghost.style.height = rect.height + 'px';
+      ghost.style.pointerEvents = 'none';
+      ghost.style.zIndex = '9997';
+      host.appendChild(ghost);
+      try {
+        ghost.animate(
+          [{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.94)' }],
+          { duration: 180, easing: 'ease-out' }
+        );
+      } catch (error) { /* ignore */ }
+      setTimeout(() => { if (ghost.parentNode) ghost.remove(); }, 200);
+      return ghost;
+    }
+
+    function animateTenantSidebarRebuild(sidebar, previous, removed) {
+      if (!tenantSidebarRendered) return;
+      let reduceMotion = false;
+      try {
+        reduceMotion = typeof sorterPrefersReducedMotion === 'function' && sorterPrefersReducedMotion();
+      } catch (error) { /* ignore */ }
+      if (reduceMotion) return;
+      const thumbs = Array.from(sidebar.querySelectorAll('.ge-thumb[data-slide-id]'));
+      thumbs.forEach(thumb => {
+        const id = String(thumb.dataset.slideId || '');
+        const first = previous.get(id);
+        if (!first) {
+          try {
+            thumb.animate(
+              [{ opacity: 0, transform: 'scale(.94)' }, { opacity: 1, transform: 'scale(1)' }],
+              { duration: 220, easing: 'cubic-bezier(.2, .8, .2, 1)' }
+            );
+          } catch (error) { /* ignore */ }
+          return;
+        }
+        const now = thumb.getBoundingClientRect();
+        const dx = Math.round((first.left - now.left) * 10) / 10;
+        const dy = Math.round((first.top - now.top) * 10) / 10;
+        if (!dx && !dy) return;
+        try {
+          thumb.animate(
+            [{ transform: 'translate(' + dx + 'px, ' + dy + 'px)' }, { transform: 'translate(0, 0)' }],
+            { duration: 200, easing: 'cubic-bezier(.2, .8, .2, 1)' }
+          );
+        } catch (error) { /* ignore */ }
+      });
+      removed.forEach(entry => sidebarSpawnGhost(sidebar, entry.node, entry.rect));
+    }
+
     function renderTenantSlidesSidebar(force) {
       const sidebar = document.getElementById('tenantSlidesSidebar');
       if (!sidebar) return;
@@ -263,6 +327,21 @@
         tenantThumbObserver.disconnect();
         tenantThumbObserver = null;
       }
+      const desiredIds = new Set(tenantSlidesData.map(slide => slideRuntimeId(slide)).filter(Boolean));
+      const previousRects = new Map();
+      const removedThumbs = [];
+      Array.from(sidebar.querySelectorAll('.ge-thumb[data-slide-id]')).forEach(thumb => {
+        const id = String(thumb.dataset.slideId || '');
+        if (!id) return;
+        const rect = thumb.getBoundingClientRect();
+        previousRects.set(id, { left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+        const canvas = thumb.querySelector('.ge-thumb-canvas');
+        const slide = tenantSlidesData[slideIndexById(id)];
+        if (canvas && canvas.dataset.filled === '1' && canvas.innerHTML) {
+          tenantSidebarThumbCache.set(id, { source: slide ? String(slide.html || '') : '', html: canvas.innerHTML });
+        }
+        if (!desiredIds.has(id)) removedThumbs.push({ node: thumb, rect: rect });
+      });
       sidebar.innerHTML = '';
       sidebar.classList.toggle('is-collapsed', !!tenantSlidesSidebarCollapsed);
       ensureThumbObserver();
@@ -323,7 +402,13 @@
         const canvas = document.createElement('div');
         canvas.className = 'ge-thumb-canvas';
         canvas.dataset.thumbIndex = String(index);
-        if (index === activeSlideIndex) fillSlideThumbnailCanvas(canvas, slide);
+        const cachedThumb = tenantSidebarThumbCache.get(id);
+        if (cachedThumb && cachedThumb.source === String(slide.html || '')) {
+          canvas.innerHTML = cachedThumb.html;
+          canvas.dataset.filled = '1';
+        } else if (index === activeSlideIndex) {
+          fillSlideThumbnailCanvas(canvas, slide);
+        }
         frame.appendChild(canvas);
         thumb.appendChild(frame);
 
@@ -366,7 +451,13 @@
         };
         sidebar.appendChild(add);
 
-        if (tenantThumbObserver) tenantThumbObserver.observe(canvas);
+        if (tenantThumbObserver && canvas.dataset.filled !== '1') tenantThumbObserver.observe(canvas);
+      });
+
+      animateTenantSidebarRebuild(sidebar, previousRects, removedThumbs);
+      tenantSidebarRendered = true;
+      tenantSidebarThumbCache.forEach((entry, id) => {
+        if (!desiredIds.has(id)) tenantSidebarThumbCache.delete(id);
       });
 
       if (tenantThumbRenamingId) {

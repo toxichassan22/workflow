@@ -280,6 +280,69 @@
       wrap.appendChild(notice);
     }
 
+    // A rebuilt deck re-uses the stage each slide already rendered, so an add
+    // or a delete animates from the old layout instead of flashing every card
+    // back to the loading placeholder.
+    const tenantStageHtmlCache = new Map();
+    let tenantDeckRendered = false;
+
+    function animateTenantDeckChange(wrap, previous, removed) {
+      if (!tenantDeckRendered) return;
+      try {
+        if (typeof sorterPrefersReducedMotion === 'function' && sorterPrefersReducedMotion()) return;
+      } catch (error) { /* ignore */ }
+      const cards = Array.from(wrap.querySelectorAll('.ge-slide-card'));
+      const survivors = cards.some(card => previous.has(String(card.dataset.slideId || '')));
+      if (!survivors) return;
+      cards.forEach(card => {
+        const id = String(card.dataset.slideId || '');
+        if (!id) return;
+        const first = previous.get(id);
+        if (!first) {
+          try {
+            card.animate(
+              [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'translateY(0)' }],
+              { duration: 240, easing: 'cubic-bezier(.2, .8, .2, 1)' }
+            );
+          } catch (error) { /* ignore */ }
+          return;
+        }
+        const now = card.getBoundingClientRect();
+        const dx = Math.round((first.left - now.left) * 10) / 10;
+        const dy = Math.round((first.top - now.top) * 10) / 10;
+        if (!dx && !dy) return;
+        try {
+          card.animate(
+            [{ transform: 'translate(' + dx + 'px, ' + dy + 'px)' }, { transform: 'translate(0, 0)' }],
+            { duration: 220, easing: 'cubic-bezier(.2, .8, .2, 1)' }
+          );
+        } catch (error) { /* ignore */ }
+      });
+      removed.forEach(entry => {
+        if (!entry || !entry.node || !entry.rect) return;
+        const rect = entry.rect;
+        if (!(rect.width || rect.height)) return;
+        const ghost = entry.node.cloneNode(true);
+        ghost.classList.add('ge-slide-card-ghost');
+        ghost.style.position = 'fixed';
+        ghost.style.left = rect.left + 'px';
+        ghost.style.top = rect.top + 'px';
+        ghost.style.width = rect.width + 'px';
+        ghost.style.height = rect.height + 'px';
+        ghost.style.margin = '0';
+        ghost.style.pointerEvents = 'none';
+        ghost.style.zIndex = '40';
+        wrap.appendChild(ghost);
+        try {
+          ghost.animate(
+            [{ opacity: 1, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.96)' }],
+            { duration: 200, easing: 'ease-out' }
+          );
+        } catch (error) { /* ignore */ }
+        setTimeout(() => { if (ghost.parentNode) ghost.remove(); }, 220);
+      });
+    }
+
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
@@ -301,6 +364,19 @@
       const anchorCard = wrap.querySelector('.ge-slide-card.active-slide');
       const anchorId = anchorCard ? String(anchorCard.dataset.slideId || '') : '';
       const anchorOffset = anchorCard ? (anchorCard.getBoundingClientRect().top - wrapRect.top) : null;
+      const desiredIds = new Set(tenantSlidesData.map(slide => String((slide && slide.id) || '')).filter(Boolean));
+      const previousCards = new Map();
+      const removedCards = [];
+      Array.from(wrap.querySelectorAll('.ge-slide-card[data-slide-id]')).forEach(card => {
+        const id = String(card.dataset.slideId || '');
+        if (!id) return;
+        const rect = card.getBoundingClientRect();
+        previousCards.set(id, { left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+        if (!desiredIds.has(id)) {
+          removedCards.push({ node: card, rect: rect });
+          tenantStageHtmlCache.delete(id);
+        }
+      });
       if (typeof initScrollSpy === 'function') initScrollSpy();
       renumberTenantSlides();
       try { syncSlideEditSessionsAfterRender(); } catch (err) {}
@@ -357,11 +433,13 @@
         stage.style.setProperty('--stage-w', '960px');
         stage.style.setProperty('--stage-h', '540px');
         stage.style.setProperty('--slide-scale', '0.75');
-        stage.innerHTML = '<div class="slide" style="padding:40px;font-size:14px;color:#999;background:#fafafa;">جاري التحميل...</div>';
+        const cachedStage = s && s.id ? tenantStageHtmlCache.get(String(s.id)) : null;
+        stage.innerHTML = cachedStage
+          || '<div class="slide" style="padding:40px;font-size:14px;color:#999;background:#fafafa;">جاري التحميل...</div>';
         container.appendChild(stage);
         wrap.appendChild(container);
         if (typeof observeTenantSlideStage === 'function') observeTenantSlideStage(stage, container);
-        containers.push({ container, stage, slide: s, index: i });
+        containers.push({ container, stage, slide: s, index: i, cached: !!cachedStage });
       });
 
       // Instant restore (no smooth animation) so the view does not visibly move.
@@ -372,6 +450,31 @@
       } catch (err) {
         try { wrap.scrollTop = savedScrollTop; } catch (err2) {}
       }
+
+      // A card that has never been painted has no cached stage, so it is
+      // rendered now instead of waiting its batch turn as a loading box.
+      const renderTenantSlideCard = entry => {
+        if (!entry || entry.rendered) return;
+        const { stage, slide: s, index: i } = entry;
+        if (!stage || !s) return;
+        const slideHtml = processSlideHtmlClient(s.html, s.type);
+        stage.innerHTML = slideHtml || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
+        if (!stage.querySelector('.slide')) {
+          stage.innerHTML = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
+        }
+        autoFitSlideContent(stage);
+        repairSlideTextContrast(stage);
+        if (s.id) tenantStageHtmlCache.set(String(s.id), stage.innerHTML);
+        enableSlideInlineEditing(stage, i);
+        enableSlideElementDragging(stage, i);
+        restoreSlideEditSelection(stage, i);
+        entry.rendered = true;
+      };
+      if (tenantDeckRendered) {
+        containers.filter(entry => !entry.cached).forEach(renderTenantSlideCard);
+      }
+      animateTenantDeckChange(wrap, previousCards, removedCards);
+      tenantDeckRendered = true;
 
       renderTenantSlidesSidebar();
       renderTenantDesignerChat();
@@ -384,17 +487,7 @@
       function processBatch() {
         const end = Math.min(cursor + BATCH, containers.length);
         for (let j = cursor; j < end; j++) {
-          const { stage, slide: s, index: i } = containers[j];
-          const slideHtml = processSlideHtmlClient(s.html, s.type);
-          stage.innerHTML = slideHtml || '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
-          if (!stage.querySelector('.slide')) {
-            stage.innerHTML = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(s.title || '') + '</div>';
-          }
-          autoFitSlideContent(stage);
-          repairSlideTextContrast(stage);
-          enableSlideInlineEditing(stage, i);
-          enableSlideElementDragging(stage, i);
-          restoreSlideEditSelection(stage, i);
+          renderTenantSlideCard(containers[j]);
         }
         cursor = end;
         if (cursor < containers.length) {

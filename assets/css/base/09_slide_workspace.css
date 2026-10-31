@@ -696,10 +696,15 @@
 }
 
 #tenantSlidesPage .ge-sorter-grid {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 18px;
   align-content: start;
+}
+
+#tenantSlidesPage .ge-sorter-ghost {
+  pointer-events: none;
 }
 
 #tenantSlidesPage .ge-sorter-cell {

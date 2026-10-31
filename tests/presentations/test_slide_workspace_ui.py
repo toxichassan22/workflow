@@ -81,6 +81,18 @@ class SlidesSidebarTests(unittest.TestCase):
         self.assertIn('function toggleTenantSidebar()', self.source)
         self.assertIn('is-collapsed', self.source)
 
+    def test_add_and_delete_animate_without_repainting_the_rail(self):
+        body = self.source.split('function renderTenantSlidesSidebar(force) {', 1)[1]
+        body = body.split('function toggleTenantSidebar', 1)[0]
+        self.assertIn('tenantSidebarThumbCache', body)
+        self.assertIn('animateTenantSidebarRebuild(sidebar, previousRects, removedThumbs)', body)
+        self.assertIn("canvas.dataset.filled = '1'", body)
+        self.assertIn('function animateTenantSidebarRebuild(sidebar, previous, removed)', self.source)
+        self.assertIn('function sidebarSpawnGhost(host, node, rect)', self.source)
+        self.assertIn('thumb.animate(', self.source)
+        self.assertIn('ge-thumb-ghost', self.source)
+
+
     def test_actions_are_hover_only_and_cover_every_slide_operation(self):
         self.assertIn('function slideThumbActionsHtml(index, slide)', self.source)
         self.assertIn('.ge-thumb:hover .ge-thumb-actions', self.source)
@@ -108,6 +120,18 @@ class SlidesSidebarTests(unittest.TestCase):
         body = body.split('\n    async function commitTenantPresentation', 1)[0]
         self.assertIn('index < wasActive', body)
         self.assertIn('selectTenantSlide(activeSlideIndex, true)', body)
+
+    def test_add_and_delete_animate_the_stage_list(self):
+        self.assertIn('const tenantStageHtmlCache = new Map();', self.source)
+        self.assertIn('function animateTenantDeckChange(wrap, previous, removed)', self.source)
+        self.assertIn('animateTenantDeckChange(wrap, previousCards, removedCards)', self.source)
+        self.assertIn('ge-slide-card-ghost', self.source)
+        body = self.source.split('function renderTenantSlides() {', 1)[1]
+        body = body.split('function tenantSlideHasBackground', 1)[0]
+        self.assertIn('tenantStageHtmlCache.get(String(s.id))', body)
+        self.assertIn('tenantStageHtmlCache.set(String(s.id), stage.innerHTML);', body)
+        self.assertIn('containers.filter(entry => !entry.cached).forEach(renderTenantSlideCard)', body)
+
 
     def test_render_keeps_the_open_slide_under_the_viewport(self):
         body = self.source.split('function renderTenantSlides() {', 1)[1]

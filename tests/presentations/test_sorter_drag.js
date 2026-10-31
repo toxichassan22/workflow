@@ -11,6 +11,8 @@ const vm = require('node:vm');
 const file = path.join(process.cwd(), 'assets/js/15a-slide-workspace/02_sorter.js');
 const source = fs.readFileSync(file, 'utf8');
 
+const animations = [];
+
 const pureStart = source.indexOf('/* SORTER_PURE_BEGIN */');
 const pureEnd = source.indexOf('/* SORTER_PURE_END */');
 assert.ok(pureStart !== -1 && pureEnd > pureStart, 'sorter pure block markers are missing');
@@ -181,6 +183,20 @@ class FakeNode {
     return this._rect || { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 };
   }
 
+  cloneNode(deep) {
+    const copy = new FakeNode(this.tagName);
+    copy.id = this.id;
+    copy.className = this.className;
+    copy._text = this._text;
+    copy._html = this._html;
+    copy.dataset = { ...this.dataset };
+    copy.style = { ...this.style };
+    copy.attributes = { ...this.attributes };
+    copy.hidden = this.hidden;
+    if (deep) this.children.forEach(child => copy.appendChild(child.cloneNode(true)));
+    return copy;
+  }
+
   contains(node) {
     let current = node;
     while (current) {
@@ -190,7 +206,10 @@ class FakeNode {
     return false;
   }
 
-  animate() { return { cancel() {} }; }
+  animate(keyframes, options) {
+    animations.push({ node: this, keyframes, options });
+    return { cancel() {}, finished: Promise.resolve() };
+  }
   getAnimations() { return []; }
   addEventListener() {}
 }
@@ -527,5 +546,67 @@ function dropOn(grid, cell, clientX) {
   assert.equal(ctx.activeSlideIndex, 2);
 }
 
+// Add and delete reconcile the visible grid instead of rebuilding it: the
+// cards that stay keep their nodes and painted thumbnails, the removed card
+// leaves a fading ghost, and the rest slide into their new slots.
+{
+  ctx.window.matchMedia = () => ({ matches: false });
+  const { grid } = setup(['a', 'b', 'c', 'd']);
+  const cardA = cardOf(cellFor(grid, 'a'));
+  const cardC = cardOf(cellFor(grid, 'c'));
+  cardA.querySelector('.ge-thumb-canvas').dataset.filled = '1';
+  animations.length = 0;
+  ctx.tenantSlidesData.splice(1, 1);
+  ctx.renderTenantSlidesSorter();
+  layout(grid);
+  assert.equal(cardOf(cellFor(grid, 'a')), cardA, 'surviving cards keep their nodes');
+  assert.equal(cardOf(cellFor(grid, 'c')), cardC);
+  assert.equal(cellFor(grid, 'b'), undefined, 'the deleted card is gone');
+  assert.deepEqual(orderOf(grid), ['a', 'c', 'd']);
+  assert.deepEqual(
+    orderOf(grid).map(id => cellFor(grid, id).querySelector('.ge-thumb-num').textContent),
+    ['1', '2', '3']
+  );
+  assert.equal(cardA.querySelector('.ge-thumb-canvas').dataset.filled, '1',
+    'thumbnails are not repainted');
+  assert.ok(grid.querySelector('.ge-sorter-ghost'), 'the removed card leaves a fading ghost');
+  assert.ok(animations.length >= 1, 'the delete is animated');
+  ctx.window.matchMedia = () => ({ matches: true });
+}
+
+{
+  ctx.window.matchMedia = () => ({ matches: false });
+  const { grid } = setup(['a', 'b', 'c']);
+  const cardA = cardOf(cellFor(grid, 'a'));
+  const cardB = cardOf(cellFor(grid, 'b'));
+  animations.length = 0;
+  ctx.tenantSlidesData.splice(1, 0, { id: 'x', title: 'Inserted card', html: '' });
+  ctx.renderTenantSlidesSorter();
+  layout(grid);
+  assert.deepEqual(orderOf(grid), ['a', 'x', 'b', 'c']);
+  assert.equal(cardOf(cellFor(grid, 'a')), cardA, 'existing nodes survive an insert');
+  assert.equal(cardOf(cellFor(grid, 'b')), cardB);
+  const added = cellFor(grid, 'x');
+  assert.ok(added, 'the new card is in the grid');
+  assert.equal(added.querySelector('.ge-thumb-title').textContent, 'Inserted card');
+  assert.ok(animations.length >= 1, 'the insert is animated');
+  assert.equal(grid.querySelector('.ge-sorter-ghost'), null, 'an insert removes nothing');
+  ctx.window.matchMedia = () => ({ matches: true });
+}
+
+// The end-of-deck add button reads the live length, so it never points one
+// slide too far after a delete or insert.
+{
+  const { grid } = setup(['a', 'b', 'c']);
+  ctx.tenantSlidesData.splice(1, 1);
+  ctx.renderTenantSlidesSorter();
+  layout(grid);
+  const addButton = addCellOf(grid).querySelector('button');
+  assert.ok(addButton, 'the add cell owns its button');
+  insertCalls.length = 0;
+  addButton.onclick();
+  assert.deepEqual(insertCalls, [2], 'the add button targets the current end');
+}
+
 console.log('Sorter harness passed: landing gap, RTL side math, in-place reorder, cancelled drag, '
-  + 'direction-aware insert, sorter delete, editor jump.');
+  + 'direction-aware insert, sorter delete, editor jump, animated reconcile.');
