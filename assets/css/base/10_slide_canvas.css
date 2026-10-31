@@ -473,3 +473,102 @@
   outline: 2px solid #17C8E3;
   outline-offset: -2px;
 }
+
+/* The inspector lives under the slide's own toolbar, not as a floating panel
+   over the canvas. Sections sit side by side so exact values stay visible
+   without eating the editing area. */
+#tenantSlidesPage .slide-inline-inspector {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 8px;
+  padding: 8px 12px 10px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  direction: rtl;
+}
+
+#tenantSlidesPage .slide-inline-inspector[hidden] {
+  display: none !important;
+}
+
+#tenantSlidesPage .slide-inline-inspector .slide-inspector-head {
+  position: static;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 0 6px;
+  border-bottom: 1px solid #eef2f6;
+  margin-bottom: 8px;
+}
+
+#tenantSlidesPage .slide-inspector-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 8px 16px;
+  align-items: start;
+}
+
+#tenantSlidesPage .slide-inline-inspector .slide-inspector-section {
+  border-top: 0;
+  padding-top: 0;
+  min-width: 0;
+}
+
+#tenantSlidesPage .slide-inline-inspector .slide-inspector-section-title {
+  margin-bottom: 4px;
+}
+
+#tenantSlidesPage .slide-inspector-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#tenantSlidesPage .slide-inspector-fields .slide-inspector-row {
+  gap: 6px;
+}
+
+#tenantSlidesPage .slide-inspector-fields .slide-inspector-row label {
+  min-width: 62px;
+  font-size: 11px;
+}
+
+#tenantSlidesPage .slide-inspector-fields input[type="number"],
+#tenantSlidesPage .slide-inspector-fields input[type="text"],
+#tenantSlidesPage .slide-inspector-fields select {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+}
+
+#tenantSlidesPage .slide-inspector-fields input[type="color"] {
+  width: 100%;
+  height: 26px;
+}
+
+#tenantSlidesPage .slide-marquee {
+  position: absolute;
+  border: 1px solid #17C8E3;
+  background: rgba(23, 200, 227, .12);
+  pointer-events: none;
+  z-index: 45;
+}
+
+#tenantSlidesPage .slide-inspector-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#tenantSlidesPage .slide-inline-inspector.is-collapsed .slide-inspector-body {
+  display: none;
+}
+
+#tenantSlidesPage .slide-inline-inspector.is-collapsed .slide-inspector-head {
+  border-bottom: 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}

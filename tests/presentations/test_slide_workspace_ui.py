@@ -561,6 +561,52 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn('restorePreservedManualSlides(', generation)
         self.assertIn('manualSlidesRestored', generation)
 
+    def test_inspector_is_an_inline_split_panel(self):
+        self.assertIn('function slideInlineInspectorHost(index)', self.source)
+        self.assertIn('.slide-inline-inspector', self.source)
+        self.assertNotIn("inspector.id = 'slideInspector'", self.source)
+        self.assertIn("canvasText('ca.position', 'الموضع')", self.source)
+        self.assertIn("canvasText('ca.align', 'محاذاة')", self.source)
+        self.assertIn("canvasText('ca.horizontal', 'أفقي')", self.source)
+        self.assertIn("canvasText('ca.vertical', 'رأسي')", self.source)
+        self.assertIn('slideShadowSelect(', self.source)
+        self.assertIn('function setSlideSelectionShadow(', self.source)
+        self.assertIn('function toggleSlideInlineInspector(btn)', self.source)
+        self.assertIn('is-collapsed', self.source)
+
+    def test_selection_geometry_uses_the_painted_scale(self):
+        self.assertIn('function slideRenderedScale(stage)', self.source)
+        # Every coordinate/handle path measures the painted slide, not only the
+        # stage zoom variable.
+        self.assertGreaterEqual(self.source.count('slideRenderedScale(stage)'), 8)
+        self.assertIn('slideElementOpacityProduct', self.source)
+        self.assertIn('applySlideElementEffectiveOpacity', self.source)
+        self.assertIn('function slideElementOpacityPct(el)', self.source)
+
+    def test_marquee_selection_and_group_naming(self):
+        self.assertIn('function startSlideMarqueeSelection(stage, index, event)', self.source)
+        self.assertIn('slide-marquee', self.source)
+        self.assertIn('marqueeAt', self.source)
+        self.assertIn('startSlideMarqueeSelection(stage, index, event)', self.source)
+        self.assertIn("groupedSlide.querySelector('[data-slide-group]')", self.source)
+        self.assertIn('selectSlideElement(groupedStage, index, grouped, groupedPath)', self.source)
+        self.assertIn('touchSlideEditSession(index);', self.source)
+        ar = (ROOT / 'assets' / 'i18n' / '01a_dict_ar_extra.js').read_text(encoding='utf-8')
+        en = (ROOT / 'assets' / 'i18n' / '01b_dict_en_extra.js').read_text(encoding='utf-8')
+        self.assertIn('"ca.group": "مجموعة"', ar)
+        self.assertIn('"ca.group": "Group"', en)
+        self.assertIn('"ca.ungroup": "فك المجموعة"', ar)
+
+    def test_shadow_can_be_removed_and_reports_its_level(self):
+        self.assertIn('function slideElementShadowLevel(el, property)', self.source)
+        self.assertIn("el.style.boxShadow = 'none'", self.source)
+        self.assertIn("el.style.textShadow = 'none'", self.source)
+        ar = (ROOT / 'assets' / 'i18n' / '01a_dict_ar_extra.js').read_text(encoding='utf-8')
+        en = (ROOT / 'assets' / 'i18n' / '01b_dict_en_extra.js').read_text(encoding='utf-8')
+        for key in ('ca.shadow_none', 'ca.shadow_soft', 'ca.shadow_strong'):
+            self.assertIn('"%s":' % key, ar)
+            self.assertIn('"%s":' % key, en)
+
     def test_authoring_labels_carry_both_languages(self):
         ar = (ROOT / 'assets' / 'i18n' / '01a_dict_ar_extra.js').read_text(encoding='utf-8')
         en = (ROOT / 'assets' / 'i18n' / '01b_dict_en_extra.js').read_text(encoding='utf-8')

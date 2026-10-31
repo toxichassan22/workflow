@@ -516,6 +516,22 @@
       toast(WFT('slide.table_border_updated', 'تم تحديث حدود الجدول'));
     }
 
+    function runSlideTableAction(index, action) {
+      if (action === 'rowadd') return mutateSlideTableSelection(index, (live, raw, ctx) => addSlideTableRow(live, raw, ctx, 1));
+      if (action === 'rowdel') return mutateSlideTableSelection(index, (live, raw, ctx) => removeSlideTableRow(live, raw, ctx));
+      if (action === 'coladd') return mutateSlideTableSelection(index, (live, raw, ctx) => addSlideTableColumn(live, raw, ctx, 1));
+      if (action === 'coldel') return mutateSlideTableSelection(index, (live, raw, ctx) => removeSlideTableColumn(live, raw, ctx));
+      if (action === 'header') return mutateSlideTableSelection(index, (live, raw) => toggleSlideTableHeader(live, raw));
+    }
+
+    function setSlideInspectorTableCellColor(index, value) {
+      return mutateSlideTableCell(index, (live, raw) => setSlideTableCellStyle(live, raw, { backgroundColor: value }));
+    }
+
+    function setSlideInspectorTableBorderColor(index, value) {
+      return mutateSlideTableSelection(index, (live, raw) => setSlideTableBorderStyle(live, raw, { color: value }));
+    }
+
     function bindSlideTableEditing(stage, index) {
       if (!stage || stage.dataset.tableEditingBound === '1') return;
       stage.dataset.tableEditingBound = '1';

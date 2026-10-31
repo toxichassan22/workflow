@@ -84,9 +84,11 @@
           + slideToolbarButton(slideToolbarText('ca.front', 'أمام'), 'front', dis)
           + slideToolbarButton(slideToolbarText('ca.back', 'خلف'), 'back', dis)
           + slideToolbarButton(slideToolbarText('ca.duplicate_element', 'تكرار'), 'dup', dis)
+          + slideToolbarButton(slideToolbarText('ca.group', 'مجموعة'), 'group', dis)
+          + slideToolbarButton(slideToolbarText('ca.ungroup', 'فك المجموعة'), 'ungroup', dis)
           + slideToolbarButton(slideToolbarText('ca.delete_element', 'حذف العنصر'), 'del', dis)
           + '<span class="slide-edit-tab-sep"></span>'
-          + '<input type="range" min="5" max="100" step="5" value="100" data-slide-edit-opacity="range"'
+          + '<input type="range" min="1" max="100" step="1" value="100" data-slide-edit-opacity="range"'
           + dis + ' style="width:110px" aria-label="' + slideToolbarText('ca.opacity', 'الشفافية') + '">'
           + '<span data-slide-edit-opacity-readout class="slide-edit-tab-readout">100%</span>'
           + '</div>',
@@ -235,6 +237,8 @@
           else if (act === 'front') adjustSlideElementLayer(index, 1);
           else if (act === 'back') adjustSlideElementLayer(index, -1);
           else if (act === 'dup' && typeof duplicateSelectedSlideElements === 'function') duplicateSelectedSlideElements(index);
+          else if (act === 'group' && typeof groupSelectedSlideElements === 'function') groupSelectedSlideElements(index);
+          else if (act === 'ungroup' && typeof ungroupSelectedSlideElements === 'function') ungroupSelectedSlideElements(index);
           else if (act === 'alignright' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'right');
           else if (act === 'aligncenter' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'center');
           else if (act === 'alignleft' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'left');

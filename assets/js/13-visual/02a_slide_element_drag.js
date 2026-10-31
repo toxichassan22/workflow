@@ -218,7 +218,18 @@
         if (event.button !== 0) return;
         if (slideElementDragActive) return;
         const target = slideDragTarget(slide, event.target);
-        if (!target) return;
+        if (!target) {
+          if (typeof startSlideMarqueeSelection === 'function' && getSlideEditSession(index)) {
+            const bounds = slide.getBoundingClientRect();
+            if (event.clientX >= bounds.left && event.clientX <= bounds.right
+              && event.clientY >= bounds.top && event.clientY <= bounds.bottom) {
+              event.preventDefault();
+              event.stopPropagation();
+              startSlideMarqueeSelection(stage, index, event);
+            }
+          }
+          return;
+        }
         const path = slideElementPath(slide, target);
         if (!path) return;
         // Crop mode turns the drag into moving the picture inside its frame,
@@ -242,7 +253,7 @@
         event.preventDefault();
         event.stopPropagation();
         slideElementDragActive = true;
-        const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+        const scale = slideRenderedScale(stage);
         const startX = event.clientX;
         const startY = event.clientY;
         const dragPairs = (typeof slideDragEntriesForTarget === 'function')
@@ -302,6 +313,10 @@
         if (event.target.closest('.slide-element-selected, .slide-resize-handle, .slide-move-handle, .slide-element-delete-btn')) return;
         if (event.target.closest && event.target.closest('[contenteditable]')) return;
         const session = slideEditSessions[index];
+        if (session && session.marqueeAt) {
+          delete session.marqueeAt;
+          return;
+        }
         if (session && session.sel) {
           const slideEl = stage.querySelector('.slide');
           const selected = slideEl ? elementAtSlidePath(slideEl, session.sel.path) : null;

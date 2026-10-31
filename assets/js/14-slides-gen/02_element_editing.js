@@ -174,7 +174,7 @@
       const slide = stage.querySelector('.slide');
       if (!slide || !slide.contains(target)) return;
       if (window.getComputedStyle(slide).position === 'static') slide.style.position = 'relative';
-      const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const scale = slideRenderedScale(stage);
       const slideRect = slide.getBoundingClientRect();
       const rect = target.getBoundingClientRect();
       const x = (rect.left - slideRect.left) / scale;
@@ -528,32 +528,52 @@
       toast('تم تغيير لون العنصر');
     }
 
+    /* A designer can put the opacity on a wrapper (a logo layer, a card), so
+       the selected element's own computed opacity reads 100 while the visible
+       result is 50. The control shows the effective value (element × every
+       ancestor) and compensates when it writes, so typing 80 really shows 80. */
+    function slideElementOpacityProduct(el, includeSelf) {
+      let node = el;
+      let product = 1;
+      if (!includeSelf && node) node = node.parentElement;
+      while (node && node.nodeType === 1) {
+        if (node.classList && node.classList.contains('slide')) break;
+        const value = parseFloat(window.getComputedStyle(node).opacity);
+        if (isFinite(value)) product *= value;
+        node = node.parentElement;
+      }
+      return Math.max(0, Math.min(1, product));
+    }
+
     function slideElementOpacityPct(el) {
-      try {
-        const value = parseFloat(window.getComputedStyle(el).opacity);
-        if (isFinite(value)) return Math.max(5, Math.min(100, Math.round(value * 100)));
-      } catch (err) {}
-      return 100;
+      if (!el) return 100;
+      return Math.max(0, Math.min(100, Math.round(slideElementOpacityProduct(el, true) * 100)));
+    }
+
+    function applySlideElementEffectiveOpacity(target, pct) {
+      const parent = slideElementOpacityProduct(target, false);
+      const desired = Math.max(1, Math.min(100, Math.round(Number(pct) || 100))) / 100;
+      const own = parent > 0 ? Math.min(1, desired / parent) : 1;
+      target.style.opacity = String(Math.round(own * 1000) / 1000);
+      return Math.max(0, Math.min(100, Math.round(Math.min(desired, parent || desired) * 100)));
     }
 
     function previewSlideElementOpacity(index, pct) {
       const session = getSlideEditSession(index);
       if (!session || !session.sel) return;
-      const clamped = Math.max(5, Math.min(100, Math.round(Number(pct) || 100)));
       const stage = slideStageForIndex(index);
       const slide = stage ? stage.querySelector('.slide') : null;
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       if (!target) return;
-      (watermarkOverlayOf(target) || target).style.opacity = String(clamped / 100);
+      const actual = applySlideElementEffectiveOpacity(watermarkOverlayOf(target) || target, pct);
       const card = document.getElementById('slide-card-' + index);
       const readout = card ? card.querySelector('[data-slide-edit-opacity-readout]') : null;
-      if (readout) readout.textContent = clamped + '%';
+      if (readout) readout.textContent = actual + '%';
     }
 
     function commitSlideElementOpacity(index, pct) {
       const session = getSlideEditSession(index);
       if (!session || !session.sel) { toast('حدد عنصرا أولا'); return; }
-      const clamped = Math.max(5, Math.min(100, Math.round(Number(pct) || 100)));
       const stage = slideStageForIndex(index);
       const slide = stage ? stage.querySelector('.slide') : null;
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
@@ -565,14 +585,16 @@
       const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, session.sel.path);
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
       pushSlideEditHistory(index);
-      (watermarkOverlayOf(target) || target).style.opacity = String(clamped / 100);
-      (watermarkOverlayOf(rawTarget) || rawTarget).style.opacity = String(clamped / 100);
+      const liveLayer = watermarkOverlayOf(target) || target;
+      const rawLayer = watermarkOverlayOf(rawTarget) || rawTarget;
+      const actual = applySlideElementEffectiveOpacity(liveLayer, pct);
+      rawLayer.style.opacity = liveLayer.style.opacity;
       slideData.html = rawRoot.outerHTML;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
       syncSlideElementToolbar(index);
-      toast(WFT('slide.opacity_set', 'تم ضبط شفافية العنصر {n}%', { n: clamped }));
+      toast(WFT('slide.opacity_set', 'تم ضبط شفافية العنصر {n}%', { n: actual }));
     }
 
     function slideElementFontSizePx(el) {

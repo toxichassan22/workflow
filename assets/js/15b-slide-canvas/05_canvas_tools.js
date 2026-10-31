@@ -193,7 +193,7 @@
       if (img.style.height && img.style.height !== 'auto') return false;
       const stage = canvasStageFor(index);
       if (!stage) return false;
-      const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const scale = slideRenderedScale(stage);
       const height = Math.round(img.getBoundingClientRect().height / scale);
       if (!height) return false;
       img.style.height = Math.max(24, height) + 'px';
@@ -228,7 +228,7 @@
       const img = slideImageTargetOf(target);
       if (!img || !stage) return;
       prepareSlideImageCrop(index, img);
-      const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const scale = slideRenderedScale(stage);
       const rect = img.getBoundingClientRect();
       const width = Math.max(1, rect.width / scale);
       const height = Math.max(1, rect.height / scale);

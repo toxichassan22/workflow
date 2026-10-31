@@ -107,6 +107,101 @@
       triggerAutoSaveDraft();
     }
 
+    /* Drag on the empty canvas to select everything the rectangle touches —
+       the same gesture PowerPoint and Canva use for a group of elements. */
+    function startSlideMarqueeSelection(stage, index, event) {
+      const slide = stage ? stage.querySelector('.slide') : null;
+      const session = canvasSession(index);
+      if (!slide || !session) return;
+      const scale = slideRenderedScale(stage);
+      const slideRect = slide.getBoundingClientRect();
+      const startX = (event.clientX - slideRect.left) / scale;
+      const startY = (event.clientY - slideRect.top) / scale;
+      const additive = !!(event.shiftKey || event.ctrlKey || event.metaKey);
+      const baseEntries = additive ? slideSelectedEntries(session).slice() : [];
+      const box = document.createElement('div');
+      box.className = 'slide-marquee';
+      slide.appendChild(box);
+      slideElementDragActive = true;
+      let moved = false;
+      const onMove = moveEvent => {
+        const x = (moveEvent.clientX - slideRect.left) / scale;
+        const y = (moveEvent.clientY - slideRect.top) / scale;
+        const left = Math.min(startX, x);
+        const top = Math.min(startY, y);
+        const width = Math.abs(x - startX);
+        const height = Math.abs(y - startY);
+        if (width + height > 3) moved = true;
+        box.style.left = Math.round(left) + 'px';
+        box.style.top = Math.round(top) + 'px';
+        box.style.width = Math.round(width) + 'px';
+        box.style.height = Math.round(height) + 'px';
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove, true);
+        window.removeEventListener('pointerup', onUp, true);
+        window.removeEventListener('pointercancel', onUp, true);
+        slideElementDragActive = false;
+        const area = {
+          left: parseFloat(box.style.left) || 0,
+          top: parseFloat(box.style.top) || 0,
+          width: parseFloat(box.style.width) || 0,
+          height: parseFloat(box.style.height) || 0
+        };
+        box.remove();
+        if (!moved) return;
+        const entries = baseEntries.slice();
+        Array.from(slide.children).forEach(child => {
+          if (slidePathIgnores(child)) return;
+          if (slideChromeOf(slide, child) === child) return;
+          const childStyle = window.getComputedStyle(child);
+          if (childStyle.display === 'none' || childStyle.visibility === 'hidden') return;
+          const rect = child.getBoundingClientRect();
+          if (rect.width < 2 || rect.height < 2) return;
+          const item = {
+            left: (rect.left - slideRect.left) / scale,
+            top: (rect.top - slideRect.top) / scale,
+            width: rect.width / scale,
+            height: rect.height / scale
+          };
+          const intersects = item.left < area.left + area.width
+            && item.left + item.width > area.left
+            && item.top < area.top + area.height
+            && item.top + item.height > area.top;
+          if (!intersects) return;
+          const entry = slideEntryForTarget(stage, child);
+          if (!entry) return;
+          if (!entries.some(existing => sameSlideEntry(existing, entry))) entries.push(entry);
+        });
+        if (!entries.length) {
+          if (!additive) {
+            session.sel = null;
+            session.multi = [];
+            clearSlideElementSelection(stage);
+            syncSlideElementToolbar(index);
+            renderSlideInspector(index);
+          }
+          return;
+        }
+        // The pointerup is followed by a click on the empty canvas; the click
+        // handler clears the selection, so mark this gesture as consumed.
+        session.marqueeAt = Date.now();
+        session.multi = entries;
+        session.sel = entries[0];
+        clearSlideElementSelection(stage);
+        const pairs = slideSelectedTargets(stage, session);
+        pairs.forEach(({ target }, entryIndex) => {
+          target.classList.add(entryIndex === 0 ? 'slide-element-selected' : 'slide-element-multiselected');
+        });
+        if (pairs[0]) positionSlideEditHandles(stage, pairs[0].target);
+        syncSlideElementToolbar(index);
+        renderSlideInspector(index);
+      };
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onUp, true);
+    }
+
     /* ── Snapping ───────────────────────────────────────────────────────── */
 
     function clearSlideSnapGuides(slide) {
@@ -117,7 +212,7 @@
     function slideSnapContext(stage, target) {
       const slide = stage ? stage.querySelector('.slide') : null;
       if (!slide) return null;
-      const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const scale = slideRenderedScale(stage);
       const slideRect = slide.getBoundingClientRect();
       const toSlide = rect => ({
         left: (rect.left - slideRect.left) / scale,

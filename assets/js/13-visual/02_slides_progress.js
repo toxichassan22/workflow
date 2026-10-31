@@ -659,6 +659,23 @@
       return canvas;
     }
 
+    /* The scale the slide is actually painted at. The stage variable only
+       covers the stage zoom; a slide that carries its own transform (or a
+       stored legacy scale) is smaller or larger than that, and every
+       selection-handle measurement used the stage scale alone — the boxes
+       landed beside the element. Measure the painted width against the
+       layout width instead. */
+    function slideRenderedScale(stage) {
+      const fallback = Number(stage && stage.style.getPropertyValue('--slide-scale')) || 1;
+      const slide = stage ? stage.querySelector('.slide') : null;
+      if (!slide) return fallback;
+      const width = slide.offsetWidth || parseFloat(slide.style.width) || 0;
+      if (!width) return fallback;
+      const painted = slide.getBoundingClientRect().width;
+      const scale = painted / width;
+      return isFinite(scale) && scale > 0 ? scale : fallback;
+    }
+
     function slideParseCssColor(value) {
       const match = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/.exec(String(value || '').trim());
       if (!match) return null;

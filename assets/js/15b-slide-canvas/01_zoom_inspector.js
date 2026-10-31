@@ -84,10 +84,6 @@
         + escapeHtml(canvasText('ca.zoom_full', 'ملء الشاشة')) + '</button>';
       page.appendChild(zoom);
 
-      const inspector = document.createElement('div');
-      inspector.className = 'slide-inspector';
-      inspector.id = 'slideInspector';
-      page.appendChild(inspector);
     }
 
     function slideElementHasText(el) {
@@ -122,7 +118,7 @@
     function slideElementRectInSlide(stage, el) {
       const slide = stage ? stage.querySelector('.slide') : null;
       if (!slide || !el) return null;
-      const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const scale = slideRenderedScale(stage);
       const slideRect = slide.getBoundingClientRect();
       const rect = el.getBoundingClientRect();
       return {
@@ -236,7 +232,7 @@
       const slide = stage.querySelector('.slide');
       const pairs = slideSelectedTargets(stage, session);
       if (!slide || !pairs.length) return;
-      const slideScale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const slideScale = slideRenderedScale(stage);
       const slideRect = slide.getBoundingClientRect();
       withSlideElementTargets(index, (live, raw) => {
         const rect = live.getBoundingClientRect();
@@ -265,7 +261,7 @@
         toast(canvasText('ca.distribute_needs_three', 'حدد ثلاثة عناصر أو أكثر للتوزيع'));
         return;
       }
-      const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const scale = slideRenderedScale(stage);
       const slide = stage.querySelector('.slide');
       const slideRect = slide.getBoundingClientRect();
       const items = pairs.map(pair => {
@@ -314,12 +310,17 @@
     }
 
     function toggleSlideSelectionShadow(index) {
-      withSlideElementTargets(index, (live, raw) => {
-        const has = String(live.style.boxShadow || '').trim();
-        const next = has ? '' : '0 10px 30px rgba(7,24,44,.22)';
-        live.style.boxShadow = next;
-        raw.style.boxShadow = next;
-      });
+      const session = canvasSession(index);
+      const stage = canvasStageFor(index);
+      if (!session || !stage) return;
+      const pairs = slideSelectedTargets(stage, session);
+      const primary = pairs[0] ? pairs[0].target : null;
+      if (!primary) return;
+      if (slideElementShadowLevel(primary, 'boxShadow') !== 'none') {
+        setSlideSelectionStyle(index, el => { el.style.boxShadow = 'none'; });
+      } else {
+        setSlideSelectionStyle(index, el => { el.style.boxShadow = '0 10px 30px rgba(7,24,44,.22)'; });
+      }
     }
 
     function deleteSelectedSlideElements(index) {
@@ -443,7 +444,7 @@
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
       const rawRoot = rawDoc.querySelector('.slide');
       if (!rawRoot) return;
-      const scale = Number(stage.style.getPropertyValue('--slide-scale')) || 1;
+      const scale = slideRenderedScale(stage);
       const slide = stage.querySelector('.slide');
       const slideRect = slide.getBoundingClientRect();
       const boxes = pairs.map(pair => {
@@ -481,9 +482,15 @@
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       session.sel = null;
       session.multi = [];
+      touchSlideEditSession(index);
       triggerAutoSaveDraft();
       refreshSingleSlideCard(index);
-      renderSlideInspector(index);
+      const groupedStage = slideStageForIndex(index);
+      const groupedSlide = groupedStage ? groupedStage.querySelector('.slide') : null;
+      const grouped = groupedSlide ? groupedSlide.querySelector('[data-slide-group]') : null;
+      const groupedPath = grouped && groupedSlide ? slideElementPath(groupedSlide, grouped) : null;
+      if (groupedStage && grouped && groupedPath) selectSlideElement(groupedStage, index, grouped, groupedPath);
+      else renderSlideInspector(index);
       toast(canvasText('ca.elements_grouped', 'تم تجميع العناصر'));
     }
 
@@ -521,6 +528,7 @@
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       session.sel = null;
       session.multi = [];
+      touchSlideEditSession(index);
       triggerAutoSaveDraft();
       refreshSingleSlideCard(index);
       renderSlideInspector(index);
@@ -536,39 +544,107 @@
         + ' onclick="' + action + '">' + escapeHtml(label) + '</button>';
     }
 
+    function slideInlineInspectorHost(index) {
+      const card = document.getElementById('slide-card-' + index);
+      if (!card) return null;
+      let host = card.querySelector('.slide-inline-inspector');
+      if (!host) {
+        host = document.createElement('div');
+        host.className = 'slide-inline-inspector';
+        const stage = card.querySelector('.tenant-slide-stage');
+        card.insertBefore(host, stage);
+      }
+      return host;
+    }
+
+    function slideElementShadowLevel(el, property) {
+      if (!el) return 'none';
+      try {
+        const inline = String(el.style && el.style[property] || '').trim().toLowerCase();
+        if (inline === 'none') return 'none';
+        if (inline) return 'soft';
+        const computed = String(window.getComputedStyle(el)[property] || '').trim().toLowerCase();
+        return computed && computed !== 'none' ? 'soft' : 'none';
+      } catch (error) {
+        return 'none';
+      }
+    }
+
+    function slideShadowSelect(index, property, el) {
+      let current = slideElementShadowLevel(el, property);
+      if (current === 'none' && property === 'textShadow'
+        && slideElementShadowLevel(el, 'boxShadow') !== 'none') current = 'soft';
+      const option = (value, label) => '<option value="' + value + '"'
+        + (current === value ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+      return '<select onchange="setSlideSelectionShadow(' + index + ', this.value)">'
+        + option('none', canvasText('ca.shadow_none', 'بدون ظل'))
+        + option('soft', canvasText('ca.shadow_soft', 'ظل خفيف'))
+        + option('strong', canvasText('ca.shadow_strong', 'ظل قوي'))
+        + '</select>';
+    }
+
+    function setSlideSelectionShadow(index, level) {
+      const session = canvasSession(index);
+      const stage = canvasStageFor(index);
+      if (!session || !stage) return;
+      const pairs = slideSelectedTargets(stage, session);
+      const primary = pairs[0] ? pairs[0].target : null;
+      if (!primary) return;
+      const property = inspectorTargetKind(primary) === 'text' ? 'textShadow' : 'boxShadow';
+      const values = property === 'textShadow'
+        ? { none: 'none', soft: '0 2px 6px rgba(7,24,44,.28)', strong: '0 4px 14px rgba(7,24,44,.4)' }
+        : { none: 'none', soft: '0 10px 30px rgba(7,24,44,.18)', strong: '0 18px 40px rgba(7,24,44,.35)' };
+      const value = values[level] || values.none;
+      setSlideSelectionStyle(index, el => {
+        el.style[property] = value;
+        // A text card may carry its shadow on the box; "no shadow" clears both.
+        if (property === 'textShadow' && value === 'none') el.style.boxShadow = 'none';
+      });
+    }
+
+    function toggleSlideInlineInspector(btn) {
+      const host = btn && btn.closest ? btn.closest('.slide-inline-inspector') : null;
+      if (!host) return;
+      const collapsed = host.classList.toggle('is-collapsed');
+      btn.textContent = canvasText(collapsed ? 'ws.plan_expand' : 'ws.plan_collapse', collapsed ? 'توسيع' : 'طي');
+    }
+
     function renderSlideInspector(index) {
-      const box = document.getElementById('slideInspector');
-      if (!box) return;
+      const host = slideInlineInspectorHost(index);
+      if (!host) return;
+      document.querySelectorAll('.slide-inline-inspector').forEach(other => {
+        if (other === host) return;
+        other.innerHTML = '';
+        other.hidden = true;
+      });
       const session = canvasSession(index);
       const stage = canvasStageFor(index);
       const pairs = slideSelectedTargets(stage, session);
       if (!session || !pairs.length) {
-        box.classList.remove('is-open');
-        box.innerHTML = '';
+        host.innerHTML = '';
+        host.hidden = true;
         return;
       }
       const primary = pairs[0].target;
-      // The chat panel owns the left edge; the inspector docks beside it so it
-      // never covers the conversation.
-      const chatPanel = document.getElementById('tenantSlidesChat');
-      if (chatPanel && window.innerWidth > 900) {
-        box.style.left = Math.round(chatPanel.getBoundingClientRect().right + 12) + 'px';
-      } else {
-        box.style.left = '';
-      }
       const kind = inspectorTargetKind(primary);
       const rect = slideElementRectInSlide(stage, primary);
       const multi = pairs.length > 1;
       const opacity = typeof slideElementOpacityPct === 'function' ? slideElementOpacityPct(primary) : 100;
       const rotation = parseFloat(primary.style.rotate) || 0;
       const parts = [];
+      host.hidden = false;
+      const collapsed = host.classList.contains('is-collapsed');
       parts.push('<div class="slide-inspector-head"><span class="slide-inspector-title">'
-        + escapeHtml(canvasText('ca.inspector', 'خصائص العنصر')) + (multi ? ' — ' + pairs.length : '') + '</span>'
-        + '<button type="button" class="slide-inspector-close" onclick="closeSlideInspector()">'
-        + escapeHtml(canvasText('ca.close', 'إغلاق')) + '</button></div>');
+        + escapeHtml(canvasText('ca.inspector', 'خصائص العنصر')) + (multi ? ' — ' + pairs.length : '')
+        + '</span><span class="slide-inspector-head-actions">'
+        + '<button type="button" class="slide-inspector-collapse" onclick="toggleSlideInlineInspector(this)">'
+        + escapeHtml(canvasText(collapsed ? 'ws.plan_expand' : 'ws.plan_collapse', collapsed ? 'توسيع' : 'طي'))
+        + '</button><button type="button" class="slide-inspector-close" onclick="closeSlideInspector()">'
+        + escapeHtml(canvasText('ca.close', 'إغلاق')) + '</button></span></div>');
+      parts.push('<div class="slide-inspector-body">');
 
       parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-        + escapeHtml(canvasText('ca.common', 'مشترك')) + '</div>');
+        + escapeHtml(canvasText('ca.position', 'الموضع')) + '</div><div class="slide-inspector-fields">');
       if (!multi && rect) {
         parts.push(slideInspectorRow(canvasText('ca.x', 'الموضع X'),
           '<input type="number" id="inspectorX" value="' + rect.x + '" onchange="moveSlideSelectionTo(' + index + ', \'x\', Number(this.value))">'));
@@ -580,7 +656,7 @@
           '<input type="number" id="inspectorH" value="' + rect.height + '" onchange="resizeSlideSelection(' + index + ', 0, Number(this.value))">'));
       }
       parts.push(slideInspectorRow(canvasText('ca.opacity', 'الشفافية'),
-        '<input type="number" min="5" max="100" step="5" value="' + opacity + '" onchange="commitSlideElementOpacity(' + index + ', Number(this.value))">'));
+        '<input type="number" min="1" max="100" step="1" value="' + opacity + '" onchange="commitSlideElementOpacity(' + index + ', Number(this.value))">'));
       parts.push(slideInspectorRow(canvasText('ca.rotation', 'الدوران'),
         '<input type="number" min="-180" max="180" step="1" value="' + Math.round(rotation) + '" onchange="setSlideSelectionRotation(' + index + ', Number(this.value))">'));
       parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.layer', 'الطبقة')) + '</label>'
@@ -588,7 +664,11 @@
         + slideInspectorButton(canvasText('ca.front', 'أمام'), 'adjustSlideElementLayer(' + index + ', 1)')
         + slideInspectorButton(canvasText('ca.back', 'خلف'), 'adjustSlideElementLayer(' + index + ', -1)')
         + '</div></div>');
-      parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.align', 'محاذاة')) + '</label>'
+      parts.push('</div></div>');
+
+      parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
+        + escapeHtml(canvasText('ca.align', 'محاذاة')) + '</div><div class="slide-inspector-fields">');
+      parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.horizontal', 'أفقي')) + '</label>'
         + '<div class="slide-inspector-actions">'
         + slideInspectorButton(canvasText('ca.right', 'يمين'), 'alignSlideSelection(' + index + ', \'right\', \'\')')
         + slideInspectorButton(canvasText('ca.center', 'وسط'), 'alignSlideSelection(' + index + ', \'center\', \'\')')
@@ -607,7 +687,7 @@
           + slideInspectorButton(canvasText('ca.distribute_v', 'رأسي'), 'distributeSlideSelection(' + index + ', \'y\')')
           + '</div></div>');
       }
-      parts.push('</div>');
+      parts.push('</div></div>');
 
       if (kind === 'text') {
         const fontSize = slideStyleNumber(slideElementInlineValue(primary, 'fontSize', '16px'), 16);
@@ -617,7 +697,7 @@
         const textAlign = String(slideElementInlineValue(primary, 'textAlign', 'right') || 'right');
         const color = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'color', '')) || '#1e293b') : '#1e293b';
         parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-          + escapeHtml(canvasText('ca.text', 'النص')) + '</div>');
+          + escapeHtml(canvasText('ca.text', 'النص')) + '</div><div class="slide-inspector-fields">');
         parts.push(slideInspectorRow(canvasText('ca.font_size', 'حجم الخط'),
           '<input type="number" min="8" max="200" value="' + fontSize
           + '" onchange="setSlideSelectionFontSize(' + index + ', Number(this.value))">'));
@@ -640,18 +720,17 @@
           + '" onchange="setSlideSelectionLetterSpacing(' + index + ', Number(this.value))">'));
         parts.push(slideInspectorRow(canvasText('ca.text_color', 'لون النص'),
           '<input type="color" value="' + color + '" onchange="setSlideSelectionTextColor(' + index + ', this.value)">'));
-        parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.shadow', 'ظل')) + '</label>'
-          + '<div class="slide-inspector-actions">'
-          + slideInspectorButton(canvasText('ca.shadow_toggle', 'ظل النص'), 'setSlideSelectionTextShadow(' + index + ')')
-          + '</div></div>');
-        parts.push('</div>');
+        parts.push(slideInspectorRow(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'textShadow', primary)));
+        parts.push('</div></div>');
       }
 
       if (kind === 'image') {
         const fit = String(slideElementInlineValue(primary, 'objectFit', '') || '').toLowerCase();
         const radius = slideStyleNumber(slideElementInlineValue(primary, 'borderRadius', '0px'), 0);
+        const borderWidth = slideStyleNumber(slideElementInlineValue(primary, 'borderWidth', '0px'), 0);
+        const borderColor = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'borderColor', '')) || '#dbe3ea') : '#dbe3ea';
         parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-          + escapeHtml(canvasText('ca.image', 'الصورة')) + '</div>');
+          + escapeHtml(canvasText('ca.image', 'الصورة')) + '</div><div class="slide-inspector-fields">');
         parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.image_file', 'الملف')) + '</label>'
           + '<div class="slide-inspector-actions">'
           + slideInspectorButton(canvasText('ca.replace_image', 'استبدال'), 'openSlideImagePicker(' + index + ')')
@@ -664,12 +743,18 @@
         parts.push(slideInspectorRow(canvasText('ca.radius', 'الزوايا'),
           '<input type="number" min="0" max="200" value="' + radius
           + '" onchange="setSlideSelectionBorderRadius(' + index + ', Number(this.value))">'));
+        parts.push(slideInspectorRow(canvasText('ca.border_width', 'سماكة الحدود'),
+          '<input type="number" min="0" max="20" value="' + borderWidth
+          + '" onchange="setSlideSelectionBorderWidth(' + index + ', Number(this.value))">'));
+        parts.push(slideInspectorRow(canvasText('ca.border_color', 'الحدود'),
+          '<input type="color" value="' + borderColor + '" onchange="setSlideSelectionBorderColor(' + index + ', this.value)">'));
         parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.aspect_lock', 'قفل النسبة')) + '</label>'
           + '<div class="slide-inspector-actions">'
           + slideInspectorButton(hasSlideAspectLock(index) ? canvasText('ca.locked', 'مقفل') : canvasText('ca.unlocked', 'مفتوح'),
             'toggleSlideAspectLock(' + index + ')', hasSlideAspectLock(index))
           + '</div></div>');
-        parts.push('</div>');
+        parts.push(slideInspectorRow(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'boxShadow', primary)));
+        parts.push('</div></div>');
       }
 
       if (kind === 'shape') {
@@ -678,43 +763,61 @@
         const borderWidth = slideStyleNumber(slideElementInlineValue(primary, 'borderWidth', '0px'), 0);
         const radius = slideStyleNumber(slideElementInlineValue(primary, 'borderRadius', '0px'), 0);
         parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
-          + escapeHtml(canvasText('ca.shape', 'الشكل')) + '</div>');
+          + escapeHtml(canvasText('ca.shape', 'الشكل')) + '</div><div class="slide-inspector-fields">');
         parts.push(slideInspectorRow(canvasText('ca.fill', 'التعبئة'),
           '<input type="color" value="' + fill + '" onchange="setSlideSelectionFill(' + index + ', this.value)">'));
-        parts.push(slideInspectorRow(canvasText('ca.border_color', 'الحدود'),
-          '<input type="color" value="' + borderColor + '" onchange="setSlideSelectionBorderColor(' + index + ', this.value)">'));
         parts.push(slideInspectorRow(canvasText('ca.border_width', 'سماكة الحدود'),
           '<input type="number" min="0" max="20" value="' + borderWidth
           + '" onchange="setSlideSelectionBorderWidth(' + index + ', Number(this.value))">'));
+        parts.push(slideInspectorRow(canvasText('ca.border_color', 'الحدود'),
+          '<input type="color" value="' + borderColor + '" onchange="setSlideSelectionBorderColor(' + index + ', this.value)">'));
         parts.push(slideInspectorRow(canvasText('ca.radius', 'الزوايا'),
           '<input type="number" min="0" max="200" value="' + radius
           + '" onchange="setSlideSelectionBorderRadius(' + index + ', Number(this.value))">'));
-        parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.shadow', 'ظل')) + '</label>'
+        parts.push(slideInspectorRow(canvasText('ca.shadow', 'ظل'), slideShadowSelect(index, 'boxShadow', primary)));
+        parts.push('</div></div>');
+      }
+
+      if (kind === 'table') {
+        const sampleCell = primary.querySelector && primary.querySelector('td,th');
+        const cellFill = sampleCell && typeof cssColorToHex === 'function'
+          ? (cssColorToHex(sampleCell.style.backgroundColor || window.getComputedStyle(sampleCell).backgroundColor) || '#ffffff') : '#ffffff';
+        const borderColor = sampleCell && typeof cssColorToHex === 'function'
+          ? (cssColorToHex(sampleCell.style.borderColor || window.getComputedStyle(sampleCell).borderColor) || '#dbe3ea') : '#dbe3ea';
+        parts.push('<div class="slide-inspector-section"><div class="slide-inspector-section-title">'
+          + escapeHtml(canvasText('tb.table', 'جدول')) + '</div><div class="slide-inspector-fields">');
+        parts.push('<div class="slide-inspector-row"><label>' + escapeHtml(canvasText('ca.add_row', 'صف جديد')) + '</label>'
           + '<div class="slide-inspector-actions">'
-          + slideInspectorButton(canvasText('ca.toggle_shadow', 'تبديل الظل'), 'toggleSlideSelectionShadow(' + index + ')')
+          + slideInspectorButton(canvasText('ca.add_row', 'صف جديد'), 'runSlideTableAction(' + index + ', \'rowadd\')')
+          + slideInspectorButton(canvasText('ca.del_row', 'حذف صف'), 'runSlideTableAction(' + index + ', \'rowdel\')')
+          + slideInspectorButton(canvasText('ca.add_col', 'عمود جديد'), 'runSlideTableAction(' + index + ', \'coladd\')')
+          + slideInspectorButton(canvasText('ca.del_col', 'حذف عمود'), 'runSlideTableAction(' + index + ', \'coldel\')')
           + '</div></div>');
-        parts.push('</div>');
+        parts.push(slideInspectorRow(canvasText('ca.cell_fill', 'لون الخلية'),
+          '<input type="color" value="' + cellFill + '" onchange="setSlideInspectorTableCellColor(' + index + ', this.value)">'));
+        parts.push(slideInspectorRow(canvasText('ca.table_border', 'حدود الجدول'),
+          '<input type="color" value="' + borderColor + '" onchange="setSlideInspectorTableBorderColor(' + index + ', this.value)">'));
+        parts.push('</div></div>');
       }
 
       parts.push('<div class="slide-inspector-section"><div class="slide-inspector-actions">'
         + slideInspectorButton(canvasText('ca.duplicate_element', 'تكرار'), 'duplicateSelectedSlideElements(' + index + ')')
         + slideInspectorButton(canvasText('ca.copy', 'نسخ'), 'copySelectedSlideElements(' + index + ')')
         + slideInspectorButton(canvasText('ca.paste', 'لصق'), 'pasteSlideElements(' + index + ')')
-        + slideInspectorButton(canvasText('ca.group', 'تجميع'), 'groupSelectedSlideElements(' + index + ')')
-        + slideInspectorButton(canvasText('ca.ungroup', 'فك التجميع'), 'ungroupSelectedSlideElements(' + index + ')')
+        + slideInspectorButton(canvasText('ca.group', 'مجموعة'), 'groupSelectedSlideElements(' + index + ')')
+        + slideInspectorButton(canvasText('ca.ungroup', 'فك المجموعة'), 'ungroupSelectedSlideElements(' + index + ')')
         + slideInspectorButton(canvasText('ca.delete_element', 'حذف العناصر'), 'deleteSelectedSlideElements(' + index + ')')
         + '</div></div>');
 
-      box.innerHTML = parts.join('');
-      box.classList.add('is-open');
+      parts.push('</div>');
+      host.innerHTML = parts.join('');
     }
 
     function closeSlideInspector() {
-      const box = document.getElementById('slideInspector');
-      if (box) {
-        box.classList.remove('is-open');
-        box.innerHTML = '';
-      }
+      document.querySelectorAll('.slide-inline-inspector').forEach(host => {
+        host.innerHTML = '';
+        host.hidden = true;
+      });
     }
 
     function hasSlideAspectLock(index) {
@@ -754,10 +857,17 @@
     }
 
     function setSlideSelectionTextShadow(index) {
-      setSlideSelectionStyle(index, el => {
-        el.style.textShadow = String(el.style.textShadow || '').trim()
-          ? '' : '0 2px 6px rgba(7,24,44,.28)';
-      });
+      const session = canvasSession(index);
+      const stage = canvasStageFor(index);
+      if (!session || !stage) return;
+      const pairs = slideSelectedTargets(stage, session);
+      const primary = pairs[0] ? pairs[0].target : null;
+      if (!primary) return;
+      if (slideElementShadowLevel(primary, 'textShadow') !== 'none') {
+        setSlideSelectionStyle(index, el => { el.style.textShadow = 'none'; });
+      } else {
+        setSlideSelectionStyle(index, el => { el.style.textShadow = '0 2px 6px rgba(7,24,44,.28)'; });
+      }
     }
 
     function setSlideSelectionImageFit(index, value) {
