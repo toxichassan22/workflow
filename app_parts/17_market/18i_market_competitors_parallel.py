@@ -261,6 +261,24 @@ def _native_search_fallback(system_prompt, prompt, usage_ctx, evidence_pool,
             if offer_lang == 'en' else
             "أنت خبير دراسات سوق عقاري في المملكة العربية السعودية. أجب دائمًا بتنسيق JSON فقط."
         )
+        # The fallback talks to the provider directly, so it must carry the
+        # company's own market training just like the regular browse path. The
+        # scan thread has no request/app context, so the block is carried from
+        # the already-built system prompt instead of reading the database here.
+        marker = '## بيانات خاصة بالشركة'
+        if marker in str(system_prompt or ''):
+            clean_sys += "\n\n" + marker + str(system_prompt).split(marker, 1)[1]
+        else:
+            tenant_id = (usage_ctx or {}).get('tenant_id') if isinstance(usage_ctx, dict) else None
+            if tenant_id:
+                try:
+                    import db as _training_db
+                    training_context = _training_db.get_training_context(
+                        tenant_id, surface='content', offer_lang=offer_lang)
+                    if training_context:
+                        clean_sys += "\n\n" + marker + "\n" + training_context
+                except Exception:
+                    pass
         effective_prompt = _native_fallback_prompt(
             task, payload, offer_lang=offer_lang) if task else prompt
         response = _browse_agent_call(

@@ -645,7 +645,10 @@ class AdminAgentTests(unittest.TestCase):
         source = read_frontend_text()
         self.assertIn('sagTenantTabAgent', source)
         self.assertIn("showSagTenantTab(\\'agent\\')", source)
-        self.assertIn("'activity', 'access', 'agent'", source)
+        # The retired access-request pane is gone (direct support access), so the
+        # modal keeps the activity and agent review tabs only.
+        self.assertIn("'activity', 'agent'", source)
+        self.assertNotIn("'access', 'agent'", source)
         self.assertIn('renderSagTenantAgent', source)
         self.assertIn('chatLog', source)
         # No client access grant gate on the tab: it loads directly.
@@ -712,9 +715,16 @@ class AdminAgentTests(unittest.TestCase):
 
         captured.clear()
 
-        def fake_summary(system_prompt, user_prompt, *args, **kwargs):
+        # The summary now researches first and aggregates afterwards; the
+        # aggregator carries the trained system prompt, so it is the call that
+        # proves tenant training reaches the summary executor.
+        def fake_research(*args, **kwargs):
+            return {'success': True, 'reports': [], 'citation_urls': []}
+
+        def fake_aggregator(system_prompt, user_prompt, usage_ctx,
+                            research, deadline=None):
             captured['system'] = system_prompt
-            captured['usage_ctx'] = args[0] if args else kwargs.get('usage_ctx')
+            captured['usage_ctx'] = usage_ctx
             return {'choices': [{'message': {
                 'content': '{"summary": "ملخص", "sources": []}',
                 'annotations': [{'url_citation': {
@@ -723,9 +733,12 @@ class AdminAgentTests(unittest.TestCase):
 
         with self.app.app_context():
             with patch.object(self.application_module, '_browse_agent_call',
-                              side_effect=fake_summary):
+                              side_effect=fake_research),                  patch.object(self.application_module, '_run_market_summary_research_with_booking',
+                              side_effect=fake_research),                  patch.object(self.application_module, '_run_market_summary_aggregator',
+                              side_effect=fake_aggregator):
                 result = self.application_module._execute_market_summary(
-                    {'projectData': {'project_name': 'مشروع'}}, tenant_id=self.tenant)
+                    {'projectData': {'project_name': 'مشروع'},
+                     'summaryScope': {'cities': ['الرياض']}}, tenant_id=self.tenant)
         self.assertTrue(result['success'], result)
         self.assertEqual(captured['usage_ctx']['tenant_id'], self.tenant)
         self.assertIn('ركز على منطقة الرياض', captured['system'])
