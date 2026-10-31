@@ -200,6 +200,12 @@
     }
 
     :root {
+      /* One fixed product scale. `--ui-scale` renders the whole app like a
+         browser zoom-out; `--ui-viewport` is the viewport height in that scaled
+         coordinate system, so full-height layouts still reach the bottom edge. */
+      --ui-scale: .85;
+      --ui-viewport: calc(100vh / var(--ui-scale));
+      --ui-width: calc(100vw / var(--ui-scale));
       --app-bg: #eef2f7;
       --surface: #ffffff;
       --surface-subtle: #f6f8fb;
@@ -228,6 +234,7 @@
 
     html {
       background: var(--app-bg);
+      zoom: var(--ui-scale);
     }
 
     body {
@@ -240,11 +247,11 @@
 
     .tenant-app {
       width: 100%;
-      min-height: 100vh;
+      min-height: var(--ui-viewport);
       margin: 0;
       padding: 0;
       grid-template-columns: 264px minmax(0, 1fr);
-      grid-template-rows: 68px minmax(calc(100vh - 68px), auto);
+      grid-template-rows: 68px minmax(calc(var(--ui-viewport) - 68px), auto);
       align-items: stretch;
       background: var(--app-bg);
       font-family: "Segoe UI", Tahoma, Arial, sans-serif;
@@ -268,7 +275,7 @@
       display: flex;
       flex-direction: column;
       width: 264px;
-      height: 100vh;
+      height: var(--ui-viewport);
       min-height: 0;
       color: var(--sidebar-text);
       background: linear-gradient(180deg, var(--sidebar-bg), var(--sidebar-bg-deep));
@@ -646,7 +653,7 @@
       display: flex;
       flex-direction: column;
       width: min(360px, 88vw);
-      max-height: min(70vh, 540px);
+      max-height: min(calc(var(--ui-viewport, 100vh) * 0.7), 540px);
       border: 1px solid var(--ui-border);
       border-radius: 12px;
       background: var(--surface);
@@ -1036,7 +1043,7 @@
       width: 100%;
       max-width: 1600px;
       min-width: 0;
-      min-height: calc(100vh - 68px);
+      min-height: calc(var(--ui-viewport) - 68px);
       margin: 0 auto;
       padding: 28px clamp(20px, 2.7vw, 38px) 48px;
       border: 0;

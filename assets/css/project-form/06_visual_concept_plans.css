@@ -351,7 +351,7 @@
     }
 
     .plans-distribution-table-wrap {
-      max-height: min(64vh, 680px);
+      max-height: min(calc(var(--ui-viewport, 100vh) * 0.64), 680px);
       overflow: auto;
       overscroll-behavior: contain;
     }

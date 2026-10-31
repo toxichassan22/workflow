@@ -1016,13 +1016,16 @@
       const panel = document.getElementById('tenantSlidesChat');
       if (!panel) return;
       let collapsed = false;
-      let width = 340;
+      let width = 300;
       try {
         collapsed = localStorage.getItem('wf.slidesChatCollapsed') === '1';
-        width = Number(localStorage.getItem('wf.slidesChatWidth')) || 340;
+        width = Number(localStorage.getItem('wf.slidesChatWidth')) || 300;
       } catch (error) {}
+      // 340 was the old default and it was never written unless the panel was
+      // dragged, so a stored 340 is that default, not a choice to keep.
+      if (width === 340) width = 300;
       panel.classList.toggle('is-collapsed', !!collapsed);
-      panel.style.setProperty('--chat-width', Math.max(260, Math.min(560, width)) + 'px');
+      panel.style.setProperty('--chat-width', Math.max(240, Math.min(560, width)) + 'px');
     }
 
     function toggleTenantChatPanel() {
@@ -1045,7 +1048,7 @@
         const startWidth = panel.getBoundingClientRect().width;
         handle.setPointerCapture(event.pointerId);
         const move = moveEvent => {
-          const width = Math.max(260, Math.min(560, startWidth + (moveEvent.clientX - startX)));
+          const width = Math.max(240, Math.min(560, startWidth + (moveEvent.clientX - startX)));
           panel.style.setProperty('--chat-width', width + 'px');
         };
         const up = () => {

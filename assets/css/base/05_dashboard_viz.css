@@ -431,7 +431,7 @@
 
     .project-form-sidebar {
       top: 88px;
-      max-height: calc(100vh - 108px);
+      max-height: calc(var(--ui-viewport) - 108px);
       padding: 8px;
       background: var(--surface);
       border: 1px solid var(--ui-border);
@@ -761,7 +761,7 @@
 
     .tenant-app.preview-active {
       display: block !important;
-      min-height: 100vh;
+      min-height: var(--ui-viewport);
       background: #f5f3f0;
     }
 
@@ -773,7 +773,7 @@
     .tenant-app.preview-active > #tenantSlidesPage {
       width: 100%;
       max-width: none;
-      min-height: 100vh;
+      min-height: var(--ui-viewport);
       margin: 0;
     }
 
@@ -787,7 +787,7 @@
 
       .tenant-app {
         grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: 64px minmax(calc(100vh - 64px), auto);
+        grid-template-rows: 64px minmax(calc(var(--ui-viewport) - 64px), auto);
       }
 
       .tenant-sidebar {
@@ -840,7 +840,7 @@
 
       .tenant-app > .tenant-page {
         grid-row: 2;
-        min-height: calc(100vh - 64px);
+        min-height: calc(var(--ui-viewport) - 64px);
       }
 
       .tenant-mobile-nav-btn {
@@ -913,7 +913,7 @@
       }
 
       .tenant-app > .tenant-page {
-        min-height: calc(100vh - 60px);
+        min-height: calc(var(--ui-viewport) - 60px);
         padding: 18px 13px 32px;
       }
 

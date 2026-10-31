@@ -2,7 +2,7 @@
     .section-versions-card {
       max-width: 1000px;
       width: 100%;
-      max-height: 92vh;
+      max-height: calc(var(--ui-viewport, 100vh) * .92);
     }
 
     .section-version-line {
@@ -247,7 +247,7 @@
     .change-log-card {
       max-width: 860px;
       width: 100%;
-      max-height: 92vh;
+      max-height: calc(var(--ui-viewport, 100vh) * .92);
     }
 
     .change-log-search {

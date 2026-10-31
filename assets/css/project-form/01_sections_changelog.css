@@ -12,7 +12,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
-      max-height: calc(100vh - 130px);
+      max-height: calc(var(--ui-viewport, 100vh) - 130px);
       overflow-y: auto;
       padding: 10px;
       background: #f7fafc;
@@ -283,9 +283,9 @@
       background: #fff;
       border-radius: 16px;
       width: min(96vw, 1500px);
-      height: min(94vh, 960px);
+      height: min(calc(var(--ui-viewport, 100vh) * 0.94), 960px);
       max-width: 96vw;
-      max-height: 94vh;
+      max-height: calc(var(--ui-viewport, 100vh) * 0.94);
       display: flex;
       flex-direction: column;
       overflow: hidden;

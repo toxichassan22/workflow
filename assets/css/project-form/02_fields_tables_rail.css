@@ -227,7 +227,7 @@
       top: 0;
       right: 0;
       width: 288px;
-      height: 100vh;
+      height: var(--ui-viewport, 100vh);
       display: flex;
       flex-direction: column;
       background: #fff;
@@ -994,8 +994,8 @@
       bottom: 84px;
       inset-inline-end: 18px;
       z-index: 451;
-      width: min(400px, calc(100vw - 24px));
-      height: min(480px, calc(100vh - 96px));
+      width: min(400px, calc(var(--ui-width, 100vw) - 24px));
+      height: min(480px, calc(var(--ui-viewport, 100vh) - 96px));
       display: flex;
       flex-direction: column;
       gap: 10px;

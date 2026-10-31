@@ -2,15 +2,18 @@
    present mode. Supersedes the flat toolbar/sidebar chrome without touching the
    slide rendering rules themselves (those stay in 04_export_responsive.css). */
 
-/* ── Header: three zones in RTL — context | view switch | actions ───────── */
+/* ── Header: three zones in RTL — context | view switch | actions ─────────
+   Chrome density: the workspace is a working surface, so every band stays
+   under ~56px and the slide keeps the room. Same scale as the rails and the
+   inspector so the three read as one piece. */
 #tenantSlidesPage .slide-workspace-header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  gap: 14px;
-  padding: 10px 16px;
-  margin-bottom: 10px;
-  border-radius: 14px;
+  gap: 10px;
+  padding: 6px 11px;
+  margin-bottom: 7px;
+  border-radius: 12px;
   background: #07182C;
   color: #fff;
   box-shadow: 0 6px 22px rgba(7, 24, 44, .18);
@@ -19,7 +22,7 @@
 #tenantSlidesPage .slide-header-context {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 9px;
   min-width: 0;
 }
 
@@ -29,10 +32,10 @@
   background: transparent;
   color: rgba(255, 255, 255, .9);
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   border-radius: 999px;
-  padding: 5px 11px;
+  padding: 3px 9px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -55,11 +58,11 @@
   background: transparent;
   color: #fff;
   font: inherit;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
-  padding: 3px 7px;
-  margin: 0 -7px;
-  border-radius: 8px;
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: 7px;
   outline: none;
   text-overflow: ellipsis;
 }
@@ -78,8 +81,8 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px 10px;
-  font-size: 11px;
+  gap: 4px 8px;
+  font-size: 10px;
   color: rgba(255, 255, 255, .68);
 }
 
@@ -87,8 +90,8 @@
   display: inline-flex;
   align-items: center;
   border-radius: 999px;
-  padding: 1px 9px;
-  font-size: 10px;
+  padding: 1px 7px;
+  font-size: 9.5px;
   font-weight: 800;
   border: 1px solid rgba(255, 255, 255, .3);
   color: rgba(255, 255, 255, .92);
@@ -108,8 +111,8 @@
   display: inline-flex;
   background: rgba(255, 255, 255, .1);
   border: 1px solid rgba(255, 255, 255, .16);
-  border-radius: 11px;
-  padding: 3px;
+  border-radius: 10px;
+  padding: 2px;
   gap: 2px;
 }
 
@@ -118,10 +121,10 @@
   background: transparent;
   color: rgba(255, 255, 255, .82);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
-  padding: 6px 16px;
-  border-radius: 8px;
+  padding: 4px 13px;
+  border-radius: 7px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -139,14 +142,14 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
 }
 
 #tenantSlidesPage .slide-header-actions .btn {
-  padding: 7px 13px;
-  font-size: 12px;
-  border-radius: 9px;
+  padding: 5px 11px;
+  font-size: 11px;
+  border-radius: 8px;
   white-space: nowrap;
 }
 
@@ -184,13 +187,13 @@
 /* Undo/redo belong to the editing session, not to save/export. */
 #tenantSlidesPage .slides-undo-rail {
   position: fixed;
-  bottom: 18px;
+  bottom: 12px;
   left: 50%;
   transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 7px;
+  gap: 5px;
+  padding: 4px 6px;
   border-radius: 999px;
   background: rgba(7, 24, 44, .92);
   box-shadow: 0 8px 24px rgba(7, 24, 44, .3);
@@ -201,9 +204,9 @@
   border: 0;
   background: rgba(255, 255, 255, .12);
   color: #fff;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  padding: 6px 12px;
+  padding: 5px 10px;
   border-radius: 999px;
 }
 
@@ -220,16 +223,20 @@
   display: none;
 }
 
-/* ── Sidebar: real thumbnails, zero buttons until hover ────────────────── */
+/* ── Sidebar: real thumbnails, zero buttons until hover ──────────────────
+   The rail is 176px total; the thumbnail canvas is scaled to the frame it
+   actually gets (176 − 12 padding − 8 card padding − 4 border = 152px), which
+   is what keeps the 16:9 stills from leaking past the card edge. */
 #tenantSlidesPage .ge-sidebar {
-  width: 208px;
-  padding: 10px 8px 24px;
+  width: 176px;
+  box-sizing: border-box;
+  padding: 8px 6px 20px;
   transition: width .18s ease;
 }
 
 #tenantSlidesPage .ge-sidebar.is-collapsed {
-  width: 46px;
-  padding: 8px 5px;
+  width: 42px;
+  padding: 7px 4px;
   overflow: hidden;
 }
 
@@ -256,12 +263,12 @@
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   position: sticky;
   top: 0;
   background: #fff;
   z-index: 8;
-  padding: 2px 2px 6px;
+  padding: 2px 2px 5px;
 }
 
 #tenantSlidesPage .ge-sidebar-head-btn {
@@ -269,10 +276,10 @@
   background: #fff;
   color: #475569;
   font: inherit;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
-  border-radius: 7px;
-  padding: 3px 8px;
+  border-radius: 6px;
+  padding: 3px 7px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -283,8 +290,8 @@
 }
 
 #tenantSlidesPage .ge-sidebar-head-btn.is-icon {
-  width: 28px;
-  height: 24px;
+  width: 26px;
+  height: 22px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -309,17 +316,17 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
-  padding: 7px;
-  border-radius: 9px;
+  gap: 3px;
+  margin-bottom: 6px;
+  padding: 6px;
+  border-radius: 8px;
   background: #E8F8FB;
   border: 1px solid #BEEAF3;
 }
 
 #tenantSlidesPage .ge-sidebar-selection-count {
   width: 100%;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 800;
   color: #0A6C7D;
 }
@@ -329,10 +336,10 @@
   background: #07182C;
   color: #fff;
   font: inherit;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
   border-radius: 6px;
-  padding: 3px 7px;
+  padding: 2px 6px;
   cursor: pointer;
 }
 
@@ -343,10 +350,10 @@
 }
 
 #tenantSlidesPage .ge-thumb-group {
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 800;
   color: #64748b;
-  margin: 6px 2px 4px;
+  margin: 5px 2px 3px;
   padding: 2px 6px;
   border-right: 3px solid #17C8E3;
   white-space: nowrap;
@@ -356,11 +363,11 @@
 
 #tenantSlidesPage .ge-thumb {
   display: block;
-  padding: 5px;
-  border-radius: 9px;
+  padding: 4px;
+  border-radius: 8px;
   border: 2px solid #e2e8f0;
   background: #fff;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   position: relative;
 }
 
@@ -394,7 +401,7 @@
   right: 0;
   width: 1280px;
   height: 720px;
-  transform: scale(var(--thumb-scale, .145));
+  transform: scale(var(--thumb-scale, .118));
   transform-origin: top right;
 }
 
@@ -423,20 +430,20 @@
 #tenantSlidesPage .ge-thumb-meta {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-top: 5px;
+  gap: 4px;
+  margin-top: 4px;
   min-width: 0;
 }
 
 #tenantSlidesPage .ge-thumb-num {
   flex-shrink: 0;
-  min-width: 18px;
-  height: 18px;
+  min-width: 16px;
+  height: 16px;
   padding: 0 3px;
   border-radius: 4px;
   background: #e2e8f0;
   color: #334155;
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 900;
   display: inline-flex;
   align-items: center;
@@ -451,7 +458,7 @@
 #tenantSlidesPage .ge-thumb-title {
   flex: 1;
   min-width: 0;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
   color: #475569;
   white-space: nowrap;
@@ -462,7 +469,7 @@
 #tenantSlidesPage .ge-thumb-notes {
   flex-shrink: 0;
   font: inherit;
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 700;
   color: #0A6C7D;
   background: #E8F8FB;
@@ -484,9 +491,9 @@
 /* Hover-only actions: the default card is the picture, nothing else. */
 #tenantSlidesPage .ge-thumb-actions {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  right: 8px;
+  top: 6px;
+  left: 6px;
+  right: 6px;
   display: none;
   align-items: center;
   justify-content: center;
@@ -508,10 +515,10 @@
   background: rgba(255, 255, 255, .14);
   color: #fff;
   font: inherit;
-  font-size: 9px;
+  font-size: 8.5px;
   font-weight: 700;
   border-radius: 5px;
-  padding: 2px 5px;
+  padding: 2px 4px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -564,10 +571,10 @@
   background: #f8fafc;
   color: #64748b;
   font: inherit;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
-  padding: 4px 0;
-  margin: -2px 0 8px;
+  padding: 3px 0;
+  margin: -2px 0 6px;
   cursor: pointer;
   opacity: 0;
   transition: opacity .15s ease;
@@ -591,7 +598,7 @@
   bottom: 74px;
   left: 50%;
   transform: translateX(-50%);
-  width: min(430px, calc(100vw - 32px));
+  width: min(430px, calc(var(--ui-width, 100vw) - 32px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -889,7 +896,7 @@
   background: transparent;
   border: 0;
   border-radius: 0;
-  padding: 0 6px;
+  padding: 0 5px;
   border-right: 1px solid #e2e8f0;
 }
 
@@ -908,14 +915,14 @@
 }
 
 #tenantSlidesPage .ge-slide-edit-controls button {
-  padding: 3px 8px;
-  font-size: 10.5px;
+  padding: 2px 7px;
+  font-size: 10px;
   border-radius: 6px;
   line-height: 1.35;
 }
 
 #tenantSlidesPage .ge-slide-edit-controls .slide-edit-watermark {
-  font-size: 10.5px;
+  font-size: 10px;
   gap: 4px;
 }
 
@@ -935,8 +942,8 @@
   flex-direction: column;
   align-items: stretch;
   flex-wrap: nowrap;
-  gap: 4px;
-  padding: 5px 8px;
+  gap: 3px;
+  padding: 4px 7px;
 }
 
 #tenantSlidesPage .slide-edit-session-rail {
@@ -970,9 +977,9 @@
   background: transparent;
   color: #475569;
   font: inherit;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
-  padding: 2px 9px;
+  padding: 2px 8px;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -991,7 +998,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 3px;
-  min-height: 26px;
+  min-height: 24px;
 }
 
 #tenantSlidesPage .slide-edit-tab-sep {
@@ -1002,22 +1009,22 @@
 }
 
 #tenantSlidesPage .slide-edit-tab-readout {
-  font-size: 10.5px;
-  min-width: 38px;
+  font-size: 10px;
+  min-width: 34px;
   text-align: center;
   direction: ltr;
 }
 
 #tenantSlidesPage .slide-edit-session-actions button,
 #tenantSlidesPage .slide-edit-tab-panel button {
-  padding: 3px 8px;
-  font-size: 10.5px;
+  padding: 2px 7px;
+  font-size: 10px;
   border-radius: 6px;
   line-height: 1.35;
 }
 
 #tenantSlidesPage .slide-edit-tab-panel .slide-edit-color {
-  font-size: 10.5px;
+  font-size: 10px;
   gap: 4px;
 }
 

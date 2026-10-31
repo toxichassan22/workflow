@@ -8,6 +8,7 @@ with a folded plan card and a send/stop toggle, and a present mode.
 """
 
 import ast
+import re
 import unittest
 from pathlib import Path
 
@@ -655,7 +656,7 @@ class SlidesAuthoringTests(unittest.TestCase):
         field_css = css.split('#tenantSlidesPage .slide-inspector-field input[type="number"]', 1)[1]
         field_css = field_css.split('}', 1)[0]
         self.assertIn('min-height: 0', field_css)
-        self.assertIn('height: 22px', field_css)
+        self.assertIn('height: 20px', field_css)
 
     def test_selecting_an_element_keeps_the_canvas_under_the_pointer(self):
         self.assertIn('function holdSlideStagePosition(stage, anchorTop)', self.source)
@@ -713,3 +714,85 @@ class SlidesAuthoringTests(unittest.TestCase):
                     'deck.replace_all', 'slide.table_added'):
             self.assertIn('"%s":' % key, ar)
             self.assertIn('"%s":' % key, en)
+
+
+class SlidesWorkspaceDensityTests(unittest.TestCase):
+    """The designer page is a working surface: the header, both rails and the
+    inspector are sized so the deck wins the room. Shrinking the rail without the
+    thumbnail scale (or the reverse) puts the 16:9 stills outside their frame, so
+    the pair is asserted as one number."""
+
+    @classmethod
+    def setUpClass(cls):
+        base = ROOT / 'assets' / 'css' / 'base'
+        cls.workspace_css = (base / '09_slide_workspace.css').read_text(encoding='utf-8')
+        cls.canvas_css = (base / '10_slide_canvas.css').read_text(encoding='utf-8')
+        cls.chat_css = (base / '11_slide_chat_present.css').read_text(encoding='utf-8')
+        cls.preview_css = (base / '01_preview_chat.css').read_text(encoding='utf-8')
+        cls.space_js = (ROOT / 'assets' / 'js' / '15a-slide-workspace'
+                        / '01_workspace.js').read_text(encoding='utf-8')
+
+    @staticmethod
+    def _rule(css, selector):
+        block = css.split(selector, 1)[1]
+        return block.split('}', 1)[0]
+
+    def test_header_stays_a_compact_band(self):
+        rule = self._rule(self.workspace_css, '#tenantSlidesPage .slide-workspace-header {')
+        self.assertIn('padding: 6px 11px', rule)
+        self.assertIn('gap: 10px', rule)
+        title = self._rule(self.workspace_css, '#tenantSlidesPage .slide-header-title {')
+        self.assertIn('font-size: 15px', title)
+        action = self._rule(self.workspace_css, '#tenantSlidesPage .slide-header-actions .btn {')
+        self.assertIn('padding: 5px 11px', action)
+        self.assertIn('font-size: 11px', action)
+
+    def test_thumbnail_rail_width_and_scale_agree(self):
+        rail = self._rule(self.workspace_css, '#tenantSlidesPage .ge-sidebar {')
+        self.assertIn('width: 176px', rail)
+        # Content-box width would add the padding back and overflow the row.
+        self.assertIn('box-sizing: border-box', rail)
+        card = self._rule(self.workspace_css, '#tenantSlidesPage .ge-thumb {')
+        self.assertIn('padding: 4px', card)
+        canvas = self._rule(self.workspace_css, '#tenantSlidesPage .ge-thumb-canvas {')
+        match = re.search(r'var\(--thumb-scale, ([0-9.]+)\)', canvas)
+        self.assertIsNotNone(match, canvas)
+        scale = float(match.group(1))
+        # 176 rail − 12 rail padding − 8 card padding − 4 card border.
+        frame = 176 - 12 - 8 - 4
+        painted = 1280 * scale
+        self.assertLessEqual(painted, frame)
+        self.assertGreaterEqual(painted, frame - 2)
+
+    def test_chat_panel_defaults_to_the_compact_rail(self):
+        panel = self._rule(self.chat_css, '#tenantSlidesPage .ge-right-panel {')
+        self.assertIn('var(--chat-width, 300px)', panel)
+        self.assertIn('min-width: 240px', panel)
+        self.assertIn('let width = 300;', self.space_js)
+        self.assertIn('Math.max(240, Math.min(560, width))', self.space_js)
+        # The old default was never written unless the panel was dragged, so a
+        # stored 340 is that default and must not keep the wide rail.
+        self.assertIn('if (width === 340) width = 300;', self.space_js)
+        self.assertIn('Math.max(240, Math.min(560, startWidth', self.space_js)
+
+    def test_canvas_owns_the_space_between_the_rails(self):
+        main = self._rule(self.preview_css, '.tenant-app.preview-active .ge-main {')
+        self.assertIn('padding: 10px 6px 64px', main)
+        self.assertIn('gap: 16px', main)
+        zoom = self._rule(self.canvas_css, '#tenantSlidesPage .slides-canvas-zoom {')
+        match = re.search(r'right: ([0-9]+)px', zoom)
+        self.assertIsNotNone(match, zoom)
+        # The zoom bar floats beside the rail; a wider offset hides it under it.
+        self.assertGreater(int(match.group(1)), 176)
+
+    def test_inspector_rows_leave_the_slide_in_view(self):
+        field_css = self._rule(
+            self.canvas_css, '#tenantSlidesPage .slide-inspector-field input[type="number"],\n'
+            '#tenantSlidesPage .slide-inspector-field input[type="text"] {')
+        self.assertIn('height: 20px', field_css)
+        self.assertIn('min-height: 0', field_css)
+        row = self._rule(self.canvas_css, '#tenantSlidesPage .slide-inspector-rowline {')
+        self.assertIn('min-height: 20px', row)
+        toolbar = self._rule(self.workspace_css, '#tenantSlidesPage .ge-slide-edit-controls button {')
+        self.assertIn('padding: 2px 7px', toolbar)
+        self.assertIn('font-size: 10px', toolbar)

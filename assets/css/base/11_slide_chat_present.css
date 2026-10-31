@@ -4,8 +4,8 @@
 /* ── Chat panel: identity, collapse, resize, composer ──────────────────── */
 #tenantSlidesPage .ge-right-panel {
   position: relative;
-  width: var(--chat-width, 340px);
-  min-width: 260px;
+  width: var(--chat-width, 300px);
+  min-width: 240px;
   max-width: 560px;
   background: #F7F9FC;
   border-right: 1px solid #dfe7ee;
@@ -13,8 +13,8 @@
 }
 
 #tenantSlidesPage .ge-right-panel.is-collapsed {
-  width: 44px !important;
-  min-width: 44px;
+  width: 40px !important;
+  min-width: 40px;
 }
 
 #tenantSlidesPage .ge-right-panel.is-collapsed .ge-chat-panel-status,
@@ -54,8 +54,8 @@
 }
 
 #tenantSlidesPage .ge-panel-header .is-icon {
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -63,13 +63,13 @@
 }
 
 #tenantSlidesPage .ge-panel-header .is-icon .ws-icon {
-  width: 13px;
-  height: 13px;
+  width: 12px;
+  height: 12px;
 }
 
 #tenantSlidesPage .ws-icon {
-  width: 14px;
-  height: 14px;
+  width: 13px;
+  height: 13px;
   display: block;
   pointer-events: none;
 }
@@ -77,9 +77,9 @@
 #tenantSlidesPage .ge-panel-header {
   display: flex;
   align-items: center;
-  gap: 5px;
-  min-height: 42px;
-  padding: 6px 8px !important;
+  gap: 4px;
+  min-height: 36px;
+  padding: 4px 6px !important;
   background: #07182C;
   border-bottom: 1px solid rgba(255, 255, 255, .08);
 }
@@ -88,7 +88,7 @@
   flex: 1;
   min-width: 0;
   color: rgba(255, 255, 255, .82);
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
@@ -98,13 +98,13 @@
 #tenantSlidesPage .ge-panel-header button {
   flex-shrink: 0;
   border: 1px solid rgba(255, 255, 255, .24);
-  border-radius: 7px;
+  border-radius: 6px;
   background: transparent;
   color: rgba(255, 255, 255, .86);
   font: inherit;
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
-  padding: 3px 6px;
+  padding: 2px 5px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -129,15 +129,15 @@
 
 #tenantSlidesPage .tenant-chat-messages {
   background: #F7F9FC !important;
-  padding: 12px 11px !important;
-  gap: 9px !important;
+  padding: 9px 9px !important;
+  gap: 7px !important;
 }
 
 #tenantSlidesPage .tenant-chat-message {
   max-width: 92%;
-  padding: 8px 11px;
-  border-radius: 13px;
-  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 12px;
+  font-size: 11.5px;
   line-height: 1.7;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -166,14 +166,14 @@
 #tenantSlidesPage .tenant-chat-composer {
   background: #F7F9FC;
   border-top: 1px solid #e2e8f0;
-  padding: 8px 9px 10px;
+  padding: 6px 7px 8px;
 }
 
 #tenantSlidesPage .tenant-chat-input-row {
   border: 1px solid #dbe3ea;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #fff;
-  padding: 5px;
+  padding: 4px;
 }
 
 #tenantSlidesPage .tenant-chat-input-row:focus-within {
@@ -182,24 +182,24 @@
 }
 
 #tenantSlidesPage .tenant-chat-entry-row textarea {
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 #tenantSlidesPage .tenant-chat-entry-row .is-icon {
   flex: 0 0 auto;
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
   padding: 0;
-  border-radius: 9px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 #tenantSlidesPage .tenant-chat-entry-row .is-icon .ws-icon {
-  width: 16px;
-  height: 16px;
+  width: 15px;
+  height: 15px;
 }
 
 /* .btn.primary paints a dark gradient and white text, so the send icon keeps
@@ -351,7 +351,7 @@
 }
 
 #tenantSlidesPage .tenant-designer-checklist-rows {
-  max-height: min(240px, 32vh);
+  max-height: min(240px, calc(var(--ui-viewport, 100vh) * .32));
 }
 
 #tenantSlidesPage .tenant-designer-checklist-actions {
@@ -464,7 +464,7 @@
   top: 22px;
   right: 22px;
   width: min(330px, 32vw);
-  max-height: 56vh;
+  max-height: calc(var(--ui-viewport, 100vh) * 0.56);
   overflow: auto;
   padding: 12px 14px;
   border-radius: 14px;
