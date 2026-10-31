@@ -2040,7 +2040,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertRegex(index_html, r'data-index-page="land"[^>]*>04')
         self.assertRegex(index_html, r'data-index-page="location"[^>]*>05')
 
-    def test_a_preserved_index_is_rebuilt_into_two_balanced_columns(self):
+    def test_a_preserved_index_keeps_its_design_and_rebalances_columns(self):
         engine = self.application_module.slide_engine
         branding = {
             'primary_color': '#123B6D', 'secondary_color': '#0b1f33',
@@ -2053,10 +2053,12 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
             f'<div>{text}</div><div data-index-page="{key}" dir="ltr">{number}</div></div>'
         )
         # The row-injection pass piled every entry into the first column and
-        # left the second empty; a preserved/custom index kept that damage
-        # forever because only the rows were patched, never the layout.
+        # left the second empty. A preserved (client/designer-edited) index now
+        # keeps its own design: the rows move back into their column, and the
+        # slide's own markup is never replaced by the canonical template.
         collapsed_index = (
             '<div class="slide" dir="rtl" style="width:1280px;height:720px;">'
+            '<div class="preserved-index-heading">فهرس العميل</div>'
             '<div style="display:grid;grid-template-columns:1fr 1fr;">'
             '<div>'
             + page('overview', 'نبذة عن المشروع', '03')
@@ -2067,7 +2069,7 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         slides = [
             {'title': 'الغلاف', 'type': 'cover', 'html': '<div class="slide">غلاف</div>'},
             {'title': 'محتويات العرض', 'type': 'index', 'is_custom': True,
-             'html': collapsed_index},
+             '_designer_keep_html': True, 'html': collapsed_index},
             {'title': 'نبذة عن المشروع', 'type': 'content', 'section_key': 'overview',
              'html': '<div class="slide">محتوى 1</div>'},
             {'title': 'بيانات الأرض', 'type': 'content', 'section_key': 'land',
@@ -2079,14 +2081,17 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         renumbered = engine.renumber_presentation_slides(
             slides, branding=branding, project_data=project)
         index_html = renumbered[1]['html']
+        self.assertIn('preserved-index-heading', index_html)
+        self.assertIn('فهرس العميل', index_html)
         grid = index_html[index_html.index('grid-template-columns:1fr 1fr'):]
-        self.assertEqual(grid.count('data-index-section='), 4)
-        # The canonical two-column design: the second column owns its rows.
+        self.assertEqual(grid.count('data-index-section='), 3)
+        # The collapsed half is rebalanced inside the client's own grid.
         self.assertIn('</div><div><div data-index-section=', grid)
         self.assertRegex(index_html, r'data-index-page="overview"[^>]*>03')
         self.assertRegex(index_html, r'data-index-page="land"[^>]*>04')
         self.assertRegex(index_html, r'data-index-page="location"[^>]*>05')
-        self.assertRegex(index_html, r'data-index-page="closing"[^>]*>06')
+        # A designed index owns its rows: no page row is invented for it.
+        self.assertNotIn('data-index-section="closing"', index_html)
         self.assertEqual(renumbered, engine.renumber_presentation_slides(
             renumbered, branding=branding, project_data=project))
 

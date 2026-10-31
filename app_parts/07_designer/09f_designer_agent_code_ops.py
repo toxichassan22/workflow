@@ -272,6 +272,7 @@ def _agent_exec_code(task, ctx, session, feedback=''):
             clone = copy.deepcopy(slide)
             clone['id'] = designer_agent_ids.new_slide_id()
             clone['title'] = (str(slide.get('title') or '').strip() or f'شريحة {idx + 1}') + ' (نسخة)'
+            clone['duplicated_from'] = slide.get('id') or ''
             slides.insert(min(idx + 1, len(slides)), clone)
             changed.append(idx)
         if not changed:

@@ -102,6 +102,7 @@
         raw.style.transform = transform;
       });
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();

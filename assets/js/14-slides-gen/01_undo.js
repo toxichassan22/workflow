@@ -26,6 +26,16 @@
 
     // In-session deck history only. Reset AFTER workspace load/render; checkpoint
     // BEFORE/AFTER generation. Saving the same deck must not clear this history.
+    /* Any slide the client edits stops being a generated/system page: the save
+       path keeps its HTML as-is instead of rebuilding its chrome, index rows or
+       divider design from the canonical builders. */
+    function markSlideHtmlEdited(slide) {
+      if (!slide || typeof slide !== 'object') return slide;
+      slide._designer_keep_html = true;
+      slide.is_custom = true;
+      return slide;
+    }
+
     const PRESENTATION_UNDO_LIMIT = 30;
     const PRESENTATION_UNDO_MAX_CHARS = 16 * 1024 * 1024;
     let presentationUndoHistory = [];
@@ -305,6 +315,7 @@
       const slide = tenantSlidesData[index];
       session.redo.push(slide.html);
       slide.html = session.undo.pop();
+      markSlideHtmlEdited(slide);
       session.sel = null;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
@@ -319,6 +330,7 @@
       const slide = tenantSlidesData[index];
       session.undo.push(slide.html);
       slide.html = session.redo.pop();
+      markSlideHtmlEdited(slide);
       session.sel = null;
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);

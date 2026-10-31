@@ -168,15 +168,31 @@
         const entries = Array.isArray(indexEntries)
           ? indexEntries.filter(entry => entry && entry.section_key)
           : [];
+        const preserved = !!(slide.is_custom || slide._designer_keep_html);
         const existingRows = Array.from(root.querySelectorAll('[data-index-section]'));
-        if (existingRows.length === 0 && entries.length > 0) {
-          return buildTenantIndexSlideHtml(entries, index, total);
-        }
-        // An empty entries list means the section keys are not known yet —
-        // never wipe a populated index on that pass. A non-empty list must
-        // leave every row in its correct column: patching rows in place used
-        // to pile them into one column after a delete or a refresh.
-        if (entries.length > 0) {
+        if (existingRows.length === 0) {
+          if (!preserved && entries.length > 0) {
+            return buildTenantIndexSlideHtml(entries, index, total);
+          }
+        } else if (preserved) {
+          // A designer-edited index keeps its own layout: only the page label
+          // of rows that still exist is refreshed, rows are never reflowed.
+          existingRows.forEach(row => {
+            const key = String(row.getAttribute('data-index-section') || '');
+            const entry = entries.find(item => String(item.section_key) === key);
+            if (!entry) return;
+            let page = row.querySelector('[data-index-page]');
+            if (!page) {
+              page = Array.from(row.querySelectorAll('*')).find(node =>
+                !node.children.length && /^\s*\d{1,3}\s*$/.test(node.textContent || ''));
+            }
+            if (page) page.textContent = String(entry.page || 0).padStart(2, '0');
+          });
+        } else if (entries.length > 0) {
+          // An empty entries list means the section keys are not known yet —
+          // never wipe a populated index on that pass. A non-empty list must
+          // leave every row in its correct column: patching rows in place used
+          // to pile them into one column after a delete or a refresh.
           const rowsByKey = new Map();
           existingRows.forEach(row => {
             const key = String(row.getAttribute('data-index-section') || '');
@@ -269,7 +285,9 @@
       return slides.filter(slide => {
         const html = String((slide || {}).html || '');
         if (html.indexOf('data-timeline-gantt') === -1) return true;
-        if (kept) return false;
+        // A slide the client duplicated on purpose is their page; only
+        // generated duplicates from one plan are collapsed.
+        if (kept && !(slide && slide.duplicated_from)) return false;
         kept = true;
         return true;
       });

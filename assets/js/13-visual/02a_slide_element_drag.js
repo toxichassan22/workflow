@@ -130,6 +130,7 @@
       rawTarget.dataset.manualTranslateY = String(Math.round(nextY));
       rawTarget.style.transform = transform;
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -157,12 +158,11 @@
         // must not plant it back on the next open.
         if (coverBackground === '1') slideData.coverBackgroundRemoved = true;
         if (dividerBackground === '1') slideData.sectionDividerBackgroundRemoved = true;
-        slideData._designer_keep_html = true;
-        slideData.is_custom = true;
       }
       pushSlideEditHistory(index);
       deleteTarget.parentElement.removeChild(deleteTarget);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       const session = slideEditSessions[index];

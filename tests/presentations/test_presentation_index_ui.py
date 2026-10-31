@@ -116,6 +116,49 @@ class PresentationIndexUiTests(unittest.TestCase):
         self.assertRegex(html, r'data-index-page="team"[^>]*>06')
         self.assertIn('فريق العمل', html)
 
+    def test_a_designer_edited_index_keeps_its_own_layout(self):
+        designed = (
+            '<div class="slide" dir="rtl" style="width:1280px;height:720px;'
+            'background:#0b1f33;color:#ffffff;">'
+            '<div class="client-index-heading">CLIENT-INDEX-DESIGN</div>'
+            '<div class="client-index-list">'
+            + _row('overview', 'نبذة موسعة', '03')
+            + _row('land', 'الأرض', '04')
+            + '</div></div>'
+        )
+        html = self.page.evaluate(
+            """({ html, entries }) => renumberTenantSlideHtml(
+                   { html, type: 'index', is_custom: true, _designer_keep_html: true },
+                   2, 6, entries)""",
+            {'html': designed, 'entries': [
+                {'section_key': 'overview', 'title': 'نبذة موسعة', 'page': 5},
+                {'section_key': 'land', 'title': 'الأرض', 'page': 6},
+            ]},
+        )
+        # The layout, heading and row markup survive the renumber pass.
+        self.assertIn('CLIENT-INDEX-DESIGN', html)
+        self.assertIn('client-index-list', html)
+        self.assertIn('نبذة موسعة', html)
+        self.assertNotIn('grid-template-columns:1fr 1fr', html)
+        # Only the page labels follow the deck positions.
+        self.assertRegex(html, r'data-index-page="overview"[^>]*>05')
+        self.assertRegex(html, r'data-index-page="land"[^>]*>06')
+
+    def test_a_designer_edited_index_without_rows_is_never_replaced(self):
+        free_design = (
+            '<div class="slide" dir="rtl" style="width:1280px;height:720px;">'
+            '<div class="free-index-design">FREE-INDEX</div></div>'
+        )
+        html = self.page.evaluate(
+            """({ html, entries }) => renumberTenantSlideHtml(
+                   { html, type: 'index', is_custom: true }, 2, 6, entries)""",
+            {'html': free_design, 'entries': [
+                {'section_key': 'overview', 'title': 'نبذة عن المشروع', 'page': 3},
+            ]},
+        )
+        self.assertIn('FREE-INDEX', html)
+        self.assertNotIn('data-index-section="overview"', html)
+
 
 if __name__ == '__main__':
     unittest.main()

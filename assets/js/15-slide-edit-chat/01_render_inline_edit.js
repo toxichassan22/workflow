@@ -57,6 +57,7 @@
         selectedImage.setAttribute('src', url);
         rawImage.setAttribute('src', url);
         current.html = rawRoot.outerHTML;
+        markSlideHtmlEdited(current);
         tenantProjectData.tenantSlidesData = tenantSlidesData;
         touchSlideEditSession(index);
         triggerAutoSaveDraft();
@@ -78,6 +79,7 @@
       wrap.appendChild(img);
       rawRoot.appendChild(wrap);
       current.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(current);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -221,6 +223,7 @@
 
       pushSlideEditHistory(index);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       syncFinancialClarificationsFromSlide(slide);
       touchSlideEditSession(index);
@@ -426,6 +429,8 @@
       slide.html = String(slide.html || '').replace(
         /<div\b[^>]*data-section-divider-background\s*=\s*["']?1["']?[^>]*>[\s\S]*?<\/div>/gi, ''
       );
+      slide.sectionDividerBackgroundRemoved = true;
+      markSlideHtmlEdited(slide);
       renumberTenantSlides();
       renderTenantSlides();
       selectTenantSlide(index);

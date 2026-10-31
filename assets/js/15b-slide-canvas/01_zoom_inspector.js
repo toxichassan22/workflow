@@ -168,6 +168,7 @@
         try { mutator(live, raw, entry); } catch (error) { console.warn('[INSPECTOR] apply failed', error); }
       });
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       if (typeof touchSlideEditSession === 'function') touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -341,6 +342,7 @@
         deleteTarget?.parentElement?.removeChild(deleteTarget);
       });
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       session.sel = null;
       session.multi = [];
       tenantProjectData.tenantSlidesData = tenantSlidesData;
@@ -383,6 +385,7 @@
         rawRoot.appendChild(node);
       });
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       triggerAutoSaveDraft();
       refreshSingleSlideCard(index);
@@ -479,6 +482,7 @@
       });
       rawRoot.appendChild(group);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       session.sel = null;
       session.multi = [];
@@ -525,6 +529,7 @@
         rawGroup.parentElement.removeChild(rawGroup);
       });
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       session.sel = null;
       session.multi = [];

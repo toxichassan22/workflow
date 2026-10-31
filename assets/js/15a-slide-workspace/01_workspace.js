@@ -515,6 +515,7 @@
       copy.id = wfNewSlideId();
       copy.title = wsText('ws.duplicate_title', 'نسخة من {title}', { title: source.title || wsText('ws.no_title', 'شريحة بدون عنوان') });
       copy.is_custom = true;
+      copy.duplicated_from = source.id || '';
       tenantSlidesData.splice(index + 1, 0, copy);
       renumberTenantSlides();
       renderTenantSlides();
@@ -535,6 +536,7 @@
         copy.id = wfNewSlideId();
         copy.title = wsText('ws.duplicate_title', 'نسخة من {title}', { title: source.title || wsText('ws.no_title', 'شريحة بدون عنوان') });
         copy.is_custom = true;
+        copy.duplicated_from = source.id || '';
         return copy;
       });
       const at = Math.max(...indexes) + 1;
@@ -592,6 +594,7 @@
       }
       beginPresentationUndoChange();
       slide.title = title;
+      markSlideHtmlEdited(slide);
       markSlidesDeckChanged();
       renderTenantSlidesSidebar();
     }

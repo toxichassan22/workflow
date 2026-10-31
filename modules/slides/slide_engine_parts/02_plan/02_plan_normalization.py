@@ -966,10 +966,11 @@ def refresh_index_entries(plan, offer_lang=None):
                         'title': section_title(section_key, lang), 'page': page})
     for slide in plan['slides']:
         if isinstance(slide, dict) and str(slide.get('type') or '').strip().lower() == 'index':
-            slide['title'] = offer_chrome('index_heading', lang)
-            slide['design_style'] = 'text'
+            if not (slide.get('_designer_keep_html') or slide.get('is_custom')):
+                slide['title'] = offer_chrome('index_heading', lang)
+                slide['design_style'] = 'text'
+                slide['bullets'] = []
             slide['index_entries'] = entries
-            slide['bullets'] = []
             break
     plan['proposed_count'] = len(plan['slides'])
     return plan

@@ -275,12 +275,16 @@ def format_timeline_phase_line(phase):
 
 
 def _collapse_duplicate_timeline_gantts(items):
-    """Two timeline pages render the same deterministic Gantt — keep the first."""
+    """Two timeline pages from one plan render the same Gantt — keep the first.
+
+    A slide the client duplicated on purpose carries ``duplicated_from`` and is
+    their page, not a generation duplicate.
+    """
     kept = False
     result = []
     for item in items if isinstance(items, list) else []:
         if isinstance(item, dict) and 'data-timeline-gantt' in str(item.get('html') or ''):
-            if kept:
+            if kept and not item.get('duplicated_from'):
                 continue
             kept = True
         result.append(item)

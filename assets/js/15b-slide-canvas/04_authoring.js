@@ -266,6 +266,7 @@
       }
       rawRoot.appendChild(shape);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -289,6 +290,7 @@
       wrapper.innerHTML = slideTableMarkup(rows, cols, authoringBrandColors());
       rawRoot.appendChild(wrapper);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -352,6 +354,7 @@
       pushSlideEditHistory(index);
       mutator(context.liveTable, context.rawTable, context);
       context.slideData.html = context.rawRoot.outerHTML;
+      markSlideHtmlEdited(context.slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -629,6 +632,7 @@
         pair.rawRoot.style[property] = value;
       });
       pair.slideData.html = pair.rawRoot.outerHTML;
+      markSlideHtmlEdited(pair.slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();

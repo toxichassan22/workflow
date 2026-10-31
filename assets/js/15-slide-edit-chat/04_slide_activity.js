@@ -201,6 +201,7 @@
             && (nextTitle === null || nextTitle === String(slide.title || ''))) return;
         if (nextTitle !== null) slide.title = nextTitle;
         if (nextHtml !== null) slide.html = nextHtml;
+        markSlideHtmlEdited(slide);
         const card = document.getElementById('slide-card-' + index);
         const stage = card && card.querySelector('.tenant-slide-stage');
         if (stage && nextHtml !== null) {

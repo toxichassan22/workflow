@@ -467,6 +467,7 @@
         rawTarget.style.maxHeight = 'none';
       }
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -548,6 +549,7 @@
       applySlideElementColorValue(target, kind, value);
       applySlideElementColorValue(rawTarget, kind, value);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -617,6 +619,7 @@
       const actual = applySlideElementEffectiveOpacity(liveLayer, pct);
       rawLayer.style.opacity = liveLayer.style.opacity;
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -672,6 +675,7 @@
       applySlideElementFontSize(target, next, ratio);
       applySlideElementFontSize(rawTarget, next, ratio);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -709,6 +713,7 @@
       applySlideElementBold(target, makeBold);
       applySlideElementBold(rawTarget, makeBold);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -848,6 +853,7 @@
       if (rawPassed) outrankZ(rawLayerTarget, rawPassed, direction);
       else pressurizeZ(rawLayerTarget, direction);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
@@ -882,6 +888,7 @@
       box.textContent = 'نص جديد';
       rawRoot.appendChild(box);
       slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();

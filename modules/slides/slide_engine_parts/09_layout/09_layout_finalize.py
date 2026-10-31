@@ -518,12 +518,15 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             item['section_key'] = 'index'
         else:
             section_key = _slide_section_key(item, current_section)
-            if _restore_misclassified_section_divider(item, section_key):
+            # A designer/client-edited page keeps its own type and title. The
+            # legacy repairs below only own pages nobody has edited.
+            preserved_design = _designer_preserves_html(item)
+            if _restore_misclassified_section_divider(item, section_key) and not preserved_design:
                 slide_type = 'content'
                 item['type'] = 'content'
                 item.pop('design_style', None)
                 item['html'] = _strip_forced_section_background(item.get('html') or '')
-            if _is_fixed_section_divider(item, section_key):
+            if _is_fixed_section_divider(item, section_key) and not preserved_design:
                 slide_type = 'section_divider'
                 current_title = str(item.get('title') or '').strip()
                 keep_title = (lang == OFFER_LANG_ENGLISH
@@ -543,7 +546,8 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
             cover_html = item.get('html') or ''
             if 'data-cover-background' in cover_html:
                 item['_cover_background_added'] = True
-            elif not item.get('coverBackgroundRemoved') and not item.get('_cover_background_added'):
+            elif (not item.get('coverBackgroundRemoved') and not item.get('_cover_background_added')
+                  and not _designer_preserves_html(item)):
                 cover_target = (creative_images.get('cover') or project_data.get('cover')
                                 or project_data.get('mainImageData') or '')
                 if cover_target:
@@ -566,18 +570,10 @@ def renumber_presentation_slides(slides, branding=None, project_data=None, tenan
         slide_type = str(item.get('type') or 'content')
         if _designer_preserves_html(item):
             if slide_type == 'index':
-                # The index is a designed structural page, not a preserved
-                # designer canvas. Rebuilding it as a whole is what keeps its
-                # two columns balanced; patching rows in place collapsed every
-                # entry into one column after a save, a refresh or a delete.
-                index_html = build_index_slide(
-                    item, index, total, branding, project_data, offer_lang=lang)
-                item['html'] = finalize_slide_html(
-                    index_html, slide_type, project_data, branding, tenant_id=tenant_id,
-                    slide_num=index, slide_title=item.get('title') or offer_chrome('index_heading', lang),
-                    total_slides=total, content_source=item.get('content_source'),
-                    allow_all_maps=allow_all_maps,
-                )
+                # The index is a designed page once someone edited it: keep the
+                # layout and refresh only the numbers it still carries.
+                item['html'] = _patch_preserved_index_html(
+                    item.get('html') or '', item.get('index_entries'), index, total)
                 continue
             html = _rewrite_preserved_counter(item.get('html') or '', slide_type, index, total)
             html = _strip_header_page_marker(html)
