@@ -987,6 +987,15 @@
       if (prev) prev.focus({ preventScroll: true });
     }
 
+    function restartTenantPresentation() {
+      if (!tenantPresentActive) return;
+      const firstVisible = visibleSlideIndexes()[0];
+      if (firstVisible === undefined) return;
+      tenantPresentIndex = firstVisible;
+      renderTenantPresentSlide();
+      showTenantPresentControls();
+    }
+
     function stepTenantPresentation(delta) {
       if (!tenantPresentActive) return;
       let next = tenantPresentIndex + Number(delta || 0);
@@ -1014,7 +1023,7 @@
         stepTenantPresentation(-1);
         return;
       }
-      if (event.key === 'Home') { event.preventDefault(); tenantPresentIndex = 0; renderTenantPresentSlide(); }
+      if (event.key === 'Home') { event.preventDefault(); restartTenantPresentation(); }
       if (event.key === 'End') { event.preventDefault(); tenantPresentIndex = tenantSlidesData.length - 1; renderTenantPresentSlide(); }
     }
 

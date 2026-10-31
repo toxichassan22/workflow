@@ -139,6 +139,7 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "ws.slides_deleted": "تم حذف الشرائح المحددة",
   "ws.keep_one_slide": "لا يمكن حذف آخر شريحة",
   "ws.delete_selected_confirm": "حذف {n} شرائح محددة؟",
+  "ws.present_restart": "من البداية",
   "ws.present_prev": "السابق",
   "ws.present_next": "التالي",
   "ws.present_exit": "خروج",

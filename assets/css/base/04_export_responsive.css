@@ -22,8 +22,12 @@
 
     /* Match the isolated PDF page reset for every element inside the slide. Inline
        slide declarations still win, while browser-default heading/paragraph
-       margins cannot make the preview taller than the exported page. */
-    .tenant-slide-stage .slide * {
+       margins cannot make the preview taller than the exported page.
+       The presentation stage shares this reset: it shows the same stored slide, so
+       anything the canvas and the export agree on must not depend on which stage a
+       slide happens to be painted in. */
+    .tenant-slide-stage .slide *,
+    #tenantPresentOverlay .present-stage .slide * {
       margin: 0;
       padding: 0;
       box-sizing: border-box;
@@ -32,7 +36,8 @@
     /* The application table rule is intentionally wide for data-entry tables, but generated
        slides contain tables inside narrower content columns. Keep those tables inside the slide;
        exported slides do not load the application-wide table minimum. */
-    .tenant-slide-stage .slide table {
+    .tenant-slide-stage .slide table,
+    #tenantPresentOverlay .present-stage .slide table {
       min-width: 0;
     }
 

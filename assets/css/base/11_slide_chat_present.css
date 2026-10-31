@@ -394,10 +394,9 @@
   height: 720px !important;
   margin: 0 !important;
   transform: none !important;
-}
-
-#tenantPresentOverlay .present-stage .slide * {
-  box-sizing: border-box;
+  /* The application body line-height must not make the presented slide taller
+     than the same slide in the canvas or on the exported page. */
+  line-height: normal;
 }
 
 #tenantPresentOverlay .present-controls {

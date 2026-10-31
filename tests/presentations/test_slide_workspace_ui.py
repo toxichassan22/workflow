@@ -264,6 +264,37 @@ class SlidesPresentModeTests(unittest.TestCase):
         self.assertIn('requestFullscreen', self.source)
         self.assertIn('controls-hidden', self.source)
 
+    def test_presentation_restarts_from_the_first_visible_slide(self):
+        # Walking the deck end to end used to have no way back: the only control
+        # was «السابق», so a viewer had to press it for every page to reach the cover.
+        self.assertIn('id="presentRestartButton" onclick="restartTenantPresentation()"',
+                      self.shell)
+        restart = self.source.split('function restartTenantPresentation()', 1)[1]
+        restart = restart.split('function stepTenantPresentation(delta)', 1)[0]
+        self.assertIn('if (!tenantPresentActive) return;', restart)
+        # Hidden slides are skipped by the visible index list, never by position.
+        self.assertIn('visibleSlideIndexes()[0]', restart)
+        self.assertIn('renderTenantPresentSlide()', restart)
+        self.assertIn('showTenantPresentControls()', restart)
+        self.assertIn("if (event.key === 'Home') { event.preventDefault(); restartTenantPresentation(); }",
+                      self.source)
+
+    def test_present_stage_shares_the_canvas_slide_normalization(self):
+        # The app-wide «table { min-width: 850px }» and heading margins are form
+        # rules; they reached the presented slide only, cutting wide tables off at
+        # the left edge while the canvas and the PDF showed them whole.
+        flat = re.sub(r'\s+', ' ', self.source)
+        self.assertIn('.tenant-slide-stage .slide table, '
+                      '#tenantPresentOverlay .present-stage .slide table { min-width: 0; }',
+                      flat)
+        self.assertIn('.tenant-slide-stage .slide *, '
+                      '#tenantPresentOverlay .present-stage .slide * { margin: 0; padding: 0; '
+                      'box-sizing: border-box; }',
+                      flat)
+        present = flat.split('#tenantPresentOverlay .present-stage .slide {', 1)[1].split('}', 1)[0]
+        self.assertIn('line-height: normal', present)
+
+
 
 class SlidesCanvasEditingTests(unittest.TestCase):
     """Axis 2 of docs/md/design_page.md: per-type tools, the inspector, zoom,

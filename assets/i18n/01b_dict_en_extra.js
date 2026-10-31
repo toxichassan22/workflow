@@ -138,6 +138,7 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "ws.slides_deleted": "Selected slides deleted",
   "ws.keep_one_slide": "The last slide cannot be deleted",
   "ws.delete_selected_confirm": "Delete {n} selected slides?",
+  "ws.present_restart": "From start",
   "ws.present_prev": "Previous",
   "ws.present_next": "Next",
   "ws.present_exit": "Exit",
