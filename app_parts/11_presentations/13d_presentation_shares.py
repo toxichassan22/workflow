@@ -181,13 +181,25 @@ body.controls-hidden #shareControls{opacity:0;pointer-events:none}
 font-size:12px;font-weight:700;border-radius:999px;padding:6px 14px;cursor:pointer}
 #shareControls button:hover{background:rgba(255,255,255,.24)}
 #shareCounter{color:rgba(255,255,255,.82);font-size:12px;font-weight:800;direction:ltr;min-width:58px;text-align:center}
-@media(max-width:700px){#shareControls button{font-size:11px;padding:6px 10px}}
+#shareControls button.is-active{background:rgba(23,200,227,.34)}
+#shareNotes{position:fixed;top:22px;right:22px;width:min(320px,32vw);max-height:56vh;overflow:auto;
+padding:12px 14px;border-radius:14px;background:rgba(15,23,42,.9);border:1px solid rgba(255,255,255,.16);
+box-shadow:0 18px 44px rgba(0,0,0,.45);z-index:26}
+#shareNotes[hidden]{display:none}
+.share-notes-title{font-size:11px;font-weight:800;color:#7DD3E8;margin-bottom:6px}
+#shareNotesBody{font-size:12.5px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;color:#e2e8f0}
+@media(max-width:700px){#shareControls button{font-size:11px;padding:6px 10px}
+#shareNotes{left:12px;right:12px;width:auto;max-height:40vh}}
 </style>
 __FONT_CSS__
 </head>
 <body>
 <div id="shareStatus"></div>
 <div id="shareApp"><div id="shareStage"></div></div>
+<aside id="shareNotes" hidden>
+  <div class="share-notes-title">ملاحظات الشريحة</div>
+  <div id="shareNotesBody"></div>
+</aside>
 <div id="shareGate" role="dialog" aria-modal="true">
   <form class="gate-card" id="shareGateForm">
     <h1>عرض محمي</h1>
@@ -198,6 +210,7 @@ __FONT_CSS__
   </form>
 </div>
 <div id="shareControls">
+  <button type="button" id="shareNotesToggle">الملاحظات</button>
   <button type="button" id="sharePrev">السابق</button>
   <span id="shareCounter">1 / 1</span>
   <button type="button" id="shareNext">التالي</button>
@@ -218,6 +231,11 @@ _SHARE_VIEWER_JS = r'''(function(){
   var gate = document.getElementById('shareGate');
   var gateError = document.getElementById('shareGateError');
   var counter = document.getElementById('shareCounter');
+  var notesPanel = document.getElementById('shareNotes');
+  var notesBody = document.getElementById('shareNotesBody');
+  var notesToggle = document.getElementById('shareNotesToggle');
+  var notesOpen = false;
+  var notesInitialized = false;
   var hideTimer = null;
 
   function setStatus(text, isError){
@@ -232,6 +250,13 @@ _SHARE_VIEWER_JS = r'''(function(){
     if (!slides.length) return;
     stage.innerHTML = slides[index].html || '';
     counter.textContent = (index + 1) + ' / ' + slides.length;
+    var notes = String(slides[index].notes || '').trim();
+    notesBody.textContent = notes || 'لا توجد ملاحظات لهذه الشريحة';
+    notesToggle.style.display = notes ? '' : 'none';
+    if (!notesInitialized) { notesInitialized = true; notesOpen = !!notes; }
+    if (!notes) notesOpen = false;
+    notesPanel.hidden = !notesOpen;
+    notesToggle.classList.toggle('is-active', notesOpen);
     fit();
   }
   function step(delta){
@@ -286,6 +311,12 @@ _SHARE_VIEWER_JS = r'''(function(){
       if (result.status === 200 && result.body && result.body.success) { load(); return; }
       gateError.textContent = (result.body && result.body.error) || 'كلمة المرور غير صحيحة';
     }).catch(function(){ gateError.textContent = 'تعذر التحقق من كلمة المرور'; });
+  });
+  notesToggle.addEventListener('click', function(){
+    notesOpen = !notesOpen;
+    notesPanel.hidden = !notesOpen;
+    notesToggle.classList.toggle('is-active', notesOpen);
+    showControls();
   });
   document.getElementById('sharePrev').addEventListener('click', function(){ step(-1); });
   document.getElementById('shareNext').addEventListener('click', function(){ step(1); });
@@ -380,6 +411,8 @@ def api_public_share(token):
         public_slides.append({
             'html': _rewrite_share_urls(slide.get('html') or '', token),
             'type': slide.get('type') or 'content',
+            # The owner asked for slide notes to reach whoever opens the deck.
+            'notes': str(slide.get('notes') or '').strip(),
         })
     db.touch_presentation_share(share.get('id'))
     return _noindex(jsonify({

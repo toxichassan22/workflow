@@ -45,7 +45,8 @@
         cell.className = 'ge-sorter-cell';
 
         const card = document.createElement('div');
-        card.className = 'ge-sorter-card' + (index === activeSlideIndex ? ' active' : '');
+        card.className = 'ge-sorter-card' + (index === activeSlideIndex ? ' active' : '')
+          + (slide.hidden ? ' is-hidden' : '');
         card.dataset.slideId = String(slide.id || '');
         card.dataset.sorterIndex = String(index);
         card.draggable = hasPermission('create_presentation');
@@ -112,8 +113,7 @@
         insert.setAttribute('aria-label', sorterText('ws.add_after', 'إضافة شريحة'));
         insert.onclick = event => {
           event.stopPropagation();
-          if (typeof insertBlankSlideAt === 'function') insertBlankSlideAt(index);
-          renderTenantSlidesSorter();
+          if (typeof openSlideInsertMenu === 'function') openSlideInsertMenu(insert, index + 1);
         };
 
         cell.appendChild(card);
@@ -126,8 +126,8 @@
 
       const addCell = document.createElement('div');
       addCell.className = 'ge-sorter-cell ge-sorter-add-cell';
-      addCell.innerHTML = '<button type="button" onclick="insertBlankSlideAt(' + tenantSlidesData.length
-        + '); renderTenantSlidesSorter()">' + escapeHtml(sorterText('ws.add_slide', 'إضافة شريحة')) + '</button>';
+      addCell.innerHTML = '<button type="button" onclick="openSlideInsertMenu(this, ' + tenantSlidesData.length
+        + ')">' + escapeHtml(sorterText('ws.add_slide', 'إضافة شريحة')) + '</button>';
       grid.appendChild(addCell);
 
       box.appendChild(grid);

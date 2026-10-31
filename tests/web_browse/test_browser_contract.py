@@ -584,6 +584,34 @@ class StaleProfileSweepTests(unittest.TestCase):
             self.assertTrue(os.path.exists(old))
 
 
+class WindowsLiveProfileDetectionTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows process discovery only')
+    def test_live_profiles_are_read_from_chrome_command_lines(self):
+        base = tempfile.gettempdir()
+        plain = os.path.join(base, 'wf-chrome-alive')
+        quoted = os.path.join(base, 'wf-chrome-quoted space')
+        output = (
+            f'chrome.exe --user-data-dir={plain} --headless\r\n'
+            f'chrome.exe --user-data-dir="{quoted}" --headless\r\n'
+        ).encode('utf-8')
+        with mock.patch.object(browser.subprocess, 'check_output', return_value=output):
+            live = browser._live_chrome_profiles()
+        self.assertIsNotNone(live)
+        self.assertEqual(
+            live,
+            {
+                os.path.normcase(os.path.abspath(plain)),
+                os.path.normcase(os.path.abspath(quoted)),
+            },
+        )
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows process discovery only')
+    def test_failed_process_discovery_returns_none(self):
+        with mock.patch.object(browser.subprocess, 'check_output',
+                               side_effect=OSError('no powershell')):
+            self.assertIsNone(browser._live_chrome_profiles())
+
+
 class WebSearchContractTests(unittest.TestCase):
     def setUp(self):
         _NET['visited'] = []

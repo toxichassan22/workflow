@@ -37,16 +37,41 @@
   border-radius: 999px;
   background: #fff;
   color: #07182C;
-  font: inherit;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 6px 4px;
+  padding: 9px 5px;
   cursor: pointer;
-  writing-mode: vertical-rl;
+}
+
+#tenantSlidesPage .ge-chat-reopen .ws-icon {
+  width: 12px;
+  height: 12px;
+  transform: rotate(180deg);
 }
 
 #tenantSlidesPage .ge-right-panel.is-collapsed .ge-chat-reopen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tenantSlidesPage .ge-panel-header .is-icon {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tenantSlidesPage .ge-panel-header .is-icon .ws-icon {
+  width: 13px;
+  height: 13px;
+}
+
+#tenantSlidesPage .ws-icon {
+  width: 14px;
+  height: 14px;
   display: block;
+  pointer-events: none;
 }
 
 #tenantSlidesPage .ge-panel-header {
@@ -158,6 +183,34 @@
 
 #tenantSlidesPage .tenant-chat-entry-row textarea {
   font-size: 12px;
+}
+
+#tenantSlidesPage .tenant-chat-entry-row .is-icon {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  padding: 0;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tenantSlidesPage .tenant-chat-entry-row .is-icon .ws-icon {
+  width: 16px;
+  height: 16px;
+}
+
+/* .btn.primary paints a dark gradient and white text, so the send icon keeps
+   the inherited white. A navy icon here was invisible on its own button. */
+#tenantSlidesPage .tenant-chat-entry-row .tenant-chat-send.is-icon .ws-icon {
+  color: #fff;
+}
+
+#tenantSlidesPage .tenant-chat-attachment-remove .ws-icon {
+  width: 10px;
+  height: 10px;
 }
 
 #tenantSlidesPage .tenant-chat-attachment {
@@ -382,6 +435,62 @@
 
 #tenantPresentOverlay .present-controls button:hover {
   background: rgba(255, 255, 255, .24);
+}
+
+#tenantPresentOverlay .present-controls .is-icon {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tenantPresentOverlay .present-controls .is-icon[hidden] {
+  display: none;
+}
+
+#tenantPresentOverlay .present-controls .is-icon.is-active {
+  background: rgba(23, 200, 227, .34);
+}
+
+#tenantPresentOverlay .present-controls .is-icon .ws-icon {
+  width: 14px;
+  height: 14px;
+}
+
+#tenantPresentOverlay .present-notes {
+  position: fixed;
+  top: 22px;
+  right: 22px;
+  width: min(330px, 32vw);
+  max-height: 56vh;
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(15, 23, 42, .9);
+  border: 1px solid rgba(255, 255, 255, .16);
+  color: #e2e8f0;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .45);
+  z-index: 12005;
+}
+
+#tenantPresentOverlay .present-notes[hidden] {
+  display: none;
+}
+
+#tenantPresentOverlay .present-notes-title {
+  font-size: 11px;
+  font-weight: 800;
+  color: #7DD3E8;
+  margin-bottom: 6px;
+}
+
+#tenantPresentOverlay .present-notes-body {
+  font-size: 12.5px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 #tenantPresentOverlay .present-counter {

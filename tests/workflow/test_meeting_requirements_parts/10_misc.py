@@ -486,11 +486,11 @@ class MeetingRequirementsTestsPart09(MeetingRequirementsTests):
         self.assertIn("showLoader('رفع العلامة المائية'", index_source)
         self.assertIn('setWatermarkSettingsBusy(true);', index_source)
 
-        toolbar = index_source.split('function slideEditToolbarHTML(index)', 1)[1]
-        toolbar = toolbar.split('\n    function normalizeHexColor', 1)[0]
+        toolbar = index_source.split('function slideEditToolbarPanels(index, dis)', 1)[1]
+        toolbar = toolbar.split('\n    function slideEditToolbarHTML', 1)[0]
         self.assertIn('data-slide-edit-watermark="toggle"', toolbar)
         self.assertIn('إظهار العلامة المائية', toolbar)
-        self.assertIn('isWatermarkVisible(tenantSlidesData[index]', toolbar)
+        self.assertIn('isWatermarkVisible(slide.html)', toolbar)
 
         toggle = index_source.split('function setSlideWatermarkVisibility(index, visible)', 1)[1]
         toggle = toggle.split('\n    function deckWatermarkMarkup', 1)[0]

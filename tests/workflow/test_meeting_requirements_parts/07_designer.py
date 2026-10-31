@@ -829,7 +829,9 @@ class MeetingRequirementsTestsPart06(MeetingRequirementsTests):
         self.assertIn('function openTenantChatImagePreview(src)', index_source)
         self.assertIn('class="tenant-chat-attachment-remove"', index_source)
         self.assertIn('class="tenant-chat-entry-row"', index_source)
-        self.assertIn('aria-label="إضافة صورة"', index_source)
+        # Owner request (2026-10-31): the attach control is a paperclip icon
+        # whose accessible name is now «إرفاق صورة أو ملف».
+        self.assertIn('aria-label="إرفاق صورة أو ملف"', index_source)
         self.assertNotIn('id="tenantChatAttachmentPreview"', index_source)
         self.assertIn('.ge-thumb-actions > button', index_source)
         # Billing transparency: greetings cost zero tokens, attachments are first-class tools.

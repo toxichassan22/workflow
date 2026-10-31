@@ -761,6 +761,9 @@
         const el = node.parentElement;
         if (!el || seen.has(el)) return;
         seen.add(el);
+        // A table cell edits on double-click only: a single click selects the
+        // table itself, the PowerPoint gesture, so the table tools stay reachable.
+        if (el.closest && el.closest('[data-slide-table]')) return;
         if (enabled) {
           if (el.hasAttribute('contenteditable')) return;
           el.setAttribute('contenteditable', 'plaintext-only');
@@ -785,6 +788,7 @@
           el.removeEventListener('focus', onSlideEditableFocus);
         }
       });
+      if (enabled && typeof bindSlideTableEditing === 'function') bindSlideTableEditing(stage, index);
       // Re-fit the slide when toggling edit mode.
       autoFitSlideContent(stage);
     }

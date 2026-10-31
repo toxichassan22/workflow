@@ -82,6 +82,7 @@ vm.runInContext(source.slice(start, end), context);
   await testCheckpointPreservesInputs();
   await testSlideGenerationFailures();
   await testGenerationHeartbeatScope();
+  await testScopeExistsAdoptsExisting();
   testSlidePartialGate();
   testPlanFingerprintIncludesEngineVersion();
   console.log('Presentation save harness passed: update/create, conflict preservation, scoped generation reuse, generation failure checkpoints.');
@@ -450,6 +451,61 @@ async function testGenerationHeartbeatScope() {
   assert.equal(heartbeats[0].url, '/api/generation-jobs/job-heartbeat/heartbeat');
   assert.deepEqual(intervals, [15000], 'the run must arm exactly one heartbeat interval');
   assert.deepEqual(cleared, ['heartbeat-timer'], 'finally must clear the heartbeat interval');
+}
+
+async function testScopeExistsAdoptsExisting() {
+  // A draft+scope owns one presentation. A create refused with
+  // PRESENTATION_SCOPE_EXISTS is a regeneration of that file, so the save must
+  // continue as an update instead of failing on every retry.
+  const start = source.indexOf('    async function commitTenantPresentation(');
+  const end = source.indexOf('    async function openExistingPresentation(', start);
+  assert(start >= 0 && end > start, 'commitTenantPresentation must be present');
+  const refuseNextPut = { value: false };
+  const calls = [];
+  const state = {
+    console, JSON, Number, String, Promise, Error, crypto: require('node:crypto').webcrypto,
+    tenantPresentationSavePromise: null, tenantPresentationRevision: 0, tenantPresentationProvenance: null,
+    tenantPresentationId: null, tenantPresentationTitle: '', tenantProjectMode: 'new',
+    tenantProjectData: {}, tenantSlidesData: [{ html: 'new' }],
+    tenantSlidePlan: {}, tenantCreativeImages: {}, tenantArchiveCache: null,
+    document: { getElementById: () => null },
+    renumberTenantSlides() {}, updatePresentationUndoButtons() {}, setSlidesEditorInfo() {},
+    ensureSlideIds() {}, clearPresentationUndoProvenance() {}, setDraftDirty() {},
+    WFT: (k, d) => d || k,
+    api: async (method, path, body) => {
+      calls.push({ method, path, body });
+      if (method === 'POST' || refuseNextPut.value) {
+        return {
+          success: false, error_code: 'PRESENTATION_SCOPE_EXISTS',
+          presentationId: 'pres-section', currentRevision: 5,
+          error: 'يوجد عرض محفوظ لهذا القسم من المشروع؛ لم يُنشأ عرض مكرر'
+        };
+      }
+      return { success: true, presentationId: 'pres-section', revision: 6, changed: true };
+    },
+  };
+  vm.createContext(state);
+  vm.runInContext(source.slice(start, end), state);
+  const snapshot = { draftId: 'draft', presentation_scope: 'section:basic', tenantSlidesData: [{ html: 'new' }] };
+  const result = await state.commitTenantPresentation(snapshot, '', 'THE ICONIC 2 - بيانات المشروع', {});
+  assert.equal(calls.length, 2, 'a refused create must be retried as an update');
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[1].method, 'PUT');
+  assert.equal(calls[1].path, '/api/presentations/pres-section');
+  assert.equal(calls[1].body.expectedRevision, 5, 'the adopted presentation is saved at the revision the refusal named');
+  assert.equal(state.tenantPresentationId, 'pres-section');
+  assert.equal(state.tenantPresentationRevision, 6);
+  assert.equal(result.revision, 6);
+
+  state.tenantPresentationSavePromise = null;
+  refuseNextPut.value = true;
+  calls.length = 0;
+  await assert.rejects(
+    state.commitTenantPresentation(snapshot, 'pres-other', 'x', {}),
+    /عرض محفوظ/,
+    'an update must never adopt another presentation on the same code'
+  );
+  assert.equal(calls.length, 1, 'an update carries a target id, so no retry is attempted');
 }
 
 function testSlidePartialGate() {

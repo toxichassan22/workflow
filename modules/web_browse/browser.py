@@ -519,29 +519,69 @@ _CHROME_PROFILE_PREFIX = 'wf-chrome-'
 # A profile younger than this is never swept: the browser that owns it may
 # still be starting up, and its process is not yet visible in /proc.
 _NEW_PROFILE_GRACE_SECONDS = 600
+_CHROME_PROFILE_ARG_RE = re.compile(r'--user-data-dir=(?:"([^"]+)"|(\S+))')
+
+
+def _normalize_profile_path(path):
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _profiles_from_command_lines(command_lines):
+    live = set()
+    for line in command_lines or ():
+        for match in _CHROME_PROFILE_ARG_RE.finditer(line):
+            value = match.group(1) or match.group(2)
+            if value:
+                live.add(_normalize_profile_path(value))
+    return live
+
+
+def _windows_chrome_command_lines():
+    """Command lines of running Chrome processes, or None if they cannot be read."""
+    command = (
+        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+        "Get-CimInstance Win32_Process | "
+        "Where-Object { $_.Name -eq 'chrome.exe' -and $_.CommandLine -match '--user-data-dir=' } | "
+        "ForEach-Object { $_.CommandLine }"
+    )
+    try:
+        output = subprocess.check_output(
+            ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command],
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return output.decode('utf-8', 'replace').splitlines()
 
 
 def _live_chrome_profiles():
     """Managed-Chrome profile dirs a running process points at.
 
-    None when this host cannot say (no /proc) — callers must then leave every
-    profile alone rather than guess.
+    None when this host cannot say (no /proc and Windows process discovery
+    failed) — callers must then leave every profile alone rather than guess.
     """
-    if not os.path.isdir('/proc'):
-        return None
-    live = set()
-    for entry in os.listdir('/proc'):
-        if not entry.isdigit():
-            continue
-        try:
-            with open(f'/proc/{entry}/cmdline', 'rb') as handle:
-                raw = handle.read().decode('utf-8', 'replace')
-        except OSError:
-            continue
-        for part in raw.split('\x00'):
-            if part.startswith('--user-data-dir='):
-                live.add(os.path.abspath(part.split('=', 1)[1].strip()))
-    return live
+    if os.path.isdir('/proc'):
+        live = set()
+        for entry in os.listdir('/proc'):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f'/proc/{entry}/cmdline', 'rb') as handle:
+                    raw = handle.read().decode('utf-8', 'replace')
+            except OSError:
+                continue
+            for part in raw.split('\x00'):
+                if part.startswith('--user-data-dir='):
+                    live.add(_normalize_profile_path(part.split('=', 1)[1].strip()))
+        return live
+    if os.name == 'nt':
+        lines = _windows_chrome_command_lines()
+        if lines is None:
+            return None
+        return _profiles_from_command_lines(lines)
+    return None
 
 
 def _sweep_stale_chrome_profiles(base_dir=None, now=None):
@@ -558,6 +598,7 @@ def _sweep_stale_chrome_profiles(base_dir=None, now=None):
     live = _live_chrome_profiles()
     if live is None:
         return 0
+    live = {_normalize_profile_path(path) for path in live}
     base = base_dir or tempfile.gettempdir()
     moment = time.time() if now is None else now
     removed = 0
@@ -567,7 +608,7 @@ def _sweep_stale_chrome_profiles(base_dir=None, now=None):
                 continue
         except OSError:
             continue
-        if os.path.abspath(path) in live:
+        if _normalize_profile_path(path) in live:
             continue
         shutil.rmtree(path, ignore_errors=True)
         removed += 1

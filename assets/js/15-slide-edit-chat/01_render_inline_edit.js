@@ -67,8 +67,10 @@
       pushSlideEditHistory(index);
       const wrap = rawDoc.createElement('div');
       wrap.setAttribute('data-slide-imagebox', '1');
-      wrap.setAttribute('style', 'position:absolute;top:180px;right:390px;width:500px;'
-        + 'box-sizing:border-box;z-index:5;');
+      const pendingStyle = session.pendingImageBox;
+      delete session.pendingImageBox;
+      wrap.setAttribute('style', pendingStyle
+        || 'position:absolute;top:180px;right:390px;width:500px;box-sizing:border-box;z-index:5;');
       const img = rawDoc.createElement('img');
       img.setAttribute('src', url);
       img.setAttribute('alt', '');
@@ -150,6 +152,16 @@
             walk(child);
             return;
           }
+          if (tag === 'SPAN') {
+            // Partial colour/highlight lives on a span; keep exactly the inline
+            // properties the canvas tools wrote and drop everything else.
+            const style = typeof slideInlineStyleSanitizer === 'function'
+              ? slideInlineStyleSanitizer(child.getAttribute('style')) : '';
+            parts.push('<span' + (style ? ' style="' + escapeHtml(style) + '"' : '') + '>');
+            walk(child);
+            parts.push('</span>');
+            return;
+          }
           walk(child);
         });
       };
@@ -158,6 +170,9 @@
     }
 
     function commitSlideInlineEdit(stage, index, editedEl) {
+      // A deck-wide replace owns the stored HTML while it re-renders; a stale
+      // editor that blurs during that rebuild must not write its old text back.
+      if (typeof slideDeckReplaceBusy !== 'undefined' && slideDeckReplaceBusy) return;
       // The deck may have been reordered/rebuilt since this card was rendered
       // (e.g. a designer merge inserting slides) — follow the slide's id to its
       // current index instead of trusting the render-time position.

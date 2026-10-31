@@ -197,24 +197,37 @@
       }, { root: null, rootMargin: '160px' });
     }
 
+    // Icon buttons keep their Arabic label in title/aria-label, so the compact
+    // row stays self-explanatory without printing a word per action.
+    function thumbIconButton(icon, labelKey, labelFallback, action, disabled) {
+      const label = wsText(labelKey, labelFallback);
+      return '<button type="button" class="ge-thumb-icon" data-ws-icon="' + icon + '"'
+        + ' title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) + '"'
+        + (disabled ? ' disabled' : '')
+        + ' onclick="event.stopPropagation(); ' + action + '"></button>';
+    }
+
     function slideThumbActionsHtml(index, slide) {
       const hasPermissionCreate = hasPermission('create_presentation');
       const selected = tenantSlideSelectionIds.includes(slideRuntimeId(slide));
       const up = index > 0
-        ? '<button type="button" onclick="event.stopPropagation(); moveTenantSlide(' + index + ', ' + (index - 1) + ')">' + escapeHtml(wsText('ws.move_up', 'أعلى')) + '</button>'
+        ? thumbIconButton('arrow-up', 'ws.move_up', 'أعلى', 'moveTenantSlide(' + index + ', ' + (index - 1) + ')')
         : '';
       const down = index < tenantSlidesData.length - 1
-        ? '<button type="button" onclick="event.stopPropagation(); moveTenantSlide(' + index + ', ' + (index + 1) + ')">' + escapeHtml(wsText('ws.move_down', 'أسفل')) + '</button>'
+        ? thumbIconButton('arrow-down', 'ws.move_down', 'أسفل', 'moveTenantSlide(' + index + ', ' + (index + 1) + ')')
         : '';
       const remove = hasPermissionCreate && tenantSlidesData.length > 1
-        ? '<button type="button" onclick="event.stopPropagation(); deleteSlide(' + index + ')">' + escapeHtml(wsText('ws.delete', 'حذف')) + '</button>'
+        ? thumbIconButton('trash', 'ws.delete', 'حذف', 'deleteSlide(' + index + ')')
         : '';
       const more = hasPermissionCreate
-        ? '<button type="button" onclick="event.stopPropagation(); toggleTenantThumbMenu(' + index + ')">' + escapeHtml(wsText('ws.more', 'المزيد')) + '</button>'
+        ? thumbIconButton('more', 'ws.more', 'المزيد', 'toggleTenantThumbMenu(' + index + ')')
+        : '';
+      const notes = hasPermissionCreate
+        ? thumbIconButton('notes', 'ws.notes', 'ملاحظات', 'openTenantSlideNotesEditor(' + index + ')')
         : '';
       const regenerate = hasPermissionCreate
-        ? '<button type="button"' + ((typeof isGeneratingTenantSlides !== 'undefined' && (isGeneratingTenantSlides || isRegeneratingTenantSlide)) ? ' disabled' : '')
-          + ' title="' + escapeHtml(wsText('ws.regenerate_title', 'إعادة توليد هذه الشريحة فقط')) + '"'
+        ? '<button type="button" title="' + escapeHtml(wsText('ws.regenerate_title', 'إعادة توليد هذه الشريحة فقط')) + '"'
+          + ((typeof isGeneratingTenantSlides !== 'undefined' && (isGeneratingTenantSlides || isRegeneratingTenantSlide)) ? ' disabled' : '')
           + ' onclick="event.stopPropagation(); regenerateTenantSlide(' + index + ')">' + escapeHtml(wsText('ws.regenerate', 'إعادة توليد')) + '</button>'
         : '';
       const background = hasPermissionCreate && typeof tenantSlideHasBackground === 'function' && tenantSlideHasBackground(slide)
@@ -223,20 +236,23 @@
       const rename = hasPermissionCreate
         ? '<button type="button" onclick="event.stopPropagation(); startRenameTenantSlide(' + index + ')">' + escapeHtml(wsText('ws.rename', 'إعادة تسمية')) + '</button>'
         : '';
-      const notes = hasPermissionCreate
-        ? '<button type="button" onclick="event.stopPropagation(); editTenantSlideNotes(' + index + ')">' + escapeHtml(wsText('ws.notes', 'ملاحظات')) + '</button>'
-        : '';
       const group = hasPermissionCreate
-        ? '<button type="button" onclick="event.stopPropagation(); editTenantSlideGroup(' + index + ')">' + escapeHtml(wsText('ws.group', 'تجميع')) + '</button>'
+        ? '<button type="button" title="' + escapeHtml(wsText('ws.group_title', 'تجميع الشريحة في قسم')) + '"'
+          + ' onclick="event.stopPropagation(); openTenantSlideGroupEditor(' + index + ')">' + escapeHtml(wsText('ws.group', 'قسم')) + '</button>'
         : '';
       const duplicate = hasPermissionCreate
         ? '<button type="button" onclick="event.stopPropagation(); duplicateSlideAt(' + index + ')">' + escapeHtml(wsText('ws.duplicate', 'تكرار')) + '</button>'
         : '';
+      const hide = hasPermissionCreate
+        ? '<button type="button" onclick="event.stopPropagation(); toggleSlideHidden(' + index + ')">'
+          + escapeHtml(slide.hidden ? wsText('ws.show_slide', 'إظهار') : wsText('ws.hide_slide', 'إخفاء')) + '</button>'
+        : '';
       const select = selected
         ? '<button type="button" onclick="event.stopPropagation(); removeSlideFromSelection(\'' + escapeHtml(slideRuntimeId(slide)) + '\')">' + escapeHtml(wsText('ws.deselect', 'إلغاء التحديد')) + '</button>'
         : '';
-      return up + down + remove + more
-        + '<span class="ge-thumb-extra">' + regenerate + background + rename + notes + group + duplicate + select + '</span>';
+      return up + down + notes + remove + more
+        + '<span class="ge-thumb-extra">' + regenerate + background + rename + group
+        + duplicate + hide + select + '</span>';
     }
 
     function renderTenantSlidesSidebar(force) {
@@ -253,10 +269,13 @@
 
       const head = document.createElement('div');
       head.className = 'ge-sidebar-head';
-      head.innerHTML = '<button type="button" class="ge-sidebar-head-btn" onclick="toggleTenantSidebar()">'
-        + escapeHtml(tenantSlidesSidebarCollapsed ? wsText('ws.expand_sidebar', 'فتح القائمة') : wsText('ws.collapse_sidebar', 'طي القائمة'))
-        + '</button>'
-        + '<button type="button" class="ge-sidebar-head-btn" onclick="insertBlankSlideAt(' + tenantSlidesData.length + ')">'
+      const collapseLabel = tenantSlidesSidebarCollapsed
+        ? wsText('ws.expand_sidebar', 'فتح القائمة')
+        : wsText('ws.collapse_sidebar', 'طي القائمة');
+      head.innerHTML = '<button type="button" class="ge-sidebar-head-btn is-icon" data-ws-icon="chevron"'
+        + ' title="' + escapeHtml(collapseLabel) + '" aria-label="' + escapeHtml(collapseLabel) + '"'
+        + ' onclick="toggleTenantSidebar()"></button>'
+        + '<button type="button" class="ge-sidebar-head-btn" onclick="openSlideInsertMenu(this, ' + tenantSlidesData.length + ')">'
         + escapeHtml(wsText('ws.add_slide', 'إضافة شريحة'))
         + '</button>';
       sidebar.appendChild(head);
@@ -294,6 +313,7 @@
         thumb.className = 'ge-thumb'
           + (index === activeSlideIndex ? ' active' : '')
           + (selected ? ' selected' : '')
+          + (slide.hidden ? ' is-hidden' : '')
           + (tenantThumbRenamingId && tenantThumbRenamingId === id ? ' is-renaming' : '');
         thumb.dataset.slideId = id;
         thumb.onclick = event => handleThumbClick(event, index);
@@ -310,7 +330,12 @@
         const meta = document.createElement('div');
         meta.className = 'ge-thumb-meta';
         const notesChip = String(slide.notes || '').trim()
-          ? '<span class="ge-thumb-notes">' + escapeHtml(wsText('ws.notes_chip', 'ملاحظات')) + '</span>'
+          ? '<button type="button" class="ge-thumb-notes" title="' + escapeHtml(String(slide.notes || '')) + '"'
+            + ' onclick="event.stopPropagation(); openTenantSlideNotesEditor(' + index + ')">'
+            + escapeHtml(wsText('ws.notes_chip', 'ملاحظات')) + '</button>'
+          : '';
+        const hiddenChip = slide.hidden
+          ? '<span class="ge-thumb-hidden">' + escapeHtml(wsText('ws.hidden_chip', 'مخفية')) + '</span>'
           : '';
         if (tenantThumbRenamingId && tenantThumbRenamingId === id) {
           meta.innerHTML = '<span class="ge-thumb-num">' + (index + 1) + '</span>'
@@ -318,7 +343,8 @@
         } else {
           meta.innerHTML = '<span class="ge-thumb-num">' + (index + 1) + '</span>'
             + '<span class="ge-thumb-title" title="' + escapeHtml(slide.title || '') + '">'
-            + escapeHtml(slide.title || wsText('ws.no_title', 'شريحة بدون عنوان')) + '</span>' + notesChip;
+            + escapeHtml(slide.title || wsText('ws.no_title', 'شريحة بدون عنوان')) + '</span>'
+            + notesChip + hiddenChip;
         }
         thumb.appendChild(meta);
 
@@ -336,7 +362,7 @@
         add.textContent = wsText('ws.add_after', 'إضافة شريحة');
         add.onclick = event => {
           event.stopPropagation();
-          insertBlankSlideAt(index + 1);
+          openSlideInsertMenu(add, index + 1);
         };
         sidebar.appendChild(add);
 
@@ -360,6 +386,7 @@
           };
         }
       }
+      hydrateWorkspaceIcons(sidebar);
       if (typeof renderSlidesHeader === 'function') renderSlidesHeader();
       if (typeof reapplyDesignerSlideActivity === 'function') reapplyDesignerSlideActivity();
     }
@@ -464,6 +491,10 @@
 
     function insertBlankSlideAt(index) {
       if (!hasPermission('create_presentation')) return;
+      if (typeof insertStructuredSlideAt === 'function') {
+        insertStructuredSlideAt(index, 'blank');
+        return;
+      }
       const at = Math.max(0, Math.min(Number(index) || 0, tenantSlidesData.length));
       beginPresentationUndoChange();
       tenantSlidesData.splice(at, 0, blankSlideTemplate());
@@ -565,26 +596,155 @@
       renderTenantSlidesSidebar();
     }
 
-    function editTenantSlideNotes(index) {
+    /* Notes and section are written in an inline card with debounced autosave,
+       never a browser prompt. The note belongs to the slide, so it saves with
+       the deck and shows up in the present view and the shared link. */
+
+    let tenantSlideEditorSlideId = '';
+    let tenantSlideEditorField = '';
+    let tenantSlideEditorOriginal = '';
+    let tenantSlideEditorChanged = false;
+    let tenantSlideEditorTimer = null;
+
+    function setTenantSlideEditorState(text) {
+      const state = document.getElementById('tenantSlideEditorState');
+      if (state) state.textContent = text || '';
+    }
+
+    function ensureTenantSlideEditor() {
+      let pop = document.getElementById('tenantSlideEditor');
+      if (pop) return pop;
+      pop = document.createElement('div');
+      pop.id = 'tenantSlideEditor';
+      pop.className = 'slide-editor-popover';
+      pop.hidden = true;
+      pop.innerHTML = '<div class="slide-editor-popover-head">'
+        + '<span class="slide-editor-popover-title" id="tenantSlideEditorTitle"></span>'
+        + '<button type="button" class="slide-editor-popover-close" data-ws-icon="close"'
+        + ' aria-label="إغلاق" title="إغلاق" onclick="closeTenantSlideEditor()"></button>'
+        + '</div>'
+        + '<textarea id="tenantSlideEditorInput" rows="4"></textarea>'
+        + '<div class="slide-editor-popover-foot">'
+        + '<button type="button" class="slide-editor-popover-clear" id="tenantSlideEditorClear"'
+        + ' onclick="clearTenantSlideEditor()"></button>'
+        + '<span class="slide-editor-popover-state" id="tenantSlideEditorState"></span>'
+        + '</div>';
+      document.body.appendChild(pop);
+      hydrateWorkspaceIcons(pop);
+      const input = pop.querySelector('#tenantSlideEditorInput');
+      input.addEventListener('input', () => {
+        setTenantSlideEditorState(wsText('ws.editor_pending', 'تعديل غير محفوظ'));
+        if (tenantSlideEditorTimer) clearTimeout(tenantSlideEditorTimer);
+        tenantSlideEditorTimer = setTimeout(commitTenantSlideEditor, 450);
+      });
+      input.addEventListener('blur', commitTenantSlideEditor);
+      input.addEventListener('keydown', event => {
+        event.stopPropagation();
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeTenantSlideEditor();
+          return;
+        }
+        if (event.key === 'Enter' && tenantSlideEditorField === 'group') {
+          event.preventDefault();
+          closeTenantSlideEditor();
+        }
+      });
+      return pop;
+    }
+
+    function openTenantSlideEditor(index, field) {
       const slide = tenantSlidesData[index];
-      if (!slide) return;
-      const value = prompt(wsText('ws.notes_prompt', 'ملاحظات الشريحة'), String(slide.notes || ''));
-      if (value === null) return;
-      beginPresentationUndoChange();
-      slide.notes = String(value || '').trim();
+      if (!slide || !hasPermission('create_presentation')) return;
+      const pop = ensureTenantSlideEditor();
+      tenantSlideEditorSlideId = slideRuntimeId(slide);
+      tenantSlideEditorField = field;
+      tenantSlideEditorOriginal = String(slide[field] || '').trim();
+      tenantSlideEditorChanged = false;
+      const isGroup = field === 'group';
+      const heading = isGroup
+        ? wsText('ws.group_prompt', 'اسم القسم')
+        : wsText('ws.notes_prompt', 'ملاحظات الشريحة');
+      pop.querySelector('#tenantSlideEditorTitle').textContent = slide.title
+        ? slide.title + ' — ' + heading
+        : heading;
+      const input = pop.querySelector('#tenantSlideEditorInput');
+      input.rows = isGroup ? 1 : 4;
+      input.placeholder = isGroup
+        ? wsText('ws.group_placeholder', 'اسم القسم')
+        : wsText('ws.notes_placeholder', 'اكتب ملاحظات هذه الشريحة');
+      input.value = String(slide[field] || '');
+      const clear = pop.querySelector('#tenantSlideEditorClear');
+      clear.textContent = isGroup
+        ? wsText('ws.group_clear', 'إزالة القسم')
+        : wsText('ws.notes_clear', 'مسح الملاحظات');
+      setTenantSlideEditorState('');
+      pop.hidden = false;
+      input.focus();
+      try { input.setSelectionRange(input.value.length, input.value.length); } catch (error) {}
+    }
+
+    function tenantSlideEditorTarget() {
+      if (!tenantSlideEditorField) return null;
+      const index = slideIndexById(tenantSlideEditorSlideId);
+      return index === -1 ? null : tenantSlidesData[index];
+    }
+
+    function commitTenantSlideEditor() {
+      if (tenantSlideEditorTimer) {
+        clearTimeout(tenantSlideEditorTimer);
+        tenantSlideEditorTimer = null;
+      }
+      const input = document.getElementById('tenantSlideEditorInput');
+      const slide = tenantSlideEditorTarget();
+      if (!input || !slide) return;
+      const value = String(input.value || '').trim();
+      if (value === tenantSlideEditorOriginal) {
+        setTenantSlideEditorState(wsText('ws.editor_saved', 'محفوظ'));
+        return;
+      }
+      if (!tenantSlideEditorChanged) {
+        beginPresentationUndoChange();
+        tenantSlideEditorChanged = true;
+      }
+      slide[tenantSlideEditorField] = value;
+      tenantSlideEditorOriginal = value;
       markSlidesDeckChanged();
       renderTenantSlidesSidebar();
+      setTenantSlideEditorState(wsText('ws.editor_saved', 'محفوظ'));
+    }
+
+    function clearTenantSlideEditor() {
+      const input = document.getElementById('tenantSlideEditorInput');
+      if (!input) return;
+      input.value = '';
+      commitTenantSlideEditor();
+      if (tenantSlideEditorField !== 'group') input.focus();
+    }
+
+    function closeTenantSlideEditor() {
+      commitTenantSlideEditor();
+      tenantSlideEditorField = '';
+      tenantSlideEditorSlideId = '';
+      tenantSlideEditorChanged = false;
+      const pop = document.getElementById('tenantSlideEditor');
+      if (pop) pop.hidden = true;
+    }
+
+    function openTenantSlideNotesEditor(index) {
+      openTenantSlideEditor(index, 'notes');
+    }
+
+    function openTenantSlideGroupEditor(index) {
+      openTenantSlideEditor(index, 'group');
+    }
+
+    function editTenantSlideNotes(index) {
+      openTenantSlideNotesEditor(index);
     }
 
     function editTenantSlideGroup(index) {
-      const slide = tenantSlidesData[index];
-      if (!slide) return;
-      const value = prompt(wsText('ws.group_prompt', 'اسم المجموعة'), String(slide.group || ''));
-      if (value === null) return;
-      beginPresentationUndoChange();
-      slide.group = String(value || '').trim();
-      markSlidesDeckChanged();
-      renderTenantSlidesSidebar();
+      openTenantSlideGroupEditor(index);
     }
 
     /* ── Present mode ───────────────────────────────────────────────────── */
@@ -606,8 +766,35 @@
       if (!slide) return;
       stage.innerHTML = presentSlideMarkup(slide);
       if (counter) counter.textContent = (tenantPresentIndex + 1) + ' / ' + tenantSlidesData.length;
+      renderTenantPresentNotes(slide);
       fitTenantPresentStage();
       if (typeof reapplyDesignerSlideActivity === 'function') { /* presentation view stays read-only */ }
+    }
+
+    function renderTenantPresentNotes(slide) {
+      const panel = document.getElementById('tenantPresentNotes');
+      const body = document.getElementById('tenantPresentNotesBody');
+      const button = document.getElementById('presentNotesButton');
+      const notes = String((slide && slide.notes) || '').trim();
+      if (button) button.hidden = !notes;
+      if (body) {
+        body.textContent = notes
+          ? notes
+          : wsText('ws.present_notes_empty', 'لا توجد ملاحظات لهذه الشريحة');
+      }
+      if (!notes) {
+        if (panel) panel.hidden = true;
+        if (button) button.classList.remove('is-active');
+      }
+    }
+
+    function toggleTenantPresentNotes() {
+      const panel = document.getElementById('tenantPresentNotes');
+      const button = document.getElementById('presentNotesButton');
+      if (!panel) return;
+      panel.hidden = !panel.hidden;
+      if (button) button.classList.toggle('is-active', !panel.hidden);
+      showTenantPresentControls();
     }
 
     function fitTenantPresentStage() {
@@ -628,15 +815,48 @@
       }, 2600);
     }
 
+    function visibleSlideIndexes() {
+      return tenantSlidesData
+        .map((slide, index) => ({ slide, index }))
+        .filter(entry => entry.slide && !entry.slide.hidden)
+        .map(entry => entry.index);
+    }
+
+    function nearestVisibleSlideIndex(from, direction) {
+      const visible = visibleSlideIndexes();
+      if (!visible.length) return -1;
+      const start = Math.max(0, Math.min(Number(from) || 0, tenantSlidesData.length - 1));
+      if (visible.includes(start)) return start;
+      if (direction < 0) {
+        for (let index = start - 1; index >= 0; index -= 1) if (visible.includes(index)) return index;
+        return visible[0];
+      }
+      for (let index = start + 1; index < tenantSlidesData.length; index += 1) {
+        if (visible.includes(index)) return index;
+      }
+      return visible[visible.length - 1];
+    }
+
     function openTenantPresentation(startIndex) {
       if (!tenantSlidesData.length) return;
-      tenantPresentActive = true;
-      tenantPresentIndex = Number.isInteger(startIndex)
+      const requested = Number.isInteger(startIndex)
         ? Math.max(0, Math.min(startIndex, tenantSlidesData.length - 1))
         : Math.max(0, Math.min(activeSlideIndex, tenantSlidesData.length - 1));
+      const firstVisible = nearestVisibleSlideIndex(requested, 1);
+      if (firstVisible === -1) {
+        toast(WFT('ws.present_all_hidden', 'كل شرائح العرض مخفية'));
+        return;
+      }
+      tenantPresentActive = true;
+      tenantPresentIndex = firstVisible;
       const overlay = document.getElementById('tenantPresentOverlay');
       if (overlay) overlay.classList.add('is-open');
       document.documentElement.style.overflow = 'hidden';
+      const openingNotes = String((tenantSlidesData[firstVisible] || {}).notes || '').trim();
+      const notesPanel = document.getElementById('tenantPresentNotes');
+      const notesButton = document.getElementById('presentNotesButton');
+      if (notesPanel) notesPanel.hidden = !openingNotes;
+      if (notesButton) notesButton.classList.toggle('is-active', !!openingNotes);
       renderTenantPresentSlide();
       showTenantPresentControls();
       const shell = document.getElementById('tenantSlidesPage');
@@ -649,6 +869,10 @@
       tenantPresentActive = false;
       const overlay = document.getElementById('tenantPresentOverlay');
       if (overlay) overlay.classList.remove('is-open', 'controls-hidden');
+      const notesPanel = document.getElementById('tenantPresentNotes');
+      const notesButton = document.getElementById('presentNotesButton');
+      if (notesPanel) notesPanel.hidden = true;
+      if (notesButton) notesButton.classList.remove('is-active');
       document.documentElement.style.overflow = '';
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
@@ -663,7 +887,10 @@
 
     function stepTenantPresentation(delta) {
       if (!tenantPresentActive) return;
-      const next = tenantPresentIndex + Number(delta || 0);
+      let next = tenantPresentIndex + Number(delta || 0);
+      while (next >= 0 && next < tenantSlidesData.length && tenantSlidesData[next] && tenantSlidesData[next].hidden) {
+        next += Number(delta || 0) >= 0 ? 1 : -1;
+      }
       if (next < 0 || next >= tenantSlidesData.length) return;
       tenantPresentIndex = next;
       renderTenantPresentSlide();
@@ -813,5 +1040,6 @@
       } catch (error) {}
       applyTenantChatPanelState();
       bindTenantChatResize();
+      hydrateWorkspaceIcons(document);
       renderSlidesHeader();
     })();

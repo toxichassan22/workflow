@@ -58,6 +58,7 @@ class PresentationShareTests(unittest.TestCase):
             'id': 'slide-1',
             'type': 'content',
             'title': 'شريحة',
+            'notes': 'ملاحظات المحاضر للشريحة',
             'html': '<div class="slide" style="width:1280px;height:720px">'
                     '<img src="%s"><span>محتوى العرض</span></div>' % self.media_url,
         }]
@@ -108,6 +109,9 @@ class PresentationShareTests(unittest.TestCase):
         html = body['slides'][0]['html']
         self.assertIn('/s/' + share['token'] + '/media?src=', html)
         self.assertNotIn(self.media_url, html)
+        # The owner wants slide notes readable by whoever opens the deck.
+        self.assertEqual(body['slides'][0]['notes'], 'ملاحظات المحاضر للشريحة')
+        self.assertNotIn('projectData', body['slides'][0])
 
         viewer = self.client.get('/s/' + share['token'])
         self.assertEqual(viewer.status_code, 200)
@@ -115,11 +119,13 @@ class PresentationShareTests(unittest.TestCase):
         # CSP allows script-src 'self' only, so the viewer must not inline its JS.
         page = viewer.get_data(as_text=True)
         self.assertIn('<script src="/s/shared-viewer.js"></script>', page)
+        self.assertIn('id="shareNotes"', page)
         self.assertNotIn('<script>', page)
         js = self.client.get('/s/shared-viewer.js')
         self.assertEqual(js.status_code, 200)
         self.assertIn('application/javascript', js.content_type)
         self.assertIn("location.pathname.split('/')[2]", js.get_data(as_text=True))
+        self.assertIn('slides[index].notes', js.get_data(as_text=True))
 
     def test_media_is_scoped_to_the_deck(self):
         token = self._share_token(self._create_share())

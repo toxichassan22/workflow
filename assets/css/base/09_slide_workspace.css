@@ -282,6 +282,29 @@
   color: #07182C;
 }
 
+#tenantSlidesPage .ge-sidebar-head-btn.is-icon {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tenantSlidesPage .ge-sidebar-head-btn.is-icon .ws-icon {
+  width: 13px;
+  height: 13px;
+  transform: rotate(180deg);
+}
+
+#tenantSlidesPage .ge-sidebar.is-collapsed .ge-sidebar-head-btn.is-icon .ws-icon {
+  transform: none;
+}
+
+#tenantSlidesPage .ge-sidebar.is-collapsed .ge-sidebar-head-btn:not(.is-icon) {
+  display: none;
+}
+
 #tenantSlidesPage .ge-sidebar-selection {
   display: flex;
   align-items: center;
@@ -438,6 +461,7 @@
 
 #tenantSlidesPage .ge-thumb-notes {
   flex-shrink: 0;
+  font: inherit;
   font-size: 9px;
   font-weight: 700;
   color: #0A6C7D;
@@ -496,6 +520,25 @@
   background: rgba(255, 255, 255, .3);
 }
 
+#tenantSlidesPage .ge-thumb-actions > button.ge-thumb-icon {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#tenantSlidesPage .ge-thumb-actions > button.ge-thumb-icon .ws-icon {
+  width: 13px;
+  height: 13px;
+}
+
+#tenantSlidesPage button.ge-thumb-notes {
+  border: 0;
+  cursor: pointer;
+}
+
 #tenantSlidesPage .ge-thumb-actions > button:disabled {
   opacity: .4;
   cursor: default;
@@ -540,6 +583,107 @@
   border-color: #17C8E3;
   color: #07182C;
   background: #E8F8FB;
+}
+
+/* Slide notes / section editor: an inline card, never a browser prompt. */
+.slide-editor-popover {
+  position: fixed;
+  bottom: 74px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(430px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #dbe3ea;
+  box-shadow: 0 22px 50px rgba(7, 24, 44, .28);
+  z-index: 900;
+}
+
+.slide-editor-popover[hidden] {
+  display: none;
+}
+
+.slide-editor-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.slide-editor-popover-title {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #07182C;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slide-editor-popover-close {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slide-editor-popover-close .ws-icon {
+  width: 12px;
+  height: 12px;
+}
+
+#tenantSlideEditorInput {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #dbe3ea;
+  border-radius: 10px;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: #0f172a;
+  background: #f8fafc;
+  outline: none;
+}
+
+#tenantSlideEditorInput:focus {
+  border-color: #17C8E3;
+  background: #fff;
+}
+
+.slide-editor-popover-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.slide-editor-popover-clear {
+  border: 0;
+  background: transparent;
+  color: #b3261e;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.slide-editor-popover-state {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #64748b;
 }
 
 /* The sorter and present views own the stage; the card list is hidden. */
@@ -823,4 +967,105 @@
 #tenantSlidesPage .slide-edit-tab-panel .slide-edit-color {
   font-size: 10.5px;
   gap: 4px;
+}
+
+/* Manual authoring: the insert menu, hidden slides and the deck-wide tools. */
+.slide-insert-menu {
+  min-width: 190px;
+  background: #fff;
+  border: 1px solid #dbe3ea;
+  border-radius: 12px;
+  padding: 8px;
+  box-shadow: 0 18px 40px rgba(7, 24, 44, .18);
+  direction: rtl;
+}
+
+.slide-insert-menu-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  padding: 2px 8px 6px;
+}
+
+.slide-insert-menu-item {
+  display: block;
+  width: 100%;
+  text-align: right;
+  border: 0;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.slide-insert-menu-item:hover,
+.slide-insert-menu-item:focus {
+  background: #E8F8FB;
+  color: #07182C;
+}
+
+#tenantSlidesPage .ge-thumb.is-hidden .ge-thumb-frame,
+#tenantSlidesPage .ge-sorter-card.is-hidden .ge-thumb-frame {
+  opacity: .55;
+}
+
+#tenantSlidesPage .ge-thumb-hidden {
+  font-size: 9px;
+  font-weight: 700;
+  color: #9a3412;
+  background: #ffedd5;
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+#tenantSlidesPage .deck-tools-menu {
+  width: 260px;
+  padding: 10px;
+  gap: 8px;
+  direction: rtl;
+}
+
+#tenantSlidesPage .deck-tool-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11.5px;
+  color: #475569;
+}
+
+#tenantSlidesPage .deck-tool-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 9px;
+  border: 1px solid #dbe3ea;
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+#tenantSlidesPage .deck-tools-menu .tenant-hint {
+  font-size: 11px;
+}
+
+#tenantSlidesPage .deck-tools-menu .tenant-hint.is-error {
+  color: #b3261e;
+}
+
+#tenantSlidesPage .slide-edit-num-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  color: #475569;
+}
+
+#tenantSlidesPage .slide-edit-num-field input {
+  width: 52px;
+  padding: 2px 4px;
+  font-size: 10.5px;
+  border: 1px solid #dbe3ea;
+  border-radius: 6px;
 }

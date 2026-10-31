@@ -130,7 +130,7 @@ class SlidesSorterTests(unittest.TestCase):
         self.assertIn('ondragstart', self.source)
         self.assertIn('ondrop', self.source)
         self.assertIn('ge-sorter-insert', self.source)
-        self.assertIn("insertBlankSlideAt(' + tenantSlidesData.length", self.source)
+        self.assertIn("openSlideInsertMenu(insert, index + 1)", self.source)
 
 
 class DesignerChatPanelTests(unittest.TestCase):
@@ -155,6 +155,16 @@ class DesignerChatPanelTests(unittest.TestCase):
         self.assertIn('function renderTenantChatAttachment()', self.source)
         self.assertIn('tenant-chat-attachment-item', self.source)
 
+    def test_chat_controls_use_the_owner_authorized_icons(self):
+        # Owner request (2026-10-31): paperclip, send arrow, stop and a chevron
+        # replace the attach/send/stop/طي words on this page.
+        for icon in ('attach', 'send', 'stop', 'chevron'):
+            self.assertIn('data-ws-icon="%s"' % icon, self.shell)
+        self.assertIn('function wsIcon(name)', self.source)
+        self.assertIn('function hydrateWorkspaceIcons(root)', self.source)
+        self.assertIn('hydrateWorkspaceIcons(document)', self.source)
+        self.assertIn('WS_ICON_PATHS', self.source)
+
     def test_plan_card_folds_with_progress(self):
         self.assertIn('function toggleDesignerChecklistCard()', self.source)
         self.assertIn('tenant-designer-checklist-progress-fill', self.source)
@@ -162,6 +172,45 @@ class DesignerChatPanelTests(unittest.TestCase):
         # The card lives in the message flow, not as a block between messages and composer.
         messages = self.shell.split('id="tenantChatMessages"', 1)[1].split('id="tenantChatComposer"', 1)[0]
         self.assertIn('id="tenantDesignerChecklist"', messages)
+
+
+class SlidesNotesAndMenusTests(unittest.TestCase):
+    """Notes are written inline and reach every viewer; dropdown menus stay on
+    screen."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.source = read_frontend_text()
+
+    def test_notes_are_edited_inline_with_autosave(self):
+        self.assertIn('function openTenantSlideNotesEditor(index)', self.source)
+        self.assertIn('function openTenantSlideEditor(index, field)', self.source)
+        self.assertIn('function commitTenantSlideEditor()', self.source)
+        self.assertIn('setTimeout(commitTenantSlideEditor, 450)', self.source)
+        self.assertIn("openTenantSlideNotesEditor(' + index + ')", self.source)
+        self.assertNotIn("prompt(wsText('ws.notes_prompt'", self.source)
+        self.assertNotIn("prompt(wsText('ws.group_prompt'", self.source)
+        self.assertIn('slide-editor-popover', self.source)
+
+    def test_notes_reach_present_mode_and_the_shared_link(self):
+        self.assertIn('id="tenantPresentNotes"', self.shell)
+        self.assertIn('function renderTenantPresentNotes(slide)', self.source)
+        self.assertIn('renderTenantPresentNotes(slide);', self.source)
+        self.assertIn('function toggleTenantPresentNotes()', self.source)
+        shares = (ROOT / 'app_parts' / '11_presentations' / '13d_presentation_shares.py').read_text(encoding='utf-8')
+        self.assertIn("'notes': str(slide.get('notes') or '').strip(),", shares)
+        self.assertIn('id="shareNotes"', shares)
+        self.assertIn('slides[index].notes', shares)
+
+    def test_menus_stay_inside_the_viewport(self):
+        self.assertIn('function clampTenantDropdownMenu(drop)', self.source)
+        self.assertIn('function resetTenantDropdownPosition(drop)', self.source)
+        clamp = self.source.split('function clampTenantDropdownMenu(drop)', 1)[1].split('function toggleTenantDropdown', 1)[0]
+        self.assertIn('getBoundingClientRect()', clamp)
+        self.assertIn('window.innerWidth', clamp)
+        self.assertIn('translateX(', clamp)
+        self.assertIn('clampTenantDropdownMenu(drop);', self.source)
 
 
 class SlidesPresentModeTests(unittest.TestCase):
@@ -401,3 +450,122 @@ class PresentationShareUiTests(unittest.TestCase):
         self.assertIn("'/shares'", self.source)
         self.assertIn("'/revoke'", self.source)
         self.assertIn("'/api/presentations/' + encodeURIComponent(tenantPresentationId) + '/shares'", self.source)
+
+
+class SlidesAuthoringTests(unittest.TestCase):
+    """PowerPoint-style manual authoring: the insert menu, per-type tools,
+    tables, crop, deck-wide replace and the hidden-slide contract."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.source = read_frontend_text()
+
+    def test_bundle_loads_the_authoring_layer(self):
+        js = _bundle_order('js')
+        for name in ('14-slides-gen/01a_slide_toolbar.js',
+                     '15b-slide-canvas/04_authoring.js',
+                     '15b-slide-canvas/05_canvas_tools.js',
+                     '15b-slide-canvas/06_deck_tools.js'):
+            self.assertIn(name, js)
+
+    def test_insert_menu_offers_five_on_brand_structures(self):
+        self.assertIn('function openSlideInsertMenu(anchor, index)', self.source)
+        for structure in ('blank', 'title', 'title_text', 'text_image', 'table'):
+            self.assertIn("['%s'," % structure, self.source)
+        template = self.source.split('function structuredSlideHtml(structure, title, colors)', 1)[1]
+        template = template.split('/* Replaces match text', 1)[0]
+        self.assertIn('##LOGO##', template)
+        self.assertIn('data-slide-footer="1"', template)
+        self.assertIn('data-slide-counter="1"', template)
+        self.assertIn('data-manual-slide="1"', template)
+        self.assertIn('manual: true', self.source)
+        # The deck font is injected, so an authored slide never pins a family.
+        self.assertNotIn('font-family', template)
+        self.assertIn('openSlideInsertMenu(', self.shell + self.source)
+
+    def test_toolbar_shows_slide_and_table_tools_by_selection(self):
+        toolbar = self.source.split('function slideEditToolbarAvailableTabs(selectionKind)', 1)[1]
+        toolbar = toolbar.split('function slideEditToolbarTabLabels', 1)[0]
+        self.assertIn("return ['add', 'slide']", toolbar)
+        self.assertIn("selectionKind === 'table') return ['table', 'common']", self.source)
+        self.assertIn("typeof insertSlideShape === 'function'", self.source)
+        self.assertIn("typeof insertSlideTableFromPanel === 'function'", self.source)
+
+    def test_text_formatting_contract(self):
+        for fn in ('toggleSlideSelectionTextStyle(', 'toggleSlideSelectionList(',
+                   'clearSlideSelectionFormatting(', 'fitSlideSelectionText(',
+                   'adjustSlideSelectionLineHeight(', 'applySlideInlineColorToSelection('):
+            self.assertIn('function ' + fn, self.source)
+        self.assertIn('data-slide-edit-color="highlight"', self.source)
+        self.assertIn('slideTextSelectionInside', self.source)
+        self.assertIn('slideInlineStyleSanitizer', self.source)
+
+    def test_image_crop_moves_the_picture_inside_its_frame(self):
+        self.assertIn('function toggleSlideImageCrop(index)', self.source)
+        self.assertIn('function startSlideImageCropDrag(stage, index, target, event)', self.source)
+        self.assertIn('session.cropMode', self.source)
+        self.assertIn('objectPosition', self.source)
+        drag = self.source.split("stage.addEventListener('pointerdown', function handleSlidePointerDown", 1)[1]
+        drag = drag.split("stage.addEventListener('click'", 1)[0]
+        self.assertIn('startSlideImageCropDrag', drag)
+        self.assertIn('.slide-crop-target', self.source)
+
+    def test_tables_insert_and_edit_like_powerpoint(self):
+        for fn in ('insertSlideTable(', 'mutateSlideTableSelection(', 'mutateSlideTableCell(',
+                   'addSlideTableRow(', 'removeSlideTableRow(', 'addSlideTableColumn(',
+                   'removeSlideTableColumn(', 'toggleSlideTableHeader(', 'bindSlideTableEditing('):
+            self.assertIn('function ' + fn, self.source)
+        self.assertIn("[data-slide-table] td, [data-slide-table] th", self.source)
+        self.assertIn('data-slide-table', self.source)
+        self.assertIn("stage.addEventListener('dblclick'", self.source)
+        # A cell edits on double-click; a single click selects the table.
+        inline = self.source.split('function enableSlideInlineEditing(stage, index)', 1)[1]
+        inline = inline.split('function slidePathIgnores', 1)[0]
+        self.assertIn("el.closest('[data-slide-table]')", inline)
+        self.assertIn('bindSlideTableEditing(stage, index)', inline)
+
+    def test_slide_background_and_visibility(self):
+        for fn in ('setSlideBackgroundColor(', 'clearSlideBackground(',
+                   'openSlideBackgroundPicker(', 'toggleSlideHidden('):
+            self.assertIn('function ' + fn, self.source)
+        self.assertIn('data-slide-edit-slide-bg', self.source)
+        self.assertIn('visibleSlideIndexes()', self.source)
+        step = self.source.split('function stepTenantPresentation(delta)', 1)[1]
+        step = step.split('function handleTenantPresentationKey', 1)[0]
+        self.assertIn('tenantSlidesData[next].hidden', step)
+        self.assertIn('ge-thumb-hidden', self.source)
+
+    def test_deck_wide_find_and_replace(self):
+        self.assertIn('id="deckFindInput"', self.shell)
+        self.assertIn('id="deckReplaceInput"', self.shell)
+        self.assertIn('runDeckFindReplace()', self.shell)
+        self.assertIn('function runDeckFindReplace()', self.source)
+        self.assertIn('function deckReplaceInSlideHtml(html, find, replace)', self.source)
+        run_replace = self.source.split('function runDeckFindReplace()', 1)[1]
+        run_replace = run_replace.split('function toggleSlideHiddenFromDeckTools', 1)[0]
+        # A live text edit commits on blur; replace must wait for that commit.
+        self.assertIn('active.blur()', run_replace)
+        self.assertLess(run_replace.index('active.blur()'), run_replace.index('let total = 0'))
+        # Replacement touches text nodes only — never attributes or style blocks.
+        replace = self.source.split('function deckReplaceInSlideHtml(html, find, replace)', 1)[1]
+        replace = replace.split('/* AUTHORING_PURE_END */', 1)[0]
+        self.assertIn('replace(/>([^<]*)</g', replace)
+        self.assertIn('(style|script)', replace)
+
+    def test_manual_slides_survive_a_full_regeneration(self):
+        self.assertIn('function preserveManualSlidesForRegeneration()', self.source)
+        self.assertIn('function restoreManualSlidesAfterRegeneration(preserved, options)', self.source)
+        generation = self.source.split('async function generateTenantSlides(options = {})', 1)[1]
+        self.assertIn('preserveManualSlidesForRegeneration()', generation)
+        self.assertIn('restorePreservedManualSlides(', generation)
+        self.assertIn('manualSlidesRestored', generation)
+
+    def test_authoring_labels_carry_both_languages(self):
+        ar = (ROOT / 'assets' / 'i18n' / '01a_dict_ar_extra.js').read_text(encoding='utf-8')
+        en = (ROOT / 'assets' / 'i18n' / '01b_dict_en_extra.js').read_text(encoding='utf-8')
+        for key in ('tb.table', 'tb.slide', 'ca.crop', 'ca.clear_format',
+                    'ca.add_row', 'ws.deck_tools', 'ws.structure_table',
+                    'deck.replace_all', 'slide.table_added'):
+            self.assertIn('"%s":' % key, ar)
+            self.assertIn('"%s":' % key, en)

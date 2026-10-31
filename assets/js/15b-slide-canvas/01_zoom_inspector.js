@@ -98,6 +98,8 @@
 
     function inspectorTargetKind(el) {
       if (!el) return 'none';
+      if (el.closest && el.closest('[data-slide-table]')) return 'table';
+      if (el.tagName === 'TABLE') return 'table';
       if (el.tagName === 'IMG') return 'image';
       if (el.hasAttribute && (el.hasAttribute('data-slide-imagebox') || el.hasAttribute('data-canonical-map'))) return 'image';
       if (slideElementHasText(el)) return 'text';

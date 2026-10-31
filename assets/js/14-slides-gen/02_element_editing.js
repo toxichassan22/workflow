@@ -21,7 +21,8 @@
       card.querySelectorAll('[data-slide-edit-eyedropper]').forEach(btn => { btn.disabled = !hasSel; });
       card.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
         inp.disabled = !hasSel;
-        if (hasSel) inp.value = inp.getAttribute('data-slide-edit-color') === 'color' ? textColor : bgColor;
+        const kind = inp.getAttribute('data-slide-edit-color');
+        if (hasSel) inp.value = kind === 'color' ? textColor : (kind === 'highlight' ? '#fff59d' : bgColor);
       });
       card.querySelectorAll('[data-slide-edit-hex]').forEach(inp => {
         inp.disabled = !hasSel;
@@ -54,7 +55,7 @@
         const lastKind = card.dataset.editKind || '';
         card.dataset.editKind = kind;
         if (kind !== lastKind) {
-          slideEditToolbarTab = kind || 'common';
+          slideEditToolbarTab = kind || 'add';
           refreshSlideEditToolbar(index);
           if (typeof renderSlideInspector === 'function') renderSlideInspector(index);
           return;
@@ -447,6 +448,12 @@
 
     function applySlideElementColorValue(root, kind, value) {
       if (!root) return;
+      if (kind === 'border') {
+        root.style.borderColor = value;
+        if (!parseFloat(root.style.borderWidth)) root.style.borderWidth = '1px';
+        root.style.borderStyle = 'solid';
+        return;
+      }
       if (kind === 'color') {
         root.style.color = value;
         try {
@@ -481,6 +488,10 @@
       const slide = stage ? stage.querySelector('.slide') : null;
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       if (!target) return;
+      // A live text selection previews nothing for a whole element: the commit
+      // colours only the selected words.
+      if ((kind === 'color' || kind === 'highlight')
+        && typeof slideTextSelectionInside === 'function' && slideTextSelectionInside(index, target)) return;
       applySlideElementColorValue(target, kind, hex);
     }
 
@@ -494,6 +505,12 @@
       const input = card ? card.querySelector('[data-slide-edit-color="' + kind + '"]') : null;
       const value = normalizeHexColor(explicitValue || (input && input.value)) || (input && input.value);
       if (!target || !value) return;
+      if ((kind === 'color' || kind === 'highlight')
+        && typeof applySlideInlineColorToSelection === 'function'
+        && applySlideInlineColorToSelection(index, kind, value)) {
+        syncSlideElementToolbar(index);
+        return;
+      }
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html) return;
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
@@ -810,10 +827,9 @@
       const right = 400 + cascade;
       const box = rawDoc.createElement('div');
       box.setAttribute('data-slide-textbox', '1');
-      box.setAttribute('style', 'position:absolute;top:' + top + 'px;right:' + right + 'px;width:400px;min-height:60px;'
-        + 'padding:12px 16px;box-sizing:border-box;background:#ffffff;border:1px solid #e2e8f0;'
-        + 'box-shadow:0 2px 12px rgba(15,40,70,.08);'
-        + 'border-radius:10px;color:#1e293b;font-size:18px;font-weight:600;text-align:center;z-index:5;');
+      box.setAttribute('style', 'position:absolute;top:' + top + 'px;right:' + right + 'px;width:560px;min-height:56px;'
+        + 'padding:8px 12px;box-sizing:border-box;background:transparent;'
+        + 'color:#1e293b;font-size:20px;font-weight:600;line-height:1.6;text-align:right;z-index:5;');
       box.textContent = 'نص جديد';
       rawRoot.appendChild(box);
       slideData.html = rawRoot.outerHTML;

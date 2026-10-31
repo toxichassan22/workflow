@@ -1405,9 +1405,10 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         for library in ('font-awesome', 'fontawesome', 'material-icons', 'bootstrap-icons', 'lucide'):
             self.assertNotIn(library, index_source.lower(), f'{library} must not be used')
         self.assertEqual(shell_source.count('<svg'), 1, 'the shell may inline only the favicon SVG')
-        # Every SVG in the client must belong to one of the allowed data-rendering
-        # uses: the favicon, the map polygon overlay, and the three super-admin
-        # dashboard chart builders (donut, sparkline, line). A new one without a
+        # Every SVG in the client must belong to one of the allowed uses: the
+        # favicon, the map polygon overlay, the three super-admin dashboard chart
+        # builders (donut, sparkline, line), and the single deck-workspace icon
+        # sprite the owner explicitly requested (2026-10-31). A new one without a
         # context from this list is an icon and fails here.
         svg_by_file = {}
         for path in sorted((ROOT / 'assets' / 'js').rglob('*.js')):
@@ -1417,9 +1418,10 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         self.assertEqual(svg_by_file, {
             '02a_admin_charts.js': 3,
             '02_catchment_edits.js': 1,
-        }, 'only the admin chart builders and the map polygon overlay may draw SVG')
-        self.assertEqual(index_source.count('<svg'), 5,
-            'allowed SVG: favicon + map overlay + the three admin dashboard chart builders')
+            '00_icons.js': 1,
+        }, 'only the admin chart builders, the map polygon overlay and the owner-authorized deck icon sprite may draw SVG')
+        self.assertEqual(index_source.count('<svg'), 6,
+            'allowed SVG: favicon + map overlay + three admin chart builders + the deck icon sprite')
         self.assertIn('id="mapPolygonOverlay"', index_source)
 
         # Missing logos fall back to a text monogram rather than a building glyph.

@@ -620,6 +620,21 @@
             data-i18n="ws.approve">تعميد</button>
           <button type="button" id="presentationSaveButton" class="btn slide-header-save-btn"
             onclick="savePresentationFromToolbar()" data-i18n="ws.save">حفظ كمسودة</button>
+          <div class="tenant-dropdown slide-header-tools">
+            <button type="button" class="btn slide-header-more-btn" onclick="toggleTenantDropdown(this)"
+              aria-haspopup="true" data-i18n="ws.deck_tools">أدوات العرض</button>
+            <div class="tenant-dropdown-menu deck-tools-menu">
+              <label class="deck-tool-field"><span data-i18n="deck.find">ابحث عن</span>
+                <input type="text" id="deckFindInput" spellcheck="false"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();runDeckFindReplace();}"></label>
+              <label class="deck-tool-field"><span data-i18n="deck.replace_with">استبدل بـ</span>
+                <input type="text" id="deckReplaceInput" spellcheck="false"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();runDeckFindReplace();}"></label>
+              <button type="button" class="btn ghost" onclick="runDeckFindReplace()"
+                data-i18n="deck.replace_all">استبدال الكل</button>
+              <div class="tenant-hint" id="deckFindResult" hidden></div>
+            </div>
+          </div>
           <div class="tenant-dropdown slide-header-more">
             <button type="button" class="btn slide-header-more-btn" onclick="toggleTenantDropdown(this)"
               aria-haspopup="true" data-i18n="ws.more">المزيد</button>
@@ -685,16 +700,18 @@
         <div class="ge-right-panel" id="tenantSlidesChat">
           <div class="ge-chat-resize" id="tenantChatResize" aria-hidden="true"></div>
           <div class="ge-panel-header">
-            <button type="button" class="ge-chat-collapse" onclick="toggleTenantChatPanel()"
-              data-i18n="ws.chat_collapse">طي</button>
+            <button type="button" class="ge-chat-collapse is-icon" data-ws-icon="chevron"
+              onclick="toggleTenantChatPanel()" aria-label="طي المحادثة" data-i18n-aria="ws.chat_collapse_title"
+              title="طي المحادثة" data-i18n-title="ws.chat_collapse_title"></button>
             <span class="ge-chat-panel-status" data-i18n="ws.chat_ready">جاهز للتعديل</span>
             <button type="button" class="ge-chat-new" onclick="startNewTenantDesignerConversation()"
               data-i18n="ws.new_conversation">محادثة جديدة</button>
             <button type="button" class="ge-chat-delete" onclick="deleteTenantDesignerConversation()"
               data-i18n="ws.delete_conversation">حذف المحادثة</button>
           </div>
-          <button type="button" class="ge-chat-reopen" onclick="toggleTenantChatPanel()"
-            data-i18n="ws.chat_expand">فتح</button>
+          <button type="button" class="ge-chat-reopen is-icon" data-ws-icon="chevron"
+            onclick="toggleTenantChatPanel()" aria-label="فتح المحادثة" data-i18n-aria="ws.chat_expand_title"
+            title="فتح المحادثة" data-i18n-title="ws.chat_expand_title"></button>
 
           <div id="tenantChatMessages" class="tenant-chat-messages"
             style="flex:1; overflow-y:auto; display:flex; flex-direction:column; border:none; border-radius:0;">
@@ -707,15 +724,20 @@
               <div class="tenant-chat-entry-row">
                 <input type="file" id="tenantChatImageFile" accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf" hidden multiple
                   onchange="attachTenantChatImage(this)">
-                <button type="button" class="btn ghost tenant-chat-attach" aria-label="إضافة صورة"
-                  onclick="document.getElementById('tenantChatImageFile').click()" data-i18n="ws.attach">إضافة</button>
+                <button type="button" class="btn ghost tenant-chat-attach is-icon" data-ws-icon="attach"
+                  aria-label="إرفاق صورة أو ملف" data-i18n-aria="ws.attach_title"
+                  title="إرفاق صورة أو ملف" data-i18n-title="ws.attach_title"
+                  onclick="document.getElementById('tenantChatImageFile').click()"></button>
                 <textarea id="tenantChatInput" data-i18n-ph="ws.chat_placeholder" placeholder="اكتب التعديل المطلوب..." rows="1"
                   oninput="growTenantChatInput(this)"
                   onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendTenantDesignerChat();}"></textarea>
-                <button type="button" class="btn ghost tenant-chat-stop" id="tenantChatStopButton"
-                  onclick="stopTenantDesignerChat()" hidden data-i18n="ws.stop">إيقاف</button>
-                <button type="button" class="btn primary tenant-chat-send" aria-label="إرسال"
-                  onclick="sendTenantDesignerChat()" data-i18n="ws.send">إرسال</button>
+                <button type="button" class="btn ghost tenant-chat-stop is-icon" id="tenantChatStopButton"
+                  data-ws-icon="stop" aria-label="إيقاف" data-i18n-aria="ws.stop"
+                  title="إيقاف" data-i18n-title="ws.stop"
+                  onclick="stopTenantDesignerChat()" hidden></button>
+                <button type="button" class="btn primary tenant-chat-send is-icon" data-ws-icon="send"
+                  aria-label="إرسال" data-i18n-aria="ws.send" title="إرسال" data-i18n-title="ws.send"
+                  onclick="sendTenantDesignerChat()"></button>
               </div>
             </div>
           </div>
@@ -724,7 +746,15 @@
 
       <div id="tenantPresentOverlay" class="tenant-present-overlay">
         <div class="present-stage" id="tenantPresentStage"></div>
+        <aside class="present-notes" id="tenantPresentNotes" hidden>
+          <div class="present-notes-title" data-i18n="ws.present_notes">ملاحظات الشريحة</div>
+          <div class="present-notes-body" id="tenantPresentNotesBody"></div>
+        </aside>
         <div class="present-controls">
+          <button type="button" class="is-icon" id="presentNotesButton" data-ws-icon="notes"
+            onclick="toggleTenantPresentNotes()" hidden
+            aria-label="ملاحظات الشريحة" data-i18n-aria="ws.present_notes"
+            title="ملاحظات الشريحة" data-i18n-title="ws.present_notes"></button>
           <button type="button" onclick="stepTenantPresentation(-1)" data-i18n="ws.present_prev">السابق</button>
           <span class="present-counter" id="tenantPresentCounter">1 / 1</span>
           <button type="button" onclick="stepTenantPresentation(1)" data-i18n="ws.present_next">التالي</button>

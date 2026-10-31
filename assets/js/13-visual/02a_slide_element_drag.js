@@ -45,6 +45,10 @@
       if (source.closest && source.closest('[contenteditable]')) return null;
       const chrome = slideChromeOf(slide, source);
       if (chrome) return chrome;
+      if (source.closest && source.closest('[data-slide-table]')) {
+        const tableBox = source.closest('[data-slide-table]');
+        if (tableBox && slide.contains(tableBox)) return tableBox;
+      }
       if (source.closest && source.closest('[data-slide-textbox], [data-slide-imagebox]')) {
         const box = source.closest('[data-slide-textbox], [data-slide-imagebox]');
         if (box && slide.contains(box)) return box;
@@ -217,6 +221,16 @@
         if (!target) return;
         const path = slideElementPath(slide, target);
         if (!path) return;
+        // Crop mode turns the drag into moving the picture inside its frame,
+        // never into moving or resizing the frame itself.
+        const cropSession = canvasSession(index);
+        if (cropSession && cropSession.cropMode && typeof startSlideImageCropDrag === 'function'
+          && (target.tagName === 'IMG' || (target.querySelector && target.querySelector('img')))) {
+          event.preventDefault();
+          event.stopPropagation();
+          startSlideImageCropDrag(stage, index, target, event);
+          return;
+        }
         // Ctrl/Cmd/Shift click builds a multi-element selection instead of
         // starting a drag — the PowerPoint selection gesture.
         if ((event.ctrlKey || event.metaKey || event.shiftKey) && typeof addSlideElementToSelection === 'function') {

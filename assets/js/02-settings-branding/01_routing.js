@@ -767,16 +767,61 @@
       if (button) button.setAttribute('aria-expanded', 'false');
     }
 
+    function resetTenantDropdownPosition(drop) {
+      const menu = drop && drop.querySelector('.tenant-dropdown-menu');
+      if (!menu) return;
+      menu.style.removeProperty('transform');
+      menu.style.removeProperty('top');
+      menu.style.removeProperty('bottom');
+      menu.style.removeProperty('max-height');
+      menu.style.removeProperty('overflow-y');
+    }
+
+    // A menu pinned with right:0 leaves the viewport when its trigger sits near
+    // the edge (the deck header's «المزيد» at 1366px did). Keep it on screen.
+    function clampTenantDropdownMenu(drop) {
+      const menu = drop && drop.querySelector('.tenant-dropdown-menu');
+      if (!menu) return;
+      resetTenantDropdownPosition(drop);
+      const margin = 8;
+      const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+      let rect = menu.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      if (rect.bottom > viewportHeight - margin && drop.getBoundingClientRect().top > viewportHeight / 2) {
+        menu.style.top = 'auto';
+        menu.style.bottom = 'calc(100% + 6px)';
+        rect = menu.getBoundingClientRect();
+      }
+      let shiftX = 0;
+      if (rect.left < margin) shiftX = margin - rect.left;
+      else if (rect.right > viewportWidth - margin) shiftX = (viewportWidth - margin) - rect.right;
+      if (shiftX) menu.style.transform = 'translateX(' + Math.round(shiftX) + 'px)';
+      if (rect.top < margin || rect.bottom > viewportHeight - margin) {
+        menu.style.maxHeight = Math.max(140, viewportHeight - margin * 2) + 'px';
+        menu.style.overflowY = 'auto';
+      }
+    }
+
     function toggleTenantDropdown(btn) {
       const drop = btn.closest('.tenant-dropdown');
       if (!drop) return;
       const isOpen = drop.classList.contains('open');
-      document.querySelectorAll('.tenant-dropdown').forEach(d => d.classList.remove('open'));
-      if (!isOpen) drop.classList.add('open');
+      document.querySelectorAll('.tenant-dropdown').forEach(d => {
+        d.classList.remove('open');
+        resetTenantDropdownPosition(d);
+      });
+      if (!isOpen) {
+        drop.classList.add('open');
+        clampTenantDropdownMenu(drop);
+      }
     }
 
     function closeTenantDropdown() {
-      document.querySelectorAll('.tenant-dropdown').forEach(d => d.classList.remove('open'));
+      document.querySelectorAll('.tenant-dropdown').forEach(d => {
+        d.classList.remove('open');
+        resetTenantDropdownPosition(d);
+      });
     }
 
     function closeTenantBellPanel() {

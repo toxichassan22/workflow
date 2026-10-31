@@ -459,3 +459,17 @@
   border-color: #fecaca;
   background: #fff5f5;
 }
+
+/* Crop mode moves the picture inside its fixed frame; a table cell edits on
+   double-click, so the outline shows the cell that is being typed in. */
+#tenantSlidesPage .slide-crop-target {
+  cursor: move;
+  outline: 2px dashed #17C8E3;
+  outline-offset: -2px;
+}
+
+#tenantSlidesPage [data-slide-table] td[contenteditable],
+#tenantSlidesPage [data-slide-table] th[contenteditable] {
+  outline: 2px solid #17C8E3;
+  outline-offset: -2px;
+}

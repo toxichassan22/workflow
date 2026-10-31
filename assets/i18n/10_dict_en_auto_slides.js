@@ -197,5 +197,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "فشل التوليد": "Generation failed",
   "العنصر بالفعل في الخلف": "Element is already at the back",
   "العنصر بالفعل في المقدمة": "Element is already at the front",
-  "تم تحديث الإيضاحات في الدراسة المالية": "The notes were updated in the financial study"
+  "تم تحديث الإيضاحات في الدراسة المالية": "The notes were updated in the financial study",
+  "اكتب النص هنا": "Type your text here",
+  "عنوان": "Title"
 }/*I18N_EN_AUTO_END*/);

@@ -329,6 +329,18 @@
       // `finally` sits outside the try block's scope, so the interval handle it
       // clears must be declared here, not inside the try.
       let heartbeatTimer = null;
+      // The client's own slides survive a full regeneration and return to their
+      // original places once the AI deck is complete.
+      let preservedManualSlides = [];
+      let manualSlidesRestored = 0;
+      const restorePreservedManualSlides = atEnd => {
+        if (!preservedManualSlides.length) return 0;
+        const count = typeof restoreManualSlidesAfterRegeneration === 'function'
+          ? restoreManualSlidesAfterRegeneration(preservedManualSlides, { atEnd: !!atEnd }) : 0;
+        preservedManualSlides = [];
+        manualSlidesRestored += count;
+        return count;
+      };
       try {
         const sectionKey = String(options.sectionKey || '');
         const runWatermark = options.watermark === true;
@@ -474,6 +486,9 @@
         const generationPayloadProjectData = JSON.parse(JSON.stringify(slimGenerationProjectData(generationProjectData)));
         const hasUnapprovedImages = !!tempCoverImage || Object.keys(tempMoodboardImages || {}).length > 0;
         if (hasUnapprovedImages) toast('سيتم استخدام الصور المولدة غير المعتمدة مع استمرار إمكانية اعتمادها لاحقًا.');
+        if (!canResume && !sectionKey && typeof preserveManualSlidesForRegeneration === 'function') {
+          preservedManualSlides = preserveManualSlidesForRegeneration();
+        }
         if (!canResume) tenantSlidesData = [];
         activeSlideIndex = Math.min(startIndex, Math.max(0, tenantSlidesData.length - 1));
 
@@ -800,11 +815,13 @@
         pumpSlideLaunches();
         await generationDone;
         if (generationFailure) {
+          restorePreservedManualSlides(true);
           await settleGenerationRun(false, (generationFailure && generationFailure.error) || 'فشل التوليد');
           return;
         }
 
         if (tenantSlidesData.length !== totalSlides || tenantSlidesData.some(s => !s.html || !containsSlideRoot(s.html))) {
+          restorePreservedManualSlides(true);
           await settleGenerationRun(false, 'لم يكتمل التوليد');
           setLiveGenBanner(true, 'لم يكتمل التوليد', 'حدث خطأ في بعض الشرائح ولم يتم الحفظ',
             totalSlides ? Math.round((tenantSlidesData.length / totalSlides) * 100) : 0, true);
@@ -813,6 +830,7 @@
         }
 
         await saveTenantSlideGenerationCheckpoint(totalSlides, 'complete', '', generationProjectData);
+        restorePreservedManualSlides(false);
         setLiveGenBanner(true, 'تم اكتمال توليد كافة الشرائح بنجاح!', WFT('gen.total_slides_approved', 'إجمالي {n} شريحة معتمدة', { n: totalSlides }), 100, true);
         renderTenantSlidesSidebar(true);
         renderTenantDesignerChat();
@@ -831,7 +849,7 @@
         const completedTitle = options.sectionLabel
           ? WFT('gen.section_presentation_done', 'تم توليد عرض {section} وحفظه ({n} شريحة)', { section: wfTr(options.sectionLabel), n: totalSlides })
           : WFT('gen.all_slides_done', 'تم توليد جميع الشرائح ({n} شريحة) بنجاح', { n: totalSlides });
-        setSlidesEditorInfo(tenantPresentationTitle, totalSlides);
+        setSlidesEditorInfo(tenantPresentationTitle, tenantSlidesData.length);
         toast(completedTitle);
         setTimeout(() => {
           setLiveGenBanner(false);
@@ -852,7 +870,9 @@
             console.warn('[GENERATION SETTLE]', settleError);
           }
         }
+        restorePreservedManualSlides(true);
         isGeneratingTenantSlides = false;
+        if (manualSlidesRestored) renderTenantSlides();
         setTenantGenerationStopVisible(false);
         checkpointPresentationUndo();
         updatePresentationUndoButtons();
