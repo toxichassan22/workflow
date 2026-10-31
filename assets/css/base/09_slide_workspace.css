@@ -706,6 +706,20 @@
   position: relative;
 }
 
+/* The dragged card leaves the flow so the gap under the pointer is the exact
+   landing slot; every other card FLIPs into its preview position. */
+#tenantSlidesPage .ge-sorter-cell.is-dragging-source {
+  display: none;
+}
+
+#tenantSlidesPage .ge-sorter-placeholder {
+  border: 2px dashed #17C8E3;
+  border-radius: 10px;
+  background: rgba(23, 200, 227, .08);
+  box-shadow: inset 0 0 0 1px rgba(23, 200, 227, .25);
+  pointer-events: none;
+}
+
 #tenantSlidesPage .ge-sorter-card {
   display: block;
   width: 100%;
