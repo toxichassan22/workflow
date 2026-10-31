@@ -60,7 +60,9 @@ PAGE = """<!doctype html><html dir="rtl"><head><meta charset="utf-8">
   #slide-card-0 { width: 640px; }
   .tenant-slide-stage { width: 640px; height: 360px; position: relative; overflow: hidden; }
   .slide { width: 1280px; height: 720px; position: relative; transform: scale(.5); transform-origin: 0 0; }
-  table { width: 600px; margin: 80px 40px; border-collapse: collapse; }
+  table { width: 100%; border-collapse: collapse; }
+  #table-frame { width: 600px; margin: 50px 40px 0; overflow: hidden; }
+  #bare-table { width: 300px; margin: 20px 40px; }
   td, th { height: 50px; border: 1px solid #ccc; }
   .slide-inline-inspector { height: 80px; background: #eef; }
 </style></head><body>
@@ -69,8 +71,12 @@ PAGE = """<!doctype html><html dir="rtl"><head><meta charset="utf-8">
     <div class="tenant-slide-stage">
       <div class="slide">
         <p id="body-copy">نص عادي</p>
-        <table id="generated-table"><thead><tr><th>المرحلة</th><th>المدة</th></tr></thead>
-        <tbody><tr><td id="cell-a">التصميم</td><td>6 أشهر</td></tr></tbody></table>
+        <div id="table-frame">
+          <div id="table-title">جدول بنود التكلفة</div>
+          <table id="generated-table"><thead><tr><th>المرحلة</th><th>المدة</th></tr></thead>
+          <tbody><tr><td id="cell-a">التصميم</td><td>6 أشهر</td></tr></tbody></table>
+        </div>
+        <table id="bare-table"><tbody><tr><td id="bare-cell">خلية مستقلة</td></tr></tbody></table>
       </div>
     </div>
     <div id="inspector" class="slide-inline-inspector"></div>
@@ -99,26 +105,37 @@ class SlideTablePointerTests(unittest.TestCase):
     def setUp(self):
         self.page.set_content(PAGE.replace('__CLIENT__', _client_script()))
 
-    def test_generated_table_is_marked_and_skips_cell_inline_editing(self):
+    def test_generated_table_frame_is_the_pointer_shape(self):
         state = self.page.evaluate("""() => {
             const stage = document.querySelector('.tenant-slide-stage');
             enableSlideInlineEditing(stage, 0);
+            const frame = document.getElementById('table-frame');
             const table = document.getElementById('generated-table');
+            const bare = document.getElementById('bare-table');
             const cell = document.getElementById('cell-a');
             const copy = document.getElementById('body-copy');
+            const title = document.getElementById('table-title');
             const slide = document.querySelector('.slide');
             return {
-                marked: table.getAttribute('data-slide-table'),
+                frameMarked: frame.getAttribute('data-slide-table'),
+                tableMarked: table.getAttribute('data-slide-table'),
+                bareMarked: bare.getAttribute('data-slide-table'),
                 cellEditable: cell.getAttribute('contenteditable'),
                 copyEditable: copy.getAttribute('contenteditable'),
-                dragTarget: slideDragTarget(slide, cell)?.id || '',
+                titleEditable: title.getAttribute('contenteditable'),
+                frameTarget: slideDragTarget(slide, cell)?.id || '',
+                bareTarget: slideDragTarget(slide, document.getElementById('bare-cell'))?.id || '',
                 bound: document.getElementById('slide-card-0').dataset.tableEditingBound,
             };
         }""")
-        self.assertEqual(state['marked'], '1')
+        self.assertEqual(state['frameMarked'], '1')
+        self.assertIsNone(state['tableMarked'])
+        self.assertEqual(state['bareMarked'], '1')
         self.assertIsNone(state['cellEditable'])
         self.assertEqual(state['copyEditable'], 'plaintext-only')
-        self.assertEqual(state['dragTarget'], 'generated-table')
+        self.assertEqual(state['titleEditable'], 'plaintext-only')
+        self.assertEqual(state['frameTarget'], 'table-frame')
+        self.assertEqual(state['bareTarget'], 'bare-table')
         self.assertEqual(state['bound'], '1')
 
     def test_the_second_tap_opens_the_recorded_cell_after_controls_shift_the_page(self):
@@ -142,14 +159,14 @@ class SlideTablePointerTests(unittest.TestCase):
     def test_a_retargeted_double_click_resolves_a_cell_from_the_table(self):
         edited = self.page.evaluate("""() => {
             const stage = document.querySelector('.tenant-slide-stage');
-            const table = document.getElementById('generated-table');
+            const frame = document.getElementById('table-frame');
             const cell = document.getElementById('cell-a');
             enableSlideInlineEditing(stage, 0);
             cell.dispatchEvent(new PointerEvent('pointerdown', {
                 bubbles: true, cancelable: true, pointerId: 1,
                 clientX: 0, clientY: 0
             }));
-            table.dispatchEvent(new MouseEvent('dblclick', {
+            frame.dispatchEvent(new MouseEvent('dblclick', {
                 bubbles: true, cancelable: true, clientX: 0, clientY: 0
             }));
             return window.__editedCell?.id || '';

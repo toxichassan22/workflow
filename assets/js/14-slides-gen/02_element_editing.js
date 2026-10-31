@@ -266,8 +266,8 @@
         handle.dataset.resizeDir = def.dir;
         handle.title = 'سحب للتحجيم';
         const pos = positions[def.dir];
-        handle.style.left = Math.max(-half, Math.min(pos[0], 1280 - half)) + 'px';
-        handle.style.top = Math.max(-half, Math.min(pos[1], 720 - half)) + 'px';
+        handle.style.left = Math.max(0, Math.min(pos[0], 1280 - HS)) + 'px';
+        handle.style.top = Math.max(0, Math.min(pos[1], 720 - HS)) + 'px';
         slide.appendChild(handle);
         handle.addEventListener('pointerdown', event => {
           if (event.button !== 0) return;
@@ -337,6 +337,12 @@
       let compY = 0;
       let moved = false;
       writeTransform(baseTx, baseTy);
+      const slideW = slide.offsetWidth || 1280;
+      const slideH = slide.offsetHeight || 720;
+      const maxW = !touchW ? slideW : Math.max(24, Math.min(slideW,
+        dir.indexOf('e') !== -1 ? slideW - base.left : base.left + base.width));
+      const maxH = !touchH ? slideH : Math.max(24, Math.min(slideH,
+        dir.indexOf('s') !== -1 ? slideH - base.top : base.top + base.height));
       const onMove = moveEvent => {
         const dw = (moveEvent.clientX - startX) / scale;
         const dh = (moveEvent.clientY - startY) / scale;
@@ -347,15 +353,15 @@
         if (dir.indexOf('w') !== -1) newW = base.width - dw;
         if (dir.indexOf('s') !== -1) newH = base.height + dh;
         if (dir.indexOf('n') !== -1) newH = base.height - dh;
-        newW = Math.max(24, Math.min(1280, Math.round(newW)));
-        newH = Math.max(24, Math.min(720, Math.round(newH)));
+        newW = Math.max(24, Math.min(maxW, Math.round(newW)));
+        newH = Math.max(24, Math.min(maxH, Math.round(newH)));
         const aspectLock = isImage && slideEditSessions[index] && slideEditSessions[index].aspectLock;
         if (aspectLock && base.width > 0 && base.height > 0) {
           if (touchW && !touchH) newH = Math.round(newW * (base.height / base.width));
           else if (touchH && !touchW) newW = Math.round(newH * (base.width / base.height));
           else newH = Math.round(newW * (base.height / base.width));
-          newW = Math.max(24, Math.min(1280, newW));
-          newH = Math.max(24, Math.min(720, newH));
+          newW = Math.max(24, Math.min(maxW, newW));
+          newH = Math.max(24, Math.min(maxH, newH));
           target.style.width = newW + 'px';
           target.style.height = newH + 'px';
         } else {

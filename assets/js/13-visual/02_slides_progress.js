@@ -769,14 +769,35 @@
       return nodes;
     }
 
-    /* Generated tables arrive as ordinary <table> elements. Giving each one the
-       table marker makes a single click select the table as one shape and keeps
-       its cells out of inline text editing; the cell edits on double-click. */
+    /* A fixed, overflow-hidden frame crops a table resized inside it. Mark that
+       frame as the table shape when it wraps just this table; a bare table is
+       its own shape. */
+    function slideTablePointerBox(table) {
+      if (!table || !table.closest) return table;
+      const slide = table.closest('.slide');
+      const tableRect = table.getBoundingClientRect();
+      let node = table.parentElement;
+      while (node && node !== slide) {
+        const style = window.getComputedStyle(node);
+        const clips = /^(hidden|clip)$/.test(style.overflowX)
+          || /^(hidden|clip)$/.test(style.overflowY);
+        if (clips) {
+          const rect = node.getBoundingClientRect();
+          const onlyThisTable = node.querySelectorAll('table').length === 1;
+          const tight = rect.width > 0 && tableRect.width > 0
+            && rect.width <= tableRect.width * 1.5 + 24;
+          if (onlyThisTable && tight) return node;
+        }
+        node = node.parentElement;
+      }
+      return table;
+    }
+
     function markSlideTablesForPointerEditing(slide) {
       if (!slide || !slide.querySelectorAll) return;
       slide.querySelectorAll('table').forEach(table => {
         if (table.closest('[data-slide-table]')) return;
-        table.setAttribute('data-slide-table', '1');
+        slideTablePointerBox(table).setAttribute('data-slide-table', '1');
       });
     }
 
@@ -790,9 +811,9 @@
         const el = node.parentElement;
         if (!el || seen.has(el)) return;
         seen.add(el);
-        // Every table is one shape on a single click, manual or generated; its
-        // cells only enter text editing on the double-click handler below.
-        if (el.closest && el.closest('[data-slide-table]')) return;
+        // Every table is one shape on a single click, manual or generated; only
+        // its cells wait for the double-click handler below.
+        if (el.closest && el.closest('[data-slide-table] td, [data-slide-table] th')) return;
         if (enabled) {
           if (el.hasAttribute('contenteditable')) return;
           el.setAttribute('contenteditable', 'plaintext-only');

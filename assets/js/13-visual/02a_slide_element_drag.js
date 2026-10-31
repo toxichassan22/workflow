@@ -47,7 +47,10 @@
       if (chrome) return chrome;
       if (source.closest && source.closest('[data-slide-table]')) {
         const tableBox = source.closest('[data-slide-table]');
-        if (tableBox && slide.contains(tableBox)) return tableBox;
+        const table = tableBox && (tableBox.tagName === 'TABLE'
+          ? tableBox : tableBox.querySelector('table'));
+        if (tableBox && slide.contains(tableBox)
+          && (!table || table.contains(source) || source === tableBox)) return tableBox;
       }
       if (source.closest && source.closest('[data-slide-textbox], [data-slide-imagebox]')) {
         const box = source.closest('[data-slide-textbox], [data-slide-imagebox]');

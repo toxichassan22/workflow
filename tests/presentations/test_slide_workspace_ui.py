@@ -535,9 +535,11 @@ class SlidesAuthoringTests(unittest.TestCase):
         inline = self.source.split('function enableSlideInlineEditing(stage, index)', 1)[1]
         inline = inline.split('function slidePathIgnores', 1)[0]
         self.assertIn('markSlideTablesForPointerEditing(slide);', inline)
-        self.assertIn("el.closest('[data-slide-table]')", inline)
+        self.assertIn("el.closest('[data-slide-table] td, [data-slide-table] th')", inline)
         self.assertIn('bindSlideTableEditing(stage, index)', inline)
-        # A generated table is the table element itself, not a manual wrapper.
+        self.assertIn('function slideTablePointerBox(table)', self.source)
+        self.assertIn("rect.width <= tableRect.width * 1.5 + 24", self.source)
+        # A generated table may be shaped by its fixed, overflow-hidden frame.
         context = self.source.split('function slideTableContext(index)', 1)[1]
         context = context.split('function slideTableActiveCell', 1)[0]
         self.assertIn("rawWrapper.tagName === 'TABLE' ? rawWrapper", context)
@@ -639,6 +641,12 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn("container.onclick = () => { if (activeSlideIndex !== i) selectTenantSlide(i); }",
                       self.source)
         self.assertIn("kind === 'table' && host.previousElementSibling !== stage", self.source)
+
+    def test_resize_stays_inside_the_slide_and_edge_handles_stay_clickable(self):
+        self.assertIn('const maxW = !touchW ? slideW :', self.source)
+        self.assertIn('slideW - base.left', self.source)
+        self.assertIn('Math.max(0, Math.min(pos[0], 1280 - HS))', self.source)
+        self.assertIn('Math.max(0, Math.min(pos[1], 720 - HS))', self.source)
 
     def test_selection_geometry_uses_the_painted_scale(self):
         self.assertIn('function slideRenderedScale(stage)', self.source)
