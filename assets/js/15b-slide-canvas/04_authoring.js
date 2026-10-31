@@ -159,6 +159,10 @@
         + choices.map(choice => '<button type="button" class="slide-insert-menu-item" data-structure="'
           + choice[0] + '">' + escapeHtml(choice[1]) + '</button>').join('');
       document.body.appendChild(menu);
+      // A fixed box shrinks to its content; in flow it measures the whole body
+      // width and the clamp below then pins it to the screen edge.
+      menu.style.position = 'fixed';
+      menu.style.visibility = 'hidden';
       menu.querySelectorAll('[data-structure]').forEach(button => {
         button.addEventListener('click', event => {
           event.stopPropagation();
@@ -168,15 +172,23 @@
         });
       });
       const rect = anchor.getBoundingClientRect();
+      const zoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
       const width = menu.offsetWidth || 190;
       const height = menu.offsetHeight || 220;
-      const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8));
-      const top = rect.bottom + height + 8 <= window.innerHeight
-        ? rect.bottom + 6
-        : Math.max(8, rect.top - height - 6);
-      menu.style.position = 'fixed';
+      // Fixed lengths are layout pixels; the anchor and the viewport measured
+      // above are painted ones, so they divide by the page zoom first.
+      const viewWidth = window.innerWidth / zoom;
+      const viewHeight = window.innerHeight / zoom;
+      const anchorLeft = rect.left / zoom;
+      const anchorTop = rect.top / zoom;
+      const anchorBottom = rect.bottom / zoom;
+      const left = Math.max(8, Math.min(anchorLeft, viewWidth - width - 8));
+      const top = anchorBottom + height + 8 <= viewHeight
+        ? anchorBottom + 6
+        : Math.max(8, anchorTop - height - 6);
       menu.style.left = left + 'px';
       menu.style.top = top + 'px';
+      menu.style.visibility = '';
       menu.style.zIndex = '9998';
       const onDoc = event => {
         if (slideInsertMenuEl && !slideInsertMenuEl.contains(event.target)) closeSlideInsertMenu();

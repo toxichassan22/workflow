@@ -148,7 +148,11 @@
           }
           const card = stage.closest('.ge-slide-card');
           if (!card) return;
-          const width = Math.round(stage.getBoundingClientRect().width);
+          // offsetWidth is a layout width, the unit card.style.width takes.
+          // getBoundingClientRect() is the painted width, so under the app's
+          // fixed page zoom it came back 15% short and the card sat smaller
+          // than its own slide.
+          const width = Math.round(stage.offsetWidth);
           if (width > 0) card.style.width = width + 'px';
         });
       });
@@ -268,10 +272,12 @@
       const ghost = node.cloneNode(true);
       ghost.classList.add('ge-thumb-ghost');
       ghost.style.position = 'fixed';
-      ghost.style.left = rect.left + 'px';
-      ghost.style.top = rect.top + 'px';
-      ghost.style.width = rect.width + 'px';
-      ghost.style.height = rect.height + 'px';
+      // Fixed lengths are layout pixels; the captured rect is painted.
+      const zoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
+      ghost.style.left = (rect.left / zoom) + 'px';
+      ghost.style.top = (rect.top / zoom) + 'px';
+      ghost.style.width = (rect.width / zoom) + 'px';
+      ghost.style.height = (rect.height / zoom) + 'px';
       ghost.style.pointerEvents = 'none';
       ghost.style.zIndex = '9997';
       host.appendChild(ghost);
@@ -1045,7 +1051,7 @@
         if (panel.classList.contains('is-collapsed')) return;
         event.preventDefault();
         const startX = event.clientX;
-        const startWidth = panel.getBoundingClientRect().width;
+        const startWidth = panel.offsetWidth;
         handle.setPointerCapture(event.pointerId);
         const move = moveEvent => {
           const width = Math.max(240, Math.min(560, startWidth + (moveEvent.clientX - startX)));
@@ -1056,7 +1062,7 @@
           handle.removeEventListener('pointerup', up);
           handle.removeEventListener('pointercancel', up);
           try {
-            localStorage.setItem('wf.slidesChatWidth', String(Math.round(panel.getBoundingClientRect().width)));
+            localStorage.setItem('wf.slidesChatWidth', String(Math.round(panel.offsetWidth)));
           } catch (error) {}
         };
         handle.addEventListener('pointermove', move);

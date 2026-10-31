@@ -100,6 +100,15 @@
     let tenantArchiveCache = null;
     let tenantLocationGeocodeRequest = null;
 
+    // The app renders at a fixed page zoom (`--ui-scale`). getBoundingClientRect
+    // and pointer/client coordinates are painted pixels, while style lengths,
+    // offsetWidth/clientWidth and the layout viewport are zoom-independent —
+    // convert before writing a measured position back into a style.
+    function wfRootZoom() {
+      const value = parseFloat(getComputedStyle(document.documentElement).zoom);
+      return isFinite(value) && value > 0 ? value : 1;
+    }
+
     // Stable per-slide identities for the designer agent: positions shuffle on
     // every structural edit, ids do not. Same scheme as designer_agent_ids.py
     // (`s_` + 8 hex); valid existing ids are kept and duplicates are rewritten.

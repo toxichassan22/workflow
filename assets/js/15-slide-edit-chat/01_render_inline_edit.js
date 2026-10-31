@@ -325,10 +325,12 @@
         const ghost = entry.node.cloneNode(true);
         ghost.classList.add('ge-slide-card-ghost');
         ghost.style.position = 'fixed';
-        ghost.style.left = rect.left + 'px';
-        ghost.style.top = rect.top + 'px';
-        ghost.style.width = rect.width + 'px';
-        ghost.style.height = rect.height + 'px';
+        // Fixed lengths are layout pixels; the captured rect is painted.
+        const zoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
+        ghost.style.left = (rect.left / zoom) + 'px';
+        ghost.style.top = (rect.top / zoom) + 'px';
+        ghost.style.width = (rect.width / zoom) + 'px';
+        ghost.style.height = (rect.height / zoom) + 'px';
         ghost.style.margin = '0';
         ghost.style.pointerEvents = 'none';
         ghost.style.zIndex = '40';

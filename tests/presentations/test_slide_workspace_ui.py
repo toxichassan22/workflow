@@ -731,6 +731,7 @@ class SlidesWorkspaceDensityTests(unittest.TestCase):
         cls.preview_css = (base / '01_preview_chat.css').read_text(encoding='utf-8')
         cls.space_js = (ROOT / 'assets' / 'js' / '15a-slide-workspace'
                         / '01_workspace.js').read_text(encoding='utf-8')
+        cls.source = read_frontend_text()
 
     @staticmethod
     def _rule(css, selector):
@@ -796,3 +797,26 @@ class SlidesWorkspaceDensityTests(unittest.TestCase):
         toolbar = self._rule(self.workspace_css, '#tenantSlidesPage .ge-slide-edit-controls button {')
         self.assertIn('padding: 2px 7px', toolbar)
         self.assertIn('font-size: 10px', toolbar)
+
+    def test_card_and_rails_measure_in_layout_pixels(self):
+        # The page renders under a root zoom, so a painted rect is 15% smaller
+        # than the layout box it describes. Writing that rect back into a style
+        # length made the slide card narrower than its own slide.
+        observer = self.source.split('function ensureTenantStageWidthObserver()', 1)[1]
+        observer = observer.split('function observeTenantSlideStage', 1)[0]
+        self.assertIn('stage.offsetWidth', observer)
+        self.assertNotIn('getBoundingClientRect().width', observer)
+        resize = self.source.split('function bindTenantChatResize()', 1)[1]
+        resize = resize.split('function resetTenantDesignerConversationState', 1)[0]
+        self.assertNotIn('getBoundingClientRect().width', resize)
+        self.assertIn('String(Math.round(panel.offsetWidth))', resize)
+        # Fixed overlays built from a captured rect convert it to layout first.
+        self.assertIn('function wfRootZoom()', self.source)
+        ghost = self.source.split('function sidebarSpawnGhost(host, node, rect)', 1)[1]
+        ghost = ghost.split('function animateTenantSidebarRebuild', 1)[0]
+        self.assertIn('rect.left / zoom', ghost)
+        menu = self.source.split('function openSlideInsertMenu(anchor, index)', 1)[1]
+        menu = menu.split('function selectSlideElementBySelector', 1)[0]
+        self.assertIn('const zoom = typeof wfRootZoom', menu)
+        self.assertIn("menu.style.position = 'fixed';", menu)
+        self.assertIn("menu.style.visibility = 'hidden';", menu)
