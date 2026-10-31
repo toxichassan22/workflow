@@ -342,6 +342,7 @@
         stage.innerHTML = '<div class="slide" style="padding:40px;font-size:14px;color:#999;background:#fafafa;">جاري التحميل...</div>';
         container.appendChild(stage);
         wrap.appendChild(container);
+        if (typeof observeTenantSlideStage === 'function') observeTenantSlideStage(stage, container);
         containers.push({ container, stage, slide: s, index: i });
       });
 

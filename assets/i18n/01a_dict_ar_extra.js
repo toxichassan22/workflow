@@ -267,4 +267,12 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "ws.slides_one": "شريحة",
   "ws.slides_two": "شريحتان",
   "ws.slides_many": "شرائح"
+,
+  "tb.common": "مشترك",
+  "tb.text": "النص",
+  "tb.image": "الصورة",
+  "tb.shape": "الشكل",
+  "tb.colors": "الألوان",
+  "tb.add": "إضافة",
+  "tb.watermark": "العلامة المائية"
 }/*I18N_AR_END*/);

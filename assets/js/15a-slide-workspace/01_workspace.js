@@ -133,6 +133,37 @@
       if (sorter) sorter.hidden = true;
     }
 
+    /* ── Card width follows the slide stage ─────────────────────────────── */
+
+    let tenantSlideStageWidthObserver = null;
+
+    function ensureTenantStageWidthObserver() {
+      if (tenantSlideStageWidthObserver || typeof ResizeObserver === 'undefined') return;
+      tenantSlideStageWidthObserver = new ResizeObserver(entries => {
+        entries.forEach(entry => {
+          const stage = entry.target;
+          if (!stage.isConnected) {
+            tenantSlideStageWidthObserver.unobserve(stage);
+            return;
+          }
+          const card = stage.closest('.ge-slide-card');
+          if (!card) return;
+          const width = Math.round(stage.getBoundingClientRect().width);
+          if (width > 0) card.style.width = width + 'px';
+        });
+      });
+    }
+
+    function observeTenantSlideStage(stage, card) {
+      if (!stage || !card) return;
+      ensureTenantStageWidthObserver();
+      if (tenantSlideStageWidthObserver) {
+        tenantSlideStageWidthObserver.observe(stage);
+      } else {
+        card.style.width = Math.round(stage.offsetWidth || 0) + 'px';
+      }
+    }
+
     /* ── Sidebar ────────────────────────────────────────────────────────── */
 
     function slideThumbnailHtml(slide) {

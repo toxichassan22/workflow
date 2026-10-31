@@ -662,3 +662,165 @@
 #tenantSlidesPage .ge-sorter[hidden] {
   display: none !important;
 }
+
+/* The editing toolbar can carry more groups than the slide is wide. It must
+   wrap inside the card instead of widening it, or the stage sits at one edge
+   with an empty white half beside it. The card width itself is pinned to the
+   stage by the ResizeObserver in 15a-slide-workspace/01_workspace.js. */
+#tenantSlidesPage .ge-slide-card {
+  width: fit-content;
+  max-width: 100%;
+}
+
+#tenantSlidesPage .ge-slide-edit-controls {
+  max-width: 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 5px 8px;
+  background: #f8fbfd;
+  border-bottom: 1px solid #e2e8f0;
+  direction: rtl;
+}
+
+/* Compact editing bar: the groups read as one strip, not a stack of cards.
+   Exact values (font size, colors, opacity) belong to the inspector, so the
+   color and opacity groups leave the card toolbar entirely. */
+#tenantSlidesPage .ge-slide-edit-controls .slide-edit-group {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0 6px;
+  border-right: 1px solid #e2e8f0;
+}
+
+#tenantSlidesPage .ge-slide-edit-controls .slide-edit-group:first-child {
+  border-right: 0;
+  padding-right: 0;
+}
+
+#tenantSlidesPage .ge-slide-edit-controls .slide-edit-group-title {
+  display: none;
+}
+
+#tenantSlidesPage .ge-slide-edit-controls .slide-edit-group-items {
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+#tenantSlidesPage .ge-slide-edit-controls button {
+  padding: 3px 8px;
+  font-size: 10.5px;
+  border-radius: 6px;
+  line-height: 1.35;
+}
+
+#tenantSlidesPage .ge-slide-edit-controls .slide-edit-watermark {
+  font-size: 10.5px;
+  gap: 4px;
+}
+
+#tenantSlidesPage .ge-slide-edit-controls .slide-edit-watermark input {
+  width: 14px;
+  height: 14px;
+}
+
+#tenantSlidesPage .ge-slide-edit-controls [data-slide-edit-group="colors"],
+#tenantSlidesPage .ge-slide-edit-controls [data-slide-edit-group="opacity"] {
+  display: none;
+}
+
+/* Tabbed editing bar: the session controls never move, the tab strip swaps
+   only the tools below them. */
+#tenantSlidesPage .ge-slide-edit-controls {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+  gap: 4px;
+  padding: 5px 8px;
+}
+
+#tenantSlidesPage .slide-edit-session-rail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+#tenantSlidesPage .slide-edit-session-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding-left: 6px;
+  border-left: 1px solid #e2e8f0;
+}
+
+#tenantSlidesPage .slide-edit-session-actions:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+
+#tenantSlidesPage .slide-edit-tabbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+#tenantSlidesPage .slide-edit-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: #475569;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 9px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#tenantSlidesPage .slide-edit-tab:hover {
+  background: #eef2f6;
+}
+
+#tenantSlidesPage .slide-edit-tab.is-active {
+  background: #07182C;
+  color: #fff;
+}
+
+#tenantSlidesPage .slide-edit-tab-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-height: 26px;
+}
+
+#tenantSlidesPage .slide-edit-tab-sep {
+  width: 1px;
+  height: 18px;
+  background: #e2e8f0;
+  margin: 0 3px;
+}
+
+#tenantSlidesPage .slide-edit-tab-readout {
+  font-size: 10.5px;
+  min-width: 38px;
+  text-align: center;
+  direction: ltr;
+}
+
+#tenantSlidesPage .slide-edit-session-actions button,
+#tenantSlidesPage .slide-edit-tab-panel button {
+  padding: 3px 8px;
+  font-size: 10.5px;
+  border-radius: 6px;
+  line-height: 1.35;
+}
+
+#tenantSlidesPage .slide-edit-tab-panel .slide-edit-color {
+  font-size: 10.5px;
+  gap: 4px;
+}

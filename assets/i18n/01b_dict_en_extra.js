@@ -266,4 +266,12 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "ws.slides_one": "slide",
   "ws.slides_two": "slides",
   "ws.slides_many": "slides"
+,
+  "tb.common": "Common",
+  "tb.text": "Text",
+  "tb.image": "Image",
+  "tb.shape": "Shape",
+  "tb.colors": "Colors",
+  "tb.add": "Add",
+  "tb.watermark": "Watermark"
 }/*I18N_EN_END*/);

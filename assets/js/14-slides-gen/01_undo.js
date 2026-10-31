@@ -551,6 +551,7 @@
         stage.innerHTML = '<div class="slide" style="padding:40px;font-size:24px;background:#fff">' + escapeHtml(slide.title || '') + '</div>';
       }
       container.appendChild(stage);
+      if (typeof observeTenantSlideStage === 'function') observeTenantSlideStage(stage, container);
       oldCard.replaceWith(container);
       autoFitSlideContent(stage);
       if (typeof tgrRefit === 'function') tgrRefit();
@@ -568,94 +569,7 @@
       }
     }
 
-    function slideEditToolbarHTML(index) {
-      const session = getSlideEditSession(index);
-      if (!session) {
-        return '<button type="button" data-slide-edit-act="edit"'
-          + ' aria-label="' + trDynamicI18n('تعديل الشريحة: تعديل النص وتحريك العناصر') + '">' + trDynamicI18n('تعديل') + '</button>';
-      }
-      const canUndo = session.undo.length > 0;
-      const canRedo = session.redo.length > 0;
-      const hasSel = !!session.sel;
-      const dis = hasSel ? '' : ' disabled';
-      const watermarkChecked = isWatermarkVisible(tenantSlidesData[index] && tenantSlidesData[index].html) ? ' checked' : '';
-      // Each element kind carries its own tools: text controls never appear on an
-      // image and image controls never appear on a shape. The deck groups stay.
-      const selectionKind = (typeof slideToolbarSelectionKind === 'function')
-        ? slideToolbarSelectionKind(index) : '';
-      const textTools = (!selectionKind || selectionKind === 'text')
-        ? '<div class="slide-edit-group is-contextual" data-slide-edit-group="text">'
-          + '<span class="slide-edit-group-title">' + trDynamicI18n('تنسيق النص') + '</span>'
-          + '<div class="slide-edit-group-items">'
-          + '<button type="button" data-slide-edit-act="fontup"' + dis + '>' + trDynamicI18n('تكبير') + '</button>'
-          + '<button type="button" data-slide-edit-act="fontdown"' + dis + '>' + trDynamicI18n('تصغير') + '</button>'
-          + '<button type="button" data-slide-edit-act="bold"' + dis + '>' + trDynamicI18n('عريض') + '</button>'
-          + '<button type="button" data-slide-edit-act="alignright"' + dis + '>' + canvasText('ca.right', 'يمين') + '</button>'
-          + '<button type="button" data-slide-edit-act="aligncenter"' + dis + '>' + canvasText('ca.center', 'وسط') + '</button>'
-          + '<button type="button" data-slide-edit-act="alignleft"' + dis + '>' + canvasText('ca.left', 'يسار') + '</button>'
-          + '</div></div>'
-        : '';
-      const imageTools = selectionKind === 'image'
-        ? '<div class="slide-edit-group is-contextual" data-slide-edit-group="image">'
-          + '<span class="slide-edit-group-title">' + canvasText('ca.image', 'الصورة') + '</span>'
-          + '<div class="slide-edit-group-items">'
-          + '<button type="button" data-slide-edit-act="fitcover">' + canvasText('ca.cover', 'ملء') + '</button>'
-          + '<button type="button" data-slide-edit-act="fitcontain">' + canvasText('ca.contain', 'احتواء') + '</button>'
-          + '<button type="button" data-slide-edit-act="replaceimg">' + canvasText('ca.replace_image', 'استبدال') + '</button>'
-          + '</div></div>'
-        : '';
-      const shapeTools = selectionKind === 'shape'
-        ? '<div class="slide-edit-group is-contextual" data-slide-edit-group="shape">'
-          + '<span class="slide-edit-group-title">' + canvasText('ca.shape', 'الشكل') + '</span>'
-          + '<div class="slide-edit-group-items">'
-          + '<button type="button" data-slide-edit-act="shadow">' + canvasText('ca.toggle_shadow', 'تبديل الظل') + '</button>'
-          + '</div></div>'
-        : '';
-      return '<div class="slide-edit-group" data-slide-edit-group="session"><span class="slide-edit-group-title">' + trDynamicI18n('الجلسة') + '</span>'
-        + '<div class="slide-edit-group-items">'
-        + '<button type="button" class="active" data-slide-edit-act="commit">' + trDynamicI18n('اعتماد') + '</button>'
-        + '<button type="button" data-slide-edit-act="cancel">' + trDynamicI18n('الغاء') + '</button>'
-        + '</div></div>'
-        + '<div class="slide-edit-group" data-slide-edit-group="record"><span class="slide-edit-group-title">' + trDynamicI18n('السجل') + '</span>'
-        + '<div class="slide-edit-group-items">'
-        + '<button type="button" data-slide-edit-act="undo"' + (canUndo ? '' : ' disabled') + '>' + trDynamicI18n('تراجع') + '</button>'
-        + '<button type="button" data-slide-edit-act="redo"' + (canRedo ? '' : ' disabled') + '>' + trDynamicI18n('تقدم') + '</button>'
-        + '</div></div>'
-        + '<div class="slide-edit-group" data-slide-edit-group="add"><span class="slide-edit-group-title">' + trDynamicI18n('إضافة') + '</span>'
-        + '<div class="slide-edit-group-items">'
-        + '<button type="button" data-slide-edit-act="addtext">' + trDynamicI18n('إضافة نص') + '</button>'
-        + '<button type="button" data-slide-edit-act="addimage">' + trDynamicI18n('إضافة صورة') + '</button>'
-        + '</div></div>'
-        + '<div class="slide-edit-group" data-slide-edit-group="watermark"><span class="slide-edit-group-title">' + trDynamicI18n('العلامة المائية') + '</span>'
-        + '<div class="slide-edit-group-items"><label class="slide-edit-watermark">'
-        + '<input type="checkbox" data-slide-edit-watermark="toggle"' + watermarkChecked + '>' + trDynamicI18n('إظهار العلامة المائية')
-        + '</label></div></div>'
-        + textTools + imageTools + shapeTools
-        + '<div class="slide-edit-group" data-slide-edit-group="common"><span class="slide-edit-group-title">' + trDynamicI18n('الطبقة') + '</span>'
-        + '<div class="slide-edit-group-items">'
-        + '<button type="button" data-slide-edit-act="front"' + dis + '>' + trDynamicI18n('أمام') + '</button>'
-        + '<button type="button" data-slide-edit-act="back"' + dis + '>' + trDynamicI18n('خلف') + '</button>'
-        + '<button type="button" data-slide-edit-act="dup"' + dis + '>' + canvasText('ca.duplicate_element', 'تكرار') + '</button>'
-        + '<button type="button" data-slide-edit-act="del"' + dis + '>' + trDynamicI18n('حذف العنصر') + '</button>'
-        + '</div></div>'
-        + '<div class="slide-edit-group" data-slide-edit-group="opacity"><span class="slide-edit-group-title">' + trDynamicI18n('الشفافية') + '</span>'
-        + '<div class="slide-edit-group-items">'
-        + '<input type="range" min="5" max="100" step="5" value="100" data-slide-edit-opacity="range"'
-        + dis + ' style="width:110px" aria-label="' + trDynamicI18n('الشفافية') + '">'
-        + '<span data-slide-edit-opacity-readout style="font-size:12px;min-width:38px;text-align:center">100%</span>'
-        + '</div></div>'
-        + '<div class="slide-edit-group" data-slide-edit-group="colors"><span class="slide-edit-group-title">' + trDynamicI18n('الألوان') + '</span>'
-        + '<div class="slide-edit-group-items">'
-        + '<label class="slide-edit-color">' + trDynamicI18n('لون النص') + '<input type="color" data-slide-edit-color="color" value="#1e293b"'
-        + dis + '><input type="text" data-slide-edit-hex="color" value="#1e293b" maxlength="7" spellcheck="false" placeholder="#000000"'
-        + dis + '></label>'
-        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="color"' + dis + '>' + trDynamicI18n('قطارة النص') + '</button>'
-        + '<label class="slide-edit-color">' + trDynamicI18n('لون الخلفية') + '<input type="color" data-slide-edit-color="background" value="#ffffff"'
-        + dis + '><input type="text" data-slide-edit-hex="background" value="#ffffff" maxlength="7" spellcheck="false" placeholder="#ffffff"'
-        + dis + '></label>'
-        + '<button type="button" class="slide-edit-eyedropper" data-slide-edit-eyedropper="background"' + dis + '>' + trDynamicI18n('قطارة الخلفية') + '</button>'
-        + '</div></div>';
-    }
+    /* The toolbar, its tab state and its wiring live in 01a_slide_toolbar.js. */
 
     function normalizeHexColor(value) {
       let text = String(value || '').trim();
@@ -689,122 +603,6 @@
       } catch (err) {
         if (err && err.name !== 'AbortError') toast('تعذر التقاط اللون');
       }
-    }
-
-    function wireSlideEditControls(editControls, index) {
-      editControls.querySelectorAll('[data-slide-edit-act]').forEach(btn => {
-        btn.addEventListener('click', event => {
-          event.stopPropagation();
-          const act = btn.getAttribute('data-slide-edit-act');
-          if (act === 'edit') startSlideEditSession(index);
-          else if (act === 'commit') commitSlideEditSession(index);
-          else if (act === 'cancel') endSlideEditSession(index, false);
-          else if (act === 'undo') undoSlideEdit(index);
-          else if (act === 'redo') redoSlideEdit(index);
-          else if (act === 'addtext') addSlideTextBox(index);
-          else if (act === 'addimage') openSlideImagePicker(index);
-          else if (act === 'fontup') adjustSlideElementFontSize(index, 2);
-          else if (act === 'fontdown') adjustSlideElementFontSize(index, -2);
-          else if (act === 'bold') toggleSlideElementBold(index);
-          else if (act === 'del') deleteSelectedSlideElement(index);
-          else if (act === 'front') adjustSlideElementLayer(index, 1);
-          else if (act === 'back') adjustSlideElementLayer(index, -1);
-          else if (act === 'dup' && typeof duplicateSelectedSlideElements === 'function') duplicateSelectedSlideElements(index);
-          else if (act === 'alignright' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'right');
-          else if (act === 'aligncenter' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'center');
-          else if (act === 'alignleft' && typeof setSlideSelectionTextAlign === 'function') setSlideSelectionTextAlign(index, 'left');
-          else if (act === 'fitcover' && typeof setSlideSelectionImageFit === 'function') setSlideSelectionImageFit(index, 'cover');
-          else if (act === 'fitcontain' && typeof setSlideSelectionImageFit === 'function') setSlideSelectionImageFit(index, 'contain');
-          else if (act === 'replaceimg') openSlideImagePicker(index);
-          else if (act === 'shadow' && typeof toggleSlideSelectionShadow === 'function') toggleSlideSelectionShadow(index);
-        });
-      });
-      editControls.querySelectorAll('[data-slide-edit-watermark="toggle"]').forEach(inp => {
-        inp.addEventListener('click', event => event.stopPropagation());
-        inp.addEventListener('pointerdown', event => event.stopPropagation());
-        inp.addEventListener('change', event => {
-          event.stopPropagation();
-          setSlideWatermarkVisibility(index, inp.checked);
-        });
-      });
-      editControls.querySelectorAll('[data-slide-edit-eyedropper]').forEach(btn => {
-        btn.addEventListener('click', event => {
-          event.stopPropagation();
-          pickSlideElementColorWithEyedropper(index, btn.getAttribute('data-slide-edit-eyedropper') || 'color');
-        });
-      });
-      editControls.querySelectorAll('[data-slide-edit-opacity="range"]').forEach(inp => {
-        inp.addEventListener('click', e => e.stopPropagation());
-        inp.addEventListener('pointerdown', e => e.stopPropagation());
-        inp.addEventListener('input', e => {
-          e.stopPropagation();
-          previewSlideElementOpacity(index, Number(inp.value));
-        });
-        inp.addEventListener('change', e => {
-          e.stopPropagation();
-          commitSlideElementOpacity(index, Number(inp.value));
-        });
-      });
-      editControls.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
-        inp.addEventListener('click', e => e.stopPropagation());
-        inp.addEventListener('pointerdown', e => e.stopPropagation());
-        inp.addEventListener('input', e => {
-          e.stopPropagation();
-          const kind = inp.getAttribute('data-slide-edit-color');
-          const card = inp.closest('.ge-slide-card');
-          const hexInput = card ? card.querySelector('[data-slide-edit-hex="' + kind + '"]') : null;
-          if (hexInput) hexInput.value = inp.value;
-          previewSlideElementColor(index, kind, inp.value);
-        });
-        inp.addEventListener('change', e => {
-          e.stopPropagation();
-          commitSlideElementColor(index, inp.getAttribute('data-slide-edit-color'));
-        });
-      });
-      editControls.querySelectorAll('[data-slide-edit-hex]').forEach(inp => {
-        inp.addEventListener('click', e => e.stopPropagation());
-        inp.addEventListener('pointerdown', e => e.stopPropagation());
-        inp.addEventListener('keydown', e => e.stopPropagation());
-        const applyHex = commit => {
-          const kind = inp.getAttribute('data-slide-edit-hex');
-          const hex = normalizeHexColor(inp.value);
-          if (!hex) {
-            inp.style.borderColor = '#dc2626';
-            if (commit) toast('كود اللون غير صالح (مثال #1e293b)');
-            return;
-          }
-          inp.style.borderColor = '';
-          inp.value = hex;
-          const card = inp.closest('.ge-slide-card');
-          const colorInput = card ? card.querySelector('[data-slide-edit-color="' + kind + '"]') : null;
-          if (colorInput) colorInput.value = hex;
-          previewSlideElementColor(index, kind, hex);
-          if (commit) commitSlideElementColor(index, kind, hex);
-        };
-        inp.addEventListener('input', () => applyHex(false));
-        inp.addEventListener('change', () => applyHex(true));
-      });
-    }
-    // Edit toolbars live inside skipped slide cards, so the DOM pass never
-    // reaches them: rebuild their labels whenever the UI language changes.
-    document.addEventListener('wf:lang', () => {
-      try {
-        document.querySelectorAll('.ge-slide-edit-controls').forEach(ctl => {
-          const card = ctl.closest('[id^="slide-card-"]');
-          const idx = card ? Number(String(card.id).replace('slide-card-', '')) : NaN;
-          if (!Number.isInteger(idx)) return;
-          ctl.innerHTML = slideEditToolbarHTML(idx);
-          wireSlideEditControls(ctl, idx);
-        });
-      } catch (e) { /* ignore */ }
-    });
-
-    function refreshSlideEditToolbar(index) {
-      const card = document.getElementById('slide-card-' + index);
-      const controls = card ? card.querySelector('.ge-slide-edit-controls') : null;
-      if (!controls) return;
-      controls.innerHTML = slideEditToolbarHTML(index);
-      wireSlideEditControls(controls, index);
     }
 
     function cssColorToHex(value) {

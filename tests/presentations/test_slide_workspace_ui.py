@@ -219,13 +219,14 @@ class SlidesCanvasEditingTests(unittest.TestCase):
         self.assertIn('function slideToolbarSelectionKind(index)', self.source)
         toolbar = self.source.split('function slideEditToolbarHTML(index)', 1)[1]
         toolbar = toolbar.split('function normalizeHexColor', 1)[0]
-        for kind in ('text', 'image', 'shape'):
-            self.assertIn('data-slide-edit-group="%s"' % kind, toolbar)
-        self.assertIn("selectionKind === 'image'", toolbar)
-        self.assertIn("selectionKind === 'shape'", toolbar)
-        self.assertIn("(!selectionKind || selectionKind === 'text')", toolbar)
-        # The flat always-on group is gone: text tools are conditional now.
-        self.assertIn('const textTools =', toolbar)
+        for tab in ('common', 'text', 'image', 'shape', 'colors', 'add', 'watermark'):
+            self.assertIn("data-slide-edit-tab", toolbar)
+        self.assertIn("slideEditToolbarAvailableTabs(selectionKind)", toolbar)
+        # The session never leaves the bar, whichever tab is open.
+        self.assertIn('slide-edit-session-rail', toolbar)
+        self.assertIn('data-slide-edit-act="commit"', toolbar)
+        self.assertIn('data-slide-edit-act="cancel"', toolbar)
+        self.assertIn('return sessionRail + tabbar', toolbar)
 
     def test_inspector_carries_exact_values_per_kind(self):
         self.assertIn('function renderSlideInspector(index)', self.source)
@@ -357,6 +358,17 @@ class SlidesCanvasEditingTests(unittest.TestCase):
         key_handler = self.source.split('function handlePresentationUndoKey(event)', 1)[1]
         key_handler = key_handler.split('document.addEventListener', 1)[0]
         self.assertIn('session && (session.undo.length || session.redo.length)', key_handler)
+
+    def test_edit_toolbar_never_widens_the_slide_card(self):
+        """A toolbar wider than the slide used to stretch the card, leaving the
+        stage on one side and an empty white half beside it."""
+        self.assertIn('function observeTenantSlideStage(stage, card)', self.source)
+        self.assertIn('new ResizeObserver', self.source)
+        self.assertIn("card.style.width = width + 'px'", self.source)
+        self.assertIn('observeTenantSlideStage(stage, container)', self.source)
+        css = (ROOT / 'assets' / 'css' / 'base' / '09_slide_workspace.css').read_text(encoding='utf-8')
+        self.assertIn('#tenantSlidesPage .ge-slide-edit-controls', css)
+        self.assertIn('max-width: 100%', css)
 
     def test_slide_images_are_uploaded_as_project_files(self):
         body = self.source.split('async function addSlideImageFromDevice(index, file)', 1)[1]

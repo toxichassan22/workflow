@@ -43,6 +43,23 @@
       card.querySelectorAll('[data-slide-edit-opacity-readout]').forEach(el => {
         el.textContent = opacityPct + '%';
       });
+      // The toolbar shows the tools of the selected kind. The tab switches
+      // only when the selection kind changes, so a tab the user opened stays
+      // open while they tweak the same element.
+      if (typeof inspectorTargetKind === 'function') {
+        const stage = card.querySelector('.tenant-slide-stage');
+        const slide = stage ? stage.querySelector('.slide') : null;
+        const target = hasSel && slide ? elementAtSlidePath(slide, session.sel.path) : null;
+        const kind = target ? inspectorTargetKind(target) : '';
+        const lastKind = card.dataset.editKind || '';
+        card.dataset.editKind = kind;
+        if (kind !== lastKind) {
+          slideEditToolbarTab = kind || 'common';
+          refreshSlideEditToolbar(index);
+          if (typeof renderSlideInspector === 'function') renderSlideInspector(index);
+          return;
+        }
+      }
       if (typeof renderSlideInspector === 'function') renderSlideInspector(index);
     }
 
