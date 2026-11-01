@@ -17,6 +17,7 @@ def _call_land_analysis_model(system_prompt, user_content, max_tokens, min_token
         res = call_openrouter_chat(
             system_prompt, user_content, temperature=None,
             max_tokens=cap, model=LAND_ANALYSIS_MODEL,
+            reasoning_effort=LAND_ANALYSIS_REASONING_EFFORT,
             response_format={'type': 'json_object'} if use_json_mode else None,
             provider=LAND_ANALYSIS_PROVIDER,
             usage_ctx=usage_ctx or _usage_ctx('land'),

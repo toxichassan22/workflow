@@ -1194,9 +1194,10 @@ PDF_VISION_ROTATION_DIRECTION_MIN_SCORE_GAP = float(os.environ.get('PDF_VISION_R
 LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '16000'))
 LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'))
 LAND_ANALYSIS_TRUNCATION_CEILING = int(os.environ.get('LAND_ANALYSIS_TRUNCATION_CEILING', '20000'))
-# Gemini 3.6 Flash accepts text, images, and files and is the primary model
-# for all text/analysis workflows, including land and croquis extraction.
-LAND_ANALYSIS_MODEL = VISION_MODEL
+# Land/croquis extraction runs on Gemini 3.8 Flash at high reasoning effort
+# (owner decision 2026-11-01), independently of the shared VISION_MODEL.
+LAND_ANALYSIS_MODEL = os.environ.get('LAND_ANALYSIS_MODEL') or 'google/gemini-3.8-flash'
+LAND_ANALYSIS_REASONING_EFFORT = os.environ.get('LAND_ANALYSIS_REASONING_EFFORT') or 'high'
 
 _AFFORDABLE_TOKENS_RE = re.compile(r'can only afford\s+(\d+)')
 _TRANSIENT_PROVIDER_RE = re.compile(r'\(HTTP 5\d\d\)')

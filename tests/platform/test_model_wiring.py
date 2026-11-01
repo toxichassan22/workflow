@@ -3,8 +3,10 @@
 Owner rule (2026-10-27): every text/analysis call answers on
 ``openai/gpt-6.1-sol`` with ``reasoning_effort='max'``.
 ``google/gemini-4-argon`` stays only on calls that actually send an image or a
-scanned document (site polygon, land analysis, visual-concept references,
-map references, attached images) until a better vision model is chosen.
+scanned document (site polygon, visual-concept references, map references,
+attached images) until a better vision model is chosen. Land/croquis
+extraction is the exception: it runs on ``google/gemini-3.8-flash`` at high
+reasoning effort (owner decision 2026-11-01).
 """
 
 import json
@@ -55,7 +57,6 @@ class ModelConstantTests(unittest.TestCase):
 
     def test_vision_model_stays_argon(self):
         self.assertEqual(application.VISION_MODEL, 'google/gemini-4-argon')
-        self.assertEqual(application.LAND_ANALYSIS_MODEL, application.VISION_MODEL)
 
     def test_text_chat_defaults_to_max_effort(self):
         captured = {}
@@ -156,9 +157,30 @@ class VisionWiringTests(unittest.TestCase):
         self.assertIn("'type': 'image_url'",
                       read_part('app_parts/07_designer/09c_designer_agent_worker.py'))
 
-    def test_land_documents_ride_the_vision_model(self):
-        self.assertIn('LAND_ANALYSIS_MODEL = VISION_MODEL',
-                      read_part('app_parts/15_team/15_team_and_regulations.py'))
+    def test_land_analysis_runs_flash_at_high_effort(self):
+        # Owner decision (2026-11-01): land/croquis extraction runs on Gemini
+        # 3.8 Flash with high reasoning effort, apart from the shared vision model.
+        self.assertEqual(application.LAND_ANALYSIS_MODEL, 'google/gemini-3.8-flash')
+        self.assertEqual(application.LAND_ANALYSIS_REASONING_EFFORT, 'high')
+        source = read_part('app_parts/16_land/16_land_analysis_vision.py')
+        self.assertIn('model=LAND_ANALYSIS_MODEL', source)
+        self.assertIn('reasoning_effort=LAND_ANALYSIS_REASONING_EFFORT', source)
+
+    def test_land_analysis_call_sends_the_land_model_and_effort(self):
+        captured = {}
+
+        def fake_call(system_prompt, user_content, **kwargs):
+            captured.update(kwargs)
+            return {'choices': [{'message': {'content': '{}'}, 'finish_reason': 'stop'}],
+                    'usage': {}}
+
+        with patch.object(application, 'call_openrouter_chat', side_effect=fake_call):
+            response, _cap, error = application._call_land_analysis_model(
+                'system', 'user', 1000, usage_ctx={'flow': 'land'})
+        self.assertNotIn('error', response)
+        self.assertEqual(error, '')
+        self.assertEqual(captured.get('model'), 'google/gemini-3.8-flash')
+        self.assertEqual(captured.get('reasoning_effort'), 'high')
 
     def test_attached_training_images_ride_the_vision_model(self):
         source = read_part('app_parts/20_admin/21_training_data.py')
