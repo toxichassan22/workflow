@@ -967,6 +967,7 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "land.analyzed_done": "تم التحليل وتحديث {n} حقلًا. راجع النتائج قبل الاعتماد.",
   "land.no_fields_updated": "لم يتم تحديث أي حقل: {reason}",
   "land.analysis_error": "حدث خطأ أثناء تحليل الملفات: {err}",
+  "land.analysis_unfinished": "توقف انتظار تحليل الأرض قبل اكتماله، ولم يتغير أي حقل.",
   "land.boundary_len": "بطول {n}م",
   "training.actions_done": "تم تنفيذ {n} إجراء بنجاح",
   "slide.opacity_set": "تم ضبط شفافية العنصر {n}%",

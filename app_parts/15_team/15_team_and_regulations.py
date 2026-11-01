@@ -552,6 +552,13 @@ LAND_FACTS_MAX_TOKENS = int(os.environ.get('LAND_FACTS_MAX_TOKENS', '2500'))
 LAND_FACTS_MIN_TOKENS = int(os.environ.get('LAND_FACTS_MIN_TOKENS', '1200'))
 REGULATION_EVIDENCE_MAX_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MAX_TOKENS', '4000'))
 REGULATION_EVIDENCE_MIN_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MIN_TOKENS', '1500'))
+# The full two-file extraction is a chain of sequential vision stages — text
+# chunks plus table batches — and every stage may retry a truncated answer.
+# Nothing bounded that chain, so one slow run could outlive the hosting worker
+# carrying it: Gunicorn recycles the worker at --max-requests and the daemon
+# thread dies with it. A wall-clock budget closes the chain with the evidence
+# already collected and says so in warnings, so a degraded answer still lands.
+REGULATION_EVIDENCE_TIME_BUDGET_SECONDS = int(os.environ.get('REGULATION_EVIDENCE_TIME_BUDGET_SECONDS', '300'))
 # When enabled, the verified rules digest (rules/*.json) supplies regulation
 # values deterministically and the per-request PDF evidence extraction is
 # skipped. Set REGULATION_DIGEST=0 to restore the legacy extraction path.
@@ -1019,6 +1026,12 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
     evidence = []
     uncertainties = []
     warnings = []
+    deadline = time.monotonic() + REGULATION_EVIDENCE_TIME_BUDGET_SECONDS
+    budget_spent = False
+
+    def result():
+        return {'evidence': evidence, 'uncertainties': uncertainties, 'warnings': warnings}
+
     base_prompt = (
         "أنت مستخرج أدلة تنظيمية من ملف واحد كامل فقط. أعد JSON فقط بهذا الشكل: "
         '{"evidence":[{"field":"","value":"","page":0,"quote":""}],'
@@ -1030,7 +1043,14 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
     )
 
     def run_stage(stage_name, context_chunk, table_batch, stage_note):
-        nonlocal evidence, uncertainties
+        nonlocal evidence, uncertainties, budget_spent
+        if time.monotonic() > deadline:
+            if not budget_spent:
+                budget_spent = True
+                warnings.append(
+                    f'تعذر استخراج بقية أدلة {source_name}: تجاوز التحليل زمنه المتاح، '
+                    'فاعتمدت النتائج المستخرجة قبل انتهائه.')
+            return False
         parts, render_warnings = render_regulation_table_pages(
             table_batch, dpi=REGULATION_EVIDENCE_TABLE_DPI)
         warnings.extend(render_warnings)
@@ -1049,21 +1069,23 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
         )
         if error:
             warnings.append(f'تعذر استخراج جزء من أدلة {source_name}: {error}')
-            return
+            return True
         values = result.get('evidence') if isinstance(result, dict) else []
         if isinstance(values, list):
             evidence.extend(item for item in values if isinstance(item, dict))
         uncertainty_values = result.get('uncertainties') if isinstance(result, dict) else []
         if isinstance(uncertainty_values, list):
             uncertainties.extend(uncertainty_values)
+        return True
 
     has_page_metadata = any(regulation_context_page_numbers(chunk) for chunk in chunks)
     if not has_page_metadata:
         if context.strip():
             for chunk_index, context_chunk in enumerate(chunks):
-                run_stage(
-                    f'{source_name}-text-{chunk_index + 1}', context_chunk, [],
-                    f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.')
+                if not run_stage(
+                        f'{source_name}-text-{chunk_index + 1}', context_chunk, [],
+                        f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.'):
+                    return result()
         table_batch_size = REGULATION_EVIDENCE_TABLE_BATCH_SIZE
         if table_batch_size > 0:
             table_batches = [
@@ -1073,10 +1095,11 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
         else:
             table_batches = [table_pages]
         for batch_index, table_batch in enumerate(table_batches):
-            run_stage(
-                f'{source_name}-tables-{batch_index + 1}', '', table_batch,
-                '\nهذه دفعة جداول من المحتوى الكامل للملف.')
-        return {'evidence': evidence, 'uncertainties': uncertainties, 'warnings': warnings}
+            if not run_stage(
+                    f'{source_name}-tables-{batch_index + 1}', '', table_batch,
+                    '\nهذه دفعة جداول من المحتوى الكامل للملف.'):
+                return result()
+        return result()
 
     for chunk_index, context_chunk in enumerate(chunks):
         chunk_pages = regulation_context_page_numbers(context_chunk)
@@ -1099,10 +1122,11 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
             stage_note = f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.'
             if batch_index:
                 stage_note += '\nهذه دفعة جداول إضافية للجزء نفسه؛ استخرج منها ما لم يظهر في الدفعة السابقة.'
-            run_stage(
-                f'{source_name}-part-{chunk_index + 1}-tables-{batch_index + 1}',
-                context_for_stage, table_batch, stage_note)
-    return {'evidence': evidence, 'uncertainties': uncertainties, 'warnings': warnings}
+            if not run_stage(
+                    f'{source_name}-part-{chunk_index + 1}-tables-{batch_index + 1}',
+                    context_for_stage, table_batch, stage_note):
+                return result()
+    return result()
 
 
 def render_regulation_table_pages(table_pages, dpi=200):

@@ -1528,6 +1528,75 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn("api('GET', '/api/extract-croquis/' + encodeURIComponent(jobId))", index_source)
         self.assertIn('res.jobId', index_source)
 
+    def test_land_job_whose_worker_died_is_reported_instead_of_running_forever(self):
+        """max-requests recycling kills the daemon thread mid-analysis, and the job file
+        then stayed at "running" while the browser polled it to its own 12-minute limit."""
+        module = self.application_module
+        client = self.app.test_client()
+        job_id = 'stale-land-job-01'
+        path = module._land_job_path(self.tenant_a, job_id)
+        with open(path, 'w', encoding='utf-8') as handle:
+            json.dump({
+                'status': 'running',
+                'success': True,
+                'message': 'جاري تحليل المستندات والاشتراطات...',
+                'updatedAt': time.time() - (module.LAND_JOB_STALE_SECONDS + 60),
+                'pid': os.getpid(),
+                'payload': {'data': {}},
+            }, handle, ensure_ascii=False)
+        polled = client.get('/api/extract-croquis/' + job_id, headers=self._headers(self.token_a))
+        self.assertEqual(polled.status_code, 200, polled.get_json())
+        job = polled.get_json()
+        self.assertEqual(job['status'], 'failed')
+        self.assertEqual(job['failureReason'], 'job_interrupted')
+        self.assertFalse(job['success'])
+        self.assertIn('توقف', job['error'])
+        self.assertNotIn('payload', job)
+        # The state is written back, so a second tab reads the same answer.
+        self.assertEqual(module._read_land_job(self.tenant_a, job_id)['status'], 'failed')
+
+        # A job whose lease is still being refreshed is never failed by a poll.
+        live_id = 'live-land-job-01'
+        live_path = module._land_job_path(self.tenant_a, live_id)
+        with open(live_path, 'w', encoding='utf-8') as handle:
+            json.dump({
+                'status': 'running',
+                'success': True,
+                'message': 'جاري تحليل المستندات والاشتراطات...',
+                'updatedAt': time.time(),
+                'pid': os.getpid(),
+            }, handle, ensure_ascii=False)
+        live = client.get('/api/extract-croquis/' + live_id,
+                          headers=self._headers(self.token_a)).get_json()
+        self.assertEqual(live['status'], 'running')
+        self.assertNotIn('failureReason', live)
+
+    def test_regulation_evidence_stops_at_its_time_budget(self):
+        """The 29-page table sweep is sequential, so a slow provider kept one analysis
+        alive past the worker that carried it. Past the budget it returns what it has."""
+        module = self.application_module
+        with patch.object(module, 'REGULATION_EVIDENCE_TIME_BUDGET_SECONDS', -1), \
+                patch.object(module, '_run_land_json_stage') as stage:
+            result = module._extract_full_regulation_evidence(
+                {'name': 'اشتراطات1.pdf', 'context': 'نسبة البناء 60%', 'table_pages': []},
+                {'plot_number': '9991'})
+        stage.assert_not_called()
+        self.assertEqual(result['evidence'], [])
+        self.assertEqual(len(result['warnings']), 1)
+        self.assertIn('زمنه المتاح', result['warnings'][0])
+
+    def test_land_poll_timeout_names_a_reason_instead_of_unknown(self):
+        """The client used to fall through with the last 'running' payload, so the console
+        said 'rejected unknown' and the screen showed a bare failure."""
+        index_source = read_frontend_text()
+        self.assertIn("failureReason: 'analysis_timeout'", index_source)
+        self.assertIn('land.analysis_unfinished', index_source)
+        assets = os.path.join(os.path.dirname(os.path.abspath(self.application_module.__file__)),
+                              'assets', 'i18n')
+        for name in ('01_dict_ar.js', '02_dict_en.js'):
+            with open(os.path.join(assets, name), encoding='utf-8') as handle:
+                self.assertIn('"land.analysis_unfinished"', handle.read(), name)
+
     def test_land_prompt_forbids_ai_written_approved_area_and_demands_narrative(self):
         source = read_module_source('app.py')
         self.assertNotIn('"approved_financial_area_sqm": null', source)

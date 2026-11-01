@@ -23,17 +23,81 @@ def _read_land_job(tenant_id, job_id):
     return _read_job('.land_jobs', tenant_id, job_id)
 
 
+# The analysis runs in a daemon thread owned by a Gunicorn worker, and that
+# worker is recycled at --max-requests without the thread being told. The job
+# file then froze at "running" while the browser polled it to its own 12-minute
+# deadline, and the rejection surfaced as "unknown". A heartbeat keeps the lease
+# fresh only while the thread is alive, so a lease nobody refreshes means the
+# worker is gone and the poller can say so at once.
+LAND_JOB_HEARTBEAT_SECONDS = max(5, int(os.environ.get('LAND_JOB_HEARTBEAT_SECONDS') or 15))
+LAND_JOB_STALE_SECONDS = max(LAND_JOB_HEARTBEAT_SECONDS * 3,
+                             int(os.environ.get('LAND_JOB_STALE_SECONDS') or 90))
+LAND_JOB_INTERRUPTED_MESSAGE = (
+    'توقف تحليل الأرض قبل اكتماله بسبب إعادة تشغيل الخادم، فلم يُعتمد أي حقل ولم تتغير البيانات.')
+
+
+def _land_job_running(tenant_id, job_id):
+    _write_land_job(tenant_id, job_id, {
+        'status': 'running',
+        'success': True,
+        'message': 'جاري تحليل المستندات والاشتراطات...',
+    })
+
+
+def _land_job_heartbeat(tenant_id, job_id, interval, stopped):
+    while not stopped.wait(interval):
+        try:
+            _land_job_running(tenant_id, job_id)
+        except Exception as exc:
+            print(f'[LAND JOB HEARTBEAT] stopped for {job_id}: {exc}')
+            return
+
+
+def _land_job_current(tenant_id, job_id, job):
+    """Report a job whose worker died instead of leaving it running forever.
+
+    The lease is the only signal that survives a killed daemon thread: the
+    worker can do nothing on its way out, so the last heartbeat is all that
+    separates "still analysing" from "nobody is analysing this". The failed
+    state is written back so every open tab reads the same answer.
+    """
+    if str(job.get('status') or '') not in ('queued', 'running'):
+        return job
+    try:
+        age = time.time() - float(job.get('updatedAt') or 0)
+    except (TypeError, ValueError):
+        age = LAND_JOB_STALE_SECONDS + 1
+    if age <= LAND_JOB_STALE_SECONDS:
+        return job
+    interrupted = {
+        'status': 'failed',
+        'success': False,
+        'message': 'توقف تحليل الأرض قبل اكتماله',
+        'error': LAND_JOB_INTERRUPTED_MESSAGE,
+        'failureReason': 'job_interrupted',
+        'httpStatus': 503,
+    }
+    try:
+        _write_land_job(tenant_id, job_id, interrupted)
+    except Exception as exc:
+        print(f'[LAND JOB] could not record the interruption of {job_id}: {exc}')
+    return interrupted
+
+
 def _land_job_worker(app, tenant_id, data, job_id):
     """Run the long land extraction off the HTTP request so the hosting proxy cannot 404 it."""
     with app.app_context():
         # The stop button reaches this analysis through the run registry; the
         # thread dies with the worker, so the handle cannot leak.
         run_control.bind_run(job_id, tenant_id)
-        _write_land_job(tenant_id, job_id, {
-            'status': 'running',
-            'success': True,
-            'message': 'جاري تحليل المستندات والاشتراطات...',
-        })
+        lease_stop = threading.Event()
+        heartbeat = threading.Thread(
+            target=_land_job_heartbeat,
+            args=(tenant_id, job_id, LAND_JOB_HEARTBEAT_SECONDS, lease_stop),
+            daemon=True,
+        )
+        heartbeat.start()
+        _land_job_running(tenant_id, job_id)
         try:
             with app.test_request_context('/api/extract-croquis', method='POST', json=data):
                 g.tenant_id = tenant_id
@@ -50,26 +114,34 @@ def _land_job_worker(app, tenant_id, data, job_id):
                        or payload.get('error_code') == run_control.CANCELLED_ERROR_CODE)
             status = ('cancelled' if stopped else
                       ('completed' if payload.get('success') else 'failed'))
-            _write_land_job(tenant_id, job_id, {
+            final = {
                 **payload,
                 **(run_control.cancelled_job_patch() if stopped else {}),
                 'status': status,
                 'httpStatus': http_status,
                 'message': (run_control.CANCELLED_MESSAGE if stopped else
                             (payload.get('error') or 'اكتمل التحليل')),
-            })
+            }
         except Exception as exc:
             cancelled = (run_control.current_run_cancelled() or
                          getattr(exc, 'error_code', None) == run_control.CANCELLED_ERROR_CODE or
                          getattr(exc, 'cancelled', False))
-            _write_land_job(tenant_id, job_id, {
+            final = {
                 'status': 'cancelled' if cancelled else 'failed',
                 'success': False,
                 'error': run_control.CANCELLED_MESSAGE if cancelled else f'حدث خطأ في قراءة ملف الكروكي: {exc}',
                 'error_code': run_control.CANCELLED_ERROR_CODE if cancelled else 'LAND_CROQUIS_FAILED',
                 'failureReason': 'cancelled' if cancelled else 'job_failed',
                 'cancelled': cancelled,
-            })
+            }
+        # The lease must stop before the result is written: a beat landing after
+        # it would leave a finished job reading as "running" forever again.
+        lease_stop.set()
+        heartbeat.join(timeout=LAND_JOB_HEARTBEAT_SECONDS)
+        try:
+            _write_land_job(tenant_id, job_id, final)
+        except Exception as write_error:
+            print(f'[LAND JOB] could not persist the result of {job_id}: {write_error}')
 
 
 def _land_document_key(filename, provided=''):
@@ -156,7 +228,7 @@ def api_extract_croquis_job(job_id):
             'error': 'مهمة التحليل غير موجودة',
             'failureReason': 'job_not_found',
         }), 404
-    return jsonify(_public_job(job, job_id, g.tenant_id))
+    return jsonify(_public_job(_land_job_current(g.tenant_id, job_id, job), job_id, g.tenant_id))
 
 
 def _execute_extract_croquis():

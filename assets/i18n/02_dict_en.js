@@ -967,6 +967,7 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "land.analyzed_done": "Analysed and updated {n} fields. Review the results before approving.",
   "land.no_fields_updated": "No fields were updated: {reason}",
   "land.analysis_error": "An error occurred while analysing the files: {err}",
+  "land.analysis_unfinished": "Waiting for the land analysis ended before it completed, and no field was changed.",
   "land.boundary_len": "{n}m long",
   "training.actions_done": "{n} actions executed successfully",
   "slide.opacity_set": "Element opacity set to {n}%",

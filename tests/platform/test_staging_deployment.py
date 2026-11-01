@@ -47,6 +47,15 @@ class StagingDeploymentRegressionTests(unittest.TestCase):
             source = (ROOT / name).read_text(encoding='utf-8')
             self.assertIn('--preload', source, name)
 
+    def test_worker_recycling_cannot_kill_a_long_land_job_every_few_minutes(self):
+        """A land analysis outlives 200 requests on staging, and the recycled worker took
+        its daemon thread with it: the job froze at "running" until the browser gave up."""
+        for name in ('start_server-staging.sh', 'start_server.sh'):
+            source = (ROOT / name).read_text(encoding='utf-8')
+            match = re.search(r'--max-requests\s+(\d+)', source)
+            self.assertIsNotNone(match, name)
+            self.assertGreaterEqual(int(match.group(1)), 1000, name)
+
     def test_old_flat_copy_does_not_register_the_endpoint_again(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

@@ -158,6 +158,9 @@ cd "$APP_DIR"
 # fd 8 and fd 9 protect startup and deployment; daemons must inherit neither.
 # Closing them for gunicorn keeps both locks scoped to the current script run.
 # Otherwise a healthy daemon could prevent every later deployment.
+# Land and market jobs run in daemon threads of a worker, and recycling that
+# worker killed them mid-analysis: the job froze at "running" while the browser
+# waited. Recycling stays for memory hygiene, but not every few minutes.
 setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --pid "$APP_DIR/.staging-gunicorn-$SELECTED_PORT.pid" \
   --preload \
@@ -165,8 +168,8 @@ setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --threads 4 \
   --timeout 300 \
   --graceful-timeout 30 \
-  --max-requests 200 \
-  --max-requests-jitter 50 \
+  --max-requests 2000 \
+  --max-requests-jitter 200 \
   --capture-output \
   --access-logfile "$APP_DIR/server.log" \
   --error-logfile "$APP_DIR/server.log" \

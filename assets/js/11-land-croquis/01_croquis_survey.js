@@ -104,6 +104,18 @@
             toast(WFT('gen.job_cancelled', 'تم إيقاف المهمة'));
             return;
           }
+          // The loop can run out of time while the job still reads as running.
+          // Falling through left the rejection logged as "unknown", which names
+          // nothing the reader can act on and hid a worker recycled mid-analysis.
+          const unfinishedStatus = String((res && res.status) || '');
+          if (!res || (!res.extractedData && !res.failureReason
+            && (unfinishedStatus === 'queued' || unfinishedStatus === 'running'))) {
+            res = {
+              success: false,
+              failureReason: 'analysis_timeout',
+              error: WFT('land.analysis_unfinished', 'توقف انتظار تحليل الأرض قبل اكتماله، ولم يتغير أي حقل.')
+            };
+          }
         }
         updateLoaderStep('تم تجهيز الموقع والخرائط؛ جاري قراءة المستندات والاشتراطات...');
         if (res.success && res.extractedData) {

@@ -123,6 +123,9 @@ fi
 log "Starting gunicorn on 127.0.0.1:$SELECTED_PORT"
 
 cd "$APP_DIR"
+# Land and market jobs run in daemon threads of a worker, and recycling that
+# worker killed them mid-analysis: the job froze at "running" while the browser
+# waited. Recycling stays for memory hygiene, but not every few minutes.
 setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --pid "$APP_DIR/.prod-gunicorn-$SELECTED_PORT.pid" \
   --preload \
@@ -130,8 +133,8 @@ setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --threads 2 \
   --timeout 300 \
   --graceful-timeout 30 \
-  --max-requests 200 \
-  --max-requests-jitter 50 \
+  --max-requests 2000 \
+  --max-requests-jitter 200 \
   --capture-output \
   --access-logfile "$APP_DIR/server.log" \
   --error-logfile "$APP_DIR/server.log" \
