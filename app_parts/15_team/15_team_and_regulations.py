@@ -552,13 +552,18 @@ LAND_FACTS_MAX_TOKENS = int(os.environ.get('LAND_FACTS_MAX_TOKENS', '2500'))
 LAND_FACTS_MIN_TOKENS = int(os.environ.get('LAND_FACTS_MIN_TOKENS', '1200'))
 REGULATION_EVIDENCE_MAX_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MAX_TOKENS', '4000'))
 REGULATION_EVIDENCE_MIN_TOKENS = int(os.environ.get('REGULATION_EVIDENCE_MIN_TOKENS', '1500'))
-# The full two-file extraction is a chain of sequential vision stages — text
-# chunks plus table batches — and every stage may retry a truncated answer.
-# Nothing bounded that chain, so one slow run could outlive the hosting worker
-# carrying it: Gunicorn recycles the worker at --max-requests and the daemon
-# thread dies with it. A wall-clock budget closes the chain with the evidence
-# already collected and says so in warnings, so a degraded answer still lands.
+# The full two-file extraction is a chain of vision stages — text chunks plus
+# table batches — and every stage may retry a truncated answer. The stages run
+# in a small thread pool so one analysis does not wait for a dozen provider
+# calls in a row; the wall-clock budget still closes the chain with the
+# evidence already collected and says so in warnings.
 REGULATION_EVIDENCE_TIME_BUDGET_SECONDS = int(os.environ.get('REGULATION_EVIDENCE_TIME_BUDGET_SECONDS', '300'))
+# Bounded parallelism: every extra call also reserves its max_tokens against the
+# tenant's provider credit, so the pool stays small enough to fit one wallet.
+REGULATION_EVIDENCE_PARALLELISM = max(1, int(os.environ.get('REGULATION_EVIDENCE_PARALLELISM', '3')))
+# PyMuPDF is not safe to drive from several threads at once; rendering is local
+# and quick, so the stages share one lock while their provider calls overlap.
+_REGULATION_RENDER_LOCK = threading.Lock()
 # When enabled, the verified rules digest (rules/*.json) supplies regulation
 # values deterministically and the per-request PDF evidence extraction is
 # skipped. Set REGULATION_DIGEST=0 to restore the legacy extraction path.
@@ -1023,14 +1028,7 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
     chunks = split_regulation_context(context)
     if not chunks and table_pages:
         chunks = ['']
-    evidence = []
-    uncertainties = []
-    warnings = []
     deadline = time.monotonic() + REGULATION_EVIDENCE_TIME_BUDGET_SECONDS
-    budget_spent = False
-
-    def result():
-        return {'evidence': evidence, 'uncertainties': uncertainties, 'warnings': warnings}
 
     base_prompt = (
         "أنت مستخرج أدلة تنظيمية من ملف واحد كامل فقط. أعد JSON فقط بهذا الشكل: "
@@ -1043,17 +1041,17 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
     )
 
     def run_stage(stage_name, context_chunk, table_batch, stage_note):
-        nonlocal evidence, uncertainties, budget_spent
+        """Return one stage's own evidence; the pool merges results in task order."""
+        stage_evidence = []
+        stage_uncertainties = []
+        stage_warnings = []
         if time.monotonic() > deadline:
-            if not budget_spent:
-                budget_spent = True
-                warnings.append(
-                    f'تعذر استخراج بقية أدلة {source_name}: تجاوز التحليل زمنه المتاح، '
-                    'فاعتمدت النتائج المستخرجة قبل انتهائه.')
-            return False
-        parts, render_warnings = render_regulation_table_pages(
-            table_batch, dpi=REGULATION_EVIDENCE_TABLE_DPI)
-        warnings.extend(render_warnings)
+            return {'evidence': stage_evidence, 'uncertainties': stage_uncertainties,
+                    'warnings': stage_warnings, 'skipped': True}
+        with _REGULATION_RENDER_LOCK:
+            parts, render_warnings = render_regulation_table_pages(
+                table_batch, dpi=REGULATION_EVIDENCE_TABLE_DPI)
+        stage_warnings.extend(render_warnings)
         user_content = [{
             'type': 'text',
             'text': base_prompt + stage_note
@@ -1061,31 +1059,33 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
                     + json.dumps(site_facts, ensure_ascii=False)
                     + '\nجزء المحتوى الحالي:\n' + context_chunk
         }] + parts
-        result, _cap, error = _run_land_json_stage(
+        stage_result, _cap, error = _run_land_json_stage(
             stage_name, base_prompt, user_content,
             REGULATION_EVIDENCE_MAX_TOKENS, REGULATION_EVIDENCE_MIN_TOKENS,
             REGULATION_EVIDENCE_MAX_TOKENS * 2,
             usage_ctx=usage_ctx,
         )
         if error:
-            warnings.append(f'تعذر استخراج جزء من أدلة {source_name}: {error}')
-            return True
-        values = result.get('evidence') if isinstance(result, dict) else []
+            stage_warnings.append(f'تعذر استخراج جزء من أدلة {source_name}: {error}')
+            return {'evidence': stage_evidence, 'uncertainties': stage_uncertainties,
+                    'warnings': stage_warnings, 'skipped': False}
+        values = stage_result.get('evidence') if isinstance(stage_result, dict) else []
         if isinstance(values, list):
-            evidence.extend(item for item in values if isinstance(item, dict))
-        uncertainty_values = result.get('uncertainties') if isinstance(result, dict) else []
+            stage_evidence.extend(item for item in values if isinstance(item, dict))
+        uncertainty_values = stage_result.get('uncertainties') if isinstance(stage_result, dict) else []
         if isinstance(uncertainty_values, list):
-            uncertainties.extend(uncertainty_values)
-        return True
+            stage_uncertainties.extend(uncertainty_values)
+        return {'evidence': stage_evidence, 'uncertainties': stage_uncertainties,
+                'warnings': stage_warnings, 'skipped': False}
 
+    tasks = []
     has_page_metadata = any(regulation_context_page_numbers(chunk) for chunk in chunks)
     if not has_page_metadata:
         if context.strip():
             for chunk_index, context_chunk in enumerate(chunks):
-                if not run_stage(
-                        f'{source_name}-text-{chunk_index + 1}', context_chunk, [],
-                        f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.'):
-                    return result()
+                tasks.append((
+                    f'{source_name}-text-{chunk_index + 1}', context_chunk, [],
+                    f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.'))
         table_batch_size = REGULATION_EVIDENCE_TABLE_BATCH_SIZE
         if table_batch_size > 0:
             table_batches = [
@@ -1095,38 +1095,56 @@ def _extract_full_regulation_evidence(source, site_facts, usage_ctx=None):
         else:
             table_batches = [table_pages]
         for batch_index, table_batch in enumerate(table_batches):
-            if not run_stage(
-                    f'{source_name}-tables-{batch_index + 1}', '', table_batch,
-                    '\nهذه دفعة جداول من المحتوى الكامل للملف.'):
-                return result()
-        return result()
-
-    for chunk_index, context_chunk in enumerate(chunks):
-        chunk_pages = regulation_context_page_numbers(context_chunk)
-        chunk_tables = [
-            entry for entry in table_pages
-            if not chunk_pages or entry.get('page') in chunk_pages
-        ]
-        table_batch_size = REGULATION_EVIDENCE_TABLE_BATCH_SIZE
-        if table_batch_size > 0:
-            table_batches = [
-                chunk_tables[start:start + table_batch_size]
-                for start in range(0, len(chunk_tables), table_batch_size)
+            tasks.append((f'{source_name}-tables-{batch_index + 1}', '', table_batch,
+                          '\nهذه دفعة جداول من المحتوى الكامل للملف.'))
+    else:
+        for chunk_index, context_chunk in enumerate(chunks):
+            chunk_pages = regulation_context_page_numbers(context_chunk)
+            chunk_tables = [
+                entry for entry in table_pages
+                if not chunk_pages or entry.get('page') in chunk_pages
             ]
-        else:
-            table_batches = [chunk_tables]
-        if not table_batches:
-            table_batches = [[]]
-        for batch_index, table_batch in enumerate(table_batches):
-            context_for_stage = context_chunk if batch_index == 0 else ''
-            stage_note = f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.'
-            if batch_index:
-                stage_note += '\nهذه دفعة جداول إضافية للجزء نفسه؛ استخرج منها ما لم يظهر في الدفعة السابقة.'
-            if not run_stage(
+            table_batch_size = REGULATION_EVIDENCE_TABLE_BATCH_SIZE
+            if table_batch_size > 0:
+                table_batches = [
+                    chunk_tables[start:start + table_batch_size]
+                    for start in range(0, len(chunk_tables), table_batch_size)
+                ]
+            else:
+                table_batches = [chunk_tables]
+            if not table_batches:
+                table_batches = [[]]
+            for batch_index, table_batch in enumerate(table_batches):
+                context_for_stage = context_chunk if batch_index == 0 else ''
+                stage_note = f'\nهذا الجزء {chunk_index + 1} من {len(chunks)} من المحتوى الكامل للملف.'
+                if batch_index:
+                    stage_note += '\nهذه دفعة جداول إضافية للجزء نفسه؛ استخرج منها ما لم يظهر في الدفعة السابقة.'
+                tasks.append((
                     f'{source_name}-part-{chunk_index + 1}-tables-{batch_index + 1}',
-                    context_for_stage, table_batch, stage_note):
-                return result()
-    return result()
+                    context_for_stage, table_batch, stage_note))
+
+    evidence = []
+    uncertainties = []
+    warnings = []
+    if tasks:
+        workers = max(1, min(REGULATION_EVIDENCE_PARALLELISM, len(tasks)))
+        if workers == 1:
+            stage_results = [run_stage(*task) for task in tasks]
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                stage_results = list(executor.map(lambda task: run_stage(*task), tasks))
+        budget_warned = False
+        for stage_result in stage_results:
+            evidence.extend(stage_result['evidence'])
+            uncertainties.extend(stage_result['uncertainties'])
+            warnings.extend(stage_result['warnings'])
+            if stage_result['skipped'] and not budget_warned:
+                budget_warned = True
+                warnings.append(
+                    f'تعذر استخراج بقية أدلة {source_name}: تجاوز التحليل زمنه المتاح، '
+                    'فاعتمدت النتائج المستخرجة قبل انتهائه.')
+    return {'evidence': evidence, 'uncertainties': uncertainties, 'warnings': warnings}
 
 
 def render_regulation_table_pages(table_pages, dpi=200):
@@ -1191,9 +1209,12 @@ PDF_VISION_ROTATION_DIRECTION_MIN_SCORE_GAP = float(os.environ.get('PDF_VISION_R
 # The ceiling cannot simply be raised either: OpenRouter *reserves* max_tokens against the account
 # balance, so an over-large cap is refused with 402 even when the real answer would be short.
 # _call_land_analysis_model() walks the cap back down when that happens.
-LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '16000'))
+# Owner decision (2026-11-01): a real one-page croquis answered with exactly 16000 tokens at the
+# old cap, so the whole main call was re-run at the higher cap — 20000 is now the first attempt,
+# and the ceiling keeps one higher step available if it still truncates.
+LAND_ANALYSIS_MAX_TOKENS = int(os.environ.get('LAND_ANALYSIS_MAX_TOKENS', '20000'))
 LAND_ANALYSIS_MIN_TOKENS = int(os.environ.get('LAND_ANALYSIS_MIN_TOKENS', '6000'))
-LAND_ANALYSIS_TRUNCATION_CEILING = int(os.environ.get('LAND_ANALYSIS_TRUNCATION_CEILING', '20000'))
+LAND_ANALYSIS_TRUNCATION_CEILING = int(os.environ.get('LAND_ANALYSIS_TRUNCATION_CEILING', '27000'))
 # Land/croquis extraction runs on Gemini 3.8 Flash at high reasoning effort
 # (owner decision 2026-11-01), independently of the shared VISION_MODEL.
 LAND_ANALYSIS_MODEL = os.environ.get('LAND_ANALYSIS_MODEL') or 'google/gemini-3.8-flash'

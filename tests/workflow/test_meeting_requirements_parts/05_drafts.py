@@ -1350,8 +1350,12 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         """OpenRouter reserves max_tokens against the balance, so an over-large cap is refused
         with 402 even when the real answer would be short."""
         module = self.application_module
-        # A default the account can actually pay for; the retry only ever walks the cap down.
-        self.assertLessEqual(module.LAND_ANALYSIS_MAX_TOKENS, 16000)
+        # Owner decision (2026-11-01): a real one-page croquis answered with exactly
+        # 16000 tokens at the old cap, so every such analysis re-ran the whole main
+        # call. 20000 is the first attempt and the ceiling keeps one higher step.
+        self.assertEqual(module.LAND_ANALYSIS_MAX_TOKENS, 20000)
+        self.assertGreater(module.LAND_ANALYSIS_TRUNCATION_CEILING,
+                           module.LAND_ANALYSIS_MAX_TOKENS)
 
         refusal = {'error': {'code': 402, 'message': (
             'This request requires more credits, or fewer max_tokens. '
@@ -1584,6 +1588,39 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertEqual(result['evidence'], [])
         self.assertEqual(len(result['warnings']), 1)
         self.assertIn('زمنه المتاح', result['warnings'][0])
+
+    def test_regulation_evidence_stages_run_in_parallel(self):
+        """The regulation sweep is a dozen provider calls in a row. Waiting for each
+        one added its latency up; the stages now overlap in a bounded pool while
+        their evidence still merges in task order."""
+        import threading
+        module = self.application_module
+        lock = threading.Lock()
+        active = {'now': 0, 'peak': 0}
+        finished = []
+
+        def fake_stage(stage_name, system_prompt, user_content, *args, **kwargs):
+            with lock:
+                active['now'] += 1
+                active['peak'] = max(active['peak'], active['now'])
+            time.sleep(0.15)
+            with lock:
+                active['now'] -= 1
+                finished.append(stage_name)
+            return {'evidence': [{'field': stage_name}], 'uncertainties': []}, 4000, ''
+
+        with patch.object(module, 'REGULATION_EVIDENCE_PARALLELISM', 3), \
+                patch.object(module, 'split_regulation_context',
+                             return_value=['قاعدة ' + 'نص ' * 200] * 4), \
+                patch.object(module, '_run_land_json_stage', side_effect=fake_stage):
+            result = module._extract_full_regulation_evidence(
+                {'name': 'اشتراطات1.pdf', 'context': 'محتوى', 'table_pages': []},
+                {'plot_number': '9991'})
+        self.assertGreater(active['peak'], 1, 'stages must overlap, not run one by one')
+        self.assertEqual(len(result['evidence']), len(finished))
+        self.assertEqual([item['field'] for item in result['evidence']],
+                         [f'اشتراطات1.pdf-text-{index + 1}' for index in range(len(finished))])
+        self.assertEqual(result['warnings'], [])
 
     def test_land_poll_timeout_names_a_reason_instead_of_unknown(self):
         """The client used to fall through with the last 'running' payload, so the console
