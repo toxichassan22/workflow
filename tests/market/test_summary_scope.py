@@ -393,11 +393,11 @@ class SummaryScopeFrontendTests(unittest.TestCase):
         self.assertIn('id="marketSummaryPeriodTo"', text)
         self.assertIn('summaryPeriod: state.summary_period', text)
 
-    def test_summary_research_depth_control_is_wired(self):
+    def test_summary_research_depth_control_is_removed(self):
         text = self.frontend
-        self.assertIn('id="marketSummaryResearchDepth"', text)
+        self.assertNotIn('marketSummaryResearchDepth', text)
+        self.assertIn("state.summary_research_depth = 'full';", text)
         self.assertIn('summaryResearchDepth: state.summary_research_depth', text)
-        self.assertIn('summary_research_depth', text)
 
 
 if __name__ == '__main__':

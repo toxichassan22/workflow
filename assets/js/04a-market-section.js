@@ -15,6 +15,19 @@
       return wfTr(text);
     }
 
+    function autoGrowMarketStudyField(field) {
+      if (!field || !field.style || typeof field.scrollHeight !== 'number') return;
+      if (field.offsetParent === null) return;
+      field.style.height = 'auto';
+      field.style.height = field.scrollHeight + 'px';
+    }
+
+    function autoGrowMarketStudyFields() {
+      if (!document.querySelectorAll) return;
+      document.querySelectorAll('#section-market-study textarea.market-auto-grow')
+        .forEach(autoGrowMarketStudyField);
+    }
+
     function addMarketStudySection(form, before) {
       const div = document.createElement('div');
       div.className = 'tenant-form-section';
@@ -25,10 +38,10 @@
       body.className = 'market-study-body';
       body.innerHTML = `
         <div class="market-study-tabs" id="marketStudyTabs" role="tablist" aria-label="دراسة السوق">
-          <button type="button" class="market-study-tab active" id="marketCompetitorsTab" data-market-study-tab="competitors" role="tab" aria-controls="marketCompetitorsPanel" aria-selected="true" data-section-lock-ignore>المنافسون</button>
-          <button type="button" class="market-study-tab" id="marketMarketTab" data-market-study-tab="market" role="tab" aria-controls="marketMarketPanel" aria-selected="false" data-section-lock-ignore>السوق</button>
+          <button type="button" class="market-study-tab" id="marketCompetitorsTab" data-market-study-tab="competitors" role="tab" aria-controls="marketCompetitorsPanel" aria-selected="false" data-section-lock-ignore="1">المنافسون</button>
+          <button type="button" class="market-study-tab active" id="marketMarketTab" data-market-study-tab="market" role="tab" aria-controls="marketMarketPanel" aria-selected="true" data-section-lock-ignore="1">السوق</button>
         </div>
-        <div class="market-study-tab-panel" id="marketCompetitorsPanel" data-market-study-panel="competitors" role="tabpanel" aria-labelledby="marketCompetitorsTab">
+        <div class="market-study-tab-panel market-study-tab-panel-off" id="marketCompetitorsPanel" data-market-study-panel="competitors" role="tabpanel" aria-labelledby="marketCompetitorsTab" aria-hidden="true">
         <div class="market-block">
           <h4>نطاق الدراسة</h4>
           <div class="market-grid">
@@ -115,73 +128,81 @@
           <div id="marketCompetitorPriceBenchmarks" hidden></div>
         </div>
         </div>
-        <div class="market-study-tab-panel market-study-tab-panel-off" id="marketMarketPanel" data-market-study-panel="market" role="tabpanel" aria-labelledby="marketMarketTab" aria-hidden="true">
-        <div class="market-block">
-          <h4>الملخص التنفيذي لسوق المشروع</h4>
-          <div style="margin-top:12px">
-            <div><label data-i18n="market.summary_scope">نطاق ملخص السوق</label></div>
-            <div id="marketSummaryScopeCities" style="margin-top:8px"></div>
-            <div class="market-actions" style="margin-top:8px">
-              <button type="button" class="btn ghost" id="marketSummaryScopeAddCityBtn" data-i18n="market.summary_scope_add_city" onclick="addMarketSummaryScopeCity()">إضافة مدينة</button>
-            </div>
+        <div class="market-study-tab-panel" id="marketMarketPanel" data-market-study-panel="market" role="tabpanel" aria-labelledby="marketMarketTab" aria-hidden="false">
+          <div class="market-study-context" id="marketStudyContext">
+            <div><span>المدينة</span><strong id="marketContextCity">—</strong></div>
+            <div><span>الحي</span><strong id="marketContextDistrict">—</strong></div>
+            <div><span>المصادر</span><strong id="marketContextSources">0</strong></div>
+            <div><span data-i18n="market.context_updated">آخر تحديث</span><strong id="marketContextUpdated">—</strong></div>
           </div>
-          <div class="market-grid" style="margin-top:12px">
-            <div><label data-i18n="market.summary_depth">عمق البحث</label>
-              <select id="marketSummaryResearchDepth">
-                <option value="full" data-i18n="market.summary_depth_full">كامل</option>
-                <option value="quick" data-i18n="market.summary_depth_quick">سريع</option>
+          <section class="market-study-decision" id="marketStudyDecisionBlock">
+            <div class="market-study-section-head"><div><span class="market-study-kicker">القرار</span><h4>تصنيف القرار</h4></div></div>
+            <div class="market-study-field"><label for="marketDecision">تصنيف القرار</label>
+              <select id="marketDecision">
+                <option value="">-- اختر القيمة --</option>
+                <option>فرصة قوية</option>
+                <option>فرصة واعدة بشروط</option>
+                <option>فرصة متوسطة</option>
+                <option>فرصة مرتفعة المخاطر</option>
+                <option>البيانات غير كافية</option>
               </select>
             </div>
-            <div><label>فترة البيانات</label>
-              <select id="marketSummaryPeriod">
-                <option value="12m">آخر 12 شهرًا</option>
-                <option value="24m">آخر 24 شهرًا</option>
-                <option value="3y">آخر 3 سنوات</option>
-                <option value="5y">آخر 5 سنوات</option>
-                <option value="custom">فترة مخصصة</option>
-              </select>
+            <div class="market-study-field"><label for="marketDisclaimer">إخلاء المسؤولية</label>
+              <textarea id="marketDisclaimer" rows="1" class="market-auto-grow"></textarea>
             </div>
-            <div id="marketSummaryCustomPeriodWrap" hidden>
-              <label>من تاريخ</label><input id="marketSummaryPeriodFrom" type="date">
-              <label style="margin-top:8px">إلى تاريخ</label><input id="marketSummaryPeriodTo" type="date">
+          </section>
+          <nav class="market-study-toc" id="marketStudyToc" aria-label="محاور دراسة السوق" data-i18n-aria="market.toc_label">
+            <a href="#marketStudySummaryBlock">الملخص</a>
+            ${MARKET_STUDY_SUMMARY_SECTIONS.map((item, index) => '<a href="#market-axis-' + item.key + '">' + String(index + 1).padStart(2, '0') + ' ' + escapeHtml(item.label) + '</a>').join('')}
+            <a href="#marketStudySwotBlock">SWOT</a>
+            <a href="#marketStudySourcesBlock">المصادر</a>
+            <button type="button" class="market-study-toc-toggle" id="marketStudyTocToggle" data-section-lock-ignore="1" data-i18n="market.collapse_all">طي الكل</button>
+          </nav>
+          <section class="market-study-summary" id="marketStudySummaryBlock">
+            <div class="market-study-section-head"><div><span class="market-study-kicker">الملخص التنفيذي</span><h4>الملخص التنفيذي لسوق المشروع</h4></div></div>
+            <div class="market-study-generate">
+              <div class="market-study-scope">
+                <div class="market-study-scope-head"><span data-i18n="market.generation_scope">نطاق التوليد</span><button type="button" class="btn ghost small" id="marketSummaryScopeAddCityBtn" data-i18n="market.summary_scope_add_city" onclick="addMarketSummaryScopeCity()">إضافة مدينة</button></div>
+                <div id="marketSummaryScopeCities"></div>
+              </div>
+              <div class="market-study-generate-row">
+                <div class="market-study-field"><label for="marketSummaryPeriod">فترة البيانات</label>
+                  <select id="marketSummaryPeriod">
+                    <option value="12m">آخر 12 شهرًا</option>
+                    <option value="24m">آخر 24 شهرًا</option>
+                    <option value="3y">آخر 3 سنوات</option>
+                    <option value="5y">آخر 5 سنوات</option>
+                    <option value="custom">فترة مخصصة</option>
+                  </select>
+                </div>
+                <div id="marketSummaryCustomPeriodWrap" hidden>
+                  <label>من تاريخ</label><input id="marketSummaryPeriodFrom" type="date">
+                  <label style="margin-top:8px">إلى تاريخ</label><input id="marketSummaryPeriodTo" type="date">
+                </div>
+                <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
+                <button type="button" class="btn ghost" id="marketResumeSummaryBtn" onclick="resumeMarketSummaryJob()" hidden>استكمال المهمة</button>
+                <button type="button" class="btn ghost" id="marketSummaryTraceBtn" hidden>تنزيل سجل البحث</button>
+              </div>
+              <div id="marketSummaryFailure"></div>
+              <div id="marketSummaryCompare" hidden></div>
             </div>
-          </div>
-          <div class="market-actions" style="margin-top:12px">
-            <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
-            <button type="button" class="btn ghost" id="marketResumeSummaryBtn" onclick="resumeMarketSummaryJob()" hidden>استكمال المهمة</button>
-          </div>
-          <div id="marketSummaryFailure"></div>
-          <button type="button" class="btn ghost" id="marketSummaryTraceBtn" hidden>تنزيل سجل البحث</button>
-          <div id="marketSummaryCompare" hidden></div>
-          <div id="marketSummaryFields"></div>
-          <h4 style="margin-top:18px">تحليل SWOT</h4>
-          <div id="marketSwotFields"></div>
-          <div style="margin-top:12px"><label>تصنيف القرار</label>
-            <select id="marketDecision">
-              <option value="">-- اختر القيمة --</option>
-              <option>فرصة قوية</option>
-              <option>فرصة واعدة بشروط</option>
-              <option>فرصة متوسطة</option>
-              <option>فرصة مرتفعة المخاطر</option>
-              <option>البيانات غير كافية</option>
-            </select>
-          </div>
-          <div style="margin-top:12px"><label>إخلاء المسؤولية</label>
-            <textarea id="marketDisclaimer" rows="2"></textarea>
-          </div>
-        </div>
-        <div class="market-block">
-          <h4>ملخص دراسة سوق العمل</h4>
-          <textarea id="marketStudyOneBlockSummary" rows="18" readonly></textarea>
-        </div>
-        <div class="market-block">
-          <h4>المصادر</h4>
-          <div class="market-actions">
-            <button type="button" class="btn ghost" onclick="addMarketSourceRow()">إضافة مصدر</button>
-          </div>
-          <div id="marketSourcesTabs" class="market-source-tabs" role="tablist"></div>
-          <div id="marketSourcesPanels" class="market-source-panels"></div>
-        </div>
+            <textarea id="marketStudyOneBlockSummary" rows="1" class="market-auto-grow market-study-one-block" aria-label="الملخص التنفيذي لسوق المشروع"></textarea>
+          </section>
+          <section class="market-study-axes" id="marketStudyAxesBlock">
+            <div class="market-study-section-head"><div><span class="market-study-kicker" data-i18n="market.axes_title">محاور التحليل</span><h4 data-i18n="market.axes_title">محاور التحليل</h4></div><span class="market-study-count" data-i18n="market.axes_count">${MARKET_STUDY_SUMMARY_SECTIONS.length} محاور</span></div>
+            <div id="marketSummaryFields"></div>
+          </section>
+          <section class="market-study-swot" id="marketStudySwotBlock">
+            <div class="market-study-section-head" id="marketStudySwotHead"><div><span class="market-study-kicker">SWOT</span><h4>تحليل SWOT</h4></div></div>
+            <div id="marketSwotFields"></div>
+          </section>
+          <section class="market-study-sources" id="marketStudySourcesBlock">
+            <div class="market-study-section-head"><div><span class="market-study-kicker">المصادر</span><h4 data-i18n="market.sources_title">سجل المصادر</h4></div>
+              <div class="market-study-sources-actions"><span id="marketSourcesCount" class="market-study-count"></span><button type="button" class="btn ghost small" id="marketAddSourceBtn" onclick="addMarketSourceRow()">إضافة مصدر</button></div>
+            </div>
+            <div id="marketSourcesTabs" class="market-source-tabs" role="tablist"></div>
+            <div id="marketSourcesPanels" class="market-source-panels"></div>
+          </section>
         </div>
         <input type="hidden" data-key="market_study_data" data-type="text" id="marketStudyData">
       `;
@@ -191,18 +212,78 @@
       setupMarketStudyTabs(div);
       const summaryHost = document.getElementById('marketSummaryFields');
       if (summaryHost) {
-        summaryHost.innerHTML = MARKET_STUDY_SUMMARY_SECTIONS.map(item =>
-          '<div style="margin-top:12px"><label>' + item.label + '</label>' +
-          '<textarea id="marketSummary_' + item.key + '" rows="4"></textarea></div>'
+        summaryHost.innerHTML = MARKET_STUDY_SUMMARY_SECTIONS.map((item, index) =>
+          '<section class="market-axis-card" id="market-axis-' + item.key + '">' +
+            '<header class="market-axis-head">' +
+              '<span class="market-axis-num">' + String(index + 1).padStart(2, '0') + '</span>' +
+              '<label class="market-axis-title" for="marketSummary_' + item.key + '">' + item.label + '</label>' +
+              '<button type="button" class="market-axis-toggle" data-section-lock-ignore="1" data-i18n="market.collapse" aria-expanded="true">طي</button>' +
+            '</header>' +
+            '<div class="market-axis-body"><textarea id="marketSummary_' + item.key + '" rows="1" class="market-auto-grow" aria-label="' + item.label + '"></textarea></div>' +
+          '</section>'
         ).join('');
+        summaryHost.querySelectorAll('.market-axis-toggle').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const card = btn.closest('.market-axis-card');
+            const collapsed = card.classList.toggle('collapsed');
+            btn.textContent = collapsed ? WFT('market.expand', 'فتح') : WFT('market.collapse', 'طي');
+            btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            if (!collapsed) autoGrowMarketStudyFields();
+          });
+        });
       }
       const swotHost = document.getElementById('marketSwotFields');
       if (swotHost) {
         swotHost.innerHTML = MARKET_STUDY_SWOT_SECTIONS.map(item =>
-          '<div style="margin-top:12px"><label>' + item.label + '</label>' +
-          '<textarea id="marketSwot_' + item.key + '" rows="4"></textarea></div>'
+          '<article class="market-swot-card" id="market-swot-' + item.key + '">' +
+            '<label class="market-swot-title" for="marketSwot_' + item.key + '">' + item.label + '</label>' +
+            '<textarea id="marketSwot_' + item.key + '" rows="1" class="market-auto-grow" aria-label="' + item.label + '"></textarea>' +
+          '</article>'
         ).join('');
       }
+      const toc = document.getElementById('marketStudyToc');
+      if (toc) {
+        toc.addEventListener('click', event => {
+          const link = event.target.closest('a[href^="#market-axis-"]');
+          if (!link) return;
+          const card = document.querySelector(link.getAttribute('href'));
+          if (!card || !card.classList.contains('collapsed')) return;
+          card.classList.remove('collapsed');
+          const btn = card.querySelector('.market-axis-toggle');
+          if (btn) {
+            btn.textContent = WFT('market.collapse', 'طي');
+            btn.setAttribute('aria-expanded', 'true');
+          }
+          setTimeout(autoGrowMarketStudyFields, 0);
+        });
+      }
+      const tocToggle = document.getElementById('marketStudyTocToggle');
+      if (tocToggle && summaryHost) {
+        let allOpen = true;
+        tocToggle.addEventListener('click', () => {
+          allOpen = !allOpen;
+          summaryHost.querySelectorAll('.market-axis-card').forEach(card => {
+            card.classList.toggle('collapsed', !allOpen);
+            const btn = card.querySelector('.market-axis-toggle');
+            if (btn) {
+              btn.textContent = allOpen ? WFT('market.collapse', 'طي') : WFT('market.expand', 'فتح');
+              btn.setAttribute('aria-expanded', allOpen ? 'true' : 'false');
+            }
+          });
+          tocToggle.textContent = allOpen ? WFT('market.collapse_all', 'طي الكل') : WFT('market.expand_all', 'فتح الكل');
+          if (allOpen) autoGrowMarketStudyFields();
+        });
+      }
+      if (typeof window !== 'undefined' && !window.__marketStudyAutoGrowBound) {
+        window.__marketStudyAutoGrowBound = true;
+        window.addEventListener('resize', () => setTimeout(autoGrowMarketStudyFields, 120));
+      }
+      const projectSidebar = document.getElementById('tenantProjectSidebar');
+      if (projectSidebar && !projectSidebar.dataset.marketStudyAutoGrowBound) {
+        projectSidebar.dataset.marketStudyAutoGrowBound = '1';
+        projectSidebar.addEventListener('click', () => setTimeout(autoGrowMarketStudyFields, 150));
+      }
+      setTimeout(autoGrowMarketStudyFields, 250);
       ['marketCompetitorScopeMode', 'marketCompetitorRadius', 'marketDataPeriod'].forEach(id => {
         document.getElementById(id)?.addEventListener('change', () => {
           updateMarketStudyFieldVisibility();
@@ -216,13 +297,31 @@
         updateMarketStudyFieldVisibility();
         persistMarketStudyFromDom();
       });
-      document.getElementById('marketSummaryResearchDepth')?.addEventListener(
-        'change', persistMarketStudyFromDom);
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
-        document.getElementById('marketSummary_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
+        const field = document.getElementById('marketSummary_' + item.key);
+        if (!field) return;
+        field.addEventListener('input', () => {
+          persistMarketStudyFromDom();
+          autoGrowMarketStudyField(field);
+        });
       });
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
-        document.getElementById('marketSwot_' + item.key)?.addEventListener('input', persistMarketStudyFromDom);
+        const field = document.getElementById('marketSwot_' + item.key);
+        if (!field) return;
+        field.addEventListener('input', () => {
+          persistMarketStudyFromDom();
+          autoGrowMarketStudyField(field);
+        });
+      });
+      const oneBlockField = document.getElementById('marketStudyOneBlockSummary');
+      if (oneBlockField) {
+        oneBlockField.addEventListener('input', () => {
+          persistMarketStudyFromDom();
+          autoGrowMarketStudyField(oneBlockField);
+        });
+      }
+      document.getElementById('marketDisclaimer')?.addEventListener('input', event => {
+        autoGrowMarketStudyField(event.target);
       });
       document.getElementById('marketCompetitorUnitTypes')?.addEventListener('change', (
         persistMarketStudyFromDom));
@@ -268,6 +367,7 @@
         panel.classList.toggle('market-study-tab-panel-off', !active);
         panel.setAttribute('aria-hidden', active ? 'false' : 'true');
       });
+      if (activeKey === 'market') setTimeout(autoGrowMarketStudyFields, 0);
     }
 
     function setupMarketStudyTabs(root) {

@@ -550,6 +550,35 @@
       syncMarketCompetitorTypeTabs();
     }
 
+    function formatMarketSummaryFieldValue(value) {
+      const text = String(value || '').trim();
+      if (!text) return '';
+      return text.replace(/\s*•\s*/g, '\n• ').replace(/^\n+/, '').trim();
+    }
+
+    function marketSwotDisplayValue(value) {
+      if (Array.isArray(value)) {
+        return value.map(item => String(item || '').trim()).filter(Boolean)
+          .map(item => '• ' + item).join('\n');
+      }
+      const text = String(value || '').trim();
+      if (!text) return '';
+      if (text.startsWith('[') && text.endsWith(']')) {
+        const inner = text.slice(1, -1).trim();
+        if (!inner) return '';
+        const items = inner.split(/['"]\s*,\s*['"]/)
+          .map(item => item.trim().replace(/^['"]|['"]$/g, '').trim())
+          .filter(Boolean);
+        if (items.length) return items.map(item => '• ' + item).join('\n');
+        const single = inner.replace(/^['"]|['"]$/g, '').trim();
+        if (single) return '• ' + single;
+      }
+      if (text.includes('•')) {
+        return text.replace(/\s*•\s*/g, '\n• ').replace(/^\n+/, '').trim();
+      }
+      return text.replace(/\s*\n\s*/g, ' ').trim();
+    }
+
     function applyMarketStudyState(state) {
       const next = { ...emptyMarketStudyState(), ...(state || {}) };
       next.sources = mergeMarketSourceRows(
@@ -600,8 +629,6 @@
         summaryTo.value = next.summary_period_to
           || (next.summary_period ? '' : (next.data_period_to || ''));
       }
-      const researchDepth = document.getElementById('marketSummaryResearchDepth');
-      if (researchDepth) researchDepth.value = next.summary_research_depth || 'full';
       renderMarketCompetitors(next.competitors || []);
       if (typeof renderMarketTransactionBenchmarks === 'function') {
         renderMarketTransactionBenchmarks(next.transaction_benchmarks);
@@ -609,11 +636,11 @@
       const summary = marketSummaryState(next.summary);
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
         const field = document.getElementById('marketSummary_' + item.key);
-        if (field) field.value = summary[item.key] || '';
+        if (field) field.value = formatMarketSummaryFieldValue(summary[item.key] || '');
       });
       MARKET_STUDY_SWOT_SECTIONS.forEach(item => {
         const field = document.getElementById('marketSwot_' + item.key);
-        if (field) field.value = (next.swot && next.swot[item.key]) || '';
+        if (field) field.value = marketSwotDisplayValue(next.swot && next.swot[item.key]);
       });
       const decision = document.getElementById('marketDecision');
       const disclaimer = document.getElementById('marketDisclaimer');
@@ -624,6 +651,7 @@
       next.one_block_summary = buildMarketStudyOneBlockSummary(next);
       const oneBlock = document.getElementById('marketStudyOneBlockSummary');
       if (oneBlock) oneBlock.value = next.one_block_summary;
+      if (typeof autoGrowMarketStudyFields === 'function') setTimeout(autoGrowMarketStudyFields, 0);
       renderMarketSources(next.sources || []);
       const hidden = document.getElementById('marketStudyData');
       if (hidden) hidden.value = JSON.stringify(next);
@@ -632,6 +660,11 @@
       syncMarketLocationMirrors();
       if (typeof renderMarketSummaryChat === 'function') renderMarketSummaryChat();
       refreshDynamicI18n(document.getElementById('section-market-study'));
+      const marketSectionStatus = typeof tenantProjectSectionStatuses === 'object'
+        ? tenantProjectSectionStatuses['section-market-study'] : '';
+      if (typeof applySectionLockState === 'function') {
+        applySectionLockState('section-market-study', marketSectionStatus || 'draft');
+      }
     }
 
     function collectMarketStudyRequestPayload() {

@@ -54,7 +54,7 @@
       const cityKey = 'market.summary_scope_city_name';
       const districtRows = (Array.isArray(city?.districts) ? city.districts : [])
         .map(marketSummaryDistrictField).join('');
-      return '<section data-summary-city class="market-block" style="margin-top:8px">' +
+      return '<section data-summary-city class="market-summary-city">' +
         '<div style="display:flex;gap:8px;align-items:end">' +
         '<div style="flex:1"><label data-i18n="market.summary_scope_city">المدينة</label>' +
         '<input data-summary-city-name value="' + escapeHtml(city?.name || '') + '"' +

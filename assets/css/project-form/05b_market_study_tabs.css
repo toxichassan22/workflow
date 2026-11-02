@@ -186,3 +186,539 @@
     grid-column: 1 / -1;
   }
 }
+
+/* Unified market study screen: one data surface for reading and editing. */
+#section-market-study .market-study-context {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line, #E1E8EF);
+  border-radius: 8px;
+  background: #fff;
+  margin: 0 0 14px;
+  overflow: hidden;
+}
+
+#section-market-study .market-study-context > div {
+  padding: 9px 13px;
+  min-width: 0;
+  border-inline-start: 1px solid var(--line, #E1E8EF);
+}
+
+#section-market-study .market-study-context > div:first-child {
+  border-inline-start: 0;
+}
+
+#section-market-study .market-study-context span {
+  display: block;
+  font-size: 10.5px;
+  color: var(--muted, #6B7C8F);
+  margin-bottom: 1px;
+}
+
+#section-market-study .market-study-context strong {
+  display: block;
+  font-size: 12.5px;
+  color: var(--navy, #07182C);
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+#section-market-study .market-study-decision,
+#section-market-study .market-study-summary,
+#section-market-study .market-study-swot,
+#section-market-study .market-study-sources,
+#section-market-study .market-axis-card {
+  background: #fff;
+  border: 1px solid var(--line, #E1E8EF);
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin: 0 0 12px;
+}
+
+#section-market-study .market-study-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line, #E1E8EF);
+}
+
+#section-market-study .market-study-kicker {
+  display: block;
+  font-size: 10.5px;
+  color: var(--muted, #6B7C8F);
+  font-weight: 600;
+  letter-spacing: .2px;
+}
+
+#section-market-study .market-study-section-head h4 {
+  margin: 2px 0 0;
+  font-size: 16px;
+  color: var(--navy, #07182C);
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+#section-market-study .market-study-count {
+  font-size: 11px;
+  color: var(--muted, #6B7C8F);
+  white-space: nowrap;
+}
+
+#section-market-study .market-study-field {
+  margin: 0 0 10px;
+}
+
+#section-market-study .market-study-field:last-child {
+  margin-bottom: 0;
+}
+
+#section-market-study .market-study-field label {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 11px;
+  color: var(--muted, #6B7C8F);
+  font-weight: 600;
+}
+
+#section-market-study .market-study-field select {
+  width: 100%;
+  max-width: 360px;
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 9px;
+  border: 1px solid var(--line, #E1E8EF);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--navy, #07182C);
+}
+
+#section-market-study .market-study-field textarea {
+  width: 100%;
+}
+
+#section-market-study .market-study-toc {
+  position: sticky;
+  top: 50px;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 15px;
+  padding: 7px 2px;
+  margin: 0 0 10px;
+  background: var(--white, #fff);
+  border-bottom: 1px solid var(--line, #E1E8EF);
+}
+
+#section-market-study .market-study-toc a,
+#section-market-study .market-study-toc button {
+  flex: 0 0 auto;
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--muted, #6B7C8F);
+  background: none;
+  border: 0;
+  padding: 2px 0;
+  text-decoration: none;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+
+#section-market-study .market-study-toc a:hover,
+#section-market-study .market-study-toc button:hover {
+  color: var(--teal-dark, #0A829B);
+  border-bottom-color: var(--teal, #0FA9C4);
+}
+
+#section-market-study .market-study-toc .market-study-toc-toggle {
+  color: var(--navy, #07182C);
+  font-weight: 700;
+}
+
+#section-market-study .market-study-summary,
+#section-market-study .market-axis-card,
+#section-market-study .market-study-swot,
+#section-market-study .market-study-sources {
+  scroll-margin-top: 104px;
+}
+
+#section-market-study .market-study-summary {
+  display: flex;
+  flex-direction: column;
+}
+
+#section-market-study .market-study-summary .market-study-section-head {
+  order: 0;
+}
+
+#section-market-study .market-study-summary #marketStudyOneBlockSummary {
+  order: 1;
+}
+
+#section-market-study .market-study-generate {
+  order: 2;
+  border-top: 1px solid var(--line, #E1E8EF);
+  padding: 10px 0 0;
+  margin: 12px 0 0;
+}
+
+#section-market-study .market-summary-city button:disabled,
+#section-market-study .market-sources-table [data-remove-source]:disabled {
+  opacity: .45;
+  cursor: default;
+}
+
+#section-market-study .market-study-scope {
+  margin-bottom: 8px;
+}
+
+#section-market-study .market-study-scope-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+#section-market-study .market-study-scope-head > span {
+  font-size: 11px;
+  color: var(--muted, #6B7C8F);
+  font-weight: 600;
+}
+
+#section-market-study .market-study-generate-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#section-market-study .market-study-generate-row .market-study-field {
+  margin: 0;
+  min-width: 150px;
+}
+
+#section-market-study .market-study-generate-row .btn {
+  flex: 0 0 auto;
+}
+
+#section-market-study .market-summary-city {
+  border: 0;
+  padding: 0;
+  margin: 6px 0 0;
+  background: transparent;
+}
+
+#section-market-study .market-summary-city label {
+  font-size: 10.5px;
+}
+
+#section-market-study .market-summary-city input {
+  font-size: 12px;
+  padding: 5px 7px;
+}
+
+#section-market-study #marketSummaryFailure {
+  font-size: 11.5px;
+  color: #8A3B3B;
+  margin-top: 6px;
+}
+
+#section-market-study #marketSummaryCompare {
+  margin-top: 8px;
+}
+
+#section-market-study .market-auto-grow {
+  display: block;
+  width: 100%;
+  min-height: 32px;
+  overflow: hidden;
+  resize: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink, #0F2438);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.9;
+  padding: 4px 6px;
+  margin: 0;
+  box-sizing: border-box;
+}
+
+#section-market-study .market-auto-grow:hover {
+  background: #F7F9FB;
+}
+
+#section-market-study .market-auto-grow:focus {
+  outline: none;
+  background: #F7F9FB;
+  border-color: var(--teal, #0FA9C4);
+}
+
+#section-market-study .market-auto-grow:disabled {
+  color: var(--ink, #0F2438);
+  opacity: 1;
+  -webkit-text-fill-color: var(--ink, #0F2438);
+  background: transparent;
+}
+
+#section-market-study .market-study-one-block {
+  font-size: 16.5px;
+  line-height: 1.95;
+  max-width: 72ch;
+  min-height: 48px;
+}
+
+#section-market-study .market-axis-card {
+  padding: 0;
+  margin: 0 0 8px;
+}
+
+#section-market-study .market-axis-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 11px 14px;
+}
+
+#section-market-study .market-axis-num {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted, #6B7C8F);
+  font-weight: 800;
+}
+
+#section-market-study .market-axis-title {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: 15.5px;
+  color: var(--navy, #07182C);
+  font-weight: 800;
+  line-height: 1.5;
+  cursor: text;
+}
+
+#section-market-study .market-axis-toggle {
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  color: var(--muted, #6B7C8F);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+#section-market-study .market-axis-toggle:hover {
+  color: var(--teal-dark, #0A829B);
+}
+
+#section-market-study .market-axis-body {
+  padding: 0 14px 12px;
+}
+
+#section-market-study .market-axis-card.collapsed .market-axis-body {
+  display: none;
+}
+
+#section-market-study .market-study-axes {
+  padding: 0;
+  margin: 0 0 12px;
+}
+
+#section-market-study .market-study-axes > .market-study-section-head {
+  padding: 4px 2px 10px;
+  margin-bottom: 8px;
+}
+
+#section-market-study .market-study-axes > #marketSummaryFields {
+  padding: 0;
+}
+
+#section-market-study .market-study-swot #marketSwotFields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+#section-market-study .market-swot-card {
+  border: 1px solid var(--line, #E1E8EF);
+  border-radius: 7px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+
+#section-market-study .market-swot-title {
+  display: block;
+  margin: 0 0 4px;
+  font-size: 12.5px;
+  color: var(--navy, #07182C);
+  font-weight: 800;
+}
+
+#section-market-study .market-swot-card .market-auto-grow {
+  font-size: 14px;
+  line-height: 1.85;
+}
+
+#section-market-study .market-study-sources-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+#section-market-study .market-study-sources .market-source-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 0 0 8px;
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--line, #E1E8EF);
+}
+
+#section-market-study .market-study-sources .market-source-tab {
+  width: auto;
+  min-width: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+  color: var(--muted, #6B7C8F);
+  padding: 3px 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: start;
+  cursor: pointer;
+}
+
+#section-market-study .market-study-sources .market-source-tab.active {
+  background: none;
+  color: var(--navy, #07182C);
+  border-bottom-color: var(--teal, #0FA9C4);
+}
+
+#section-market-study .market-study-sources .market-sources-table {
+  min-width: 760px;
+  width: 100%;
+}
+
+#section-market-study .market-sources-table th:nth-child(1),
+#section-market-study .market-sources-table td:nth-child(1) {
+  width: 48px;
+  min-width: 48px;
+  text-align: center;
+}
+
+#section-market-study .market-sources-table th:nth-child(2),
+#section-market-study .market-sources-table td:nth-child(2) {
+  width: 32%;
+  min-width: 200px;
+}
+
+#section-market-study .market-sources-table th:nth-child(3),
+#section-market-study .market-sources-table td:nth-child(3) {
+  width: 46%;
+  min-width: 300px;
+}
+
+#section-market-study .market-sources-table th:nth-child(4),
+#section-market-study .market-sources-table td:nth-child(4) {
+  width: 14%;
+  min-width: 130px;
+}
+
+#section-market-study .market-sources-table th:nth-child(5),
+#section-market-study .market-sources-table td:nth-child(5) {
+  width: 60px;
+  min-width: 60px;
+  text-align: center;
+}
+
+#section-market-study .market-source-serial {
+  color: var(--muted, #6B7C8F);
+  font-size: 11px;
+  direction: ltr;
+  font-variant-numeric: tabular-nums;
+}
+
+#section-market-study .market-sources-table input,
+#section-market-study .market-sources-table textarea {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 4px;
+  padding: 2px 5px;
+  color: var(--ink, #0F2438);
+  font-size: 12px;
+}
+
+#section-market-study .market-sources-table input:hover,
+#section-market-study .market-sources-table textarea:hover {
+  background: #F7F9FB;
+}
+
+#section-market-study .market-sources-table input:focus,
+#section-market-study .market-sources-table textarea:focus {
+  outline: none;
+  background: #fff;
+  border-color: var(--teal, #0FA9C4);
+}
+
+#section-market-study .market-sources-table input:disabled,
+#section-market-study .market-sources-table textarea:disabled {
+  color: var(--ink, #0F2438);
+  opacity: 1;
+  -webkit-text-fill-color: var(--ink, #0F2438);
+  background: transparent;
+}
+
+#section-market-study .market-sources-table td textarea {
+  min-height: 36px;
+  resize: none;
+  line-height: 1.5;
+}
+
+@media (max-width: 760px) {
+  #section-market-study .market-study-context {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  #section-market-study .market-study-context > div:nth-child(3) {
+    border-inline-start: 0;
+    border-top: 1px solid var(--line, #E1E8EF);
+  }
+
+  #section-market-study .market-study-context > div:nth-child(4) {
+    border-top: 1px solid var(--line, #E1E8EF);
+  }
+
+  #section-market-study .market-study-toc {
+    top: 46px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  #section-market-study .market-study-summary,
+  #section-market-study .market-axis-card,
+  #section-market-study .market-study-swot,
+  #section-market-study .market-study-sources {
+    scroll-margin-top: 96px;
+  }
+
+  #section-market-study .market-study-swot #marketSwotFields {
+    grid-template-columns: 1fr;
+  }
+
+  #section-market-study .market-auto-grow {
+    font-size: 15.5px;
+  }
+}

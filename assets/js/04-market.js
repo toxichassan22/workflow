@@ -26,8 +26,7 @@
         || state.summary_period_from || '';
       state.summary_period_to = document.getElementById('marketSummaryPeriodTo')?.value
         || state.summary_period_to || '';
-      state.summary_research_depth = document.getElementById('marketSummaryResearchDepth')?.value
-        || state.summary_research_depth || 'full';
+      state.summary_research_depth = 'full';
       state.competitors = collectMarketCompetitorRows();
       const summary = {};
       MARKET_STUDY_SUMMARY_SECTIONS.forEach(item => {
@@ -47,6 +46,8 @@
       // The summary register owns the summary's sources only. A competitor's
       // link lives in that competitor's row/slide, never here as well.
       state.sources = mergeMarketSourceRows(collectMarketSourceRows(), []);
+      const oneBlockField = document.getElementById('marketStudyOneBlockSummary');
+      if (oneBlockField) state.one_block_summary = oneBlockField.value;
       state.one_block_summary = buildMarketStudyOneBlockSummary(state);
       return state;
     }
@@ -88,6 +89,7 @@
         districtMirror.setAttribute('aria-readonly', 'true');
         districtMirror.value = district;
       }
+      if (typeof syncMarketStudyContext === 'function') syncMarketStudyContext();
     }
 
     function applyCityDistrictToForm(city, district, overwrite = false) {

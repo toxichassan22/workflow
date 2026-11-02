@@ -2,8 +2,55 @@
 
     function marketSourcesTableHtml() {
       return '<div class="table-wrap"><table class="market-sources-table">' +
-        '<thead><tr><th>المصدر</th><th>الرابط</th><th>تاريخ البيانات</th>' +
-        '<th></th></tr></thead><tbody></tbody></table></div>';
+        '<thead><tr><th data-i18n="market.sources_serial">الرقم</th><th>المصدر</th><th>الرابط</th><th>تاريخ البيانات</th>' +
+        '<th>إجراء</th></tr></thead><tbody></tbody></table></div>';
+    }
+
+    function marketSourceCountLabel(count) {
+      if (!count) return WFT('market.sources_none', 'لا توجد مصادر');
+      if (count === 1) return WFT('market.sources_one', 'مصدر واحد');
+      if (count === 2) return WFT('market.sources_two', 'مصدران');
+      return WFT('market.sources_count', '{count} مصدرًا', { count });
+    }
+
+    function syncMarketStudyContext() {
+      const city = document.querySelector('#tenantProjectForm [data-key="city"]')?.value
+        || (typeof tenantProjectData !== 'undefined' ? tenantProjectData.city : '') || '';
+      const district = document.querySelector('#tenantProjectForm [data-key="district"]')?.value
+        || (typeof tenantProjectData !== 'undefined' ? tenantProjectData.district : '') || '';
+      const cityEl = document.getElementById('marketContextCity');
+      if (cityEl) cityEl.textContent = city || '—';
+      const districtEl = document.getElementById('marketContextDistrict');
+      if (districtEl) districtEl.textContent = district || '—';
+      const dates = [];
+      document.querySelectorAll('#marketSourcesPanels .market-sources-table tbody tr').forEach(tr => {
+        const date = String(tr.querySelector('[data-field="data_date"]')?.value || '').trim();
+        if (date) dates.push(date);
+        const accessed = String(tr.dataset.accessedAt || '').trim();
+        if (accessed) dates.push(accessed);
+      });
+      dates.sort();
+      const updatedEl = document.getElementById('marketContextUpdated');
+      if (updatedEl) updatedEl.textContent = dates.length ? dates[dates.length - 1] : '—';
+    }
+
+    function updateMarketSourcesCount() {
+      const count = document.querySelectorAll('#marketSourcesPanels .market-sources-table tbody tr').length;
+      const sourceEl = document.getElementById('marketSourcesCount');
+      if (sourceEl) sourceEl.textContent = marketSourceCountLabel(count);
+      const contextEl = document.getElementById('marketContextSources');
+      if (contextEl) contextEl.textContent = String(count);
+      syncMarketStudyContext();
+    }
+
+    function renumberMarketSourceRows() {
+      let index = 0;
+      document.querySelectorAll('#marketSourcesPanels .market-sources-table tbody tr').forEach(tr => {
+        index += 1;
+        const cell = tr.querySelector('[data-source-serial]');
+        if (cell) cell.textContent = index;
+      });
+      updateMarketSourcesCount();
     }
 
     function selectMarketSourceTab(key) {
@@ -135,6 +182,7 @@
       const competitor = marketCompetitorDomRow(sourceRow.dataset.competitorId);
       rewriteMarketCompetitorSourceUrl(competitor, url, '');
       sourceRow.remove();
+      renumberMarketSourceRows();
       persistMarketStudyFromDom();
     }
 
@@ -170,11 +218,13 @@
       tr.dataset.reliability = sourceRow.reliability || '';
       tr.dataset.note = sourceRow.note || '';
       tr.innerHTML =
+        '<td class="market-source-serial" data-source-serial></td>' +
         '<td><textarea data-field="name" rows="2">' + escapeHtml(sourceRow.name || '') + '</textarea></td>' +
         '<td><input data-field="url" value="' + escapeHtml(sourceRow.url || '') + '"><div data-source-link class="market-source-links">' + link + '</div></td>' +
         '<td><input data-field="data_date" value="' + escapeHtml(sourceRow.data_date || '') + '"></td>' +
         '<td><button type="button" class="btn ghost small" data-remove-source>حذف</button></td>';
       tb.appendChild(tr);
+      renumberMarketSourceRows();
       tr.querySelector('[data-remove-source]').addEventListener('click', () => removeMarketSourcePermanently(tr));
       tr.querySelector('[data-field="url"]').addEventListener('input', () => {
         const value = tr.querySelector('[data-field="url"]')?.value || '';
@@ -245,6 +295,7 @@
         button.type = 'button';
         button.className = 'market-source-tab';
         button.dataset.sourceTab = group.key;
+        button.dataset.sectionLockIgnore = '1';
         button.setAttribute('role', 'tab');
         button.textContent = group.label;
         button.addEventListener('click', () => selectMarketSourceTab(group.key));
@@ -262,6 +313,7 @@
         group.rows.forEach(row => addMarketSourceRow(row, body));
       });
       selectMarketSourceTab(selectedKey);
+      renumberMarketSourceRows();
       refreshDynamicI18n(tabs);
       refreshDynamicI18n(panels);
     }
