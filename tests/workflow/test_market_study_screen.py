@@ -79,6 +79,12 @@ class MarketStudyScreenTests(unittest.TestCase):
             "const oneBlockField = document.getElementById('marketStudyOneBlockSummary');",
             self.text)
 
+    def test_executive_summary_uses_the_full_content_width(self):
+        rule = re.search(
+            r'#section-market-study \.market-study-one-block \{[^}]*\}', self.text)
+        self.assertIsNotNone(rule)
+        self.assertIn('max-width: none', rule.group(0))
+
     def test_sources_table_keeps_edit_add_delete_and_serial_numbers(self):
         self.assertIn('data-i18n="market.sources_serial"', self.text)
         self.assertIn('الرقم', self.text)
