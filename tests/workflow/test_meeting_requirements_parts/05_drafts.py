@@ -1622,30 +1622,6 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
                          [f'اشتراطات1.pdf-text-{index + 1}' for index in range(len(finished))])
         self.assertEqual(result['warnings'], [])
 
-    def test_land_result_view_groups_the_detail_fields(self):
-        """The land section opened as a wall of boxes, several holding whole
-        paragraphs. The overview card and the collapsible blocks present the same
-        values without moving the data out of its [data-key] inputs."""
-        source = read_frontend_text()
-        self.assertIn('11-land-croquis/01b_land_result_panel.js', _bundle_order('js'))
-        self.assertIn('project-form/09_land_results.css', _bundle_order('css'))
-        for needle in ('landAnalysisOverview', 'LAND_ANALYSIS_GROUPS', 'groupLandAnalysisFields',
-                       'refreshLandAnalysisOverview', 'revealLandAnalysisField',
-                       'updateLandAnalysisFacts', 'beginLandSummaryEdit', 'land-narrative-editor',
-                       "addEventListener('input', refreshFromFields)"):
-            self.assertIn(needle, source)
-        # The overview is fed by the stored field values, not by a second copy.
-        self.assertIn("landFieldValue('land_and_building_summary')", source)
-        self.assertIn("landFieldValue('croquis_land_area')", source)
-        self.assertIn('groupLandAnalysisFields(sectionDiv)', source)
-        self.assertIn('refreshLandAnalysisOverview();', source)
-        panel = (ROOT / 'assets' / 'js' / '11-land-croquis'
-                 / '01b_land_result_panel.js').read_text(encoding='utf-8')
-        for key in ('land_documents_files', 'approved_financial_area', 'croquis_land_area',
-                    'directions_table', 'survey_coordinates', 'building_ratio_coverage',
-                    'allowed_uses', 'land_and_building_summary'):
-            self.assertIn("'%s'" % key, panel, key)
-
     def test_land_poll_timeout_names_a_reason_instead_of_unknown(self):
         """The client used to fall through with the last 'running' payload, so the console
         said 'rejected unknown' and the screen showed a bare failure."""

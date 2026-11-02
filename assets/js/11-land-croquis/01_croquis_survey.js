@@ -146,7 +146,6 @@
           renderSurveyDirections(tenantProjectData.directions_table);
           showLandAnalysisDiagnostics(data);
           refreshAllowedUsesStatusNote();
-          if (typeof refreshLandAnalysisOverview === 'function') refreshLandAnalysisOverview();
           const appliedCount = Object.values(extractedFields)
             .filter(value => value !== undefined && value !== null && value !== '' && typeof value !== 'object').length;
           updateLoaderProgress(100, WFT('land.analyzed_review', 'تم تحليل الملفات وتحديث {n} حقلًا. راجع الحقول والاتجاهات ثم اعتمد البيانات.', { n: appliedCount }), true);
@@ -358,12 +357,8 @@
           toast(errors[0].message);
           const firstInput = document.querySelector('#tenantProjectForm [data-key="' + errors[0].key + '"]');
           if (firstInput) {
-            // A grouped field can sit inside a closed block; open it before pointing at it.
-            if (typeof revealLandAnalysisField === 'function') revealLandAnalysisField(errors[0].key);
-            else {
-              firstInput.focus();
-              firstInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+            firstInput.focus();
+            firstInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
           return;
         }
