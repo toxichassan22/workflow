@@ -152,12 +152,20 @@
             </div>
           </section>
           <nav class="market-study-toc" id="marketStudyToc" aria-label="محاور دراسة السوق" data-i18n-aria="market.toc_label">
-            <a href="#marketStudySummaryBlock">الملخص</a>
             ${MARKET_STUDY_SUMMARY_SECTIONS.map((item, index) => '<a href="#market-axis-' + item.key + '">' + String(index + 1).padStart(2, '0') + ' ' + escapeHtml(item.label) + '</a>').join('')}
             <a href="#marketStudySwotBlock">SWOT</a>
+            <a href="#marketStudySummaryBlock">الملخص</a>
             <a href="#marketStudySourcesBlock">المصادر</a>
             <button type="button" class="market-study-toc-toggle" id="marketStudyTocToggle" data-section-lock-ignore="1" data-i18n="market.collapse_all">طي الكل</button>
           </nav>
+          <section class="market-study-axes" id="marketStudyAxesBlock">
+            <div class="market-study-section-head"><div><span class="market-study-kicker" data-i18n="market.axes_title">محاور التحليل</span><h4 data-i18n="market.axes_title">محاور التحليل</h4></div><span class="market-study-count" data-i18n="market.axes_count">${MARKET_STUDY_SUMMARY_SECTIONS.length} محاور</span></div>
+            <div id="marketSummaryFields"></div>
+          </section>
+          <section class="market-study-swot" id="marketStudySwotBlock">
+            <div class="market-study-section-head" id="marketStudySwotHead"><div><span class="market-study-kicker">SWOT</span><h4>تحليل SWOT</h4></div></div>
+            <div id="marketSwotFields"></div>
+          </section>
           <section class="market-study-summary" id="marketStudySummaryBlock">
             <div class="market-study-section-head"><div><span class="market-study-kicker">الملخص التنفيذي</span><h4>الملخص التنفيذي لسوق المشروع</h4></div></div>
             <div class="market-study-generate">
@@ -187,14 +195,6 @@
               <div id="marketSummaryCompare" hidden></div>
             </div>
             <textarea id="marketStudyOneBlockSummary" rows="1" class="market-auto-grow market-study-one-block" aria-label="الملخص التنفيذي لسوق المشروع"></textarea>
-          </section>
-          <section class="market-study-axes" id="marketStudyAxesBlock">
-            <div class="market-study-section-head"><div><span class="market-study-kicker" data-i18n="market.axes_title">محاور التحليل</span><h4 data-i18n="market.axes_title">محاور التحليل</h4></div><span class="market-study-count" data-i18n="market.axes_count">${MARKET_STUDY_SUMMARY_SECTIONS.length} محاور</span></div>
-            <div id="marketSummaryFields"></div>
-          </section>
-          <section class="market-study-swot" id="marketStudySwotBlock">
-            <div class="market-study-section-head" id="marketStudySwotHead"><div><span class="market-study-kicker">SWOT</span><h4>تحليل SWOT</h4></div></div>
-            <div id="marketSwotFields"></div>
           </section>
           <section class="market-study-sources" id="marketStudySourcesBlock">
             <div class="market-study-section-head"><div><span class="market-study-kicker">المصادر</span><h4 data-i18n="market.sources_title">سجل المصادر</h4></div>
