@@ -755,9 +755,11 @@
       const target = slide ? elementAtSlidePath(slide, session.sel.path) : null;
       if (!target) return;
       let weight = 400;
-      try { weight = parseInt(window.getComputedStyle(target).fontWeight, 10) || 400; } catch (err) {}
-      if (String(window.getComputedStyle(target).fontWeight).toLowerCase() === 'bold') weight = 700;
-      const makeBold = weight < 600;
+      try {
+        const computedWeight = String(window.getComputedStyle(target).fontWeight || '').toLowerCase();
+        weight = computedWeight === 'bold' ? 700 : (parseInt(computedWeight, 10) || 400);
+      } catch (err) {}
+      const makeBold = weight < 700;
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html) return;
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');

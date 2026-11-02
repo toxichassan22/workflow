@@ -596,6 +596,36 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn("querySelectorAll('[data-slide-edit-radius]')", self.source)
         self.assertIn('slideRadiusPx(radiusValue, target)', self.source)
 
+    def test_slide_swatch_and_bold_read_the_live_state(self):
+        # The slide swatch used to be the constant #ffffff whatever surface the
+        # slide actually painted.
+        self.assertIn('const slideBgColor = (() => {', self.source)
+        self.assertIn('data-slide-edit-slide-bg value="\' + slideBgColor', self.source)
+        self.assertNotIn('data-slide-edit-slide-bg value="#ffffff"', self.source)
+        # A default text box is 600; the old threshold treated it as bold, so
+        # the first press made the text lighter instead of bolder.
+        self.assertIn('const makeBold = weight < 700;', self.source)
+        self.assertNotIn('const makeBold = weight < 600;', self.source)
+
+    def test_html_writes_refresh_the_edit_session_fingerprint(self):
+        # A write that skips touchSlideEditSession makes the next session read
+        # fail, which silently drops edit mode after paste or inspector delete.
+        paste = self.source.split('function pasteSlideElements(index)', 1)[1]
+        paste = paste.split('function duplicateSelectedSlideElements', 1)[0]
+        self.assertIn('touchSlideEditSession(index)', paste)
+        delete = self.source.split('function deleteSelectedSlideElements(index)', 1)[1]
+        delete = delete.split('function copySelectedSlideElements', 1)[0]
+        self.assertIn('touchSlideEditSession(index)', delete)
+
+    def test_text_decoration_composes_a_valid_shorthand(self):
+        # "none underline" is invalid CSS and the browser drops it; the helper
+        # without `none` is what makes underline and strike appear.
+        self.assertIn('function slideTextDecorationNext(current, styleKind)', self.source)
+        toggle = self.source.split('function toggleSlideSelectionTextStyle', 1)[1]
+        toggle = toggle.split('function adjustSlideSelectionLineHeight', 1)[0]
+        self.assertIn('slideTextDecorationNext(current, styleKind)', toggle)
+        self.assertNotIn("next = (next ? next + ' ' : '') + wanted", toggle)
+
     def test_tables_insert_and_edit_like_powerpoint(self):
         for fn in ('insertSlideTable(', 'mutateSlideTableSelection(', 'mutateSlideTableCell(',
                    'addSlideTableRow(', 'removeSlideTableRow(', 'addSlideTableColumn(',

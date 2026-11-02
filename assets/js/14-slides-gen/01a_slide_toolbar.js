@@ -58,6 +58,16 @@
       const shapeStyle = typeof slideShapeToolbarSnapshot === 'function'
         ? slideShapeToolbarSnapshot(index)
         : { fill: '#ffffff', borderColor: '#dbe3ea', borderWidth: 0, radius: 0 };
+      // The slide swatch must show the slide's own surface, not a markup default.
+      const slideBgColor = (() => {
+        try {
+          const stage = typeof slideStageForIndex === 'function' ? slideStageForIndex(index) : null;
+          const liveSlide = stage ? stage.querySelector('.slide') : null;
+          const hex = liveSlide && typeof cssColorToHex === 'function'
+            ? cssColorToHex(window.getComputedStyle(liveSlide).backgroundColor) : '';
+          return hex || '#ffffff';
+        } catch (error) { return '#ffffff'; }
+      })();
       return {
         add: '<div class="slide-edit-tab-panel" data-slide-edit-panel="add">'
           + slideToolbarButton(slideToolbarText('tb.add_text', 'إضافة نص'), 'addtext')
@@ -75,7 +85,7 @@
           + '</div>',
         slide: '<div class="slide-edit-tab-panel" data-slide-edit-panel="slide">'
           + '<label class="slide-edit-color">' + slideToolbarText('tb.background_color', 'خلفية الشريحة')
-          + '<input type="color" data-slide-edit-slide-bg value="#ffffff"></label>'
+          + '<input type="color" data-slide-edit-slide-bg value="' + slideBgColor + '"></label>'
           + slideToolbarButton(slideToolbarText('tb.background_image', 'خلفية صورة'), 'slidebgimage')
           + slideToolbarButton(slideToolbarText('tb.clear_background', 'مسح الخلفية'), 'slidebgclear')
           + '<span class="slide-edit-tab-sep"></span>'

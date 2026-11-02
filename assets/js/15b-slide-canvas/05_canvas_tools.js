@@ -12,6 +12,17 @@
       return { stage, session, slide, target: pairs[0].target };
     }
 
+    /* `text-decoration: none underline` is invalid and the browser drops the
+       whole declaration, so the next value is composed without `none`. */
+    function slideTextDecorationNext(current, styleKind) {
+      const wanted = styleKind === 'underline' ? 'underline' : 'line-through';
+      const parts = String(current || '').toLowerCase().split(/\s+/)
+        .filter(value => value && value !== 'none');
+      const has = parts.indexOf(wanted) !== -1;
+      const rest = parts.filter(value => value !== wanted);
+      return has ? rest.join(' ') : rest.concat(wanted).join(' ');
+    }
+
     function toggleSlideSelectionTextStyle(index, styleKind) {
       const primary = slideSelectionPrimary(index);
       if (!primary) return;
@@ -21,14 +32,7 @@
         setSlideSelectionStyle(index, el => { el.style.fontStyle = next; });
       } else {
         const current = String(computed.textDecorationLine || computed.textDecoration || '').toLowerCase();
-        const wanted = styleKind === 'underline' ? 'underline' : 'line-through';
-        const has = current.indexOf(wanted) !== -1;
-        let next = current
-          .replace('underline', '')
-          .replace('line-through', '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (!has) next = (next ? next + ' ' : '') + wanted;
+        const next = slideTextDecorationNext(current, styleKind);
         setSlideSelectionStyle(index, el => { el.style.textDecoration = next; });
       }
     }

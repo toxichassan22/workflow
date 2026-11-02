@@ -386,6 +386,9 @@
       session.sel = null;
       session.multi = [];
       tenantProjectData.tenantSlidesData = tenantSlidesData;
+      // The fingerprint is the session's link to the slide HTML; without this
+      // the next session read deletes the session and edit mode silently ends.
+      if (typeof touchSlideEditSession === 'function') touchSlideEditSession(index);
       triggerAutoSaveDraft();
       refreshSingleSlideCard(index);
       renderSlideInspector(index);
@@ -427,6 +430,7 @@
       slideData.html = rawRoot.outerHTML;
       markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
+      if (typeof touchSlideEditSession === 'function') touchSlideEditSession(index);
       triggerAutoSaveDraft();
       refreshSingleSlideCard(index);
       toast(canvasText('ca.elements_pasted', 'تم لصق العناصر'));
