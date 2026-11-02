@@ -160,6 +160,11 @@
         if (dividerBackground === '1') slideData.sectionDividerBackgroundRemoved = true;
       }
       pushSlideEditHistory(index);
+      // A fitted text box reserved its flow slot with a placeholder; deleting
+      // the box must release the slot rather than leave a blank gap behind.
+      if (typeof releaseSlideFlowSlot === 'function') {
+        releaseSlideFlowSlot(stage, target, rawRoot, rawTarget);
+      }
       deleteTarget.parentElement.removeChild(deleteTarget);
       slideData.html = rawRoot.outerHTML;
       markSlideHtmlEdited(slideData);

@@ -21,6 +21,9 @@ const commitEnd = source.indexOf('\n    }', commitStart) + 6;
 const commit = source.slice(commitStart, commitEnd);
 
 const context = vm.createContext({
+  // The editor's own strings go through the i18n runtime; the harness runs
+  // the extracted functions outside the browser, so resolve to the fallback.
+  WFT: (key, fallback) => fallback,
   escapeHtml(value) {
     return String(value == null ? '' : value).replace(/[&<>"']/g,
       ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));

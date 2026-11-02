@@ -230,10 +230,11 @@
       renderTenantSlidesSidebar();
       triggerAutoSaveDraft();
       toast('تم تعديل النص. اضغط "حفظ التعديلات" للحفظ النهائي.');
-      // Typed text can outgrow its box; the box grows with it instead of
-      // spilling the selection frame.
+      // Typed text can outgrow or leave its box; the box follows the text
+      // instead of the words spilling the selection frame. The edit already
+      // wrote its own history entry, so the fit must not add a second one.
       if (typeof fitSlideTextElement === 'function' && editedEl) {
-        fitSlideTextElement(stage, index, editedEl);
+        fitSlideTextElement(stage, index, editedEl, { history: false });
       }
       autoFitSlideContent(stage);
     }

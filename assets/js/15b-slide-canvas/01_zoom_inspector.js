@@ -37,6 +37,10 @@
       document.querySelectorAll('#tenantSlidesPage .tenant-slide-stage').forEach(stage => {
         if (typeof autoFitSlideContent === 'function') autoFitSlideContent(stage);
         const card = stage.closest('.ge-slide-card');
+        // The card follows its stage through a ResizeObserver, one frame later.
+        // Applying the width here keeps the zoom anchor measured against the
+        // final layout instead of the previous width.
+        if (card && stage.offsetWidth > 0) card.style.width = Math.round(stage.offsetWidth) + 'px';
         const index = card ? Number(String(card.id || '').replace('slide-card-', '')) : NaN;
         if (Number.isInteger(index) && typeof restoreSlideEditSelection === 'function') {
           restoreSlideEditSelection(stage, index);
@@ -65,6 +69,74 @@
       }
       page.requestFullscreen?.().then(() => fitTenantCanvasZoom()).catch(() => {});
     }
+
+    let tenantCanvasAnchorToken = 0;
+
+    /* Move the scrollable canvas (and, for the fit-on-screen range, the page)
+       so the slide point stays under the pointer. Runs again after the frame
+       the card width settles in, which removes the boundary-step offset. */
+    function anchorTenantCanvasPoint(stage, wrap, pointX, pointY, clientX, clientY) {
+      const slide = stage ? stage.querySelector('.slide') : null;
+      if (!slide || !wrap) return;
+      const rect = slide.getBoundingClientRect();
+      const scale = slideRenderedScale(stage) || (rect.width / 1280) || 1;
+      const driftX = (rect.left + pointX * scale) - clientX;
+      const driftY = (rect.top + pointY * scale) - clientY;
+      if (Math.abs(driftX) < 0.5 && Math.abs(driftY) < 0.5) return;
+      // Rect and pointer positions are painted pixels under the fixed page
+      // zoom; scrollLeft/scrollTop are layout pixels. Mixing the two left the
+      // canvas a few pixels short of the pointer on every wheel step.
+      const rootZoom = typeof wfRootZoom === 'function' ? wfRootZoom() : 1;
+      // The canvas scrolls smoothly for navigation; anchoring the pointer must
+      // happen in the same frame, not as an animation.
+      const behavior = wrap.style.scrollBehavior;
+      wrap.style.scrollBehavior = 'auto';
+      const beforeTop = wrap.scrollTop;
+      wrap.scrollLeft += driftX / rootZoom;
+      wrap.scrollTop += driftY / rootZoom;
+      // While the whole slide still fits, the canvas has no scroll range and
+      // the last part of the anchor has to move the page itself.
+      const leftoverY = driftY - (wrap.scrollTop - beforeTop) * rootZoom;
+      if (Math.abs(leftoverY) > 1) window.scrollBy(0, leftoverY / rootZoom);
+      wrap.style.scrollBehavior = behavior;
+    }
+
+    /* Ctrl/Command + wheel zooms the canvas around the pointer: the slide point
+       under the cursor stays under it, so a detail can be reached without
+       zooming the whole deck blindly. A plain wheel keeps scrolling the page. */
+    function bindTenantCanvasWheelZoom() {
+      const wrap = document.getElementById('tenantSlidesMain');
+      if (!wrap || wrap.dataset.wheelZoomBound === '1') return;
+      wrap.dataset.wheelZoomBound = '1';
+      wrap.addEventListener('wheel', event => {
+        if (!(event.ctrlKey || event.metaKey)) return;
+        const stage = event.target && event.target.closest ? event.target.closest('.tenant-slide-stage') : null;
+        if (!stage || !wrap.contains(stage)) return;
+        const slide = stage.querySelector('.slide');
+        if (!slide) return;
+        event.preventDefault();
+        const beforeRect = slide.getBoundingClientRect();
+        const scale = slideRenderedScale(stage) || (beforeRect.width / 1280) || 1;
+        const pointX = (event.clientX - beforeRect.left) / scale;
+        const pointY = (event.clientY - beforeRect.top) / scale;
+        const step = event.deltaY < 0 ? 0.1 : -0.1;
+        const next = Math.round(Math.max(TENANT_CANVAS_ZOOM_MIN,
+          Math.min(TENANT_CANVAS_ZOOM_MAX, tenantCanvasZoom + step)) * 10) / 10;
+        if (next === tenantCanvasZoom) return;
+        applyTenantCanvasZoom(next);
+        anchorTenantCanvasPoint(stage, wrap, pointX, pointY, event.clientX, event.clientY);
+        const token = ++tenantCanvasAnchorToken;
+        requestAnimationFrame(() => {
+          if (token !== tenantCanvasAnchorToken) return;
+          anchorTenantCanvasPoint(stage, wrap, pointX, pointY, event.clientX, event.clientY);
+        });
+      }, { passive: false });
+    }
+
+    bindTenantCanvasWheelZoom();
+    document.addEventListener('wf:page', event => {
+      if (event && event.detail && event.detail.pageId === 'tenantSlidesPage') bindTenantCanvasWheelZoom();
+    });
 
     function ensureSlidesCanvasChrome() {
       const page = document.getElementById('tenantSlidesPage');
@@ -218,6 +290,13 @@
       pairs.forEach(({ live, raw, entry }) => {
         try { mutator(live, raw, entry); } catch (error) { console.warn('[INSPECTOR] apply failed', error); }
       });
+      // A font, weight or line change moves the text; the box it is edited
+      // through follows in the same commit so the text never leaves its frame.
+      pairs.forEach(({ live, raw, entry }) => {
+        if (typeof fitSlideTextPair !== 'function') return;
+        try { fitSlideTextPair(stage, live, raw, rawRoot, entry); }
+        catch (error) { console.warn('[INSPECTOR] text fit failed', error); }
+      });
       slideData.html = rawRoot.outerHTML;
       markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
@@ -225,6 +304,9 @@
       triggerAutoSaveDraft();
       if (typeof refreshSlideEditToolbar === 'function') refreshSlideEditToolbar(index);
       renderSlideInspector(index);
+      if (pairs.length === 1 && typeof positionSlideEditHandles === 'function') {
+        positionSlideEditHandles(stage, pairs[0].live);
+      }
       return true;
     }
 
@@ -389,6 +471,9 @@
       if (typeof pushSlideEditHistory === 'function') pushSlideEditHistory(index);
       pairs.forEach(({ entry, target }) => {
         const raw = findSlideRawTarget(rawRoot, target, entry.path);
+        if (raw && typeof releaseSlideFlowSlot === 'function') {
+          releaseSlideFlowSlot(stage, target, rawRoot, raw);
+        }
         const deleteTarget = watermarkOverlayOf(raw) || raw;
         deleteTarget?.parentElement?.removeChild(deleteTarget);
       });
@@ -433,6 +518,7 @@
         const node = template.firstElementChild;
         if (!node) return;
         node.classList.remove('slide-element-selected', 'slide-element-multiselected');
+        if (typeof stripSlideFlowOwners === 'function') stripSlideFlowOwners(node);
         node.dataset.manualTranslateX = String((Number(node.dataset.manualTranslateX) || 0) + 20);
         node.dataset.manualTranslateY = String((Number(node.dataset.manualTranslateY) || 0) + 20);
         node.style.transform = 'translate(' + node.dataset.manualTranslateX + 'px, ' + node.dataset.manualTranslateY + 'px)';

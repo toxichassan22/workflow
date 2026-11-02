@@ -18,10 +18,18 @@ function extract(name, nextName) {
   return source.slice(start, end);
 }
 
+// elementAtSlidePath is the last function in this part; the shape helper that
+// used to follow it lives in its own part file now.
+function extractToEnd(name) {
+  const start = source.indexOf('function ' + name + '(');
+  if (start < 0) throw new Error('missing ' + name + ' in the slide bundle');
+  return source.slice(start);
+}
+
 const code = [
   extract('slidePathIgnores', 'slideElementPath'),
   extract('slideElementPath', 'elementAtSlidePath'),
-  extract('elementAtSlidePath', 'slideNodeIsVisualShape'),
+  extractToEnd('elementAtSlidePath'),
 ].join('\n');
 const sandbox = {};
 vm.runInNewContext(code + '\nthis.__api = { slidePathIgnores, slideElementPath, elementAtSlidePath };', sandbox);

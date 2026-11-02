@@ -327,6 +327,39 @@ class SlidesCanvasEditingTests(unittest.TestCase):
         self.assertIn('tenantCanvasZoom', fit)
         self.assertIn('canvas.height / canvas.width', fit)
 
+    def test_ctrl_wheel_zooms_the_canvas_around_the_pointer(self):
+        self.assertIn('function bindTenantCanvasWheelZoom()', self.source)
+        wheel = self.source.split('function bindTenantCanvasWheelZoom()', 1)[1]
+        wheel = wheel.split('function ensureSlidesCanvasChrome', 1)[0]
+        self.assertIn('event.ctrlKey || event.metaKey', wheel)
+        self.assertIn('pointX', wheel)
+        self.assertIn('pointY', wheel)
+        self.assertIn('applyTenantCanvasZoom(next)', wheel)
+        self.assertIn('anchorTenantCanvasPoint(stage, wrap', wheel)
+        self.assertIn('requestAnimationFrame', wheel)
+        self.assertIn("pageId === 'tenantSlidesPage'", wheel)
+        anchor = self.source.split('function anchorTenantCanvasPoint(', 1)[1]
+        anchor = anchor.split('function bindTenantCanvasWheelZoom', 1)[0]
+        # Scroll anchoring must happen in the same frame, not as an animation.
+        self.assertIn("wrap.style.scrollBehavior = 'auto'", anchor)
+        # Painted pixels (rect, pointer) versus layout scroll units.
+        self.assertIn('driftX / rootZoom', anchor)
+        self.assertIn('window.scrollBy', anchor)
+
+    def test_the_edit_card_keeps_its_width_and_the_canvas_scrolls(self):
+        # Entering edit mode rebuilt the card at the 960px skeleton width, so
+        # the canvas visibly shrank; the rebuilt stage now carries the width the
+        # reader already had.
+        self.assertIn('const previousStage = oldCard.querySelector', self.source)
+        self.assertIn('previousStage.offsetWidth', self.source)
+        self.assertIn('stage.dataset.fitWidth', self.source)
+        self.assertIn('previousWidth / zoom', self.source)
+        css = (ROOT / 'assets' / 'css' / 'base' / '09_slide_workspace.css').read_text(encoding='utf-8')
+        main = css.split('#tenantSlidesPage .ge-main {', 1)[1].split('}', 1)[0]
+        self.assertIn('overflow-x: auto', main)
+        card = css.split('#tenantSlidesPage .ge-slide-card {', 1)[1].split('}', 1)[0]
+        self.assertIn('max-width: none', card)
+
     def test_each_element_kind_gets_its_own_tools(self):
         self.assertIn('function inspectorTargetKind(el)', self.source)
         self.assertIn('function slideToolbarSelectionKind(index)', self.source)
@@ -631,9 +664,10 @@ class SlidesAuthoringTests(unittest.TestCase):
         # reflows the following paragraphs. Selecting it grows it to the text
         # and lifts it out of the flow behind a placeholder.
         for fn in ('slideTextNeedsContentHeight(', 'slideTextContentHeight(',
+                   'slideTextVisualCenterY(', 'slideTextBoxNeedsFit(',
                    'slideFlowPlaceholder(', 'slideDetachInfo(',
                    'applySlideDetachedElement(', 'detachSlideTextElementLive(',
-                   'fitSlideTextElement('):
+                   'fitSlideTextPair(', 'fitSlideTextElement('):
             self.assertIn('function ' + fn, self.source)
         select = self.source.split('function selectSlideElement(stage, index, target, path)', 1)[1]
         select = select.split('function restoreSlideEditSelection', 1)[0]
@@ -643,12 +677,37 @@ class SlidesAuthoringTests(unittest.TestCase):
         resize = resize.split('function commitSlideElementResize', 1)[0]
         self.assertIn('detachSlideTextElementLive(stage, target)', resize)
         self.assertIn('detachInfo: detachInfo, rawPath: rawPath', resize)
+        self.assertIn('const isText = typeof slideTextNeedsContentHeight', resize)
         commit = self.source.split('function commitSlideElementResize', 1)[1]
         commit = commit.split('function applySlideElementColorValue', 1)[0]
-        self.assertIn('slideFlowPlaceholder(rawDoc, detachInfo)', commit)
+        self.assertIn('slideFlowPlaceholder(rawDoc, detachInfo, detachInfo.owner)', commit)
         self.assertIn('slideTextContentHeight(target)', commit)
+        self.assertNotIn('applied + 2 < needed', commit)
         self.assertIn("data-slide-flow-placeholder', '1'", self.source)
         self.assertIn("node.getAttribute('data-slide-flow-placeholder')", self.source)
+
+    def test_the_selection_box_is_the_text_boundary_and_hugs_it_both_ways(self):
+        # A box larger than its text used to stay large: the fit only grew. The
+        # frame is the text boundary now, so it shrinks onto the text as well.
+        needs = self.source.split('function slideTextBoxNeedsFit(live)', 1)[1]
+        needs = needs.split('function slideFlowPlaceholder', 1)[0]
+        self.assertIn('Math.abs(needed - (live.offsetHeight || 0)) > 2', needs)
+        pair = self.source.split('function fitSlideTextPair(stage, live, raw, rawRoot, entry)', 1)[1]
+        pair = pair.split('function fitSlideTextElement', 1)[0]
+        self.assertIn('slideTextVisualCenterY(stage, live)', pair)
+        self.assertIn('beforeCenterY - afterCenterY', pair)
+        self.assertIn("el.style.height = needed + 'px'", pair)
+        self.assertIn("el.style.minHeight = needed + 'px'", pair)
+        # Every style commit runs the same fit, so a font/line change cannot
+        # leave the words outside the frame they are edited through.
+        style = self.source.split('function withSlideElementTargets(index, mutator)', 1)[1]
+        style = style.split('function setSlideElementTransformPair', 1)[0]
+        self.assertIn('fitSlideTextPair(stage, live, raw, rawRoot, entry)', style)
+        # The edit already records its own history entry; the fit must not add a
+        # second one that would make undo restore only the box.
+        inline = self.source.split('function commitSlideInlineEdit(stage, index, editedEl)', 1)[1]
+        inline = inline.split('function setSlidesEditorInfo', 1)[0]
+        self.assertIn('{ history: false }', inline)
 
     def test_image_controls_target_the_picture_inside_its_frame(self):
         # object-fit on the wrapper div is ignored and a radius on the frame

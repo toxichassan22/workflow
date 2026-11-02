@@ -166,19 +166,66 @@
 
     function slideTextContentHeight(el) {
       if (!el) return 0;
-      const cs = window.getComputedStyle(el);
-      const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
-      const borderY = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
-      const scroll = Math.max(el.scrollHeight || 0, el.clientHeight || 0);
-      const needed = String(cs.boxSizing || '').toLowerCase() === 'border-box'
-        ? scroll + borderY
-        : Math.max(0, scroll - padY);
-      return Math.ceil(needed);
+      // scrollHeight never falls below the box height, so a box taller than its
+      // text could not shrink. Measure the natural content box instead; a flex
+      // or grid item is also released from the stretch of its row, or it would
+      // report the row height rather than the height of its own words.
+      const style = el.style;
+      const previous = {
+        height: style.height,
+        minHeight: style.minHeight,
+        flexGrow: style.flexGrow,
+        flexShrink: style.flexShrink,
+        flexBasis: style.flexBasis,
+        alignSelf: style.alignSelf
+      };
+      style.height = 'auto';
+      style.minHeight = '0px';
+      style.flexGrow = '0';
+      style.flexShrink = '0';
+      style.flexBasis = 'auto';
+      style.alignSelf = 'flex-start';
+      const natural = el.offsetHeight || 0;
+      style.height = previous.height;
+      style.minHeight = previous.minHeight;
+      style.flexGrow = previous.flexGrow;
+      style.flexShrink = previous.flexShrink;
+      style.flexBasis = previous.flexBasis;
+      style.alignSelf = previous.alignSelf;
+      return Math.ceil(natural);
     }
 
-    function slideFlowPlaceholder(doc, info) {
+    /* Where the words themselves sit on the slide, not the box around them.
+       The box is kept centred on this line while it is fitted to its text. */
+    function slideTextVisualCenterY(stage, el) {
+      const slide = stage ? stage.querySelector('.slide') : null;
+      if (!slide || !el) return null;
+      let rect = null;
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        rect = range.getBoundingClientRect();
+      } catch (error) {
+        return null;
+      }
+      if (!rect || (!rect.height && !rect.width)) return null;
+      const slideRect = slide.getBoundingClientRect();
+      const scale = slideRenderedScale(stage) || 1;
+      return (rect.top - slideRect.top + rect.height / 2) / scale;
+    }
+
+    function slideTextBoxNeedsFit(live) {
+      if (!live || !slideTextNeedsContentHeight(live)) return false;
+      const cs = window.getComputedStyle(live);
+      if (String(cs.overflowY || '').toLowerCase() !== 'visible') return false;
+      const needed = slideTextContentHeight(live);
+      return !!needed && Math.abs(needed - (live.offsetHeight || 0)) > 2;
+    }
+
+    function slideFlowPlaceholder(doc, info, owner) {
       const ph = doc.createElement('div');
       ph.setAttribute('data-slide-flow-placeholder', '1');
+      if (owner) ph.setAttribute('data-slide-flow-owner', owner);
       ph.setAttribute('aria-hidden', 'true');
       ph.setAttribute('style', 'visibility:hidden;pointer-events:none;box-sizing:border-box;display:block;'
         + 'width:' + info.layoutWidth + 'px;height:' + info.layoutHeight + 'px;'
@@ -189,9 +236,74 @@
       return ph;
     }
 
+    /* A detached text box leaves an invisible placeholder in the flow. Deleting
+       the box releases that placeholder, or the empty slot would stay forever. */
+    function removeSlideFlowPlaceholders(root, el) {
+      if (!root || !el) return;
+      const owners = new Set();
+      const collect = node => {
+        if (!node || !node.getAttribute) return;
+        const owner = node.getAttribute('data-slide-flow-owner');
+        if (owner) owners.add(owner);
+        Array.from(node.children || []).forEach(collect);
+      };
+      collect(el);
+      owners.forEach(owner => {
+        root.querySelectorAll('[data-slide-flow-placeholder][data-slide-flow-owner="' + owner + '"]')
+          .forEach(ph => ph.remove());
+      });
+    }
+
+    /* A pasted copy does not own the original's flow slot. */
+    function stripSlideFlowOwners(node) {
+      if (!node || !node.removeAttribute) return;
+      node.removeAttribute('data-slide-flow-owner');
+      Array.from(node.children || []).forEach(stripSlideFlowOwners);
+    }
+
+    /* Release the flow slot of a deleted text box. Older decks stored
+       placeholders before they carried an owner, so when the box names none the
+       slot is matched by the geometry the box still has: same left and width. */
+    function releaseSlideFlowSlot(stage, live, root, raw) {
+      if (!root || !raw) return;
+      const owners = new Set();
+      const collect = node => {
+        if (!node || !node.getAttribute) return;
+        const owner = node.getAttribute('data-slide-flow-owner');
+        if (owner) owners.add(owner);
+        Array.from(node.children || []).forEach(collect);
+      };
+      collect(raw);
+      if (owners.size) {
+        removeSlideFlowPlaceholders(root, raw);
+        return;
+      }
+      const liveSlide = stage ? stage.querySelector('.slide') : null;
+      if (!liveSlide || !live) return;
+      const scale = slideRenderedScale(stage) || 1;
+      const liveRect = live.getBoundingClientRect();
+      const ownerless = Array.from(liveSlide.querySelectorAll('[data-slide-flow-placeholder]'))
+        .filter(ph => !ph.getAttribute('data-slide-flow-owner'));
+      if (!ownerless.length) return;
+      let best = null;
+      let bestTop = Infinity;
+      ownerless.forEach(ph => {
+        const rect = ph.getBoundingClientRect();
+        if (Math.abs(rect.width - liveRect.width) / scale > 2) return;
+        if (Math.abs(rect.left - liveRect.left) / scale > 2) return;
+        const top = Math.abs(rect.top - liveRect.top) / scale;
+        if (top < bestTop) { bestTop = top; best = ph; }
+      });
+      if (!best) return;
+      const index = ownerless.indexOf(best);
+      const raws = Array.from(root.querySelectorAll('[data-slide-flow-placeholder]'))
+        .filter(ph => !ph.getAttribute('data-slide-flow-owner'));
+      if (raws[index]) raws[index].remove();
+    }
+
     function slideDetachInfo(stage, target) {
       const slide = stage ? stage.querySelector('.slide') : null;
-      if (!slide || !target || !target.parentElement || target.parentElement === slide) return null;
+      if (!slide || !target || !target.parentElement) return null;
       const cs = window.getComputedStyle(target);
       const position = String(cs.position || '').toLowerCase();
       if (position === 'absolute' || position === 'fixed') return null;
@@ -215,11 +327,17 @@
       };
     }
 
-    function applySlideDetachedElement(el, info) {
+    function applySlideDetachedElement(el, info, owner) {
       if (!el || !info) return;
+      // The owner ties the detached box to the placeholder holding its slot, so
+      // deleting the box can release the slot instead of leaving a gap.
+      if (owner) el.setAttribute('data-slide-flow-owner', owner);
       el.style.position = 'absolute';
       el.style.left = info.left + 'px';
       el.style.top = info.top + 'px';
+      // The measured box is a border box; saying so keeps padding and border
+      // from being added to the width the reader already sees.
+      el.style.boxSizing = 'border-box';
       el.style.width = info.width + 'px';
       el.style.height = info.height + 'px';
       el.style.margin = '0';
@@ -233,56 +351,106 @@
       }
     }
 
+    function slideFlowOwnerToken() {
+      return 'ph-' + Math.random().toString(36).slice(2, 10);
+    }
+
     function detachSlideTextElementLive(stage, target) {
       const info = slideDetachInfo(stage, target);
       if (!info) return null;
       const slide = stage.querySelector('.slide');
       if (!slide) return null;
-      target.parentElement.insertBefore(slideFlowPlaceholder(document, info), target);
+      const owner = slideFlowOwnerToken();
+      info.owner = owner;
+      target.parentElement.insertBefore(slideFlowPlaceholder(document, info, owner), target);
       slide.appendChild(target);
-      applySlideDetachedElement(target, info);
+      applySlideDetachedElement(target, info, owner);
       return info;
     }
 
-    /* The selected comment box always holds its own text: a box shorter than
-       its content grows to the content height, and is lifted out of the flow
-       behind a placeholder so the following paragraphs do not move. */
-    function fitSlideTextElement(stage, index, target) {
+    /* Bring one live text box and its stored twin onto their own text. The box
+       keeps its width (the wrap boundary) and its words stay where they were:
+       the height is the text's height and the box is re-centred on the text's
+       line. The element leaves the flow behind a fixed placeholder, so nothing
+       around it moves. Returns true when the stored HTML changed. */
+    function fitSlideTextPair(stage, live, raw, rawRoot, entry) {
+      if (!live || !raw || !rawRoot || !slideTextBoxNeedsFit(live)) return false;
+      const slide = stage ? stage.querySelector('.slide') : null;
+      if (!slide) return false;
+      const cs = window.getComputedStyle(live);
+      const inFlow = !['absolute', 'fixed'].includes(String(cs.position || '').toLowerCase());
+      const beforeCenterY = slideTextVisualCenterY(stage, live);
+      if (inFlow) {
+        const info = slideDetachInfo(stage, live);
+        if (!info) return false;
+        const owner = slideFlowOwnerToken();
+        info.owner = owner;
+        live.parentElement.insertBefore(slideFlowPlaceholder(document, info, owner), live);
+        raw.parentElement.insertBefore(slideFlowPlaceholder(raw.ownerDocument || document, info, owner), raw);
+        slide.appendChild(live);
+        rawRoot.appendChild(raw);
+        applySlideDetachedElement(live, info, owner);
+        applySlideDetachedElement(raw, info, owner);
+        if (entry && slideElementPath) {
+          const detachedPath = slideElementPath(slide, live);
+          if (detachedPath) entry.path = detachedPath;
+        }
+      }
+      // Measure inside the final box: padding and old centring no longer skew
+      // the number once the box is standalone at the width it will keep.
+      const needed = slideTextContentHeight(live);
+      if (!needed) return false;
+      [live, raw].forEach(el => {
+        el.style.height = needed + 'px';
+        el.style.minHeight = needed + 'px';
+      });
+      const afterCenterY = slideTextVisualCenterY(stage, live);
+      if (beforeCenterY !== null && afterCenterY !== null) {
+        const delta = beforeCenterY - afterCenterY;
+        if (Math.abs(delta) > 0.5) {
+          [live, raw].forEach(el => {
+            const top = parseFloat(el.style.top);
+            if (!isFinite(top)) return;
+            el.style.top = (Math.round((top + delta) * 100) / 100) + 'px';
+          });
+        }
+      }
+      return true;
+    }
+
+    /* The selected text box always equals its text: a box larger than the text
+       shrinks onto it, a box with overflowing text grows, and the element is
+       lifted out of the flow behind a placeholder so no neighbour moves. */
+    function fitSlideTextElement(stage, index, target, options) {
       const session = getSlideEditSession(index);
       const slideData = tenantSlidesData[index];
       const slide = stage ? stage.querySelector('.slide') : null;
       if (!session || !slideData || !slideData.html || !slide) return false;
-      if (!slideTextNeedsContentHeight(target)) return false;
-      const cs = window.getComputedStyle(target);
-      if (String(cs.overflowY || '').toLowerCase() !== 'visible') return false;
-      const needed = slideTextContentHeight(target);
-      const current = Math.max(target.offsetHeight || 0, parseFloat(cs.height) || 0);
-      if (!needed || needed <= current + 2) return false;
+      if (!slideTextBoxNeedsFit(target)) return false;
       const path = slideElementPath(slide, target);
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
       const rawRoot = rawDoc.querySelector('.slide');
       const rawTarget = rawRoot && path ? elementAtSlidePath(rawRoot, path) : null;
       if (!rawRoot || !rawTarget) return false;
-      pushSlideEditHistory(index);
-      const inFlow = !['absolute', 'fixed'].includes(String(cs.position || '').toLowerCase());
-      const info = inFlow ? slideDetachInfo(stage, target) : null;
-      if (info) {
-        target.parentElement.insertBefore(slideFlowPlaceholder(document, info), target);
-        rawTarget.parentElement.insertBefore(slideFlowPlaceholder(rawDoc, info), rawTarget);
-        slide.appendChild(target);
-        rawRoot.appendChild(rawTarget);
-        applySlideDetachedElement(target, info);
-        applySlideDetachedElement(rawTarget, info);
-      }
-      [target, rawTarget].forEach(el => {
-        el.style.height = needed + 'px';
-        el.style.minHeight = needed + 'px';
+      const entries = [];
+      if (session.sel) entries.push(session.sel);
+      (Array.isArray(session.multi) ? session.multi : []).forEach(entry => {
+        if (entry !== session.sel) entries.push(entry);
       });
+      const affected = entries.filter(entry => elementAtSlidePath(slide, entry.path) === target);
+      if (!options || options.history !== false) pushSlideEditHistory(index);
+      if (!fitSlideTextPair(stage, target, rawTarget, rawRoot, null)) return false;
+      const settledPath = slideElementPath(slide, target);
+      if (settledPath) affected.forEach(entry => { entry.path = settledPath; });
       slideData.html = rawRoot.outerHTML;
       markSlideHtmlEdited(slideData);
       tenantProjectData.tenantSlidesData = tenantSlidesData;
       touchSlideEditSession(index);
       triggerAutoSaveDraft();
+      if (target.classList.contains('slide-element-selected')
+        && typeof positionSlideEditHandles === 'function') {
+        positionSlideEditHandles(stage, target);
+      }
       return true;
     }
 
@@ -474,6 +642,7 @@
       const startY = event.clientY;
       const computed = window.getComputedStyle(target);
       const isImage = slideElementIsImageBox(target);
+      const isText = typeof slideTextNeedsContentHeight === 'function' && slideTextNeedsContentHeight(target);
       const explicitHeight = !!(computed.height && computed.height !== 'auto');
       let baseTx = Number(target.dataset.manualTranslateX) || 0;
       let baseTy = Number(target.dataset.manualTranslateY) || 0;
@@ -548,6 +717,15 @@
             }
           }
         }
+        if (isText && typeof slideTextContentHeight === 'function') {
+          // The frame is the text boundary: a width change rewraps the words
+          // and the frame takes the height those words now need, live.
+          const needed = slideTextContentHeight(target);
+          if (needed) {
+            target.style.minHeight = needed + 'px';
+            target.style.height = needed + 'px';
+          }
+        }
         const m = measure();
         if (dir.indexOf('e') !== -1) compX += (base.left - m.left);
         else if (dir.indexOf('w') !== -1) compX += ((base.left + base.width) - (m.left + m.width));
@@ -603,9 +781,9 @@
       // The live element was lifted out of the flow on the first move; the
       // stored copy follows the same route behind an identical placeholder.
       if (detachInfo && rawTarget.parentElement) {
-        rawTarget.parentElement.insertBefore(slideFlowPlaceholder(rawDoc, detachInfo), rawTarget);
+        rawTarget.parentElement.insertBefore(slideFlowPlaceholder(rawDoc, detachInfo, detachInfo.owner), rawTarget);
         rawRoot.appendChild(rawTarget);
-        applySlideDetachedElement(rawTarget, detachInfo);
+        applySlideDetachedElement(rawTarget, detachInfo, detachInfo.owner);
       }
       if (widthPx !== null && widthPx !== undefined) {
         const widthValue = Math.max(24, Math.min(1280, Math.round(widthPx))) + 'px';
@@ -642,11 +820,11 @@
       if (size && typeof size === 'object' && size.displayPromoted) {
         rawTarget.style.display = 'inline-block';
       }
-      // A text element never ends up shorter than its own text.
+      // The box is the text boundary: after every resize it takes exactly the
+      // height the text needs at the new width, so the text can never leave it.
       if (typeof slideTextNeedsContentHeight === 'function' && slideTextNeedsContentHeight(target)) {
         const needed = slideTextContentHeight(target);
-        const applied = parseFloat(target.style.minHeight) || parseFloat(target.style.height) || 0;
-        if (needed && applied + 2 < needed) {
+        if (needed) {
           target.style.minHeight = needed + 'px';
           target.style.height = needed + 'px';
           rawTarget.style.minHeight = needed + 'px';

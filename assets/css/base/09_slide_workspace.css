@@ -872,7 +872,16 @@
    stage by the ResizeObserver in 15a-slide-workspace/01_workspace.js. */
 #tenantSlidesPage .ge-slide-card {
   width: fit-content;
-  max-width: 100%;
+  max-width: none;
+  margin-inline: auto;
+}
+
+/* A zoomed stage is wider than the page: the canvas must scroll to it instead
+   of clipping the sides, and the card starts at the page edge so the whole
+   stage stays reachable. */
+#tenantSlidesPage .ge-main {
+  overflow-x: auto;
+  align-items: flex-start;
 }
 
 #tenantSlidesPage .ge-slide-edit-controls {

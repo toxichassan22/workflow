@@ -554,7 +554,18 @@
       }
       const stage = document.createElement('div');
       stage.className = 'tenant-slide-stage';
-      stage.style.setProperty('--stage-w', '960px');
+      // Entering edit mode used to rebuild the stage at the 960px skeleton
+      // width, so the canvas visibly shrank. Carry the size the reader already
+      // has into the rebuilt card and express it as the zoom model's fit width.
+      const previousStage = oldCard.querySelector('.tenant-slide-stage');
+      const previousWidth = previousStage ? Math.round(previousStage.offsetWidth) : 0;
+      const zoom = typeof tenantCanvasZoom === 'number' && tenantCanvasZoom > 0 ? tenantCanvasZoom : 1;
+      if (previousWidth > 0) {
+        stage.dataset.fitWidth = String(Math.max(1, Math.round(previousWidth / zoom)));
+        stage.style.setProperty('--stage-w', previousWidth + 'px');
+      } else {
+        stage.style.setProperty('--stage-w', '960px');
+      }
       stage.style.setProperty('--stage-h', '540px');
       stage.style.setProperty('--slide-scale', '0.75');
       stage.innerHTML = processSlideHtmlClient(slide.html, slide.type)
