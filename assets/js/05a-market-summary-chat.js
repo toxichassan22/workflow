@@ -338,7 +338,8 @@
       const decision = document.getElementById('marketDecision');
       const swot = document.getElementById('marketSwotFields');
       return {
-        one_block: oneBlock ? (oneBlock.closest('.market-block') || oneBlock.parentElement) : null,
+        one_block: document.getElementById('marketStudySummaryBlock')
+          || (oneBlock ? (oneBlock.closest('.market-study-summary') || oneBlock.parentElement) : null),
         decision: decision ? decision.parentElement : null,
         swot: swot ? swot.previousElementSibling : null
       };

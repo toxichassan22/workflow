@@ -223,6 +223,7 @@
   line-height: 1.5;
 }
 
+#section-market-study .market-study-generate-card,
 #section-market-study .market-study-decision,
 #section-market-study .market-study-summary,
 #section-market-study .market-study-swot,
@@ -347,24 +348,35 @@
   scroll-margin-top: 104px;
 }
 
-#section-market-study .market-study-summary {
-  display: flex;
-  flex-direction: column;
-}
-
-#section-market-study .market-study-summary .market-study-section-head {
-  order: 0;
-}
-
-#section-market-study .market-study-summary #marketStudyOneBlockSummary {
-  order: 1;
-}
-
 #section-market-study .market-study-generate {
-  order: 2;
-  border-top: 1px solid var(--line, #E1E8EF);
-  padding: 10px 0 0;
-  margin: 12px 0 0;
+  border-top: 0;
+  padding: 0;
+  margin: 0;
+}
+
+#section-market-study .market-study-summary-body {
+  min-width: 0;
+}
+
+#section-market-study .market-study-summary.collapsed .market-study-summary-body,
+#section-market-study .market-study-swot.collapsed #marketSwotFields {
+  display: none;
+}
+
+#section-market-study .market-study-section-toggle {
+  flex: 0 0 auto;
+  border: 0;
+  background: none;
+  color: var(--muted, #6B7C8F);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+#section-market-study .market-study-section-toggle:hover {
+  color: var(--teal-dark, #0A829B);
 }
 
 #section-market-study .market-summary-city button:disabled,
@@ -545,19 +557,22 @@
 #section-market-study .market-study-swot #marketSwotFields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 12px;
 }
 
 #section-market-study .market-swot-card {
   border: 1px solid var(--line, #E1E8EF);
-  border-radius: 7px;
-  padding: 10px 12px;
+  border-radius: 8px;
+  padding: 14px 16px;
   min-width: 0;
+  background: #FBFCFD;
 }
 
 #section-market-study .market-swot-title {
   display: block;
-  margin: 0 0 4px;
+  margin: 0 0 7px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line, #E1E8EF);
   font-size: 12.5px;
   color: var(--navy, #07182C);
   font-weight: 800;
@@ -565,7 +580,7 @@
 
 #section-market-study .market-swot-card .market-auto-grow {
   font-size: 14px;
-  line-height: 1.85;
+  line-height: 1.9;
 }
 
 #section-market-study .market-study-sources-actions {

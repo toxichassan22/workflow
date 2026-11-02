@@ -129,6 +129,35 @@
         </div>
         </div>
         <div class="market-study-tab-panel" id="marketMarketPanel" data-market-study-panel="market" role="tabpanel" aria-labelledby="marketMarketTab" aria-hidden="false">
+          <section class="market-study-generate-card" id="marketStudyGenerateBlock">
+            <div class="market-study-section-head"><div><span class="market-study-kicker" data-i18n="market.generation_scope">نطاق التوليد</span><h4 data-i18n="market.generation_scope">نطاق التوليد</h4></div></div>
+            <div class="market-study-generate">
+              <div class="market-study-scope">
+                <div class="market-study-scope-head"><button type="button" class="btn ghost small" id="marketSummaryScopeAddCityBtn" data-i18n="market.summary_scope_add_city" onclick="addMarketSummaryScopeCity()">إضافة مدينة</button></div>
+                <div id="marketSummaryScopeCities"></div>
+              </div>
+              <div class="market-study-generate-row">
+                <div class="market-study-field"><label for="marketSummaryPeriod">فترة البيانات</label>
+                  <select id="marketSummaryPeriod">
+                    <option value="12m">آخر 12 شهرًا</option>
+                    <option value="24m">آخر 24 شهرًا</option>
+                    <option value="3y">آخر 3 سنوات</option>
+                    <option value="5y">آخر 5 سنوات</option>
+                    <option value="custom">فترة مخصصة</option>
+                  </select>
+                </div>
+                <div id="marketSummaryCustomPeriodWrap" hidden>
+                  <label>من تاريخ</label><input id="marketSummaryPeriodFrom" type="date">
+                  <label style="margin-top:8px">إلى تاريخ</label><input id="marketSummaryPeriodTo" type="date">
+                </div>
+                <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
+                <button type="button" class="btn ghost" id="marketResumeSummaryBtn" onclick="resumeMarketSummaryJob()" hidden>استكمال المهمة</button>
+                <button type="button" class="btn ghost" id="marketSummaryTraceBtn" hidden>تنزيل سجل البحث</button>
+              </div>
+              <div id="marketSummaryFailure"></div>
+              <div id="marketSummaryCompare" hidden></div>
+            </div>
+          </section>
           <div class="market-study-context" id="marketStudyContext">
             <div><span>المدينة</span><strong id="marketContextCity">—</strong></div>
             <div><span>الحي</span><strong id="marketContextDistrict">—</strong></div>
@@ -163,38 +192,14 @@
             <div id="marketSummaryFields"></div>
           </section>
           <section class="market-study-swot" id="marketStudySwotBlock">
-            <div class="market-study-section-head" id="marketStudySwotHead"><div><span class="market-study-kicker">SWOT</span><h4>تحليل SWOT</h4></div></div>
-            <div id="marketSwotFields"></div>
+            <div class="market-study-section-head" id="marketStudySwotHead"><div><span class="market-study-kicker">SWOT</span><h4>تحليل SWOT</h4></div><button type="button" class="market-study-section-toggle" data-market-section-toggle="swot" data-section-lock-ignore="1" data-i18n="market.collapse" aria-expanded="true">طي</button></div>
+            <div id="marketSwotFields" data-market-section-body="swot"></div>
           </section>
           <section class="market-study-summary" id="marketStudySummaryBlock">
-            <div class="market-study-section-head"><div><span class="market-study-kicker">الملخص التنفيذي</span><h4>الملخص التنفيذي لسوق المشروع</h4></div></div>
-            <div class="market-study-generate">
-              <div class="market-study-scope">
-                <div class="market-study-scope-head"><span data-i18n="market.generation_scope">نطاق التوليد</span><button type="button" class="btn ghost small" id="marketSummaryScopeAddCityBtn" data-i18n="market.summary_scope_add_city" onclick="addMarketSummaryScopeCity()">إضافة مدينة</button></div>
-                <div id="marketSummaryScopeCities"></div>
-              </div>
-              <div class="market-study-generate-row">
-                <div class="market-study-field"><label for="marketSummaryPeriod">فترة البيانات</label>
-                  <select id="marketSummaryPeriod">
-                    <option value="12m">آخر 12 شهرًا</option>
-                    <option value="24m">آخر 24 شهرًا</option>
-                    <option value="3y">آخر 3 سنوات</option>
-                    <option value="5y">آخر 5 سنوات</option>
-                    <option value="custom">فترة مخصصة</option>
-                  </select>
-                </div>
-                <div id="marketSummaryCustomPeriodWrap" hidden>
-                  <label>من تاريخ</label><input id="marketSummaryPeriodFrom" type="date">
-                  <label style="margin-top:8px">إلى تاريخ</label><input id="marketSummaryPeriodTo" type="date">
-                </div>
-                <button type="button" class="btn primary" id="marketGenerateSummaryBtn" onclick="runMarketSummaryJob()">توليد ملخص السوق</button>
-                <button type="button" class="btn ghost" id="marketResumeSummaryBtn" onclick="resumeMarketSummaryJob()" hidden>استكمال المهمة</button>
-                <button type="button" class="btn ghost" id="marketSummaryTraceBtn" hidden>تنزيل سجل البحث</button>
-              </div>
-              <div id="marketSummaryFailure"></div>
-              <div id="marketSummaryCompare" hidden></div>
+            <div class="market-study-section-head"><div><span class="market-study-kicker">الملخص التنفيذي</span><h4>الملخص التنفيذي لسوق المشروع</h4></div><button type="button" class="market-study-section-toggle" data-market-section-toggle="summary" data-section-lock-ignore="1" data-i18n="market.collapse" aria-expanded="true">طي</button></div>
+            <div class="market-study-summary-body" data-market-section-body="summary">
+              <textarea id="marketStudyOneBlockSummary" rows="1" class="market-auto-grow market-study-one-block" aria-label="الملخص التنفيذي لسوق المشروع"></textarea>
             </div>
-            <textarea id="marketStudyOneBlockSummary" rows="1" class="market-auto-grow market-study-one-block" aria-label="الملخص التنفيذي لسوق المشروع"></textarea>
           </section>
           <section class="market-study-sources" id="marketStudySourcesBlock">
             <div class="market-study-section-head"><div><span class="market-study-kicker">المصادر</span><h4 data-i18n="market.sources_title">سجل المصادر</h4></div>
@@ -244,12 +249,12 @@
       const toc = document.getElementById('marketStudyToc');
       if (toc) {
         toc.addEventListener('click', event => {
-          const link = event.target.closest('a[href^="#market-axis-"]');
+          const link = event.target.closest('a[href^="#market-axis-"], a[href="#marketStudySummaryBlock"], a[href="#marketStudySwotBlock"]');
           if (!link) return;
           const card = document.querySelector(link.getAttribute('href'));
           if (!card || !card.classList.contains('collapsed')) return;
           card.classList.remove('collapsed');
-          const btn = card.querySelector('.market-axis-toggle');
+          const btn = card.querySelector('.market-axis-toggle, .market-study-section-toggle');
           if (btn) {
             btn.textContent = WFT('market.collapse', 'طي');
             btn.setAttribute('aria-expanded', 'true');
@@ -257,6 +262,16 @@
           setTimeout(autoGrowMarketStudyFields, 0);
         });
       }
+      document.querySelectorAll('.market-study-section-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const card = btn.closest('.market-study-summary, .market-study-swot');
+          if (!card) return;
+          const collapsed = card.classList.toggle('collapsed');
+          btn.textContent = collapsed ? WFT('market.expand', 'فتح') : WFT('market.collapse', 'طي');
+          btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          if (!collapsed) setTimeout(autoGrowMarketStudyFields, 0);
+        });
+      });
       const tocToggle = document.getElementById('marketStudyTocToggle');
       if (tocToggle && summaryHost) {
         let allOpen = true;

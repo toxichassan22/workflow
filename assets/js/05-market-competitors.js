@@ -576,6 +576,8 @@
       if (text.includes('•')) {
         return text.replace(/\s*•\s*/g, '\n• ').replace(/^\n+/, '').trim();
       }
+      const sentences = text.split(/(?<=[.!?؟])\s+/).map(item => item.trim()).filter(Boolean);
+      if (sentences.length > 1) return sentences.map(item => '• ' + item).join('\n');
       return text.replace(/\s*\n\s*/g, ' ').trim();
     }
 

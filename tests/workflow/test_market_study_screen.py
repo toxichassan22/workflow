@@ -41,8 +41,9 @@ class MarketStudyScreenTests(unittest.TestCase):
         self.assertNotIn('عمق البحث', self.text)
         self.assertIn("state.summary_research_depth = 'full';", self.text)
 
-    def test_unified_screen_orders_axes_swot_summary_and_sources(self):
+    def test_unified_screen_puts_generation_first_and_summary_after_swot(self):
         for token in (
+            'id="marketStudyGenerateBlock"',
             'id="marketStudySummaryBlock"',
             'id="marketStudyAxesBlock"',
             'id="marketStudySwotBlock"',
@@ -51,12 +52,23 @@ class MarketStudyScreenTests(unittest.TestCase):
             'market-study-toc-toggle',
         ):
             self.assertIn(token, self.text)
+        self.assertLess(self.text.index('id="marketStudyGenerateBlock"'),
+                        self.text.index('id="marketStudyAxesBlock"'))
         self.assertLess(self.text.index('id="marketStudyAxesBlock"'),
                         self.text.index('id="marketStudySwotBlock"'))
         self.assertLess(self.text.index('id="marketStudySwotBlock"'),
                         self.text.index('id="marketStudySummaryBlock"'))
         self.assertLess(self.text.index('id="marketStudySummaryBlock"'),
                         self.text.index('id="marketStudySourcesBlock"'))
+
+    def test_summary_and_swot_are_collapsible(self):
+        for token in (
+            'data-market-section-toggle="summary"',
+            'data-market-section-toggle="swot"',
+            'data-market-section-body="summary"',
+            'data-market-section-body="swot"',
+        ):
+            self.assertIn(token, self.text)
 
     def test_summary_axes_use_editable_cards_and_normalized_display_values(self):
         self.assertIn('class="market-axis-card"', self.text)
