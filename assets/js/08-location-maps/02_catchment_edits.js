@@ -776,6 +776,9 @@
           sectionDiv.appendChild(coordinatesField);
           sectionDiv.appendChild(directionsField);
           if (typeof mountLandChat === 'function') mountLandChat(sectionDiv);
+          // Presentation only: the same fields, grouped under titled blocks, with
+          // a result overview on top. Values still live in their [data-key] inputs.
+          if (typeof groupLandAnalysisFields === 'function') groupLandAnalysisFields(sectionDiv);
         }
 
         return sectionDiv;

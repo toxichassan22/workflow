@@ -16,7 +16,7 @@ FRONTEND_CSS_ORDER = (
     'project-form/04_financial_parking.css', 'project-form/05_best_use.css',
     'project-form/05a_market_summary_chat.css', 'project-form/05b_market_study_tabs.css',
     'project-form/06_visual_concept_plans.css', 'project-form/07_section_change_history.css',
-    'project-form/08_live_collab.css',
+    'project-form/08_live_collab.css', 'project-form/09_land_results.css',
 )
 FRONTEND_JS_ORDER = (
     '00-core.js', '00-core/01_progress.js',
@@ -37,7 +37,8 @@ FRONTEND_JS_ORDER = (
     '09-financial/02_formulas_calc.js', '09-financial/03_parking_planning.js',
     '10-financial-report-timeline/01_report_collect.js', '10-financial-report-timeline/02_timeline_sidebar.js',
     '10-financial-report-timeline/03_timeline_board.js', '11-land-croquis/01_croquis_survey.js',
-    '11-land-croquis/01a_boundary_dimensions.js', '11-land-croquis/02_map_edits.js',
+    '11-land-croquis/01a_boundary_dimensions.js', '11-land-croquis/01b_land_result_panel.js',
+    '11-land-croquis/02_map_edits.js',
     '11-land-croquis/02a_map_approval_viewport.js', '11-land-croquis/03_interactive_map.js',
     '11-land-croquis/04_land_chat.js', '12-files-media/01_files_media.js',
     '12-files-media/02_visual_concept.js', '12-files-media/02a_visual_concept_sections.js',

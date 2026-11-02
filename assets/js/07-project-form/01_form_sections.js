@@ -87,6 +87,7 @@
       });
       refreshClientEnteredLandFieldStates();
       if (typeof updateLandComputedMetrics === 'function') updateLandComputedMetrics();
+      if (typeof refreshLandAnalysisOverview === 'function') refreshLandAnalysisOverview();
       // Stored phases are authoritative even when empty: a cleared timeline hydrates to an
       // empty board, and the quarter/duration rows of older drafts convert to real dates.
       if (typeof hydrateTimelinePhases === 'function') hydrateTimelinePhases(source);
