@@ -150,6 +150,142 @@
       setTimeout(settle, 80);
     }
 
+    /* A paragraph in a generated flow layout shares its height with the
+       siblings: growing or resizing it reflows them, and a fixed height can
+       leave the text outside its own selection frame. Text elements therefore
+       get their real content height, and the first manual resize lifts them
+       out of the flow behind an invisible placeholder so no neighbour moves. */
+    function slideTextNeedsContentHeight(el) {
+      if (!el || el.nodeType !== 1) return false;
+      if (el.closest && el.closest('[data-slide-table], [data-slide-header], [data-slide-footer], header, footer, .slide-watermark')) return false;
+      if (el.hasAttribute && el.hasAttribute('data-slide-textbox')) return true;
+      const tag = String(el.tagName || '').toLowerCase();
+      if (!['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) return false;
+      return String(el.textContent || '').trim().length > 0;
+    }
+
+    function slideTextContentHeight(el) {
+      if (!el) return 0;
+      const cs = window.getComputedStyle(el);
+      const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+      const borderY = (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+      const scroll = Math.max(el.scrollHeight || 0, el.clientHeight || 0);
+      const needed = String(cs.boxSizing || '').toLowerCase() === 'border-box'
+        ? scroll + borderY
+        : Math.max(0, scroll - padY);
+      return Math.ceil(needed);
+    }
+
+    function slideFlowPlaceholder(doc, info) {
+      const ph = doc.createElement('div');
+      ph.setAttribute('data-slide-flow-placeholder', '1');
+      ph.setAttribute('aria-hidden', 'true');
+      ph.setAttribute('style', 'visibility:hidden;pointer-events:none;box-sizing:border-box;display:block;'
+        + 'width:' + info.layoutWidth + 'px;height:' + info.layoutHeight + 'px;'
+        + 'margin:' + info.margins.top + ' ' + info.margins.right + ' ' + info.margins.bottom + ' ' + info.margins.left + ';'
+        + (info.flex && info.flex !== '0 1 auto' ? 'flex:' + info.flex + ';' : '')
+        + (info.alignSelf && info.alignSelf !== 'auto' ? 'align-self:' + info.alignSelf + ';' : '')
+        + (info.order && info.order !== '0' ? 'order:' + info.order + ';' : ''));
+      return ph;
+    }
+
+    function slideDetachInfo(stage, target) {
+      const slide = stage ? stage.querySelector('.slide') : null;
+      if (!slide || !target || !target.parentElement || target.parentElement === slide) return null;
+      const cs = window.getComputedStyle(target);
+      const position = String(cs.position || '').toLowerCase();
+      if (position === 'absolute' || position === 'fixed') return null;
+      const scale = slideRenderedScale(stage) || 1;
+      const slideRect = slide.getBoundingClientRect();
+      const rect = target.getBoundingClientRect();
+      const round = value => Math.round(value * 100) / 100;
+      return {
+        left: round((rect.left - slideRect.left) / scale),
+        top: round((rect.top - slideRect.top) / scale),
+        width: round(rect.width / scale),
+        height: round(rect.height / scale),
+        layoutWidth: target.offsetWidth,
+        layoutHeight: target.offsetHeight,
+        margins: { top: cs.marginTop, right: cs.marginRight, bottom: cs.marginBottom, left: cs.marginLeft },
+        flex: cs.flex,
+        alignSelf: cs.alignSelf,
+        order: cs.order,
+        textAlign: cs.textAlign,
+        direction: cs.direction
+      };
+    }
+
+    function applySlideDetachedElement(el, info) {
+      if (!el || !info) return;
+      el.style.position = 'absolute';
+      el.style.left = info.left + 'px';
+      el.style.top = info.top + 'px';
+      el.style.width = info.width + 'px';
+      el.style.height = info.height + 'px';
+      el.style.margin = '0';
+      el.style.transform = '';
+      if (!el.style.zIndex) el.style.zIndex = '5';
+      if (info.textAlign && !el.style.textAlign) el.style.textAlign = info.textAlign;
+      if (info.direction && !el.style.direction) el.style.direction = info.direction;
+      if (el.dataset) {
+        delete el.dataset.manualTranslateX;
+        delete el.dataset.manualTranslateY;
+      }
+    }
+
+    function detachSlideTextElementLive(stage, target) {
+      const info = slideDetachInfo(stage, target);
+      if (!info) return null;
+      const slide = stage.querySelector('.slide');
+      if (!slide) return null;
+      target.parentElement.insertBefore(slideFlowPlaceholder(document, info), target);
+      slide.appendChild(target);
+      applySlideDetachedElement(target, info);
+      return info;
+    }
+
+    /* The selected comment box always holds its own text: a box shorter than
+       its content grows to the content height, and is lifted out of the flow
+       behind a placeholder so the following paragraphs do not move. */
+    function fitSlideTextElement(stage, index, target) {
+      const session = getSlideEditSession(index);
+      const slideData = tenantSlidesData[index];
+      const slide = stage ? stage.querySelector('.slide') : null;
+      if (!session || !slideData || !slideData.html || !slide) return false;
+      if (!slideTextNeedsContentHeight(target)) return false;
+      const cs = window.getComputedStyle(target);
+      if (String(cs.overflowY || '').toLowerCase() !== 'visible') return false;
+      const needed = slideTextContentHeight(target);
+      const current = Math.max(target.offsetHeight || 0, parseFloat(cs.height) || 0);
+      if (!needed || needed <= current + 2) return false;
+      const path = slideElementPath(slide, target);
+      const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
+      const rawRoot = rawDoc.querySelector('.slide');
+      const rawTarget = rawRoot && path ? elementAtSlidePath(rawRoot, path) : null;
+      if (!rawRoot || !rawTarget) return false;
+      pushSlideEditHistory(index);
+      const inFlow = !['absolute', 'fixed'].includes(String(cs.position || '').toLowerCase());
+      const info = inFlow ? slideDetachInfo(stage, target) : null;
+      if (info) {
+        target.parentElement.insertBefore(slideFlowPlaceholder(document, info), target);
+        rawTarget.parentElement.insertBefore(slideFlowPlaceholder(rawDoc, info), rawTarget);
+        slide.appendChild(target);
+        rawRoot.appendChild(rawTarget);
+        applySlideDetachedElement(target, info);
+        applySlideDetachedElement(rawTarget, info);
+      }
+      [target, rawTarget].forEach(el => {
+        el.style.height = needed + 'px';
+        el.style.minHeight = needed + 'px';
+      });
+      slideData.html = rawRoot.outerHTML;
+      markSlideHtmlEdited(slideData);
+      tenantProjectData.tenantSlidesData = tenantSlidesData;
+      touchSlideEditSession(index);
+      triggerAutoSaveDraft();
+      return true;
+    }
+
     function selectSlideElement(stage, index, target, path) {
       const session = getSlideEditSession(index);
       if (!session || !stage || !target) return;
@@ -166,6 +302,9 @@
       };
       session.multi = [session.sel];
       target.classList.add('slide-element-selected');
+      if (typeof fitSlideTextElement === 'function') fitSlideTextElement(stage, index, target);
+      const settledPath = slideElementPath(slide, target);
+      if (settledPath) session.sel.path = settledPath;
       positionSlideEditHandles(stage, target);
       syncSlideElementToolbar(index);
       holdSlideStagePosition(stage, anchorTop);
@@ -305,8 +444,10 @@
        elements, LTR and RTL, without rewriting the element positioning. */
     function startSlideElementResize(stage, index, slide, target, dir, scale, event) {
       if (slideElementDragActive) return;
-      const path = slideElementPath(slide, target);
+      let path = slideElementPath(slide, target);
       if (!path) return;
+      const rawPath = path;
+      let detachInfo = null;
       const touchW = dir.indexOf('e') !== -1 || dir.indexOf('w') !== -1;
       const touchH = dir.indexOf('n') !== -1 || dir.indexOf('s') !== -1;
       if (!touchW && !touchH) return;
@@ -365,6 +506,20 @@
       const onMove = moveEvent => {
         const dw = (moveEvent.clientX - startX) / scale;
         const dh = (moveEvent.clientY - startY) / scale;
+        if (!moved && Math.abs(dw) + Math.abs(dh) > 2
+          && typeof detachSlideTextElementLive === 'function'
+          && typeof slideTextNeedsContentHeight === 'function'
+          && slideTextNeedsContentHeight(target)) {
+          // Lifting the element out of the flow before the first size change
+          // keeps every sibling where it was; the placeholder owns its slot.
+          detachInfo = detachSlideTextElementLive(stage, target);
+          if (detachInfo) {
+            baseTx = 0;
+            baseTy = 0;
+            foreignPrefix = '';
+            path = slideElementPath(slide, target) || path;
+          }
+        }
         if (Math.abs(dw) + Math.abs(dh) > 2) moved = true;
         let newW = base.width;
         let newH = base.height;
@@ -418,7 +573,8 @@
         commitSlideElementResize(stage, index, target, path, {
           width: finalW, height: finalH, tx: finalTx, ty: finalTy,
           isImage: isImage, explicitHeight: explicitHeight,
-          displayPromoted: displayPromoted, foreignPrefix: foreignPrefix
+          displayPromoted: displayPromoted, foreignPrefix: foreignPrefix,
+          detachInfo: detachInfo, rawPath: rawPath
         });
         selectSlideElement(stage, index, target, path);
       };
@@ -431,15 +587,26 @@
       const slideData = tenantSlidesData[index];
       if (!slideData || !slideData.html || !target) return;
       if (!getSlideEditSession(index)) return;
+      const detachInfo = size && typeof size === 'object' ? size.detachInfo : null;
+      const rawPath = size && typeof size === 'object' ? size.rawPath : null;
       const rawDoc = new DOMParser().parseFromString(slideData.html, 'text/html');
       const rawRoot = rawDoc.querySelector('.slide');
-      const rawTarget = rawRoot && findSlideRawTarget(rawRoot, target, path);
+      const rawTarget = rawRoot
+        ? (detachInfo && rawPath ? elementAtSlidePath(rawRoot, rawPath) : findSlideRawTarget(rawRoot, target, path))
+        : null;
       if (!rawRoot || !rawTarget) { renderTenantSlides(); return; }
       const widthPx = size && typeof size === 'object' ? size.width : size;
       const heightPx = size && typeof size === 'object' ? size.height : null;
       const isImage = !!(size && typeof size === 'object' && size.isImage);
       const explicitHeight = !!(size && typeof size === 'object' && size.explicitHeight);
       pushSlideEditHistory(index);
+      // The live element was lifted out of the flow on the first move; the
+      // stored copy follows the same route behind an identical placeholder.
+      if (detachInfo && rawTarget.parentElement) {
+        rawTarget.parentElement.insertBefore(slideFlowPlaceholder(rawDoc, detachInfo), rawTarget);
+        rawRoot.appendChild(rawTarget);
+        applySlideDetachedElement(rawTarget, detachInfo);
+      }
       if (widthPx !== null && widthPx !== undefined) {
         const widthValue = Math.max(24, Math.min(1280, Math.round(widthPx))) + 'px';
         target.style.width = widthValue;
@@ -474,6 +641,17 @@
       }
       if (size && typeof size === 'object' && size.displayPromoted) {
         rawTarget.style.display = 'inline-block';
+      }
+      // A text element never ends up shorter than its own text.
+      if (typeof slideTextNeedsContentHeight === 'function' && slideTextNeedsContentHeight(target)) {
+        const needed = slideTextContentHeight(target);
+        const applied = parseFloat(target.style.minHeight) || parseFloat(target.style.height) || 0;
+        if (needed && applied + 2 < needed) {
+          target.style.minHeight = needed + 'px';
+          target.style.height = needed + 'px';
+          rawTarget.style.minHeight = needed + 'px';
+          rawTarget.style.height = needed + 'px';
+        }
       }
       // Persist the caps dropped at drag start, or the next reload would clamp
       // the hand-picked watermark size back to 50% of the slide.

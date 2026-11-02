@@ -230,6 +230,11 @@
       renderTenantSlidesSidebar();
       triggerAutoSaveDraft();
       toast('تم تعديل النص. اضغط "حفظ التعديلات" للحفظ النهائي.');
+      // Typed text can outgrow its box; the box grows with it instead of
+      // spilling the selection frame.
+      if (typeof fitSlideTextElement === 'function' && editedEl) {
+        fitSlideTextElement(stage, index, editedEl);
+      }
       autoFitSlideContent(stage);
     }
 

@@ -868,6 +868,7 @@
       if (!node || node.nodeType !== 1) return false;
       const flag = node.getAttribute ? String(node.getAttribute('data-slide-live-only') || '') : '';
       if (flag === '1') return true;
+      if (node.getAttribute && String(node.getAttribute('data-slide-flow-placeholder') || '') === '1') return true;
       const classes = node.classList;
       if (!classes) return false;
       return classes.contains('slide-resize-handle')

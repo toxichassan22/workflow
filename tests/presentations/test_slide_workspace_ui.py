@@ -626,6 +626,30 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn('slideTextDecorationNext(current, styleKind)', toggle)
         self.assertNotIn("next = (next ? next + ' ' : '') + wanted", toggle)
 
+    def test_text_boxes_fit_their_text_and_leave_the_flow_once(self):
+        # A generated paragraph can overflow its fixed height, and resizing it
+        # reflows the following paragraphs. Selecting it grows it to the text
+        # and lifts it out of the flow behind a placeholder.
+        for fn in ('slideTextNeedsContentHeight(', 'slideTextContentHeight(',
+                   'slideFlowPlaceholder(', 'slideDetachInfo(',
+                   'applySlideDetachedElement(', 'detachSlideTextElementLive(',
+                   'fitSlideTextElement('):
+            self.assertIn('function ' + fn, self.source)
+        select = self.source.split('function selectSlideElement(stage, index, target, path)', 1)[1]
+        select = select.split('function restoreSlideEditSelection', 1)[0]
+        self.assertIn('fitSlideTextElement(stage, index, target)', select)
+        self.assertIn('session.sel.path = settledPath', select)
+        resize = self.source.split('function startSlideElementResize', 1)[1]
+        resize = resize.split('function commitSlideElementResize', 1)[0]
+        self.assertIn('detachSlideTextElementLive(stage, target)', resize)
+        self.assertIn('detachInfo: detachInfo, rawPath: rawPath', resize)
+        commit = self.source.split('function commitSlideElementResize', 1)[1]
+        commit = commit.split('function applySlideElementColorValue', 1)[0]
+        self.assertIn('slideFlowPlaceholder(rawDoc, detachInfo)', commit)
+        self.assertIn('slideTextContentHeight(target)', commit)
+        self.assertIn("data-slide-flow-placeholder', '1'", self.source)
+        self.assertIn("node.getAttribute('data-slide-flow-placeholder')", self.source)
+
     def test_image_controls_target_the_picture_inside_its_frame(self):
         # object-fit on the wrapper div is ignored and a radius on the frame
         # does not round the picture, so both controls looked dead.
