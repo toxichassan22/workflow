@@ -221,7 +221,9 @@
     (function initSlidesCanvasShortcuts() {
       if (typeof ensureSlidesCanvasChrome === 'function') ensureSlidesCanvasChrome();
       try {
-        const saved = Number(localStorage.getItem('wf.slidesCanvasZoom'));
+        // The old build painted the deck at its reading width whatever the saved
+        // zoom said; the v2 key starts from the fitted 100% instead.
+        const saved = Number(localStorage.getItem('wf.slidesCanvasZoom.v2'));
         if (saved && isFinite(saved)) tenantCanvasZoom = saved;
       } catch (error) {}
       if (typeof applyTenantCanvasZoom === 'function') applyTenantCanvasZoom(tenantCanvasZoom, true);

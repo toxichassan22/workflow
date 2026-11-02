@@ -354,6 +354,18 @@ class SlidesCanvasEditingTests(unittest.TestCase):
         self.assertIn('previousStage.offsetWidth', self.source)
         self.assertIn('stage.dataset.fitWidth', self.source)
         self.assertIn('previousWidth / zoom', self.source)
+        # A full deck re-render carries the canvas width too (only the edited
+        # card used to keep it, so every other slide shrank).
+        self.assertIn('function applyTenantPreservedStageWidth(stage, width, baseWidth)', self.source)
+        self.assertIn('const previousStageWidths = new Map()', self.source)
+        self.assertIn('previousBaseFit', self.source)
+        self.assertIn('applyTenantPreservedStageWidth(stage, preservedWidth, canvasBase)', self.source)
+        # The fitted reading width is 100%; zoom multiplies it and survives.
+        self.assertIn('let tenantCanvasZoom = 1;', self.source)
+        rail = (ROOT / 'assets' / 'js' / '02-settings-branding' / '01_routing.js').read_text(encoding='utf-8')
+        refit = rail.split('function tgrRefit()', 1)[1].split('function renderGlobalRailInputs', 1)[0]
+        self.assertIn('st.dataset.fitWidth', refit)
+        self.assertIn('baseW * zoom', refit)
         css = (ROOT / 'assets' / 'css' / 'base' / '09_slide_workspace.css').read_text(encoding='utf-8')
         main = css.split('#tenantSlidesPage .ge-main {', 1)[1].split('}', 1)[0]
         self.assertIn('overflow-x: auto', main)
@@ -448,7 +460,7 @@ class SlidesCanvasEditingTests(unittest.TestCase):
         self.assertIn('function fitTenantCanvasZoom()', self.source)
         self.assertIn('fullscreenTenantCanvas()', self.source)
         self.assertIn('slides-canvas-zoom', self.source)
-        self.assertIn("localStorage.setItem('wf.slidesCanvasZoom'", self.source)
+        self.assertIn("localStorage.setItem('wf.slidesCanvasZoom.v2'", self.source)
 
     def test_inspector_changes_with_the_selected_type(self):
         self.assertIn('function renderSlideInspector(index)', self.source)

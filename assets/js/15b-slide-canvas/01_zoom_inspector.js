@@ -1,7 +1,9 @@
 /* Canvas zoom and the element inspector. The inspector is the exact-value
    surface; the card toolbar stays the quick-actions surface. */
 
-    let tenantCanvasZoom = 0.75;
+    // 100% is the fitted reading width; the deck used to open at a 75% label
+    // while the canvas was painted at its full reading width.
+    let tenantCanvasZoom = 1;
     const TENANT_CANVAS_ZOOM_MIN = 0.5;
     const TENANT_CANVAS_ZOOM_MAX = 2;
 
@@ -32,7 +34,7 @@
     }
 
     function applyTenantCanvasZoom(scale, silent) {
-      const next = Math.max(TENANT_CANVAS_ZOOM_MIN, Math.min(TENANT_CANVAS_ZOOM_MAX, Number(scale) || 0.75));
+      const next = Math.max(TENANT_CANVAS_ZOOM_MIN, Math.min(TENANT_CANVAS_ZOOM_MAX, Number(scale) || 1));
       tenantCanvasZoom = next;
       document.querySelectorAll('#tenantSlidesPage .tenant-slide-stage').forEach(stage => {
         if (typeof autoFitSlideContent === 'function') autoFitSlideContent(stage);
@@ -49,7 +51,9 @@
       const readout = document.getElementById('slidesZoomReadout');
       if (readout) readout.textContent = Math.round(next * 100) + '%';
       if (!silent) {
-        try { localStorage.setItem('wf.slidesCanvasZoom', String(next)); } catch (error) {}
+        // A new key: the old build painted the deck at its reading width
+        // whatever the stored zoom said, so those values never matched a screen.
+        try { localStorage.setItem('wf.slidesCanvasZoom.v2', String(next)); } catch (error) {}
       }
     }
 
@@ -57,7 +61,9 @@
       const main = document.getElementById('tenantSlidesMain');
       if (!main) return;
       const width = Math.max(320, main.clientWidth - 48);
-      applyTenantCanvasZoom(Math.min(width / 1280, 1));
+      const stage = document.querySelector('#tenantSlidesPage .tenant-slide-stage');
+      const base = Number(stage && stage.dataset.fitWidth) || 1280;
+      applyTenantCanvasZoom(Math.min(width / base, 1));
     }
 
     function fullscreenTenantCanvas() {
@@ -146,7 +152,7 @@
       zoom.id = 'slidesCanvasZoom';
       zoom.innerHTML = '<button type="button" onclick="applyTenantCanvasZoom(tenantCanvasZoom - 0.1)">'
         + escapeHtml(canvasText('ca.zoom_out', 'تصغير')) + '</button>'
-        + '<span class="slides-canvas-zoom-readout" id="slidesZoomReadout">75%</span>'
+        + '<span class="slides-canvas-zoom-readout" id="slidesZoomReadout">100%</span>'
         + '<button type="button" onclick="applyTenantCanvasZoom(tenantCanvasZoom + 0.1)">'
         + escapeHtml(canvasText('ca.zoom_in', 'تكبير')) + '</button>'
         + '<button type="button" onclick="applyTenantCanvasZoom(1)">100%</button>'

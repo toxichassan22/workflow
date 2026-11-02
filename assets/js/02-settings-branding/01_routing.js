@@ -520,13 +520,18 @@
 
     function tgrRefit() {
       if (typeof autoFitSlideContent !== 'function') return;
+      const zoom = typeof tenantCanvasZoom === 'number' && tenantCanvasZoom > 0 ? tenantCanvasZoom : 1;
       // Resize slide preview stages so they fit inside the remaining width when the rail is open.
       document.querySelectorAll('.tenant-slide-stage').forEach(st => {
         const canvas = autoFitSlideContent(st) || { width: 1280, height: 720 };
         const main = st.closest('.ge-main') || st.closest('#tenantSlidesMain');
         const maxW = main ? main.clientWidth - 32 : 1280;
         const minStageW = window.innerWidth <= 900 ? 280 : 480;
-        const stageW = Math.min(1280, Math.max(minStageW, maxW));
+        // The fitted reading width is the canvas's 100%; the reader's zoom
+        // multiplies it, so the fitted size survives a rail toggle or a render.
+        const baseW = Math.min(1280, Math.max(minStageW, maxW));
+        const stageW = Math.max(180, Math.round(baseW * zoom));
+        st.dataset.fitWidth = String(Math.max(1, Math.round(baseW)));
         st.style.setProperty('--stage-w', stageW + 'px');
         st.style.setProperty('--stage-h', (stageW * canvas.height / canvas.width).toFixed(2) + 'px');
         st.style.setProperty('--slide-scale', (stageW / canvas.width).toFixed(4));

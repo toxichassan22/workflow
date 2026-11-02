@@ -559,9 +559,10 @@
       // has into the rebuilt card and express it as the zoom model's fit width.
       const previousStage = oldCard.querySelector('.tenant-slide-stage');
       const previousWidth = previousStage ? Math.round(previousStage.offsetWidth) : 0;
+      const previousBase = previousStage ? Number(previousStage.dataset.fitWidth) || 0 : 0;
       const zoom = typeof tenantCanvasZoom === 'number' && tenantCanvasZoom > 0 ? tenantCanvasZoom : 1;
       if (previousWidth > 0) {
-        stage.dataset.fitWidth = String(Math.max(1, Math.round(previousWidth / zoom)));
+        stage.dataset.fitWidth = String(Math.max(1, Math.round(previousBase || previousWidth / zoom)));
         stage.style.setProperty('--stage-w', previousWidth + 'px');
       } else {
         stage.style.setProperty('--stage-w', '960px');

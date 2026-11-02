@@ -353,6 +353,19 @@
       });
     }
 
+    /* A rebuilt card used to start from the 960px skeleton, so every full
+       re-render shrank the deck while the one card being edited kept its size.
+       The deck's reading width (fitWidth) and the displayed width are carried
+       into the new cards; zoom is applied on top of that base, never baked in. */
+    function applyTenantPreservedStageWidth(stage, width, baseWidth) {
+      if (!stage) return false;
+      const base = Math.round(Number(baseWidth) || 1280);
+      stage.dataset.fitWidth = String(Math.max(1, base));
+      const displayed = Math.round(Number(width) || 0);
+      stage.style.setProperty('--stage-w', (displayed > 0 ? displayed : base) + 'px');
+      return true;
+    }
+
     function renderTenantSlides() {
       const wrap = document.getElementById('tenantSlidesMain');
       if (!wrap) return;
@@ -399,6 +412,22 @@
           if (tenantBranding) renderTenantSlides();
         });
       }
+      // Carry every card's current canvas width into the rebuilt deck.
+      const canvasZoom = typeof tenantCanvasZoom === 'number' && tenantCanvasZoom > 0 ? tenantCanvasZoom : 1;
+      const previousStageWidths = new Map();
+      let previousCanvasWidth = 0;
+      let previousBaseFit = 0;
+      Array.from(wrap.querySelectorAll('.ge-slide-card[data-slide-id]')).forEach(card => {
+        const stage = card.querySelector('.tenant-slide-stage');
+        if (!stage) return;
+        if (!previousBaseFit) previousBaseFit = Number(stage.dataset.fitWidth) || 0;
+        const width = Math.round(stage.offsetWidth);
+        if (!width) return;
+        if (!previousCanvasWidth) previousCanvasWidth = width;
+        const id = String(card.dataset.slideId || '');
+        if (id) previousStageWidths.set(id, width);
+      });
+      const canvasBase = previousBaseFit || 1280;
       wrap.innerHTML = '';
 
       // Cancel any pending batch render from a previous call
@@ -440,9 +469,11 @@
         }
         const stage = document.createElement('div');
         stage.className = 'tenant-slide-stage';
-        stage.style.setProperty('--stage-w', '960px');
+        const preservedWidth = (s && s.id && previousStageWidths.get(String(s.id))) || previousCanvasWidth || 0;
+        applyTenantPreservedStageWidth(stage, preservedWidth, canvasBase);
         stage.style.setProperty('--stage-h', '540px');
-        stage.style.setProperty('--slide-scale', '0.75');
+        stage.style.setProperty('--slide-scale',
+          ((preservedWidth || Math.round(canvasBase * canvasZoom)) / 1280).toFixed(4));
         const cachedStage = s && s.id ? tenantStageHtmlCache.get(String(s.id)) : null;
         stage.innerHTML = cachedStage
           || '<div class="slide" style="padding:40px;font-size:14px;color:#999;background:#fafafa;">جاري التحميل...</div>';
