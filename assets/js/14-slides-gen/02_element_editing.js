@@ -5,6 +5,9 @@
       const hasSel = !!(session && session.sel);
       let textColor = '#1e293b';
       let bgColor = '#ffffff';
+      let borderColor = '#dbe3ea';
+      let borderWidth = 0;
+      let radius = 0;
       if (hasSel) {
         const stage = card.querySelector('.tenant-slide-stage');
         const slide = stage ? stage.querySelector('.slide') : null;
@@ -13,6 +16,11 @@
           const cs = window.getComputedStyle(target);
           textColor = cssColorToHex(cs.color) || textColor;
           bgColor = cssColorToHex(cs.backgroundColor) || bgColor;
+          borderColor = cssColorToHex(cs.borderTopColor) || borderColor;
+          borderWidth = Math.round(parseFloat(cs.borderTopWidth) || 0);
+          const radiusValue = target.style.borderRadius || cs.borderTopLeftRadius;
+          radius = Math.round(typeof slideRadiusPx === 'function'
+            ? slideRadiusPx(radiusValue, target) : (parseFloat(radiusValue) || 0));
         }
       }
       card.querySelectorAll('[data-slide-edit-act="del"]').forEach(btn => { btn.disabled = !hasSel; });
@@ -22,7 +30,18 @@
       card.querySelectorAll('[data-slide-edit-color]').forEach(inp => {
         inp.disabled = !hasSel;
         const kind = inp.getAttribute('data-slide-edit-color');
-        if (hasSel) inp.value = kind === 'color' ? textColor : (kind === 'highlight' ? '#fff59d' : bgColor);
+        if (hasSel) {
+          inp.value = kind === 'color' ? textColor
+            : (kind === 'highlight' ? '#fff59d' : (kind === 'border' ? borderColor : bgColor));
+        }
+      });
+      card.querySelectorAll('[data-slide-edit-border-width]').forEach(inp => {
+        inp.disabled = !hasSel;
+        if (hasSel) inp.value = String(borderWidth);
+      });
+      card.querySelectorAll('[data-slide-edit-radius]').forEach(inp => {
+        inp.disabled = !hasSel;
+        if (hasSel) inp.value = String(radius);
       });
       card.querySelectorAll('[data-slide-edit-hex]').forEach(inp => {
         inp.disabled = !hasSel;

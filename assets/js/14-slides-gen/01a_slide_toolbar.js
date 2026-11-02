@@ -55,6 +55,9 @@
       const tableStyle = typeof slideTableToolbarSnapshot === 'function'
         ? slideTableToolbarSnapshot(index)
         : { width: 1, borderColor: '#dbe3ea', cellFill: '#ffffff' };
+      const shapeStyle = typeof slideShapeToolbarSnapshot === 'function'
+        ? slideShapeToolbarSnapshot(index)
+        : { fill: '#ffffff', borderColor: '#dbe3ea', borderWidth: 0, radius: 0 };
       return {
         add: '<div class="slide-edit-tab-panel" data-slide-edit-panel="add">'
           + slideToolbarButton(slideToolbarText('tb.add_text', 'إضافة نص'), 'addtext')
@@ -134,13 +137,13 @@
           + '</div>',
         shape: '<div class="slide-edit-tab-panel" data-slide-edit-panel="shape">'
           + '<label class="slide-edit-color">' + slideToolbarText('ca.fill', 'التعبئة')
-          + '<input type="color" data-slide-edit-color="background" value="#ffffff"' + dis + '></label>'
+          + '<input type="color" data-slide-edit-color="background" value="' + shapeStyle.fill + '"' + dis + '></label>'
           + '<label class="slide-edit-color">' + slideToolbarText('ca.border_color', 'الحدود')
-          + '<input type="color" data-slide-edit-color="border" value="#dbe3ea"' + dis + '></label>'
+          + '<input type="color" data-slide-edit-color="border" value="' + shapeStyle.borderColor + '"' + dis + '></label>'
           + '<label class="slide-edit-num-field">' + slideToolbarText('ca.border_width', 'سماكة الحدود')
-          + '<input type="number" min="0" max="20" value="0" data-slide-edit-border-width' + dis + '></label>'
+          + '<input type="number" min="0" max="20" value="' + shapeStyle.borderWidth + '" data-slide-edit-border-width' + dis + '></label>'
           + '<label class="slide-edit-num-field">' + slideToolbarText('ca.radius', 'الزوايا')
-          + '<input type="number" min="0" max="200" value="0" data-slide-edit-radius' + dis + '></label>'
+          + '<input type="number" min="0" max="200" value="' + shapeStyle.radius + '" data-slide-edit-radius' + dis + '></label>'
           + slideToolbarButton(slideToolbarText('ca.shadow', 'ظل'), 'shadow', dis)
           + '</div>',
         table: '<div class="slide-edit-tab-panel" data-slide-edit-panel="table">'

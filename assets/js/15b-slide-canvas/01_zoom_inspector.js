@@ -145,6 +145,46 @@
       return isFinite(number) ? Math.round(number * 10) / 10 : fallback;
     }
 
+    /* Border-radius is stored in px or in %; the panel edits px, so a
+       percentage is shown as the px it currently resolves to (a 50% circle
+       stays a circle when the box is applied again). */
+    function slideRadiusPx(value, element) {
+      const text = String(value || '').trim();
+      const number = parseFloat(text);
+      if (!isFinite(number)) return 0;
+      if (text.indexOf('%') === -1) return number;
+      const width = element ? (element.offsetWidth || 0) : 0;
+      const height = element ? (element.offsetHeight || 0) : 0;
+      const base = Math.min(width, height);
+      return base > 0 ? (number / 100) * base : number;
+    }
+
+    /* The shape panel shows the selected element's real values. Rebuilding the
+       toolbar used to reset the thickness and corner boxes to their markup
+       default while the element kept what the user typed. */
+    function slideShapeStyleSnapshot(element) {
+      const fallback = { fill: '#ffffff', borderColor: '#dbe3ea', borderWidth: 0, radius: 0 };
+      if (!element) return fallback;
+      const hex = value => (typeof cssColorToHex === 'function' ? (cssColorToHex(value) || '') : '');
+      const fill = hex(slideElementInlineValue(element, 'backgroundColor', ''));
+      const borderColor = hex(slideElementInlineValue(element, 'borderTopColor', ''));
+      const borderWidth = slideStyleNumber(slideElementInlineValue(element, 'borderTopWidth', '0px'), 0);
+      const radius = slideRadiusPx(slideElementInlineValue(element, 'borderRadius', '0px'), element);
+      return {
+        fill: fill || fallback.fill,
+        borderColor: borderColor || fallback.borderColor,
+        borderWidth: Math.max(0, Math.round(borderWidth)),
+        radius: Math.max(0, Math.round(radius))
+      };
+    }
+
+    function slideShapeToolbarSnapshot(index) {
+      const pairs = slideSelectedTargets(canvasStageFor(index), canvasSession(index));
+      const primary = pairs[0] ? pairs[0].target : null;
+      if (!primary || inspectorTargetKind(primary) !== 'shape') return slideShapeStyleSnapshot(null);
+      return slideShapeStyleSnapshot(primary);
+    }
+
     function withSlideElementTargets(index, mutator) {
       const session = canvasSession(index);
       const stage = canvasStageFor(index);
@@ -715,7 +755,7 @@
 
       if (kind === 'image') {
         const fit = String(slideElementInlineValue(primary, 'objectFit', '') || '').toLowerCase();
-        const radius = slideStyleNumber(slideElementInlineValue(primary, 'borderRadius', '0px'), 0);
+        const radius = Math.round(slideRadiusPx(slideElementInlineValue(primary, 'borderRadius', '0px'), primary));
         parts.push('<div class="slide-inspector-rowline">'
           + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.image', 'الصورة')) + '</span>'
           + '<div class="slide-inspector-actions">'
@@ -735,7 +775,7 @@
       if (kind === 'shape') {
         const fill = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'backgroundColor', '')) || '#ffffff') : '#ffffff';
         const borderColor = typeof cssColorToHex === 'function' ? (cssColorToHex(slideElementInlineValue(primary, 'borderColor', '')) || '#dbe3ea') : '#dbe3ea';
-        const radius = slideStyleNumber(slideElementInlineValue(primary, 'borderRadius', '0px'), 0);
+        const radius = Math.round(slideRadiusPx(slideElementInlineValue(primary, 'borderRadius', '0px'), primary));
         parts.push('<div class="slide-inspector-rowline">'
           + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.shape', 'الشكل')) + '</span>'
           + slideInspectorField(canvasText('ca.fill', 'التعبئة'),

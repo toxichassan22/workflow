@@ -576,6 +576,26 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn('startSlideImageCropDrag', drag)
         self.assertIn('.slide-crop-target', self.source)
 
+    def test_shape_panel_reads_the_selected_shape(self):
+        # The shape tab used to show markup defaults (white fill, no border, no
+        # corners) while the element kept its own values, and the thickness and
+        # corner boxes snapped back after every rebuild.
+        self.assertIn('slideShapeToolbarSnapshot(index)', self.source)
+        self.assertIn('function slideShapeStyleSnapshot(element)', self.source)
+        self.assertIn('function slideRadiusPx(value, element)', self.source)
+        self.assertIn('value="\' + shapeStyle.fill', self.source)
+        self.assertIn('value="\' + shapeStyle.borderColor', self.source)
+        self.assertIn('value="\' + shapeStyle.borderWidth', self.source)
+        self.assertIn('value="\' + shapeStyle.radius', self.source)
+        self.assertNotIn('value="0" data-slide-edit-border-width', self.source)
+        self.assertNotIn('value="0" data-slide-edit-radius', self.source)
+        # Selection sync writes the element's real border colour, thickness and
+        # radius into the mounted panel, and a % radius is shown as its px.
+        self.assertIn("kind === 'border' ? borderColor", self.source)
+        self.assertIn("querySelectorAll('[data-slide-edit-border-width]')", self.source)
+        self.assertIn("querySelectorAll('[data-slide-edit-radius]')", self.source)
+        self.assertIn('slideRadiusPx(radiusValue, target)', self.source)
+
     def test_tables_insert_and_edit_like_powerpoint(self):
         for fn in ('insertSlideTable(', 'mutateSlideTableSelection(', 'mutateSlideTableCell(',
                    'addSlideTableRow(', 'removeSlideTableRow(', 'addSlideTableColumn(',
