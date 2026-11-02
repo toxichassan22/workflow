@@ -59,21 +59,6 @@
       return typeof stored === 'string' ? stored.trim() : String(stored);
     }
 
-    function landCoordinatesRows() {
-      const stored = tenantProjectData ? tenantProjectData.survey_coordinates : null;
-      if (Array.isArray(stored)) return stored;
-      const hidden = document.getElementById('surveyCoordinatesData');
-      if (hidden && hidden.value) {
-        try {
-          const parsed = JSON.parse(hidden.value);
-          return Array.isArray(parsed) ? parsed : [];
-        } catch (error) {
-          return [];
-        }
-      }
-      return [];
-    }
-
     function landFactFirstLine(value, limit) {
       const text = String(value || '').split(/\n/).map(part => part.trim()).filter(Boolean)[0] || '';
       return text.length > limit ? text.slice(0, limit).trim() + '…' : text;
@@ -90,31 +75,18 @@
 
     function landFacadesFact() {
       const count = landFieldValue('facades_count');
-      const directions = landFieldValue('facades_directions');
-      const parts = [];
-      if (count && count !== '0') parts.push(count);
-      if (directions) parts.push(directions);
-      return parts.join(' — ');
-    }
-
-    function landFloorsFact() {
-      const approved = landFieldValue('approved_floor_count');
-      if (approved && approved !== '0') return approved + ' ' + WFT('land.result.floor_unit', 'أدوار');
-      const rule = landFieldValue('max_floors_height') || landFactFirstLine(landAnalysisParcel().table_floors || '', 48);
-      return landFactFirstLine(rule, 48);
+      return count && count !== '0' ? count : '';
     }
 
     function landAnalysisFactTiles() {
       const parcel = landAnalysisParcel();
-      const coordinates = landCoordinatesRows();
+      // Only the facts the client needs at a glance. The setbacks, floors and
+      // coordinates are detailed below in their own groups; repeating them here
+      // only crowded the card.
       const facts = [
         [WFT('land.result.fact_area', 'المساحة'), landAreaFact()],
         [WFT('land.result.fact_zoning', 'التنظيم'), landFactFirstLine(parcel.zoning_code || '', 48)],
-        [WFT('land.result.fact_facades', 'الواجهات'), landFacadesFact()],
-        [WFT('land.result.fact_setbacks', 'الارتدادات'), landFactFirstLine(landFieldValue('setbacks'), 48)],
-        [WFT('land.result.fact_floors', 'الأدوار'), landFloorsFact()],
-        [WFT('land.result.fact_coordinates', 'الإحداثيات'),
-          coordinates.length ? WFT('land.result.coordinates_count', 'عدد النقاط: {n}', { n: String(coordinates.length) }) : '']
+        [WFT('land.result.fact_facades', 'الواجهات'), landFacadesFact()]
       ];
       return facts.filter(([, value]) => String(value || '').trim() !== '');
     }
