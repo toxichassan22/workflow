@@ -1630,7 +1630,9 @@ class MeetingRequirementsTestsPart04(MeetingRequirementsTests):
         self.assertIn('11-land-croquis/01b_land_result_panel.js', _bundle_order('js'))
         self.assertIn('project-form/09_land_results.css', _bundle_order('css'))
         for needle in ('landAnalysisOverview', 'LAND_ANALYSIS_GROUPS', 'groupLandAnalysisFields',
-                       'refreshLandAnalysisOverview', 'revealLandAnalysisField'):
+                       'refreshLandAnalysisOverview', 'revealLandAnalysisField',
+                       'updateLandAnalysisFacts', 'beginLandSummaryEdit', 'land-narrative-editor',
+                       "addEventListener('input', refreshFromFields)"):
             self.assertIn(needle, source)
         # The overview is fed by the stored field values, not by a second copy.
         self.assertIn("landFieldValue('land_and_building_summary')", source)

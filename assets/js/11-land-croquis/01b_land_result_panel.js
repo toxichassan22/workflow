@@ -100,6 +100,97 @@
       return String(parcel.summary || '');
     }
 
+    function landSummaryField() {
+      return document.querySelector('#tenantProjectForm [data-key="land_and_building_summary"]');
+    }
+
+    function renderLandNarrativeParagraphs(host, text) {
+      host.innerHTML = '';
+      String(text || '').split(/\n+/).map(part => part.trim()).filter(Boolean).forEach(part => {
+        const paragraph = document.createElement('p');
+        paragraph.textContent = part;
+        host.appendChild(paragraph);
+      });
+    }
+
+    function landFactTileElements() {
+      return landAnalysisFactTiles().map(([label, value]) => {
+        const tile = document.createElement('div');
+        tile.className = 'land-fact';
+        const labelEl = document.createElement('span');
+        labelEl.className = 'land-fact-label';
+        labelEl.textContent = label;
+        const valueEl = document.createElement('strong');
+        valueEl.className = 'land-fact-value';
+        valueEl.textContent = value;
+        tile.appendChild(labelEl);
+        tile.appendChild(valueEl);
+        return tile;
+      });
+    }
+
+    // The fields stay editable below; the tiles must follow them so a corrected
+    // area never leaves the card showing the value the model first read.
+    function updateLandAnalysisFacts() {
+      const card = document.getElementById('landAnalysisOverview');
+      if (!card) return;
+      const tiles = landFactTileElements();
+      let grid = card.querySelector('.land-facts');
+      if (!tiles.length) {
+        if (grid) grid.remove();
+        return;
+      }
+      if (!grid) {
+        grid = document.createElement('div');
+        grid.className = 'land-facts';
+        const head = card.querySelector('.land-overview-head');
+        if (head) head.after(grid);
+        else card.prepend(grid);
+      }
+      grid.replaceChildren(...tiles);
+    }
+
+    function updateLandNarrativeInline() {
+      const card = document.getElementById('landAnalysisOverview');
+      if (!card || card.querySelector('.land-narrative-editor')) return;
+      const body = card.querySelector('.land-narrative');
+      if (!body) return;
+      renderLandNarrativeParagraphs(body, landAnalysisNarrative());
+    }
+
+    function beginLandSummaryEdit(card, body, actions) {
+      if (!card || card.querySelector('.land-narrative-editor')) return;
+      const field = landSummaryField();
+      const editor = document.createElement('textarea');
+      editor.className = 'land-narrative-editor';
+      editor.rows = 8;
+      editor.value = field ? field.value : landAnalysisNarrative();
+      editor.addEventListener('input', () => {
+        if (field) field.value = editor.value;
+        if (tenantProjectData) tenantProjectData.land_and_building_summary = editor.value;
+        if (typeof triggerAutoSaveDraft === 'function') triggerAutoSaveDraft();
+      });
+      body.hidden = true;
+      if (actions) actions.hidden = true;
+      card.appendChild(editor);
+      const doneActions = document.createElement('div');
+      doneActions.className = 'land-overview-actions';
+      const done = document.createElement('button');
+      done.type = 'button';
+      done.className = 'land-overview-toggle';
+      done.textContent = WFT('land.result.summary_done', 'تم');
+      done.addEventListener('click', () => {
+        renderLandNarrativeParagraphs(body, editor.value);
+        editor.remove();
+        doneActions.remove();
+        body.hidden = false;
+        if (actions) actions.hidden = false;
+      });
+      doneActions.appendChild(done);
+      card.appendChild(doneActions);
+      editor.focus();
+    }
+
     function landAnalysisOverviewElement() {
       const tiles = landAnalysisFactTiles();
       const narrative = landAnalysisNarrative();
@@ -125,34 +216,21 @@
       }
       card.appendChild(head);
 
-      if (tiles.length) {
+      const factTiles = landFactTileElements();
+      if (factTiles.length) {
         const grid = document.createElement('div');
         grid.className = 'land-facts';
-        tiles.forEach(([label, value]) => {
-          const tile = document.createElement('div');
-          tile.className = 'land-fact';
-          const labelEl = document.createElement('span');
-          labelEl.className = 'land-fact-label';
-          labelEl.textContent = label;
-          const valueEl = document.createElement('strong');
-          valueEl.className = 'land-fact-value';
-          valueEl.textContent = value;
-          tile.appendChild(labelEl);
-          tile.appendChild(valueEl);
-          grid.appendChild(tile);
-        });
+        grid.replaceChildren(...factTiles);
         card.appendChild(grid);
       }
 
       if (narrative) {
         const body = document.createElement('div');
         body.className = 'land-narrative land-narrative-collapsed';
-        String(narrative).split(/\n+/).map(part => part.trim()).filter(Boolean).forEach(part => {
-          const paragraph = document.createElement('p');
-          paragraph.textContent = part;
-          body.appendChild(paragraph);
-        });
+        renderLandNarrativeParagraphs(body, narrative);
         card.appendChild(body);
+        const actions = document.createElement('div');
+        actions.className = 'land-overview-actions';
         const toggle = document.createElement('button');
         toggle.type = 'button';
         toggle.className = 'land-overview-toggle';
@@ -165,7 +243,15 @@
             : WFT('land.result.summary_collapse', 'إخفاء الملخص');
           toggle.dataset.arText = toggle.textContent;
         });
-        card.appendChild(toggle);
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = 'land-overview-toggle';
+        edit.textContent = WFT('land.result.summary_edit', 'تعديل الملخص');
+        edit.dataset.arText = 'تعديل الملخص';
+        edit.addEventListener('click', () => beginLandSummaryEdit(card, body, actions));
+        actions.appendChild(toggle);
+        actions.appendChild(edit);
+        card.appendChild(actions);
       }
       return card;
     }
@@ -280,4 +366,17 @@
       Object.values(groupByKey).forEach(group => {
         group.count.textContent = String(group.grid.children.length);
       });
+
+      // Editing a field below must move the card above with it; a corrected
+      // area kept showing the model's original reading until a full reload.
+      let refreshTimer = null;
+      const refreshFromFields = () => {
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => {
+          updateLandAnalysisFacts();
+          updateLandNarrativeInline();
+        }, 200);
+      };
+      sectionDiv.addEventListener('input', refreshFromFields);
+      sectionDiv.addEventListener('change', refreshFromFields);
     }
