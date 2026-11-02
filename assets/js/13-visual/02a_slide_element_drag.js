@@ -267,6 +267,11 @@
         const dragPairs = (typeof slideDragEntriesForTarget === 'function')
           ? slideDragEntriesForTarget(stage, index, target, path)
           : [{ entry: { path, placement: '' }, target }];
+        // A table is grabbed from any cell, so an unsteady click used to nudge
+        // it by a few pixels. The move only arms after a real drag.
+        const isTableTarget = !!(target.hasAttribute && target.hasAttribute('data-slide-table'))
+          || !!(target.closest && target.closest('[data-slide-table]'));
+        const dragThreshold = isTableTarget ? 5 : 0;
         const dragStarts = dragPairs.map(pair => ({
           target: pair.target,
           x: Number(pair.target.dataset.manualTranslateX) || 0,
@@ -277,13 +282,16 @@
         target.setPointerCapture?.(event.pointerId);
 
         const handlePointerMove = moveEvent => {
-          let dx = (moveEvent.clientX - startX) / scale;
-          let dy = (moveEvent.clientY - startY) / scale;
+          const rawDx = moveEvent.clientX - startX;
+          const rawDy = moveEvent.clientY - startY;
+          if (!moved && Math.hypot(rawDx, rawDy) < dragThreshold) return;
+          let dx = rawDx / scale;
+          let dy = rawDy / scale;
           if (typeof snapSlideMoveDelta === 'function') {
             const snapped = snapSlideMoveDelta(stage, target, dx, dy);
             if (snapped) { dx = snapped.dx; dy = snapped.dy; }
           }
-          if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+          if (isTableTarget || Math.abs(dx) + Math.abs(dy) > 2) moved = true;
           dragStarts.forEach(start => {
             start.target.style.transform = 'translate(' + Math.round(start.x + dx) + 'px, '
               + Math.round(start.y + dy) + 'px)';

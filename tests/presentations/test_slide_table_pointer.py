@@ -1,10 +1,10 @@
-"""A table is one shape for the pointer; only a double-click enters one cell.
+"""A table is one shape for the pointer; its cells open on a tap once selected.
 
 Generated decks carry bare <table> elements, not the manual authoring wrapper.
 They used to enter inline text editing cell by cell, so a single click never
 selected the table. This suite runs the real client helpers in Chromium and
-checks the generated-table path, including the retargeted double-click after the
-selection controls move the canvas.
+checks the generated-table path, the single-tap cell edit, the drag threshold,
+the real style snapshot behind the border counter and whole-table alignment.
 """
 
 import unittest
@@ -53,12 +53,34 @@ def _client_script():
         "function onInlineEditPaste() {}",
         "function onSlideEditableFocus() {}",
         "function commitSlideInlineEdit() {}",
+        "function slideRenderedScale() { return 1; }",
+        "function selectSlideElement() { window.__selected = true; }",
+        "function commitSlideElementMove(stage, index, target, path, dx, dy) { window.__movedBy = { dx: dx, dy: dy }; }",
+        "function WFT(key, fallback) { return fallback; }",
+        "function toast() {}",
+        "Element.prototype.setPointerCapture = function() {};",
+        "Element.prototype.releasePointerCapture = function() {};",
+        "function cssColorToHex(value) {",
+        "  const text = String(value || '').trim().toLowerCase();",
+        "  const hex = text.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/);",
+        "  if (hex) {",
+        "    let digits = hex[1];",
+        "    if (digits.length === 3) digits = digits.split('').map(ch => ch + ch).join('');",
+        "    return '#' + digits;",
+        "  }",
+        "  const rgb = text.match(/^rgba?\\(\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})\\s*,\\s*(\\d{1,3})(?:\\s*,\\s*([\\d.]+))?\\s*\\)$/);",
+        "  if (!rgb) return '';",
+        "  if (rgb[4] !== undefined && Number(rgb[4]) === 0) return '';",
+        "  return '#' + [rgb[1], rgb[2], rgb[3]].map(n => Number(n).toString(16).padStart(2, '0')).join('');",
+        "}",
         "function slideTableCellAt(table, row, col) {",
         "  const line = table && table.rows && table.rows[row];",
         "  return line ? line.cells[col] || null : null;",
         "}",
         _block(SLIDE_PROGRESS, 'collectSlideTextNodes', 'function markSlideTablesForPointerEditing'),
         _block(SLIDE_PROGRESS, 'markSlideTablesForPointerEditing', 'function slidePathIgnores'),
+        _block(AUTHORING, 'slideTableStyleSnapshot', 'function slideTableToolbarSnapshot'),
+        _block(AUTHORING, 'setSlideTableTextAlign', 'function runSlideTableAction'),
         _block(AUTHORING, 'bindSlideTableEditing', 'function beginSlideTableCellEdit'),
         _block(ELEMENT_DRAG, 'slideDragTarget', 'function findSlideRawTarget'),
         _tail(ELEMENT_DRAG, 'enableSlideElementDragging'),
@@ -204,6 +226,128 @@ class SlideTablePointerTests(unittest.TestCase):
         }""")
         self.assertFalse(state['prevented'])
         self.assertFalse(state['marquee'])
+
+    def test_a_single_tap_inside_the_selected_table_opens_the_cell(self):
+        edited = self.page.evaluate("""() => {
+            const stage = document.querySelector('.tenant-slide-stage');
+            const frame = document.getElementById('table-frame');
+            const cell = document.getElementById('cell-a');
+            enableSlideInlineEditing(stage, 0);
+            frame.classList.add('slide-element-selected');
+            const rect = cell.getBoundingClientRect();
+            const point = { clientX: rect.left + 20, clientY: rect.top + 20 };
+            cell.dispatchEvent(new PointerEvent('pointerdown', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1, ...point
+            }));
+            cell.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1, ...point
+            }));
+            return window.__editedCell?.id || '';
+        }""")
+        self.assertEqual(edited, 'cell-a')
+
+    def test_a_tap_that_moved_does_not_open_the_cell(self):
+        edited = self.page.evaluate("""() => {
+            const stage = document.querySelector('.tenant-slide-stage');
+            const frame = document.getElementById('table-frame');
+            const cell = document.getElementById('cell-a');
+            enableSlideInlineEditing(stage, 0);
+            frame.classList.add('slide-element-selected');
+            const rect = cell.getBoundingClientRect();
+            cell.dispatchEvent(new PointerEvent('pointerdown', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1,
+                clientX: rect.left + 20, clientY: rect.top + 20
+            }));
+            cell.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1,
+                clientX: rect.left + 80, clientY: rect.top + 20
+            }));
+            return window.__editedCell?.id || '';
+        }""")
+        self.assertEqual(edited, '')
+
+    def test_a_jittery_click_does_not_nudge_the_table(self):
+        state = self.page.evaluate("""() => {
+            const stage = document.querySelector('.tenant-slide-stage');
+            const table = document.getElementById('bare-table');
+            const cell = document.getElementById('bare-cell');
+            enableSlideInlineEditing(stage, 0);
+            enableSlideElementDragging(stage, 0);
+            const rect = cell.getBoundingClientRect();
+            const start = { clientX: rect.left + 5, clientY: rect.top + 5 };
+            cell.dispatchEvent(new PointerEvent('pointerdown', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1, ...start
+            }));
+            table.dispatchEvent(new PointerEvent('pointermove', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1,
+                clientX: start.clientX + 3, clientY: start.clientY
+            }));
+            table.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1,
+                clientX: start.clientX + 3, clientY: start.clientY
+            }));
+            return { transform: table.style.transform, movedBy: window.__movedBy || null };
+        }""")
+        self.assertEqual(state['transform'], '')
+        self.assertIsNone(state['movedBy'])
+
+    def test_a_real_drag_still_moves_the_table(self):
+        state = self.page.evaluate("""() => {
+            const stage = document.querySelector('.tenant-slide-stage');
+            const table = document.getElementById('bare-table');
+            const cell = document.getElementById('bare-cell');
+            enableSlideInlineEditing(stage, 0);
+            enableSlideElementDragging(stage, 0);
+            const rect = cell.getBoundingClientRect();
+            const start = { clientX: rect.left + 5, clientY: rect.top + 5 };
+            cell.dispatchEvent(new PointerEvent('pointerdown', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1, ...start
+            }));
+            table.dispatchEvent(new PointerEvent('pointermove', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1,
+                clientX: start.clientX + 24, clientY: start.clientY
+            }));
+            table.dispatchEvent(new PointerEvent('pointerup', {
+                bubbles: true, cancelable: true, button: 0, pointerId: 1,
+                clientX: start.clientX + 24, clientY: start.clientY
+            }));
+            return { transform: table.style.transform, movedBy: window.__movedBy || null };
+        }""")
+        self.assertIn('translate(24px, 0px)', state['transform'])
+        self.assertIsNotNone(state['movedBy'])
+        self.assertAlmostEqual(state['movedBy']['dx'], 24, delta=1)
+
+    def test_table_text_alignment_applies_to_every_cell(self):
+        result = self.page.evaluate("""() => {
+            const live = document.getElementById('generated-table');
+            const raw = live.cloneNode(true);
+            setSlideTableTextAlign(live, raw, 'center');
+            const read = table => Array.from(table.querySelectorAll('td, th'))
+                .map(cell => cell.style.textAlign);
+            return { live: read(live), raw: read(raw) };
+        }""")
+        self.assertTrue(result['live'])
+        self.assertEqual(set(result['live']), {'center'})
+        self.assertEqual(set(result['raw']), {'center'})
+
+    def test_table_style_snapshot_reads_the_real_cell(self):
+        state = self.page.evaluate("""() => {
+            const table = document.getElementById('generated-table');
+            const cell = document.getElementById('cell-a');
+            cell.style.borderTopWidth = '6px';
+            cell.style.borderTopStyle = 'solid';
+            cell.style.borderTopColor = '#112233';
+            cell.style.backgroundColor = '#ffeeaa';
+            const styled = slideTableStyleSnapshot(table, cell);
+            const plain = slideTableStyleSnapshot(table, table.querySelector('th'));
+            return { styled, plain };
+        }""")
+        self.assertEqual(state['styled'], {
+            'width': 6, 'borderColor': '#112233', 'cellFill': '#ffeeaa'
+        })
+        self.assertEqual(state['plain'], {
+            'width': 1, 'borderColor': '#cccccc', 'cellFill': '#ffffff'
+        })
 
 
 if __name__ == '__main__':

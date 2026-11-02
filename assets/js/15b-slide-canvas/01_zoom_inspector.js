@@ -638,6 +638,7 @@
       });
       const session = canvasSession(index);
       const stage = canvasStageFor(index);
+      if (typeof markSlideTableActiveCell === 'function') markSlideTableActiveCell(index);
       const pairs = slideSelectedTargets(stage, session);
       if (!session || !pairs.length) {
         host.innerHTML = '';

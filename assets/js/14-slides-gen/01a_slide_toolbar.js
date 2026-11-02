@@ -52,6 +52,9 @@
       const slide = tenantSlidesData[index] || {};
       const slideHidden = !!slide.hidden;
       const watermarkChecked = isWatermarkVisible(slide.html) ? ' checked' : '';
+      const tableStyle = typeof slideTableToolbarSnapshot === 'function'
+        ? slideTableToolbarSnapshot(index)
+        : { width: 1, borderColor: '#dbe3ea', cellFill: '#ffffff' };
       return {
         add: '<div class="slide-edit-tab-panel" data-slide-edit-panel="add">'
           + slideToolbarButton(slideToolbarText('tb.add_text', 'إضافة نص'), 'addtext')
@@ -145,14 +148,13 @@
           + slideToolbarButton(slideToolbarText('ca.del_row', 'حذف صف'), 'tablerowdel', dis)
           + slideToolbarButton(slideToolbarText('ca.add_col', 'عمود جديد'), 'tablecoladd', dis)
           + slideToolbarButton(slideToolbarText('ca.del_col', 'حذف عمود'), 'tablecoldel', dis)
-          + slideToolbarButton(slideToolbarText('ca.header_row', 'صف رأس'), 'tableheader', dis)
           + '<span class="slide-edit-tab-sep"></span>'
           + '<label class="slide-edit-color">' + slideToolbarText('ca.cell_fill', 'لون الخلية')
-          + '<input type="color" data-slide-table-cell-color value="#ffffff"' + dis + '></label>'
+          + '<input type="color" data-slide-table-cell-color value="' + tableStyle.cellFill + '"' + dis + '></label>'
           + '<label class="slide-edit-color">' + slideToolbarText('ca.table_border', 'حدود الجدول')
-          + '<input type="color" data-slide-table-border-color value="#dbe3ea"' + dis + '></label>'
+          + '<input type="color" data-slide-table-border-color value="' + tableStyle.borderColor + '"' + dis + '></label>'
           + '<label class="slide-edit-num-field">' + slideToolbarText('ca.border_width', 'سماكة الحدود')
-          + '<input type="number" min="0" max="10" value="1" data-slide-table-border-width' + dis + '></label>'
+          + '<input type="number" min="0" max="20" value="' + tableStyle.width + '" data-slide-table-border-width' + dis + '></label>'
           + '<span class="slide-edit-tab-sep"></span>'
           + slideToolbarButton(slideToolbarText('ca.align_right', 'يمين'), 'tablealignright', dis)
           + slideToolbarButton(slideToolbarText('ca.align_center', 'وسط'), 'tablealigncenter', dis)
@@ -256,10 +258,9 @@
           else if (act === 'tablerowdel' && typeof mutateSlideTableSelection === 'function') mutateSlideTableSelection(index, (live, raw, ctx) => removeSlideTableRow(live, raw, ctx));
           else if (act === 'tablecoladd' && typeof mutateSlideTableSelection === 'function') mutateSlideTableSelection(index, (live, raw, ctx) => addSlideTableColumn(live, raw, ctx, 1));
           else if (act === 'tablecoldel' && typeof mutateSlideTableSelection === 'function') mutateSlideTableSelection(index, (live, raw, ctx) => removeSlideTableColumn(live, raw, ctx));
-          else if (act === 'tableheader' && typeof mutateSlideTableSelection === 'function') mutateSlideTableSelection(index, (live, raw) => toggleSlideTableHeader(live, raw));
-          else if (act === 'tablealignright' && typeof mutateSlideTableCell === 'function') mutateSlideTableCell(index, (live, raw) => setSlideTableCellStyle(live, raw, { textAlign: 'right' }));
-          else if (act === 'tablealigncenter' && typeof mutateSlideTableCell === 'function') mutateSlideTableCell(index, (live, raw) => setSlideTableCellStyle(live, raw, { textAlign: 'center' }));
-          else if (act === 'tablealignleft' && typeof mutateSlideTableCell === 'function') mutateSlideTableCell(index, (live, raw) => setSlideTableCellStyle(live, raw, { textAlign: 'left' }));
+          else if (act === 'tablealignright' && typeof mutateSlideTableSelection === 'function') mutateSlideTableSelection(index, (live, raw) => setSlideTableTextAlign(live, raw, 'right'));
+          else if (act === 'tablealigncenter' && typeof mutateSlideTableSelection === 'function') mutateSlideTableSelection(index, (live, raw) => setSlideTableTextAlign(live, raw, 'center'));
+          else if (act === 'tablealignleft' && typeof mutateSlideTableSelection === 'function') mutateSlideTableSelection(index, (live, raw) => setSlideTableTextAlign(live, raw, 'left'));
         });
       });
       editControls.querySelectorAll('[data-slide-edit-watermark="toggle"]').forEach(inp => {

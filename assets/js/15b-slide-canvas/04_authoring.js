@@ -360,6 +360,57 @@
       return line ? line.cells[col] || null : null;
     }
 
+    /* The table panel reads the selected table's real values. Rebuilding the
+       toolbar used to reset the thickness box to its markup default while the
+       cells kept the thick border. */
+    function slideTableStyleSnapshot(table, cell) {
+      const fallback = { width: 1, borderColor: '#dbe3ea', cellFill: '#ffffff' };
+      if (!table) return fallback;
+      const sample = cell || (table.rows[0] ? table.rows[0].cells[0] : null);
+      if (!sample) return fallback;
+      let width = parseFloat(sample.style.borderTopWidth);
+      if (!isFinite(width)) width = parseFloat(window.getComputedStyle(sample).borderTopWidth);
+      const readHex = value => (typeof cssColorToHex === 'function' ? (cssColorToHex(value) || '') : '');
+      const borderColor = readHex(sample.style.borderTopColor
+        || window.getComputedStyle(sample).borderTopColor);
+      const cellFill = readHex(sample.style.backgroundColor
+        || window.getComputedStyle(sample).backgroundColor);
+      return {
+        width: Math.max(0, Math.round(isFinite(width) ? width : fallback.width)),
+        borderColor: borderColor || fallback.borderColor,
+        cellFill: cellFill || fallback.cellFill
+      };
+    }
+
+    function slideTableToolbarSnapshot(index) {
+      const context = slideTableContext(index);
+      if (!context) return slideTableStyleSnapshot(null);
+      const active = slideTableActiveCell(context);
+      const cell = active ? slideTableCellAt(context.liveTable, active.row, active.col) : null;
+      return slideTableStyleSnapshot(context.liveTable, cell);
+    }
+
+    /* The cell the table tools act on carries a live-only outline; without it
+       the cell colour and alignment buttons changed an invisible target. */
+    function clearSlideTableActiveCell(slide) {
+      if (!slide || !slide.querySelectorAll) return;
+      slide.querySelectorAll('.slide-table-active-cell')
+        .forEach(cell => cell.classList.remove('slide-table-active-cell'));
+    }
+
+    function markSlideTableActiveCell(index) {
+      const stage = typeof canvasStageFor === 'function' ? canvasStageFor(index) : null;
+      const slide = stage ? stage.querySelector('.slide') : null;
+      if (!slide) return;
+      clearSlideTableActiveCell(slide);
+      const context = slideTableContext(index);
+      if (!context) return;
+      const active = slideTableActiveCell(context);
+      if (!active) return;
+      const cell = slideTableCellAt(context.liveTable, active.row, active.col);
+      if (cell) cell.classList.add('slide-table-active-cell');
+    }
+
     function mutateSlideTableSelection(index, mutator) {
       const context = slideTableContext(index);
       if (!context) return false;
@@ -483,28 +534,6 @@
       toast(WFT('slide.table_col_removed', 'تم حذف العمود'));
     }
 
-    function replaceSlideTableCellTag(cell, tagName) {
-      const replacement = cell.ownerDocument.createElement(tagName);
-      Array.from(cell.attributes).forEach(attr => replacement.setAttribute(attr.name, attr.value));
-      replacement.innerHTML = cell.innerHTML;
-      cell.replaceWith(replacement);
-      return replacement;
-    }
-
-    function toggleSlideTableHeader(liveTable, rawTable) {
-      const toggle = table => {
-        const firstRow = table.rows[0];
-        if (!firstRow) return;
-        Array.from(firstRow.cells).forEach(cell => {
-          const isHeader = cell.tagName.toLowerCase() === 'th';
-          replaceSlideTableCellTag(cell, isHeader ? 'td' : 'th');
-        });
-      };
-      toggle(liveTable);
-      toggle(rawTable);
-      toast(WFT('slide.table_header_toggled', 'تم تبديل صف الرأس'));
-    }
-
     function setSlideTableCellStyle(liveCell, rawCell, styles) {
       [liveCell, rawCell].forEach(cell => {
         Object.entries(styles).forEach(([prop, value]) => { cell.style[prop] = value; });
@@ -533,12 +562,25 @@
       toast(WFT('slide.table_border_updated', 'تم تحديث حدود الجدول'));
     }
 
+    /* Text alignment is a property of the whole table here: applying it to the
+       one active cell looked like the button did nothing. */
+    function setSlideTableTextAlign(liveTable, rawTable, align) {
+      const value = align === 'center' || align === 'left' ? align : 'right';
+      const apply = table => {
+        Array.from(table.rows).forEach(row => {
+          Array.from(row.cells).forEach(cell => { cell.style.textAlign = value; });
+        });
+      };
+      apply(liveTable);
+      apply(rawTable);
+      toast(WFT('slide.table_aligned', 'تمت محاذاة نص الجدول'));
+    }
+
     function runSlideTableAction(index, action) {
       if (action === 'rowadd') return mutateSlideTableSelection(index, (live, raw, ctx) => addSlideTableRow(live, raw, ctx, 1));
       if (action === 'rowdel') return mutateSlideTableSelection(index, (live, raw, ctx) => removeSlideTableRow(live, raw, ctx));
       if (action === 'coladd') return mutateSlideTableSelection(index, (live, raw, ctx) => addSlideTableColumn(live, raw, ctx, 1));
       if (action === 'coldel') return mutateSlideTableSelection(index, (live, raw, ctx) => removeSlideTableColumn(live, raw, ctx));
-      if (action === 'header') return mutateSlideTableSelection(index, (live, raw) => toggleSlideTableHeader(live, raw));
     }
 
     function setSlideInspectorTableCellColor(index, value) {
@@ -554,6 +596,20 @@
       if (!card || card.dataset.tableEditingBound === '1') return;
       card.dataset.tableEditingBound = '1';
       let lastCellTap = null;
+      let pendingCellTap = null;
+      // A single tap inside an already-selected table opens the cell. Requiring
+      // a double-click made typing feel unreliable, and the drag threshold in
+      // the stage handler keeps a tap from nudging the table. The listener sits
+      // on the card so it dies with the rendered card instead of leaking.
+      card.addEventListener('pointerup', event => {
+        if (!pendingCellTap) return;
+        const tap = pendingCellTap;
+        pendingCellTap = null;
+        const moved = Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > 6;
+        if (moved || !tap.cell.isConnected || !getSlideEditSession(index)) return;
+        beginSlideTableCellEdit(stage, index, tap.cell);
+      }, true);
+      card.addEventListener('pointercancel', () => { pendingCellTap = null; }, true);
       card.addEventListener('pointerdown', event => {
         if (event.button !== 0) return;
         const session = getSlideEditSession(index);
@@ -575,10 +631,16 @@
         }
         const cell = event.target.closest
           ? event.target.closest('[data-slide-table] td, [data-slide-table] th') : null;
-        if (!cell) { lastCellTap = null; return; }
+        if (!cell) { lastCellTap = null; pendingCellTap = null; return; }
         const row = cell.parentElement ? cell.parentElement.rowIndex : 0;
         session.tableCell = { row, col: cell.cellIndex };
         lastCellTap = { cell, at: now, x: event.clientX, y: event.clientY };
+        const tableBox = cell.closest('[data-slide-table]');
+        if (tableBox && tableBox.classList.contains('slide-element-selected')
+          && !event.ctrlKey && !event.shiftKey && !event.metaKey) {
+          pendingCellTap = { cell, x: event.clientX, y: event.clientY };
+        }
+        if (typeof markSlideTableActiveCell === 'function') markSlideTableActiveCell(index);
       }, true);
       card.addEventListener('dblclick', event => {
         const session = getSlideEditSession(index);

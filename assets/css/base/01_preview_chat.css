@@ -635,6 +635,13 @@
       outline-offset: 3px;
     }
 
+    /* Live-only marker for the table cell whose colour and text tools fire.
+       Never stored with the slide. */
+    .slide-table-active-cell {
+      outline: 2px dashed var(--teal-bright, #17c8e3) !important;
+      outline-offset: -2px;
+    }
+
     /* Keep the full-slide watermark overlay click-through while editing; only
        the visible logo receives pointer events for selection and dragging. */
     .slide-element-editing .slide-watermark,

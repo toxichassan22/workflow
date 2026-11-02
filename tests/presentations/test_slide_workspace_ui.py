@@ -93,7 +93,6 @@ class SlidesSidebarTests(unittest.TestCase):
         self.assertIn('thumb.animate(', self.source)
         self.assertIn('ge-thumb-ghost', self.source)
 
-
     def test_actions_are_hover_only_and_cover_every_slide_operation(self):
         self.assertIn('function slideThumbActionsHtml(index, slide)', self.source)
         self.assertIn('.ge-thumb:hover .ge-thumb-actions', self.source)
@@ -132,7 +131,6 @@ class SlidesSidebarTests(unittest.TestCase):
         self.assertIn('tenantStageHtmlCache.get(String(s.id))', body)
         self.assertIn('tenantStageHtmlCache.set(String(s.id), stage.innerHTML);', body)
         self.assertIn('containers.filter(entry => !entry.cached).forEach(renderTenantSlideCard)', body)
-
 
     def test_render_keeps_the_open_slide_under_the_viewport(self):
         body = self.source.split('function renderTenantSlides() {', 1)[1]
@@ -293,7 +291,6 @@ class SlidesPresentModeTests(unittest.TestCase):
                       flat)
         present = flat.split('#tenantPresentOverlay .present-stage .slide {', 1)[1].split('}', 1)[0]
         self.assertIn('line-height: normal', present)
-
 
 
 class SlidesCanvasEditingTests(unittest.TestCase):
@@ -582,12 +579,13 @@ class SlidesAuthoringTests(unittest.TestCase):
     def test_tables_insert_and_edit_like_powerpoint(self):
         for fn in ('insertSlideTable(', 'mutateSlideTableSelection(', 'mutateSlideTableCell(',
                    'addSlideTableRow(', 'removeSlideTableRow(', 'addSlideTableColumn(',
-                   'removeSlideTableColumn(', 'toggleSlideTableHeader(', 'bindSlideTableEditing('):
+                   'removeSlideTableColumn(', 'bindSlideTableEditing('):
             self.assertIn('function ' + fn, self.source)
         self.assertIn("[data-slide-table] td, [data-slide-table] th", self.source)
         self.assertIn('data-slide-table', self.source)
         self.assertIn("card.addEventListener('dblclick'", self.source)
-        # A cell edits on double-click; a single click selects the table.
+        # The first tap selects the table; a tap on the already-selected table
+        # opens its cell (the double-click still works).
         inline = self.source.split('function enableSlideInlineEditing(stage, index)', 1)[1]
         inline = inline.split('function slidePathIgnores', 1)[0]
         self.assertIn('markSlideTablesForPointerEditing(slide);', inline)
@@ -595,7 +593,7 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn('bindSlideTableEditing(stage, index)', inline)
         self.assertIn('function slideTablePointerBox(table)', self.source)
         self.assertIn("rect.width <= tableRect.width * 1.5 + 24", self.source)
-        # A generated table may be shaped by its fixed, overflow-hidden frame.
+        # A generated table is the table element itself, not a manual wrapper.
         context = self.source.split('function slideTableContext(index)', 1)[1]
         context = context.split('function slideTableActiveCell', 1)[0]
         self.assertIn("rawWrapper.tagName === 'TABLE' ? rawWrapper", context)
@@ -603,6 +601,44 @@ class SlidesAuthoringTests(unittest.TestCase):
         bind = bind.split('function beginSlideTableCellEdit', 1)[0]
         self.assertIn('lastCellTap', bind)
         self.assertIn('beginSlideTableCellEdit(stage, index, cell)', bind)
+        # A tap inside the already-selected table opens the cell on pointerup;
+        # a drag past the threshold never opens it.
+        self.assertIn('pendingCellTap', bind)
+        self.assertIn("classList.contains('slide-element-selected')", bind)
+        self.assertIn('Math.hypot(event.clientX - tap.x, event.clientY - tap.y)', bind)
+        # The active cell carries a live-only outline, so the colour and
+        # alignment tools have a visible target.
+        self.assertIn('markSlideTableActiveCell(', self.source)
+        self.assertIn('.slide-table-active-cell', self.source)
+        self.assertIn('clearSlideTableActiveCell(', self.source)
+
+    def test_table_panel_reads_the_selected_table_and_aligns_every_cell(self):
+        # Rebuilding the toolbar used to reset these boxes to markup defaults
+        # while the table kept the values the user typed.
+        self.assertIn('slideTableToolbarSnapshot(index)', self.source)
+        self.assertIn('function slideTableToolbarSnapshot(index)', self.source)
+        self.assertIn('function slideTableStyleSnapshot(table, cell)', self.source)
+        self.assertNotIn('value="1" data-slide-table-border-width', self.source)
+        self.assertNotIn('data-slide-table-cell-color value="#ffffff"', self.source)
+        self.assertNotIn('data-slide-table-border-color value="#dbe3ea"', self.source)
+        self.assertIn('value="\' + tableStyle.width', self.source)
+        self.assertIn('value="\' + tableStyle.borderColor', self.source)
+        self.assertIn('value="\' + tableStyle.cellFill', self.source)
+        # The header-row toggle did nothing visual (th/td only kept inline
+        # styles), so the owner removed it.
+        self.assertNotIn('toggleSlideTableHeader', self.source)
+        self.assertNotIn("'tableheader'", self.source)
+        self.assertNotIn('ca.header_row', self.source)
+        # Text alignment belongs to the whole table, never one hidden cell.
+        self.assertIn('function setSlideTableTextAlign(liveTable, rawTable, align)', self.source)
+        self.assertIn("setSlideTableTextAlign(live, raw, 'center')", self.source)
+        align_actions = self.source.split('function wireSlideEditControls', 1)[1]
+        self.assertNotIn('setSlideTableCellStyle(live, raw, { textAlign:', align_actions)
+        # A table drag arms after a real move instead of from the first pixel.
+        drag = self.source.split("stage.addEventListener('pointerdown', function handleSlidePointerDown", 1)[1]
+        drag = drag.split("stage.addEventListener('click'", 1)[0]
+        self.assertIn('dragThreshold', drag)
+        self.assertIn("target.closest('[data-slide-table]')", drag)
 
     def test_slide_background_and_visibility(self):
         for fn in ('setSlideBackgroundColor(', 'clearSlideBackground(',
@@ -689,6 +725,12 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn('min-height: 0', field_css)
         self.assertIn('height: 20px', field_css)
 
+    def test_resize_stays_inside_the_slide_and_edge_handles_stay_clickable(self):
+        self.assertIn('const maxW = !touchW ? slideW :', self.source)
+        self.assertIn('slideW - base.left', self.source)
+        self.assertIn('Math.max(0, Math.min(pos[0], 1280 - HS))', self.source)
+        self.assertIn('Math.max(0, Math.min(pos[1], 720 - HS))', self.source)
+
     def test_selecting_an_element_keeps_the_canvas_under_the_pointer(self):
         self.assertIn('function holdSlideStagePosition(stage, anchorTop)', self.source)
         select = self.source.split('function selectSlideElement(stage, index, target, path)', 1)[1]
@@ -697,12 +739,6 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn("container.onclick = () => { if (activeSlideIndex !== i) selectTenantSlide(i); }",
                       self.source)
         self.assertIn("kind === 'table' && host.previousElementSibling !== stage", self.source)
-
-    def test_resize_stays_inside_the_slide_and_edge_handles_stay_clickable(self):
-        self.assertIn('const maxW = !touchW ? slideW :', self.source)
-        self.assertIn('slideW - base.left', self.source)
-        self.assertIn('Math.max(0, Math.min(pos[0], 1280 - HS))', self.source)
-        self.assertIn('Math.max(0, Math.min(pos[1], 720 - HS))', self.source)
 
     def test_selection_geometry_uses_the_painted_scale(self):
         self.assertIn('function slideRenderedScale(stage)', self.source)
