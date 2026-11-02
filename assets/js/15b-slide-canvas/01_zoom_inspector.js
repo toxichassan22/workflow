@@ -104,6 +104,17 @@
       return 'shape';
     }
 
+    /* Style controls on an image frame belong to the picture itself: a div
+       ignores object-fit, and a radius on the frame does not round its image. */
+    function slideSelectionImageElement(el) {
+      if (!el) return null;
+      if (el.tagName === 'IMG') return el;
+      if (!el.hasAttribute || !(el.hasAttribute('data-slide-imagebox') || el.hasAttribute('data-canonical-map'))) {
+        return null;
+      }
+      return el.querySelector ? el.querySelector('img') : null;
+    }
+
     /* The card toolbar asks the same question the inspector asks, so a text
        element never carries image tools and a shape never carries text ones. */
     function slideToolbarSelectionKind(index) {
@@ -758,8 +769,9 @@
       }
 
       if (kind === 'image') {
-        const fit = String(slideElementInlineValue(primary, 'objectFit', '') || '').toLowerCase();
-        const radius = Math.round(slideRadiusPx(slideElementInlineValue(primary, 'borderRadius', '0px'), primary));
+        const imageTarget = slideSelectionImageElement(primary) || primary;
+        const fit = String(slideElementInlineValue(imageTarget, 'objectFit', '') || '').toLowerCase();
+        const radius = Math.round(slideRadiusPx(slideElementInlineValue(imageTarget, 'borderRadius', '0px'), imageTarget));
         parts.push('<div class="slide-inspector-rowline">'
           + '<span class="slide-inspector-row-label">' + escapeHtml(canvasText('ca.image', 'الصورة')) + '</span>'
           + '<div class="slide-inspector-actions">'
@@ -967,13 +979,20 @@
     }
 
     function setSlideSelectionImageFit(index, value) {
+      const fit = value === 'contain' ? 'contain' : 'cover';
       setSlideSelectionStyle(index, el => {
-        el.style.objectFit = value === 'contain' ? 'contain' : 'cover';
+        const image = slideSelectionImageElement(el) || el;
+        image.style.objectFit = fit;
       });
     }
 
     function setSlideSelectionBorderRadius(index, value) {
-      setSlideSelectionStyle(index, el => { el.style.borderRadius = Math.max(0, value) + 'px'; });
+      const radiusValue = Math.max(0, value) + 'px';
+      setSlideSelectionStyle(index, el => {
+        el.style.borderRadius = radiusValue;
+        const image = slideSelectionImageElement(el);
+        if (image) image.style.borderRadius = radiusValue;
+      });
     }
 
     function setSlideSelectionFill(index, value) {

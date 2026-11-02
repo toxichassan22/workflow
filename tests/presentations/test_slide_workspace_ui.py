@@ -626,6 +626,20 @@ class SlidesAuthoringTests(unittest.TestCase):
         self.assertIn('slideTextDecorationNext(current, styleKind)', toggle)
         self.assertNotIn("next = (next ? next + ' ' : '') + wanted", toggle)
 
+    def test_image_controls_target_the_picture_inside_its_frame(self):
+        # object-fit on the wrapper div is ignored and a radius on the frame
+        # does not round the picture, so both controls looked dead.
+        self.assertIn('function slideSelectionImageElement(el)', self.source)
+        fit = self.source.split('function setSlideSelectionImageFit(index, value)', 1)[1]
+        fit = fit.split('function setSlideSelectionBorderRadius', 1)[0]
+        self.assertIn('slideSelectionImageElement(el)', fit)
+        radius = self.source.split('function setSlideSelectionBorderRadius(index, value)', 1)[1]
+        radius = radius.split('function setSlideSelectionFill', 1)[0]
+        self.assertIn('slideSelectionImageElement(el)', radius)
+        inspector = self.source.split("if (kind === 'image')", 1)[1]
+        inspector = inspector.split("if (kind === 'shape')", 1)[0]
+        self.assertIn('slideSelectionImageElement(primary) || primary', inspector)
+
     def test_tables_insert_and_edit_like_powerpoint(self):
         for fn in ('insertSlideTable(', 'mutateSlideTableSelection(', 'mutateSlideTableCell(',
                    'addSlideTableRow(', 'removeSlideTableRow(', 'addSlideTableColumn(',
