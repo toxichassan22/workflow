@@ -456,12 +456,14 @@ class ExportSlideSanitizationTests(unittest.TestCase):
         source = read_frontend_text()
         self.assertIn('display: block !important;', source)
         self.assertIn('transform: scale(var(--slide-scale, 0.75)) !important;', source)
+        # The reset moved into one grouped rule that also covers the present
+        # overlay, so the two stages cannot drift apart.
+        flat = ' '.join(source.split())
         self.assertIn(
-            '.tenant-slide-stage .slide * {\n'
-            '      margin: 0;\n'
-            '      padding: 0;\n'
-            '      box-sizing: border-box;',
-            source,
+            '.tenant-slide-stage .slide *, '
+            '#tenantPresentOverlay .present-stage .slide * '
+            '{ margin: 0; padding: 0; box-sizing: border-box; }',
+            flat,
         )
 
     def test_authenticated_project_file_images_are_localized_for_export(self):

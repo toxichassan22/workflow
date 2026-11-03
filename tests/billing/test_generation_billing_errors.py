@@ -135,7 +135,13 @@ class GenerationBillingErrorTests(unittest.TestCase):
                 'sys', 'hi', max_tokens=10, usage_ctx=usage_ctx)
         self.assertEqual(result, success)
         self.assertEqual(post.call_count, 2)
-        repair.assert_called_once_with(usage_ctx)
+        # The metering layer enriches the context with prompt size/fingerprint
+        # before the refusal, so assert the identity it must carry instead of
+        # exact dict equality (which made this test order-dependent).
+        repair.assert_called_once()
+        repair_ctx = repair.call_args[0][0]
+        self.assertEqual(repair_ctx.get('tenant_id'), self.tenant_id)
+        self.assertEqual(repair_ctx.get('billing_flow'), 'market_summary')
 
     def test_tenant_key_refusal_falls_back_to_platform_key_and_succeeds(self):
         module = self.application_module

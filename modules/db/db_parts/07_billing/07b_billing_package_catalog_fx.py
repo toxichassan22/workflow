@@ -365,12 +365,15 @@ def get_client_overview(tenant_id):
             if not package.get('is_active'):
                 consumed = max(consumed, credit)
         remaining = max(0.0, credit - consumed)
+        # The card is a money display: provider cost converted at the stored
+        # FX rate lands on fractions of a halala, and the client reads these
+        # figures as riyals with two decimals.
         block = {
             'id': package.get('id'),
             'name': package.get('name'),
-            'credit_sar': credit,
-            'consumed_sar': consumed,
-            'remaining_sar': remaining,
+            'credit_sar': round(credit, 2),
+            'consumed_sar': round(consumed, 2),
+            'remaining_sar': round(remaining, 2),
             'status': 'expired' if remaining <= 0 else 'active',
             'assigned_at': assigned_at,
         }
@@ -378,10 +381,10 @@ def get_client_overview(tenant_id):
         'projects': int(counts.get('projects') or 0),
         'presentations': int(counts.get('presentations') or 0),
         'consumption_usd': lifetime,
-        'consumption_sar': lifetime_sar,
+        'consumption_sar': round(lifetime_sar, 2),
         'package': block,
         'lifetime_consumed_usd': lifetime,
-        'lifetime_consumed_sar': lifetime_sar,
+        'lifetime_consumed_sar': round(lifetime_sar, 2),
     }
 
 

@@ -1,4 +1,5 @@
 import re
+import unittest
 
 import designer_chat_reliability as reliability
 
@@ -354,4 +355,69 @@ def test_watermark_visibility_state_survives_carry():
     assert app._is_watermark_visible(carried_hidden) is False
 
 
+class DesignerChatReliabilityTests(unittest.TestCase):
+    """unittest entry point for the checks above.
+
+    The repo has no pytest dependency and runs suites with `unittest`, which
+    collects nothing from module-level test functions — so without this
+    wrapper the whole file passed by never running.
+    """
+
+    def test_collects_descriptions_from_project_and_parallel_metadata(self):
+        test_collects_descriptions_from_project_and_parallel_metadata()
+
+    def test_adds_only_missing_matching_image_descriptions_and_is_idempotent(self):
+        test_adds_only_missing_matching_image_descriptions_and_is_idempotent()
+
+    def test_detects_caption_requests_and_requested_split_count(self):
+        test_detects_caption_requests_and_requested_split_count()
+
+    def test_table_split_balances_rows_repeats_header_and_preserves_every_row_once(self):
+        test_table_split_balances_rows_repeats_header_and_preserves_every_row_once()
+
+    def test_auto_table_split_does_not_split_a_table_that_fits(self):
+        test_auto_table_split_does_not_split_a_table_that_fits()
+
+    def test_table_without_tbody_is_paginated_and_keeps_implicit_header(self):
+        test_table_without_tbody_is_paginated_and_keeps_implicit_header()
+
+    def test_explicit_parts_expand_when_requested_count_would_still_overflow(self):
+        test_explicit_parts_expand_when_requested_count_would_still_overflow()
+
+    def test_material_change_rejects_unchanged_and_fallback_responses(self):
+        test_material_change_rejects_unchanged_and_fallback_responses()
+
+    def test_arabic_split_phrasing_detection(self):
+        test_arabic_split_phrasing_detection()
+
+    def test_split_cards_or_blocks_partitions_evenly(self):
+        test_split_cards_or_blocks_partitions_evenly()
+
+    def test_auto_heal_workspace_slides_unpacks_multiple_slides(self):
+        test_auto_heal_workspace_slides_unpacks_multiple_slides()
+
+    def test_watermark_request_detection(self):
+        test_watermark_request_detection()
+
+    def test_watermark_injection_and_removal(self):
+        test_watermark_injection_and_removal()
+
+    def test_watermark_deterministic_plan_handles_user_exact_request(self):
+        test_watermark_deterministic_plan_handles_user_exact_request()
+
+    def test_watermark_white_detection_ignores_inner_dark_chrome(self):
+        test_watermark_white_detection_ignores_inner_dark_chrome()
+
+    def test_watermark_survives_model_regeneration(self):
+        test_watermark_survives_model_regeneration()
+
+    def test_watermark_hide_show_verbs_and_current_scope(self):
+        test_watermark_hide_show_verbs_and_current_scope()
+
+    def test_watermark_visibility_state_survives_carry(self):
+        test_watermark_visibility_state_survives_carry()
+
+
+if __name__ == '__main__':
+    unittest.main()
 

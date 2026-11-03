@@ -663,7 +663,7 @@ class MarketJobIdentityTests(ScopeTestBase):
         from flask import g as flask_g
         captured = {}
 
-        def fake_execute(data, tenant_id=None, progress=None):
+        def fake_execute(data, tenant_id=None, progress=None, **kwargs):
             captured['g_tenant'] = getattr(flask_g, 'tenant_id', None)
             captured['g_user'] = getattr(flask_g, 'user_id', None)
             captured['arg_tenant'] = tenant_id

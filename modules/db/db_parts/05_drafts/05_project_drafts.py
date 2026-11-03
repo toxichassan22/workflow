@@ -429,7 +429,16 @@ def save_project_draft(tenant_id, user_id, draft_data, section_statuses=None, st
         # workspace — the shape that overwrote real files — unless the client
         # explicitly reports that the user cleared the field.
         name_present = 'project_name' in save_data or 'projectName' in save_data
+        # A targeted clear of a draft that is still being started carries the
+        # name and nothing else: clearing it is a real edit, not the blank
+        # workspace shape that once erased real files. A payload that also
+        # carries content, or a file above the floor, stays refused.
+        targeted_name_clear = (
+            len(stored_content) < DRAFT_EMPTY_OVERWRITE_FLOOR
+            and incoming_content <= {'project_name', 'projectName'}
+        )
         if stored_name and name_present and not incoming_name \
+                and not targeted_name_clear \
                 and (clear_set is None or 'project_name' not in clear_set):
             raise DraftOverwriteRefused(
                 existing['id'], sorted(stored_content),

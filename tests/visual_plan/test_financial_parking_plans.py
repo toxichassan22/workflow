@@ -1,11 +1,14 @@
 import copy
 import os
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import db
 import financial_parking
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import test_financial_parking as parking_fixtures
 
 

@@ -16,7 +16,19 @@ if str(ROOT) not in sys.path:
 import auth
 import db
 import maps_service
-from test_ai_usage import _FakeResponse
+
+
+class _FakeResponse:
+    """Minimal HTTP stand-in; kept local so this suite never imports another
+    suite's module (that import failed when run as `tests.maps...`)."""
+
+    def __init__(self, payload, status_code=200):
+        self._payload = payload
+        self.status_code = status_code
+        self.text = json.dumps(payload, ensure_ascii=False)
+
+    def json(self):
+        return self._payload
 
 
 class MapsUsageTests(unittest.TestCase):
