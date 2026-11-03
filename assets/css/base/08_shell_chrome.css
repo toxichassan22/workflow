@@ -457,3 +457,181 @@
     max-height: calc(var(--ui-viewport, 100vh) * 0.5);
   }
 }
+
+
+/* ── Tenant Dashboard Revitalization ────────────────────────────── */
+
+.tenant-dashboard-heading {
+  margin-bottom: 22px;
+}
+
+#dashboardStats .tenant-dash-card {
+  border-top: 3px solid var(--line);
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+#dashboardStats .tenant-dash-card:hover {
+  border-top-color: var(--teal-bright);
+}
+
+#dashboardStats .tenant-balance-card {
+  border: 1px solid rgba(255, 255, 255, .14);
+  border-top: 3px solid var(--teal-bright);
+  box-shadow: 0 4px 18px rgba(7, 24, 44, .25);
+}
+
+#dashboardLifecycle {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) !important;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+#dashboardLifecycle .tenant-dash-card {
+  min-height: 76px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--ui-border);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+#dashboardLifecycle .tenant-dash-card h3 {
+  font-size: 20px !important;
+  color: var(--teal-dark) !important;
+}
+
+#dashboardLifecycle .tenant-dash-card p {
+  font-size: 11px !important;
+  color: var(--ink-muted);
+}
+
+#dashboardLifecycle .tenant-dash-card::after {
+  display: none;
+}
+
+/* Recent Projects Panel */
+.tenant-recent-projects-panel {
+  background: var(--surface);
+  border: 1px solid var(--ui-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 22px 24px;
+  margin-bottom: 22px;
+}
+
+.tenant-recent-projects-panel .tenant-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.tenant-recent-projects-panel .dash-section-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 850;
+  color: var(--ink);
+}
+
+.tenant-panel-subtitle {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 2px;
+}
+
+.tenant-recent-projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tenant-recent-project-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #FCFDFE;
+  transition: all .16s ease;
+}
+
+.tenant-recent-project-row:hover {
+  background: #F4F9FC;
+  border-color: var(--teal-bright);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 12px rgba(7, 24, 44, .06);
+}
+
+.tenant-recent-project-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.tenant-recent-project-title-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tenant-recent-project-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tenant-recent-project-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
+.tenant-recent-dot {
+  color: var(--line-strong, #CBD5E1);
+  font-size: 10px;
+}
+
+.tenant-recent-project-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.tenant-dash-empty-state {
+  text-align: center;
+  padding: 36px 20px;
+  background: #FAFBFD;
+  border: 1px dashed var(--line-strong, #CBD5E1);
+  border-radius: 12px;
+}
+
+.tenant-dash-empty-title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.tenant-dash-empty-state .tenant-hint {
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}

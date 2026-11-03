@@ -141,9 +141,14 @@
     // stayed Arabic. Numbers themselves never change with the language.
     function sagFmtMoneyParts(v) {
       const n = Number(v || 0);
-      const digits = n !== 0 && Math.abs(n) < 100 ? 2 : 0;
+      if (!Number.isFinite(n)) {
+        return { number: '0', currency: wfTr('ريال سعودي') };
+      }
+      const rounded = Math.round(n * 100) / 100;
+      const hasDecimals = Math.abs(rounded % 1) > 0.001;
+      const val = hasDecimals ? rounded.toFixed(2) : rounded;
       return {
-        number: formatExactSystemNumber(n, true),
+        number: formatExactSystemNumber(val, true),
         currency: wfTr('ريال سعودي')
       };
     }
@@ -274,8 +279,16 @@
       const maxTicks = Math.max(2, Math.floor(innerW / (maxLabelW + 14)));
       const tickStep = Math.max(1, Math.ceil(n / maxTicks));
       const candidates = [];
-      for (let i = 0; i < n; i += tickStep) candidates.push(i);
-      if (n > 1 && candidates[candidates.length - 1] !== n - 1) candidates.push(n - 1);
+      if (tickStep <= 1) {
+        for (let i = 0; i < n; i++) candidates.push(i);
+      } else {
+        const numIntervals = Math.max(1, Math.min(maxTicks - 1, Math.round((n - 1) / tickStep)));
+        for (let k = 0; k <= numIntervals; k++) {
+          const idx = Math.round(k * (n - 1) / numIntervals);
+          if (!candidates.length || candidates[candidates.length - 1] !== idx) candidates.push(idx);
+        }
+      }
+
       const tickBox = i => {
         const w = sagTickWidth(tickText(i));
         if (n > 1 && i === 0) return [2, 2 + w];

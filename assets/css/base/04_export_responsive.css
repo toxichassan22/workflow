@@ -1383,7 +1383,7 @@
     }
 
     .tenant-balance-pill {
-      max-width: 46%;
+      max-width: 68%;
       padding: 3px 10px;
       overflow: hidden;
       border: 1px solid rgba(255, 255, 255, .35);

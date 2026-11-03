@@ -891,6 +891,7 @@
       ]);
       renderDashboardOverview(dashData && dashData.dashboard);
       renderDashboardBalance(overviewData);
+      if (typeof renderDashboardRecentProjects === 'function') renderDashboardRecentProjects(presData && presData.presentations);
       tenantApplyChartRange();
       if (presData && presData.success && totalEl) {
         totalEl.textContent = Number.isFinite(Number(presData.total)) ? presData.total : (presData.presentations || []).length;

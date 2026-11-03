@@ -425,3 +425,55 @@
         toast(data.error || 'فشل حذف العرض');
       }
     }
+
+
+    function renderDashboardRecentProjects(presentations) {
+      const container = document.getElementById('dashRecentProjects');
+      if (!container) return;
+      const list = Array.isArray(presentations) ? presentations.slice(0, 5) : [];
+      if (!list.length) {
+        container.innerHTML = '<div class="tenant-dash-empty-state">' +
+          '<p class="tenant-dash-empty-title">' + escapeHtml(WFT('dashboard.empty_title', 'لا توجد عروض عقارية بعد')) + '</p>' +
+          '<p class="tenant-hint">' + escapeHtml(WFT('dashboard.empty_hint', 'لم يتم إنشاء أي عرض عقاري في هذه المنظومة بعد.')) + '</p>' +
+          '<button type="button" class="btn primary small" onclick="startTenantProject()">' + escapeHtml(WFT('nav.new_proposal', 'مشروع جديد')) + '</button>' +
+          '</div>';
+        return;
+      }
+      const statusLabels = {
+        'draft': WFT('dashboard.status_draft', 'مسودة'),
+        'pending_approval': WFT('dashboard.status_pending', 'بانتظار التعميد'),
+        'approved': WFT('dashboard.status_approved', 'معتمد'),
+        'completed': WFT('dashboard.status_completed', 'مكتمل')
+      };
+      const rows = list.map(item => {
+        const title = escapeHtml(item.title || WFT('dashboard.untitled_deck', 'عرض بدون عنوان'));
+        const slides = Number(item.slideCount || 0);
+        const rev = Number(item.revision || 0);
+        const date = (item.updatedAt || item.createdAt || '').slice(0, 10);
+        const statusKey = item.status || 'draft';
+        const statusText = statusLabels[statusKey] || statusLabels.draft;
+        const statusClass = 'tenant-badge status-' + (statusKey === 'approved' ? 'success' : (statusKey === 'pending_approval' ? 'warning' : 'neutral'));
+        const draftBtn = item.draftId
+          ? '<button type="button" class="btn ghost small" onclick="openProjectDraftById(\'' + escapeHtml(item.draftId) + '\')">' + escapeHtml(WFT('dashboard.edit_project', 'بيانات المشروع')) + '</button>'
+          : '';
+        return '<div class="tenant-recent-project-row" data-id="' + escapeHtml(item.id) + '">' +
+          '<div class="tenant-recent-project-info">' +
+            '<div class="tenant-recent-project-title-line">' +
+              '<h4 class="tenant-recent-project-title">' + title + '</h4>' +
+              '<span class="' + statusClass + '">' + escapeHtml(statusText) + '</span>' +
+            '</div>' +
+            '<div class="tenant-recent-project-meta">' +
+              '<span>' + slides + ' ' + escapeHtml(WFT('ws.slides_count_unit', 'شريحة')) + '</span>' +
+              '<span class="tenant-recent-dot">•</span>' +
+              '<span>' + escapeHtml(WFT('ws.revision_label', 'النسخة')) + ' ' + rev + '</span>' +
+              (date ? '<span class="tenant-recent-dot">•</span><span>' + escapeHtml(date) + '</span>' : '') +
+            '</div>' +
+          '</div>' +
+          '<div class="tenant-recent-project-actions">' +
+            '<button type="button" class="btn primary small" onclick="openExistingPresentation(\'' + escapeHtml(item.id) + '\')">' + escapeHtml(WFT('dashboard.open_deck', 'فتح العرض')) + '</button>' +
+            draftBtn +
+          '</div>' +
+        '</div>';
+      }).join('');
+      container.innerHTML = '<div class="tenant-recent-projects-list">' + rows + '</div>';
+    }

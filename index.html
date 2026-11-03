@@ -300,6 +300,16 @@
         </div>
       </div>
       <div id="dashboardLifecycle" class="tenant-dashboard-stats" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))"></div>
+      <div id="dashboardRecentSection" class="tenant-content-panel tenant-recent-projects-panel">
+        <div class="tenant-panel-heading">
+          <div>
+            <h3 class="dash-section-title" data-i18n="dashboard.recent_projects">المشاريع والعروض الأخيرة</h3>
+            <span class="tenant-panel-subtitle" data-i18n="dashboard.recent_projects_sub">أحدث الدراسات والعروض العقارية في مساحة العمل</span>
+          </div>
+          <button type="button" class="btn ghost small" onclick="openTenantPage('tenantPresentationsPage')" data-i18n="dashboard.view_all_projects">عرض جميع العروض</button>
+        </div>
+        <div id="dashRecentProjects" class="tenant-recent-projects-body"></div>
+      </div>
       <div class="tenant-content-panel admin-chart-panel">
         <div class="tenant-panel-heading">
           <h3 class="dash-section-title" data-i18n="dashboard.company_activity">نشاط الشركة</h3>
