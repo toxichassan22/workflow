@@ -337,6 +337,16 @@ class PresentationTranslationApiTests(unittest.TestCase):
         self.assertEqual(translated['slidesData'][0]['title'], 'Cover')
         self.assertEqual(translated['projectData']['project_language'], 'en')
 
+    def test_default_translation_model_slug_is_deepseek_flash(self):
+        """TRANSLATION_MODEL defaults to deepseek/deepseek-v4.1-flash-1017."""
+        app_path = ROOT / 'app.py'
+        with open(app_path, 'r', encoding='utf-8') as f:
+            src = f.read()
+        self.assertIn(
+            "TRANSLATION_MODEL = (os.environ.get('TRANSLATION_MODEL') or 'deepseek/deepseek-v4.1-flash-1017').strip()",
+            src,
+        )
+
     def test_translation_without_a_configured_model_is_refused(self):
         created = self._create()
         with patch.object(self.module, 'TRANSLATION_MODEL', ''):

@@ -420,10 +420,10 @@ DESIGNER_REASONING_EFFORT = os.environ.get('DESIGNER_REASONING_EFFORT', 'low')
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
 # Deck translation runs on its own model: re-writing an existing deck is a
-# mechanical job, and the owner picks what pays for it. There is deliberately no
-# default slug — an empty value makes /api/presentations/<id>/translate refuse
-# with TRANSLATION_MODEL_NOT_CONFIGURED instead of spending on a guess.
-TRANSLATION_MODEL = (os.environ.get('TRANSLATION_MODEL') or '').strip()
+# mechanical job, and the owner picks what pays for it. Defaults to
+# deepseek/deepseek-v4.1-flash-1017; setting it empty makes the endpoint
+# refuse with TRANSLATION_MODEL_NOT_CONFIGURED.
+TRANSLATION_MODEL = (os.environ.get('TRANSLATION_MODEL') or 'deepseek/deepseek-v4.1-flash-1017').strip()
 # The plans workflow (verify, boundary, distribution, notes, scene) runs its own
 # text model — default the primary text model, overridable without touching the slide model.
 VISUAL_PLAN_TEXT_MODEL = os.environ.get('VISUAL_PLAN_TEXT_MODEL') or GEMINI_TEXT_MODEL
@@ -441,6 +441,7 @@ DESIGNER_AGENT_PLANNER_MODEL = os.environ.get('DESIGNER_AGENT_PLANNER_MODEL') or
 DESIGNER_AGENT_WORKER_MODEL = os.environ.get('DESIGNER_AGENT_WORKER_MODEL') or GEMINI_TEXT_MODEL
 print(f"[CONFIG] Primary text/design model: {GEMINI_TEXT_MODEL}")
 print(f"[CONFIG] Slide generation model: {SLIDE_TEXT_MODEL}")
+print(f"[CONFIG] Slide translation model: {TRANSLATION_MODEL}")
 print(f"[CONFIG] Visual plan text model: {VISUAL_PLAN_TEXT_MODEL}")
 print(f"[CONFIG] Visual plan distribution model: {VISUAL_PLAN_DISTRIBUTION_MODEL}")
 # All image generation runs on OpenRouter's dedicated /images endpoint — the

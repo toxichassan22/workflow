@@ -5,8 +5,9 @@
 # modules/slides/slide_translator.py, which also validates that placeholders and
 # numbers survived before accepting a translation.
 #
-# The model is owner-managed: TRANSLATION_MODEL has no default on purpose, and
-# this route refuses with TRANSLATION_MODEL_NOT_CONFIGURED until it is set.
+# The model is owner-managed: TRANSLATION_MODEL defaults to
+# deepseek/deepseek-v4.1-flash-1017; setting it empty makes this route refuse
+# with TRANSLATION_MODEL_NOT_CONFIGURED.
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import copy as _translation_copy
