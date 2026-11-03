@@ -91,6 +91,35 @@ class TranslationEngineTests(unittest.TestCase):
         self.assertEqual(stats['translated'], 0)
         self.assertEqual(stats['skipped'], 1)
 
+    def test_a_mangled_unit_is_retried_once_and_recovered(self):
+        html = '<p>نبذة عن المشروع <strong>واحة النخيل السكنية</strong></p>'
+        calls = []
+
+        def flaky(texts):
+            calls.append(len(texts))
+            if len(calls) == 1:
+                return [re.sub(r'⟦\d+⟧', '', text) for text in texts]
+            return fake_translator(texts)
+
+        translated, stats = slide_translator.translate_html(html, flaky)
+        self.assertEqual(len(calls), 2, calls)
+        self.assertEqual(stats['translated'], 1)
+        self.assertIn('Project overview', translated)
+        self.assertIn('<strong>', translated)
+
+    def test_pieces_recover_when_even_the_retry_mangles_it(self):
+        html = '<p>نبذة عن المشروع <strong>واحة النخيل السكنية</strong></p>'
+
+        def mangles_units(texts):
+            if any('⟦' in text for text in texts):
+                return [re.sub(r'⟦\d+⟧', '', text) for text in texts]
+            return fake_translator(texts)
+
+        translated, stats = slide_translator.translate_html(html, mangles_units)
+        self.assertIn('<strong>Palm Oasis Residences</strong>', translated)
+        self.assertIn('Project overview', translated)
+        self.assertEqual(stats['skipped'], 0)
+
     def test_a_translation_that_drops_a_placeholder_is_refused(self):
         html = '<p>نبذة عن المشروع <strong>واحة النخيل السكنية</strong></p>'
         translated, _ = slide_translator.translate_html(html, drop_placeholders)

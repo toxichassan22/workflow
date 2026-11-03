@@ -217,6 +217,19 @@ def translate_html(html, translator, glossary=None):
     translations = []
     for batch in _chunks([unit['template'] for unit in units]):
         translations.extend(_translate_batch(batch, translator))
+    # A unit the model returned with a placeholder or a number missing is asked
+    # for again on its own: one broken item in a big batch is usually a copying
+    # slip, and a retry recovers it for a few tokens instead of leaving Arabic
+    # in an English deck.
+    retry_indexes = [
+        index for index, (unit, value) in enumerate(zip(units, translations))
+        if not _accepted(unit['template'], value)
+    ]
+    if retry_indexes:
+        retried = _translate_batch(
+            [units[index]['template'] for index in retry_indexes], translator)
+        for index, value in zip(retry_indexes, retried):
+            translations[index] = value
     accepted = []
     for unit, translated in zip(units, translations):
         if _accepted(unit['template'], translated):
@@ -224,7 +237,12 @@ def translate_html(html, translator, glossary=None):
             stats['translated'] += 1
         else:
             accepted.append(None)
-            stats['skipped'] += 1
+    # Last resort: translate the plain text pieces of a unit that still fails
+    # without any placeholders. The inline tags keep their positions, only the
+    # words change, so the slide is complete instead of half Arabic.
+    recovered = _recover_pieces(tokens, units, accepted, translator, glossary)
+    stats['translated'] += len(recovered)
+    stats['skipped'] = len(units) - stats['translated']
     return _rebuild(tokens, units, accepted), stats
 
 
@@ -251,6 +269,32 @@ def _plain(texts, translator, glossary=None):
             apply_glossary(translated, glossary)
             if _accepted(source, translated) else None)
     return out
+
+
+def _recover_pieces(tokens, units, accepted, translator, glossary):
+    """Translate the text pieces of units that no whole-unit attempt could save."""
+    pairs = []
+    for unit_index, (unit, value) in enumerate(zip(units, accepted)):
+        if value is not None:
+            continue
+        for token_index in unit['pieces']:
+            if AR_RE.search(tokens[token_index] or ''):
+                pairs.append((token_index, unit_index))
+    if not pairs:
+        return set()
+    translated = []
+    for batch in _chunks([tokens[token_index] for token_index, _ in pairs]):
+        translated.extend(_translate_batch(batch, translator))
+    recovered = set()
+    for (token_index, unit_index), value in zip(pairs, translated):
+        source = tokens[token_index]
+        if not _accepted(source, value):
+            continue
+        lead = re.match(r'^\s*', source).group(0)
+        trail = re.search(r'\s*$', source).group(0)
+        tokens[token_index] = lead + str(apply_glossary(value, glossary)).strip() + trail
+        recovered.add(unit_index)
+    return recovered
 
 
 def translate_slides(slides, translator, target_lang='en', glossary=None):
