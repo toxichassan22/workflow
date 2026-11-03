@@ -26,7 +26,7 @@ def _summary_rental_benchmark_files():
 
 
 def _xlsx_shared_strings(archive):
-    import xml.etree.ElementTree as ET
+    import defusedxml.ElementTree as ET
 
     try:
         root = ET.fromstring(archive.read('xl/sharedStrings.xml'))
@@ -60,8 +60,9 @@ def _xlsx_value(cell, shared_strings, ns):
 
 
 def _summary_xlsx_sheets(file_path):
-    """Read cell values with the standard library, without workbook mutation."""
-    import xml.etree.ElementTree as ET
+    """Read cell values with defusedxml (no entity expansion), without workbook mutation."""
+    import defusedxml.ElementTree as ET
+    from defusedxml.common import DefusedXmlException
     from zipfile import BadZipFile, ZipFile
 
     ns = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
@@ -75,7 +76,7 @@ def _summary_xlsx_sheets(file_path):
             for sheet_name in sheet_names:
                 try:
                     root = ET.fromstring(archive.read(sheet_name))
-                except ET.ParseError:
+                except (ET.ParseError, DefusedXmlException):
                     continue
                 rows = []
                 for row in root.iter(ns + 'row'):

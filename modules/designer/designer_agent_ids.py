@@ -66,8 +66,8 @@ def deck_signature(slides):
         html = str(slide.get('html') or '')
         rows.append({
             'id': slide.get('id') or '',
-            'title': str(slide.get('title') or ''),
-            'h': hashlib.sha1(html.encode('utf-8')).hexdigest()[:12],
+            'title': str(slide.get('title') or ''),'h': hashlib.sha1(html.encode('utf-8'), usedforsecurity=False).hexdigest()[:12],
+            
         })
     return hashlib.sha256(
         json.dumps(rows, ensure_ascii=False, sort_keys=True).encode('utf-8')
@@ -85,7 +85,7 @@ def slide_signature(slide):
     html = str(slide.get('html') or '')
     payload = {
         'title': str(slide.get('title') or ''),
-        'h': hashlib.sha1(html.encode('utf-8')).hexdigest()[:12],
+        'h': hashlib.sha1(html.encode('utf-8'), usedforsecurity=False).hexdigest()[:12],
     }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode('utf-8')

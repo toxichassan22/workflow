@@ -867,7 +867,7 @@ def _map_cache_path(lat, lng, maptype, zoom, markers=None, paths=None, size=None
         [lat, lng, maptype, zoom, markers, paths, size, styles, _lang_norm(language), STATIC_MAP_FRAME_VERSION],
         ensure_ascii=False, sort_keys=True, default=str
     )
-    key = hashlib.md5(raw.encode('utf-8')).hexdigest()
+    key = hashlib.md5(raw.encode('utf-8'), usedforsecurity=False).hexdigest()
     return os.path.join(MAPS_DIR, f"map_{key}.png")
 
 

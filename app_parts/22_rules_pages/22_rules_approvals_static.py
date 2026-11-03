@@ -257,7 +257,7 @@ def index():
             if version:
                 body = body.replace(asset_path, asset_path + b'?v=' + version.encode('ascii'))
         resp.set_data(body)
-        resp.set_etag(hashlib.sha1(body).hexdigest())
+        resp.set_etag(hashlib.sha1(body, usedforsecurity=False).hexdigest())
         resp.make_conditional(request)
     except Exception:
         app.logger.warning('Could not version frontend bundle URLs', exc_info=True)

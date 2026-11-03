@@ -969,7 +969,7 @@ def _measure_regression_reasons(before, after):
 
 
 def _agent_layout_key(html):
-    return hashlib.sha1(str(html or '').encode('utf-8')).hexdigest()
+    return hashlib.sha1(str(html or '').encode('utf-8'), usedforsecurity=False).hexdigest()
 
 
 def _agent_remember_layout(ctx, html, report):

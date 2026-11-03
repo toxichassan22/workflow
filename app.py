@@ -50,7 +50,8 @@ import concurrent.futures
 import contextlib
 import copy
 from dotenv import load_dotenv
-from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app, Response, has_request_context, has_app_context, redirect
+from flask import Flask, request, jsonify, send_file, send_from_directory, g, current_app, Response, has_request_context, has_app_context, redirect, abort
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
@@ -85,6 +86,8 @@ app = Flask(__name__, static_folder=None)
 # Trust the proxy headers for host/proto only; the proxy itself is local.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024
+app.config['SESSION_COOKIE_SECURE'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.teardown_appcontext(db.close_db)
 
 
@@ -160,6 +163,9 @@ def security_headers(response):
     return response
 
 
+MAX_DECOMPRESSED_BODY_BYTES = 25 * 1024 * 1024
+
+
 @app.before_request
 def decompress_gzip_request_body():
     # The client gzips large JSON bodies because the hosting proxy corrupts
@@ -167,14 +173,23 @@ def decompress_gzip_request_body():
     if request.headers.get('Content-Encoding', '').lower() != 'gzip':
         return
     try:
-        import gzip as _gzip
+        import zlib
         import io
         raw = request.get_data(cache=True)
-        data = _gzip.decompress(raw)
+        # Cap the decompressed size so a small gzip bomb cannot exhaust memory.
+        inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        data = inflater.decompress(raw, MAX_DECOMPRESSED_BODY_BYTES + 1)
+        if len(data) > MAX_DECOMPRESSED_BODY_BYTES or inflater.unconsumed_tail:
+            abort(413)
+        data += inflater.flush()
+        if len(data) > MAX_DECOMPRESSED_BODY_BYTES:
+            abort(413)
         request._cached_data = data
         request.environ['wsgi.input'] = io.BytesIO(data)
         request.environ['CONTENT_LENGTH'] = str(len(data))
         request.__dict__.pop('_cached_json', None)
+    except HTTPException:
+        raise
     except Exception:
         app.logger.warning('Could not decompress gzipped request body', exc_info=True)
 

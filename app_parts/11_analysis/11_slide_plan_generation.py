@@ -667,13 +667,13 @@ def api_generate_slide_single():
     """Generate a single slide by index. Returns one slide HTML."""
     from slide_engine import generate_single_slide, build_design_rules, finalize_slide_html
     data = request.json or {}
-    _billing_guard = _require_billing_balance('slide_single')
-    if _billing_guard is not None:
-        return _billing_guard
     project_data = clean_project_data(data.get('projectData', {}))
     _inputs_guard = _generation_inputs_guard(project_data, section_key=data.get('sectionKey'))
     if _inputs_guard is not None:
         return _inputs_guard
+    _billing_guard = _require_billing_balance('slide_single')
+    if _billing_guard is not None:
+        return _billing_guard
     presentation_id = str(data.get('presentationId') or '').strip() or None
     project_data, request_images = _hydrate_map_assets_for_request(
         project_data, data.get('images', {}), g.tenant_id, presentation_id=presentation_id

@@ -173,7 +173,7 @@ def api_branding_font_css():
     branding = db.get_branding(g.tenant_id) or {}
     css, _family = build_font_css(branding, g.tenant_id, embed=False)
     body = (css or '/* no tenant font */').encode('utf-8')
-    etag = '"' + _hashlib.sha1(body).hexdigest() + '"'
+    etag = '"' + _hashlib.sha1(body, usedforsecurity=False).hexdigest() + '"'
     if request.headers.get('If-None-Match') == etag:
         response = app.response_class('', status=304, mimetype='text/css')
         response.headers['ETag'] = etag

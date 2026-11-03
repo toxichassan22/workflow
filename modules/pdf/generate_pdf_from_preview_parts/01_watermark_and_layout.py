@@ -221,7 +221,7 @@ def fit_export_images_in_html(html, tmp_root):
             fitted_files[clean] = None
             return None
         ext = '.png' if fitted[:8] == b'\x89PNG\r\n\x1a\n' else '.jpg'
-        name = 'export-img-' + _hashlib.md5(fitted).hexdigest() + ext
+        name = 'export-img-' + _hashlib.md5(fitted, usedforsecurity=False).hexdigest() + ext
         target = Path(tmp_root) / name
         try:
             if not target.is_file():

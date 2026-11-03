@@ -136,7 +136,7 @@ def add_missing_image_descriptions(
         next_start = matches[index + 1].start() if index + 1 < len(matches) else len(source)
         if not description or _caption_already_follows(source, match.end(), next_start, description):
             continue
-        marker = hashlib.sha1((src + "\0" + description).encode("utf-8")).hexdigest()[:12]
+        marker = hashlib.sha1((src + "\0" + description).encode("utf-8"), usedforsecurity=False).hexdigest()[:12]
         caption = (
             f'<div data-project-image-description="{marker}" data-visual-media-caption="1" '
             'style="font-size:13px;line-height:1.55;color:#4b5563;margin-top:7px;'

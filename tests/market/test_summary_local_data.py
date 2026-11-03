@@ -47,6 +47,28 @@ def _write_workbook(path, sheets):
 
 class SummaryLocalDataTests(unittest.TestCase):
 
+    def test_xlsx_reader_refuses_entity_expansion_payload(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        bomb = Path(temp_dir.name) / 'bomb.xlsx'
+        billion_laughs = (
+            '<?xml version="1.0"?>'
+            '<!DOCTYPE worksheet [<!ENTITY a "aaaaaaaaaa">'
+            '<!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">]>'
+            '<worksheet><sheetData><row><c><v>&b;</v></c></row></sheetData></worksheet>')
+        with ZipFile(bomb, 'w') as archive:
+            archive.writestr('xl/worksheets/sheet1.xml', billion_laughs)
+        # A rejected sheet is skipped, never raised into the summary request.
+        self.assertEqual(market_study._summary_xlsx_sheets(bomb), [])
+
+    def test_xlsx_reader_still_reads_plain_workbook(self):
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        path = Path(temp_dir.name) / 'plain.xlsx'
+        _write_workbook(path, [[['a', 'ب'], ['1', '2']]])
+        sheets = market_study._summary_xlsx_sheets(path)
+        self.assertEqual(sheets, [[['a', 'ب'], ['1', '2']]])
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.workbook = Path(self.temp_dir.name) / 'deals.xlsx'

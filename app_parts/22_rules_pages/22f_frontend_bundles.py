@@ -147,7 +147,7 @@ def _build_frontend_bundle(kind):
         else:
             chunks.append('\n/*__PART:' + name + '*/\n' + content)
     raw = (''.join(chunks)).encode('utf-8')
-    etag = '"' + _hashlib.sha1(raw).hexdigest() + '"'
+    etag = '"' + _hashlib.sha1(raw, usedforsecurity=False).hexdigest() + '"'
     bundle = (etag, raw, _gzip.compress(raw, 6), content_type)
     _FRONTEND_BUNDLE_CACHE[kind] = (sig, bundle)
     return bundle
