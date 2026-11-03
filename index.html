@@ -7,8 +7,12 @@
   <meta name="robots" content="noindex, nofollow, noarchive">
   <meta name="google-site-verification" content="DjcprG6EDZYXybz9fFyDqEQE7mIPvmsJXTnEDVi7J6c">
   <title>منصة العروض التقديمية | مولّد عروض المشاريع</title>
-  <link rel="icon"
-    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'></text></svg>">
+  <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+  <link rel="manifest" href="/assets/site.webmanifest">
+  <meta name="theme-color" content="#07182C">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <script src="/assets/i18n.bundle.js"></script>
@@ -864,11 +868,12 @@
           <div class="tenant-field project-search-field">
             <label data-i18n="projects.search_label">بحث</label>
             <input type="text" id="projectArchiveSearch" placeholder="بحث باسم المشروع..."
+              oninput="filterProjectArchiveInstant()"
               onkeydown="if(event.key==='Enter') openTenantPresentations(true)">
           </div>
           <div class="tenant-field">
             <label data-i18n="projects.status_label">الحالة</label>
-            <select id="projectArchiveStatus" onchange="openTenantPresentations(true)">
+            <select id="projectArchiveStatus" onchange="filterProjectArchiveInstant()">
               <option value="" data-i18n="projects.all_statuses">كل الحالات</option>
               <option value="draft">مسودة</option>
               <option value="sections_in_progress">قيد إعداد الأقسام</option>
@@ -885,11 +890,11 @@
           </div>
           <div class="tenant-field">
             <label data-i18n="projects.from_date">من تاريخ</label>
-            <input type="date" id="projectArchiveFrom" onchange="openTenantPresentations(true)">
+            <input type="date" id="projectArchiveFrom" onchange="filterProjectArchiveInstant()">
           </div>
           <div class="tenant-field">
             <label data-i18n="projects.to_date">إلى تاريخ</label>
-            <input type="date" id="projectArchiveTo" onchange="openTenantPresentations(true)">
+            <input type="date" id="projectArchiveTo" onchange="filterProjectArchiveInstant()">
           </div>
           <div class="tenant-field filter-actions-field" style="display:flex;align-items:flex-end;gap:8px">
             <button type="button" class="btn primary" onclick="openTenantPresentations(true)" data-i18n="projects.filter">تصفية</button>

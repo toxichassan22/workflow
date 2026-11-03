@@ -22,6 +22,40 @@ def public_landing():
     return _serve_public_page('landing.html')
 
 
+@app.route('/sitemap.xml')
+def public_sitemap():
+    """Official sitemap for search engines on the production domain."""
+    host = (request.host or '').lower().split(':')[0]
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://landloom.ai/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+  <url>
+    <loc>https://landloom.ai/about</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://landloom.ai/terms</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+  <url>
+    <loc>https://landloom.ai/privacy</loc>
+    <changefreq>yearly</changefreq>
+    <priority>0.3</priority>
+  </url>
+</urlset>"""
+    resp = Response(xml, mimetype='application/xml')
+    resp.headers['Cache-Control'] = 'no-cache'
+    if host != 'landloom.ai' and host != 'www.landloom.ai':
+        resp.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
+    return resp
+
+
 @app.route('/robots.txt')
 def public_robots():
     host = (request.host or '').lower().split(':')[0]

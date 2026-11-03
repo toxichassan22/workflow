@@ -1,4 +1,4 @@
-"""Tests for staging de-indexing protection, robots.txt, and site verification."""
+"""Tests for staging de-indexing protection, robots.txt, sitemap.xml, and site verification."""
 
 import os
 import sys
@@ -58,6 +58,14 @@ class StagingIndexingProtectionTests(unittest.TestCase):
         self.assertIn('User-agent: *', resp.get_data(as_text=True))
         self.assertIn('noindex', resp.headers.get('X-Robots-Tag', ''))
 
+    def test_sitemap_xml_endpoint(self):
+        resp = self.client.get('/sitemap.xml', headers={'Host': 'landloom.ai'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.mimetype, 'application/xml')
+        body = resp.get_data(as_text=True)
+        self.assertIn('https://landloom.ai/', body)
+        self.assertIn('<changefreq>weekly</changefreq>', body)
+
     def test_google_verification_file_endpoint(self):
         resp = self.client.get('/google3567ac5386460d70.html')
         self.assertEqual(resp.status_code, 200)
@@ -72,7 +80,21 @@ class StagingIndexingProtectionTests(unittest.TestCase):
             index_content = f.read()
         self.assertIn('name="robots" content="noindex, nofollow, noarchive"', index_content)
         self.assertIn('name="google-site-verification"', index_content)
+        self.assertIn('href="/assets/favicon.svg"', index_content)
 
         with open(ROOT / 'pages' / 'landing.html', 'r', encoding='utf-8') as f:
             landing_content = f.read()
         self.assertIn('name="google-site-verification"', landing_content)
+        self.assertIn('href="/assets/favicon-48.png"', landing_content)
+        self.assertIn('property="og:image"', landing_content)
+        self.assertIn('SoftwareApplication', landing_content)
+
+    def test_favicon_assets_exist_on_disk(self):
+        assets_dir = ROOT / 'assets'
+        self.assertTrue((assets_dir / 'favicon.svg').exists())
+        self.assertTrue((assets_dir / 'favicon-48.png').exists())
+        self.assertTrue((assets_dir / 'favicon-32.png').exists())
+        self.assertTrue((assets_dir / 'favicon-16.png').exists())
+        self.assertTrue((assets_dir / 'apple-touch-icon.png').exists())
+        self.assertTrue((assets_dir / 'site.webmanifest').exists())
+        self.assertTrue((assets_dir / 'og-image.png').exists())
