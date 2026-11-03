@@ -1,7 +1,7 @@
 /* assets/i18n/02_dict_en.js — English UI dictionary, extracted from i18n.js.
  * Edit entries here; keep the I18N_*_BEGIN/END markers and JSON-compatible
  * quoting (tests parse the block between them). Loaded before i18n.js. */
-window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
+window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "best_use.optional": "Optional",
   "best_use.generate": "Suggest Best Distribution",
   "best_use.save_failed": "Could not save the draft before continuing.",
@@ -1033,4 +1033,4 @@ window.__WFI18N_EN = /*I18N_EN_BEGIN*/{
   "summary_chat.end_confirm_body": "The chat will start a new conversation next time it opens.",
   "summary_chat.end_confirm": "End conversation",
   "summary_chat.end_return": "Back to the conversation"
-}/*I18N_EN_END*/;
+}/*I18N_EN_END*/);

@@ -546,6 +546,55 @@ class I18nFoundationTests(unittest.TestCase):
                     str(dicts['en'][key]), AR_CHAR,
                     'en value carries Arabic script: %s' % key)
 
+    def test_dictionary_parts_survive_the_real_load_order(self):
+        """Every dictionary part must merge into the shared global, not replace it.
+
+        The shell loads the parts in FRONTEND_I18N_ORDER and only then i18n.js
+        reads window.__WFI18N_AR/EN. 01b_dict_en_extra.js sorts BEFORE the main
+        02_dict_en.js, so a plain assignment in the main file wiped the 370 keys
+        the extra part had just added: the English design screen kept showing
+        «تحرير» and «سورتر» while the static block check above still passed,
+        because it merges the blocks itself and never runs the real order.
+        This loads the parts exactly as the browser does and compares the
+        globals the runtime actually gets.
+        """
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not installed')
+        names = sorted(p.name for p in I18N_DICT_DIR.glob('*.js'))
+        harness = (
+            "const fs=require('fs'),vm=require('vm'),path=require('path');"
+            "const dir=process.argv[1],names=JSON.parse(process.argv[2]);"
+            "const sandbox={};sandbox.window=sandbox;vm.createContext(sandbox);"
+            "for(const n of names){vm.runInContext("
+            "fs.readFileSync(path.join(dir,n),'utf8'),sandbox,{filename:n});}"
+            "const en=sandbox.__WFI18N_EN||{},ar=sandbox.__WFI18N_AR||{};"
+            "process.stdout.write(JSON.stringify({"
+            "en:Object.keys(en),ar:Object.keys(ar),"
+            "sorter:en['ws.view_sorter'],edit:en['ws.view_edit'],"
+            "tools:en['ws.deck_tools']}));"
+        )
+        proc = subprocess.run(
+            [node, '-e', harness, str(I18N_DICT_DIR), json.dumps(names)],
+            capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0,
+                         'loading the dictionary parts failed:\n%s' % proc.stderr)
+        runtime = json.loads(proc.stdout)
+        en_keys, ar_keys = set(runtime['en']), set(runtime['ar'])
+        missing = sorted(ar_keys - en_keys)
+        self.assertEqual(
+            missing, [],
+            'the real load order leaves English without %d key(s); a later '
+            'part replaced the global instead of merging it:%s'
+            % (len(missing), '\n' + '\n'.join(missing[:40])))
+        # The design workspace is the screen the owner reported: its view switch
+        # and deck-tools labels must resolve to real English at runtime.
+        for key in ('sorter', 'edit', 'tools'):
+            self.assertTrue(runtime[key], 'runtime EN is missing %s' % key)
+            self.assertNotRegex(runtime[key], AR_CHAR,
+                                'runtime EN %s carries Arabic: %r'
+                                % (key, runtime[key]))
+
     def test_static_bindings_reference_known_keys(self):
         dicts = read_dicts()
         html = read_shell()

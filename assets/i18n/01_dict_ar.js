@@ -1,7 +1,7 @@
 /* assets/i18n/01_dict_ar.js — Arabic UI dictionary, extracted from i18n.js.
  * Edit entries here; keep the I18N_*_BEGIN/END markers and JSON-compatible
  * quoting (tests parse the block between them). Loaded before i18n.js. */
-window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
+window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "best_use.optional": "اختياري",
   "best_use.generate": "اقتراح أفضل توزيع",
   "best_use.save_failed": "تعذر حفظ المسودة قبل المتابعة.",
@@ -1033,4 +1033,4 @@ window.__WFI18N_AR = /*I18N_AR_BEGIN*/{
   "summary_chat.end_confirm_body": "سيبدأ الشات محادثة جديدة عند فتحه مرة أخرى.",
   "summary_chat.end_confirm": "إنهاء المحادثة",
   "summary_chat.end_return": "العودة إلى المحادثة"
-}/*I18N_AR_END*/;
+}/*I18N_AR_END*/);
