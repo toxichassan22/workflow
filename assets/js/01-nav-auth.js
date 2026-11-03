@@ -214,6 +214,8 @@
           : pageId === 'tenantProjectPresentationsPage'
             ? (overrides.draftId || currentProjectPresentationsDraftId() || null) : null,
         activeSection: hasProjectContext ? (tenantActiveProjectSection || null) : null,
+        slidesView: pageId === 'tenantSlidesPage' ? (overrides.slidesView || (typeof tenantSlidesView !== 'undefined' ? tenantSlidesView : 'edit')) : null,
+        slideIndex: pageId === 'tenantSlidesPage' && typeof overrides.slideIndex === 'number' ? overrides.slideIndex : null,
         visualConceptView: pageId === 'tenantVisualConceptPage' ? (overrides.visualConceptView || document.querySelector('#tenantVisualConceptPage [data-visual-concept-view]:not([hidden])')?.dataset.visualConceptView || 'home') : null,
         opsTab: pageId === 'tenantLandloomOpsPage' ? ((typeof llActiveTab !== 'undefined' && llActiveTab) || 'recharge') : null,
         railTab: localStorage.getItem('tgrTab') || 'nav',

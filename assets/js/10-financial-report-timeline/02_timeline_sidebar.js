@@ -384,7 +384,12 @@
           }
         }
         if (sameDraftOpen) {
-          if (resp.draftId) tenantProjectData.draftId = resp.draftId;
+          if (resp.draftId) {
+            tenantProjectData.draftId = resp.draftId;
+            if (typeof syncTenantBrowserHistory === 'function') {
+              syncTenantBrowserHistory('tenantProjectPage', { draftId: resp.draftId, activeSection: tenantActiveProjectSection || 'basic' }, true);
+            }
+          }
           // The workspace revision and the live poll's baseline move together,
           // so a save of our own is never read as somebody else's change.
           setTenantDraftRevision(resp.revision);

@@ -10,26 +10,16 @@
     // company name or a user name). /app/* stays as a legacy alias that resolves
     // to the canonical address instead of breaking bookmarks.
     const TENANT_ROUTE_SUFFIXES = {
-      tenantDashboardPage: 'dashboard',
-      tenantProjectPage: 'projects/new',
-      tenantProjectPresentationsPage: 'projects/presentations',
-      tenantVisualConceptPage: 'projects/visual-concept',
-      tenantSlidesPage: 'presentations/current',
-      tenantPresentationsPage: 'presentations',
-      tenantSettingsPage: 'settings',
-      tenantTeamPage: 'settings/team',
-      tenantFieldsPage: 'settings/fields',
-      tenantUsersPage: 'settings/users',
-      tenantTrainingPage: 'settings/training',
-      tenantAIRulesPage: 'settings/ai-rules',
-      tenantApprovalsPage: 'approvals',
-      tenantLandloomOpsPage: 'operations',
-      tenantAdminPage: 'admin',
-      tenantCompaniesPage: 'admin/companies',
-      tenantAdminRechargePage: 'admin/recharges',
-      tenantAdminTicketsPage: 'admin/tickets',
-      tenantAdminJoinPage: 'admin/join-requests',
-      tenantAdminPackagesPage: 'admin/packages',
+      tenantDashboardPage: 'dashboard', tenantProjectPage: 'projects/new',
+      tenantProjectPresentationsPage: 'projects/presentations', tenantVisualConceptPage: 'projects/visual-concept',
+      tenantSlidesPage: 'presentations/current', tenantPresentationsPage: 'presentations',
+      tenantSettingsPage: 'settings', tenantTeamPage: 'settings/team',
+      tenantFieldsPage: 'settings/fields', tenantUsersPage: 'settings/users',
+      tenantTrainingPage: 'settings/training', tenantAIRulesPage: 'settings/ai-rules',
+      tenantApprovalsPage: 'approvals', tenantLandloomOpsPage: 'operations',
+      tenantAdminPage: 'admin', tenantCompaniesPage: 'admin/companies',
+      tenantAdminRechargePage: 'admin/recharges', tenantAdminTicketsPage: 'admin/tickets',
+      tenantAdminJoinPage: 'admin/join-requests', tenantAdminPackagesPage: 'admin/packages',
       tenantAdminPlatformPage: 'admin/platform'
     };
     const TENANT_SUFFIX_PAGES = Object.fromEntries([
@@ -49,31 +39,66 @@
       return slug ? '/c/' + slug : '/app';
     }
 
-    function tenantCanonicalRoute(pageId) {
+    function tenantCanonicalRoute(pageId, state = {}) {
+      const isSagAdmin = tenantUser && tenantUser.isAdmin, prefix = isSagAdmin ? '/superadmin' : tenantPathPrefix();
+      if (pageId === 'tenantProjectPage') {
+        const draftId = state.draftId || (state.mode !== 'new' && tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id));
+        const section = state.activeSection || tenantActiveProjectSection || 'basic';
+        const secPart = (section && section !== 'basic') ? '/' + encodeURIComponent(section) : '';
+        return (draftId && state.mode !== 'new') ? (prefix + '/projects/' + encodeURIComponent(draftId) + secPart) : (prefix + '/projects/new' + secPart);
+      }
+      if (pageId === 'tenantProjectPresentationsPage') {
+        const draftId = state.draftId || (tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id));
+        return draftId ? (prefix + '/projects/' + encodeURIComponent(draftId) + '/presentations') : (prefix + '/projects/presentations');
+      }
+      if (pageId === 'tenantVisualConceptPage') {
+        const draftId = state.draftId || (tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id));
+        return draftId ? (prefix + '/projects/' + encodeURIComponent(draftId) + '/visual-concept') : (prefix + '/projects/visual-concept');
+      }
+      if (pageId === 'tenantSlidesPage') {
+        const presId = state.presentationId || tenantPresentationId;
+        if (!presId) return prefix + '/presentations/current';
+        const view = state.slidesView || (typeof tenantSlidesView !== 'undefined' ? tenantSlidesView : 'edit');
+        if (view === 'sorter') return prefix + '/presentations/' + encodeURIComponent(presId) + '/sorter';
+        if (view === 'present') return prefix + '/presentations/' + encodeURIComponent(presId) + '/present';
+        if (typeof state.slideIndex === 'number' && state.slideIndex > 0) return prefix + '/presentations/' + encodeURIComponent(presId) + '/slides/' + (state.slideIndex + 1);
+        return prefix + '/presentations/' + encodeURIComponent(presId);
+      }
       const suffix = TENANT_ROUTE_SUFFIXES[pageId];
       if (!suffix) return null;
-      if (tenantUser && tenantUser.isAdmin) {
-        return pageId === 'tenantAdminPage' ? '/superadmin/admin' : '/superadmin/' + suffix;
-      }
-      return tenantPathPrefix() + '/' + suffix;
+      return isSagAdmin ? (pageId === 'tenantAdminPage' ? '/superadmin/admin' : '/superadmin/' + suffix) : (prefix + '/' + suffix);
     }
 
     function resolveTenantRoutePath(path) {
       const clean = String(path || '/').replace(/\/+$/, '') || '/';
       if (clean === '/superadmin') return { pageId: 'tenantAdminPage', prefix: '/superadmin', urlSlug: '' };
-      if (clean.startsWith('/superadmin/')) {
-        const suffix = clean.slice('/superadmin/'.length);
-        const pageId = TENANT_SUFFIX_PAGES[suffix];
-        return pageId ? { pageId, prefix: '/superadmin', urlSlug: '' } : null;
+      let prefix = '', urlSlug = '', suffix = '';
+      if (clean.startsWith('/superadmin/')) { prefix = '/superadmin'; suffix = clean.slice('/superadmin/'.length); }
+      else {
+        const m = clean.match(/^\/c\/([^\/]+)(\/(.*))?$/);
+        if (m) { urlSlug = m[1].toLowerCase(); prefix = '/c/' + urlSlug; suffix = (m[3] || '').replace(/\/+$/, ''); }
+        else if (clean.startsWith('/app/')) { prefix = '/app'; suffix = clean.slice('/app/'.length); }
+        else if (clean === '/app') return { pageId: 'tenantDashboardPage', prefix: '/app', urlSlug: '' };
+        else return null;
       }
-      const companyMatch = clean.match(/^\/c\/([^\/]+)(\/(.*))?$/);
-      if (companyMatch) {
-        const urlSlug = companyMatch[1].toLowerCase();
-        const suffix = (companyMatch[3] || '').replace(/\/+$/, '');
-        if (!suffix) return { pageId: 'tenantDashboardPage', prefix: '/c/' + urlSlug, urlSlug };
-        const pageId = TENANT_SUFFIX_PAGES[suffix];
-        return pageId ? { pageId, prefix: '/c/' + urlSlug, urlSlug } : null;
+      if (!suffix) return { pageId: 'tenantDashboardPage', prefix, urlSlug };
+      if (suffix === 'projects/new') return { pageId: 'tenantProjectPage', prefix, urlSlug, mode: 'new', draftId: null, activeSection: 'basic' };
+      if (suffix === 'presentations/current') return { pageId: 'tenantSlidesPage', prefix, urlSlug, presentationId: null };
+      if (TENANT_SUFFIX_PAGES[suffix]) return { pageId: TENANT_SUFFIX_PAGES[suffix], prefix, urlSlug };
+
+      let m = suffix.match(/^projects\/new(?:\/([^\/]+))?$/);
+      if (m) return { pageId: 'tenantProjectPage', prefix, urlSlug, mode: 'new', draftId: null, activeSection: m[1] || 'basic' };
+      if ((m = suffix.match(/^projects\/([^\/]+)\/presentations$/))) return { pageId: 'tenantProjectPresentationsPage', prefix, urlSlug, draftId: decodeURIComponent(m[1]) };
+      if ((m = suffix.match(/^projects\/([^\/]+)\/visual-concept$/))) return { pageId: 'tenantVisualConceptPage', prefix, urlSlug, draftId: decodeURIComponent(m[1]) };
+      if ((m = suffix.match(/^projects\/([^\/]+)\/([^\/]+)$/))) return { pageId: 'tenantProjectPage', prefix, urlSlug, draftId: decodeURIComponent(m[1]), activeSection: decodeURIComponent(m[2]) };
+      if ((m = suffix.match(/^projects\/([^\/]+)$/))) return { pageId: 'tenantProjectPage', prefix, urlSlug, draftId: decodeURIComponent(m[1]), activeSection: 'basic' };
+
+      if ((m = suffix.match(/^presentations\/([^\/]+)\/sorter$/))) return { pageId: 'tenantSlidesPage', prefix, urlSlug, presentationId: decodeURIComponent(m[1]), slidesView: 'sorter' };
+      if ((m = suffix.match(/^presentations\/([^\/]+)\/present$/))) return { pageId: 'tenantSlidesPage', prefix, urlSlug, presentationId: decodeURIComponent(m[1]), slidesView: 'present' };
+      if ((m = suffix.match(/^presentations\/([^\/]+)\/slides\/(\d+)$/))) {
+        return { pageId: 'tenantSlidesPage', prefix, urlSlug, presentationId: decodeURIComponent(m[1]), slideIndex: Math.max(0, parseInt(m[2], 10) - 1), slidesView: 'edit' };
       }
+      if ((m = suffix.match(/^presentations\/([^\/]+)$/))) return { pageId: 'tenantSlidesPage', prefix, urlSlug, presentationId: decodeURIComponent(m[1]), slidesView: 'edit' };
       return null;
     }
 
@@ -92,13 +117,13 @@
     }
 
     function canonicalizeTenantUrl(pageId, replace) {
-      const canonical = (typeof tenantCanonicalRoute === 'function') ? tenantCanonicalRoute(pageId) : null;
+      const state = buildTenantNavigationState(pageId, {});
+      const canonical = (typeof tenantCanonicalRoute === 'function') ? tenantCanonicalRoute(pageId, state) : null;
       const current = window.location.pathname;
       if (!canonical || current === canonical) return;
       const resolved = (typeof resolveTenantRoutePath === 'function') ? resolveTenantRoutePath(current) : null;
       const legacy = !resolved && !!(TENANT_PAGE_ROUTES[pageId] && current === TENANT_PAGE_ROUTES[pageId]);
       if (replace || legacy || (resolved && resolved.prefix !== tenantPathPrefix())) {
-        const state = buildTenantNavigationState(pageId, {});
         window.history.replaceState(state, '', canonical + window.location.search);
       }
     }
@@ -114,12 +139,10 @@
       };
     }
 
-    function tenantNavigationUrl(pageId, state) {
-      const canonical = (typeof tenantCanonicalRoute === 'function') ? tenantCanonicalRoute(pageId) : null;
+    function tenantNavigationUrl(pageId, state = {}) {
+      const canonical = (typeof tenantCanonicalRoute === 'function') ? tenantCanonicalRoute(pageId, state) : null;
       const route = canonical || TENANT_PAGE_ROUTES[pageId] || window.location.pathname;
       const query = new URLSearchParams();
-      if (pageId === 'tenantProjectPage' && state.activeSection) query.set('section', state.activeSection);
-      if (pageId === 'tenantProjectPresentationsPage' && state.draftId) query.set('draftId', state.draftId);
       if (state.railTab === 'inputs') query.set('rail', 'inputs');
       const queryString = query.toString();
       return queryString ? route + '?' + queryString : route;
@@ -178,7 +201,7 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    window.addEventListener('popstate', () => {
+    window.addEventListener('popstate', async () => {
       // The bare `tenantToken` variable is null on every page load: the session is restored from
       // localStorage through getTenantToken(). Guarding on the variable made Back change the
       // address bar and leave the screen untouched.
@@ -198,8 +221,30 @@
       }
       if (pageId) {
         if (pageId === 'tenantProjectPresentationsPage') {
-          const draftId = new URLSearchParams(window.location.search).get('draftId');
-          loadProjectPresentationsPage(draftId || currentProjectPresentationsDraftId());
+          const draftId = resolved?.draftId || new URLSearchParams(window.location.search).get('draftId') || currentProjectPresentationsDraftId();
+          loadProjectPresentationsPage(draftId);
+        } else if (pageId === 'tenantProjectPage') {
+          const draftId = resolved?.draftId || new URLSearchParams(window.location.search).get('draftId');
+          if (draftId && (!tenantProjectData || String(tenantProjectData.draftId) !== String(draftId))) {
+            await openProjectDraftById(draftId);
+          } else {
+            showTenantPage(pageId, true);
+          }
+          const section = resolved?.activeSection || new URLSearchParams(window.location.search).get('section');
+          if (section && typeof showSection === 'function') showSection(section, true);
+        } else if (pageId === 'tenantSlidesPage') {
+          const presId = resolved?.presentationId;
+          if (presId && String(tenantPresentationId) !== String(presId)) {
+            await openExistingPresentation(presId);
+          } else {
+            showTenantPage(pageId, true);
+          }
+          if (resolved?.slidesView && typeof setSlidesWorkspaceView === 'function') {
+            setSlidesWorkspaceView(resolved.slidesView);
+          }
+          if (typeof resolved?.slideIndex === 'number' && typeof selectTenantSlide === 'function') {
+            selectTenantSlide(resolved.slideIndex, true);
+          }
         } else {
           openTenantPageById(pageId);
         }
@@ -215,22 +260,14 @@
     // Pages whose content is loaded by a dedicated opener. Used by popstate so
     // Back/Forward lands on a populated page, not an empty shell.
     const TENANT_PAGE_OPENERS = {
-      tenantAdminPage: 'openTenantAdmin',
-      tenantCompaniesPage: 'openTenantCompanies',
-      tenantAdminRechargePage: 'openAdminRechargePage',
-      tenantAdminTicketsPage: 'openAdminTicketsPage',
-      tenantAdminJoinPage: 'openAdminJoinPage',
-      tenantAdminPackagesPage: 'openAdminPackagesPage',
-      tenantAdminPlatformPage: 'openAdminPlatformPage',
-      tenantLandloomOpsPage: 'openLandloomOpsPage',
-      tenantPresentationsPage: 'openTenantPresentations',
-      tenantSettingsPage: 'openTenantSettings',
-      tenantTeamPage: 'openTenantTeam',
-      tenantFieldsPage: 'openTenantFields',
-      tenantUsersPage: 'openTenantUsers',
-      tenantTrainingPage: 'openTenantTraining',
-      tenantAIRulesPage: 'openTenantAIRules',
-      tenantApprovalsPage: 'openTenantApprovals',
+      tenantAdminPage: 'openTenantAdmin', tenantCompaniesPage: 'openTenantCompanies',
+      tenantAdminRechargePage: 'openAdminRechargePage', tenantAdminTicketsPage: 'openAdminTicketsPage',
+      tenantAdminJoinPage: 'openAdminJoinPage', tenantAdminPackagesPage: 'openAdminPackagesPage',
+      tenantAdminPlatformPage: 'openAdminPlatformPage', tenantLandloomOpsPage: 'openLandloomOpsPage',
+      tenantPresentationsPage: 'openTenantPresentations', tenantSettingsPage: 'openTenantSettings',
+      tenantTeamPage: 'openTenantTeam', tenantFieldsPage: 'openTenantFields',
+      tenantUsersPage: 'openTenantUsers', tenantTrainingPage: 'openTenantTraining',
+      tenantAIRulesPage: 'openTenantAIRules', tenantApprovalsPage: 'openTenantApprovals',
       tenantNotificationsPage: 'openNotificationsPage'
     };
 
@@ -284,7 +321,9 @@
     }
 
     function currentProjectPresentationsDraftId() {
-      return new URLSearchParams(window.location.search).get('draftId')
+      const resolved = (typeof resolveTenantRoutePath === 'function') ? resolveTenantRoutePath(window.location.pathname) : null;
+      return (resolved && resolved.draftId)
+        || new URLSearchParams(window.location.search).get('draftId')
         || tenantProjectData?.draftId || tenantProjectData?.draft_id || '';
     }
 
@@ -305,6 +344,9 @@
       const host = document.getElementById('projectPresentationsPageList');
       if (!host) return;
       showTenantPage('tenantProjectPresentationsPage', true);
+      if (typeof syncTenantBrowserHistory === 'function') {
+        syncTenantBrowserHistory('tenantProjectPresentationsPage', { draftId: draftId || null });
+      }
       if (!draftId) {
         host.innerHTML = '<p class="tenant-hint">ملف المشروع غير محدد.</p>';
         return;
@@ -403,8 +445,7 @@
 
       if (!includeProject && hasPermission('create_presentation')) {
         const genButton = document.createElement('button');
-        genButton.type = 'button';
-        genButton.className = 'project-section-nav-item workflow-sidebar-action';
+        genButton.type = 'button'; genButton.className = 'project-section-nav-item workflow-sidebar-action';
         genButton.style.cssText = 'background:#1a4d6f;color:#fff;font-weight:700;margin-bottom:6px;';
         genButton.textContent = 'توليد العرض';
         genButton.addEventListener('click', () => directGenerateProposalFile());
@@ -413,8 +454,7 @@
 
       if (!includeProject && hasPermission('view_presentations')) {
         const previousButton = document.createElement('button');
-        previousButton.type = 'button';
-        previousButton.className = 'project-section-nav-item';
+        previousButton.type = 'button'; previousButton.className = 'project-section-nav-item';
         previousButton.style.cssText = 'margin-top:6px;font-weight:700;';
         previousButton.textContent = 'العروض السابقة';
         previousButton.addEventListener('click', openProjectPresentationsTab);
@@ -427,8 +467,7 @@
         .filter(item => includeProject || item.pageId !== 'tenantProjectPage')
         .forEach(item => {
           const button = document.createElement('button');
-          button.type = 'button';
-          button.className = 'project-section-nav-item';
+          button.type = 'button'; button.className = 'project-section-nav-item';
           button.textContent = item.label;
           button.classList.toggle('active', item.pageId === activePageId);
           if (item.pageId === activePageId) button.setAttribute('aria-current', 'page');
@@ -451,17 +490,9 @@
     ];
 
     const TGR_HIDE_ON = [
-      'tenantAuthPage',
-      'tenantDashboardPage',
-      'tenantSettingsPage',
-      'tenantFieldsPage',
-      'tenantPresentationsPage',
-      'tenantProjectPresentationsPage',
-      'tenantUsersPage',
-      'tenantTrainingPage',
-      'tenantAIRulesPage',
-      'tenantApprovalsPage',
-      'tenantAdminPage'
+      'tenantAuthPage', 'tenantDashboardPage', 'tenantSettingsPage', 'tenantFieldsPage',
+      'tenantPresentationsPage', 'tenantProjectPresentationsPage', 'tenantUsersPage',
+      'tenantTrainingPage', 'tenantAIRulesPage', 'tenantApprovalsPage', 'tenantAdminPage'
     ];
 
     function tgrCurrentPageId() {
@@ -625,28 +656,17 @@
     }
 
     const TENANT_PAGE_CHROME = Object.freeze({
-      tenantDashboardPage: ['page.dashboard', 'لوحة التحكم'],
-      tenantProjectPage: ['page.project_new', 'مشروع جديد'],
-      tenantProjectPresentationsPage: ['page.project_presentations', 'عروض المشروع'],
-      tenantVisualConceptPage: ['page.visual_concept', 'التصور البصري'],
-      tenantSlidesPage: ['page.presentation_editor', 'محرر العرض'],
-      tenantPresentationsPage: ['page.projects', 'المشاريع'],
-      tenantSettingsPage: ['page.company_settings', 'إعدادات الشركة'],
-      tenantTeamPage: ['page.team', 'فريق التطوير'],
-      tenantFieldsPage: ['page.fields', 'الحقول'],
-      tenantUsersPage: ['page.staff', 'الموظفون'],
-      tenantTrainingPage: ['page.training', 'بيانات التدريب'],
-      tenantAIRulesPage: ['page.ai_rules', 'قواعد AI'],
-      tenantApprovalsPage: ['page.approvals', 'تعميد العروض'],
-      tenantNotificationsPage: ['page.notifications', 'الإشعارات'],
-      tenantAdminPage: ['page.admin_dashboard', 'لوحة المدير'],
-      tenantCompaniesPage: ['page.companies', 'إدارة الشركات'],
-      tenantAdminRechargePage: ['page.recharge_requests', 'طلبات الشحن'],
-      tenantAdminTicketsPage: ['page.support_desk', 'الدعم الفني'],
-      tenantAdminJoinPage: ['page.join_requests', 'طلبات الانضمام'],
-      tenantAdminPackagesPage: ['page.packages', 'الباقات'],
-      tenantAdminPlatformPage: ['page.platform_settings', 'إعدادات المنصة'],
-      tenantLandloomOpsPage: ['page.operations', 'العمليات']
+      tenantDashboardPage: ['page.dashboard', 'لوحة التحكم'], tenantProjectPage: ['page.project_new', 'مشروع جديد'],
+      tenantProjectPresentationsPage: ['page.project_presentations', 'عروض المشروع'], tenantVisualConceptPage: ['page.visual_concept', 'التصور البصري'],
+      tenantSlidesPage: ['page.presentation_editor', 'محرر العرض'], tenantPresentationsPage: ['page.projects', 'المشاريع'],
+      tenantSettingsPage: ['page.company_settings', 'إعدادات الشركة'], tenantTeamPage: ['page.team', 'فريق التطوير'],
+      tenantFieldsPage: ['page.fields', 'الحقول'], tenantUsersPage: ['page.staff', 'الموظفون'],
+      tenantTrainingPage: ['page.training', 'بيانات التدريب'], tenantAIRulesPage: ['page.ai_rules', 'قواعد AI'],
+      tenantApprovalsPage: ['page.approvals', 'تعميد العروض'], tenantNotificationsPage: ['page.notifications', 'الإشعارات'],
+      tenantAdminPage: ['page.admin_dashboard', 'لوحة المدير'], tenantCompaniesPage: ['page.companies', 'إدارة الشركات'],
+      tenantAdminRechargePage: ['page.recharge_requests', 'طلبات الشحن'], tenantAdminTicketsPage: ['page.support_desk', 'الدعم الفني'],
+      tenantAdminJoinPage: ['page.join_requests', 'طلبات الانضمام'], tenantAdminPackagesPage: ['page.packages', 'الباقات'],
+      tenantAdminPlatformPage: ['page.platform_settings', 'إعدادات المنصة'], tenantLandloomOpsPage: ['page.operations', 'العمليات']
     });
 
     function refreshTenantNavGroups() {
@@ -775,11 +795,7 @@
     function resetTenantDropdownPosition(drop) {
       const menu = drop && drop.querySelector('.tenant-dropdown-menu');
       if (!menu) return;
-      menu.style.removeProperty('transform');
-      menu.style.removeProperty('top');
-      menu.style.removeProperty('bottom');
-      menu.style.removeProperty('max-height');
-      menu.style.removeProperty('overflow-y');
+      ['transform', 'top', 'bottom', 'max-height', 'overflow-y'].forEach(p => menu.style.removeProperty(p));
     }
 
     // A menu pinned with right:0 leaves the viewport when its trigger sits near
@@ -830,8 +846,7 @@
     }
 
     function closeTenantBellPanel() {
-      const panel = document.getElementById('tenantBellPanel');
-      if (panel) panel.hidden = true;
+      const panel = document.getElementById('tenantBellPanel'); if (panel) panel.hidden = true;
       if (typeof closeNotificationsDropdown === 'function') closeNotificationsDropdown();
     }
 
@@ -849,8 +864,7 @@
     // Placeholder until the smart-notification feed ships: the dot turns on
     // with any positive unread count.
     function setTenantBellDot(unreadCount) {
-      const dot = document.getElementById('tenantBellDot');
-      if (dot) dot.classList.toggle('hidden', !(Number(unreadCount) > 0));
+      const dot = document.getElementById('tenantBellDot'); if (dot) dot.classList.toggle('hidden', !(Number(unreadCount) > 0));
     }
 
     document.addEventListener('click', function (e) {
@@ -887,16 +901,10 @@
     }
 
     function renderDashboardOverview(dash) {
-      const lifecycleEl = document.getElementById('dashboardLifecycle');
-      if (!lifecycleEl) return;
-      if (!dash) {
-        lifecycleEl.innerHTML = '';
-        return;
-      }
+      const el = document.getElementById('dashboardLifecycle'); if (!el) return;
+      if (!dash) { el.innerHTML = ''; return; }
       const buckets = (dash.lifecycle || []).filter(b => b.count > 0 || ['draft', 'approved'].includes(b.key));
-      lifecycleEl.innerHTML = buckets.map(b =>
-        '<div class="tenant-dash-card stat"><h3>' + (b.count || 0) + '</h3><p>' + escapeHtml(b.label || b.key) + '</p></div>'
-      ).join('');
+      el.innerHTML = buckets.map(b => '<div class="tenant-dash-card stat"><h3>' + (b.count || 0) + '</h3><p>' + escapeHtml(b.label || b.key) + '</p></div>').join('');
     }
 
     var tenantLastOverview = null;
@@ -961,30 +969,22 @@
       const box = document.getElementById('tenantActivityRange');
       if (!box) return;
       const presets = [
-        { v: '3', t: WFT('admin.range_3m', 'آخر 3 شهور') },
-        { v: '6', t: WFT('admin.range_6m', 'آخر 6 شهور') },
-        { v: '12', t: WFT('admin.range_12m', 'آخر 12 شهرًا') },
-        { v: '24', t: WFT('admin.range_24m', 'آخر سنتين') },
-        { v: 'ytd', t: WFT('admin.range_ytd', 'هذه السنة') },
-        { v: 'custom', t: WFT('admin.range_custom', 'نطاق مخصص') },
+        { v: '3', t: WFT('admin.range_3m', 'آخر 3 شهور') }, { v: '6', t: WFT('admin.range_6m', 'آخر 6 شهور') },
+        { v: '12', t: WFT('admin.range_12m', 'آخر 12 شهرًا') }, { v: '24', t: WFT('admin.range_24m', 'آخر سنتين') },
+        { v: 'ytd', t: WFT('admin.range_ytd', 'هذه السنة') }, { v: 'custom', t: WFT('admin.range_custom', 'نطاق مخصص') }
       ];
-      box.innerHTML =
-        '<select id="tenantRangePreset" class="admin-range-select" onchange="tenantChartRange.preset=this.value; renderTenantRangeControls(); tenantApplyChartRange()">' +
+      box.innerHTML = '<select id="tenantRangePreset" class="admin-range-select" onchange="tenantChartRange.preset=this.value; renderTenantRangeControls(); tenantApplyChartRange()">' +
         presets.map(p => '<option value="' + p.v + '"' + (tenantChartRange.preset === p.v ? ' selected' : '') + '>' + p.t + '</option>').join('') +
-        '</select>' +
-        '<span class="admin-range-custom" style="display:' + (tenantChartRange.preset === 'custom' ? 'inline-flex' : 'none') + '">' +
+        '</select><span class="admin-range-custom" style="display:' + (tenantChartRange.preset === 'custom' ? 'inline-flex' : 'none') + '">' +
         '<input type="date" id="tenantRangeFromDate" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_from', 'من')) + '" value="' + escapeHtml(tenantChartRange.from.slice(0, 10)) + '" onchange="tenantRangeChanged()">' +
         '<input type="time" id="tenantRangeFromTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_from_time', 'وقت البداية (اختياري)')) + '" value="' + escapeHtml(tenantChartRange.from.slice(11, 16)) + '" onchange="tenantRangeChanged()">' +
         '<input type="date" id="tenantRangeToDate" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_to', 'إلى')) + '" value="' + escapeHtml(tenantChartRange.to.slice(0, 10)) + '" onchange="tenantRangeChanged()">' +
-        '<input type="time" id="tenantRangeToTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_to_time', 'وقت النهاية (اختياري)')) + '" value="' + escapeHtml(tenantChartRange.to.slice(11, 16)) + '" onchange="tenantRangeChanged()">' +
-        '</span>';
+        '<input type="time" id="tenantRangeToTime" dir="ltr" aria-label="' + escapeHtml(WFT('admin.range_to_time', 'وقت النهاية (اختياري)')) + '" value="' + escapeHtml(tenantChartRange.to.slice(11, 16)) + '" onchange="tenantRangeChanged()"></span>';
     }
 
     function tenantRangeChanged() {
-      const fd = document.getElementById('tenantRangeFromDate');
-      const ft = document.getElementById('tenantRangeFromTime');
-      const td = document.getElementById('tenantRangeToDate');
-      const tt = document.getElementById('tenantRangeToTime');
+      const fd = document.getElementById('tenantRangeFromDate'), ft = document.getElementById('tenantRangeFromTime');
+      const td = document.getElementById('tenantRangeToDate'), tt = document.getElementById('tenantRangeToTime');
       tenantChartRange.from = fd && fd.value ? fd.value + (ft && ft.value ? 'T' + ft.value : '') : '';
       tenantChartRange.to = td && td.value ? td.value + (tt && tt.value ? 'T' + tt.value : '') : '';
       tenantApplyChartRange();

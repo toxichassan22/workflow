@@ -721,6 +721,9 @@
     function selectTenantSlide(index, skipScroll = false) {
       activeSlideIndex = index;
       tenantChatSlideIndex = index;
+      if (tenantPresentationId && (typeof tgrCurrentPageId === 'function' ? tgrCurrentPageId() : '') === 'tenantSlidesPage' && (typeof tenantSlidesView === 'undefined' || tenantSlidesView === 'edit') && typeof syncTenantBrowserHistory === 'function') {
+        syncTenantBrowserHistory('tenantSlidesPage', { presentationId: tenantPresentationId, slideIndex: index, slidesView: 'edit' }, true);
+      }
 
       // Update active states
       document.querySelectorAll('.ge-slide-card').forEach((card, idx) => {

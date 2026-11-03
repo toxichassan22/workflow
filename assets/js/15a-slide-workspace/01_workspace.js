@@ -115,10 +115,10 @@
       const sorter = document.getElementById('tenantSlidesSorter');
       if (sorter) sorter.hidden = tenantSlidesView !== 'sorter';
       renderSlidesHeader();
-      if (tenantSlidesView === 'sorter') {
-        renderTenantSlidesSorter();
-      } else {
-        renderTenantSlidesSidebar();
+      if (tenantSlidesView === 'sorter') renderTenantSlidesSorter();
+      else renderTenantSlidesSidebar();
+      if (tenantPresentationId && typeof syncTenantBrowserHistory === 'function') {
+        syncTenantBrowserHistory('tenantSlidesPage', { presentationId: tenantPresentationId, slidesView: tenantSlidesView });
       }
     }
 
@@ -961,6 +961,9 @@
       if (notesButton) notesButton.classList.toggle('is-active', !!openingNotes);
       renderTenantPresentSlide();
       showTenantPresentControls();
+      if (tenantPresentationId && typeof syncTenantBrowserHistory === 'function') {
+        syncTenantBrowserHistory('tenantSlidesPage', { presentationId: tenantPresentationId, slidesView: 'present' });
+      }
       const shell = document.getElementById('tenantSlidesPage');
       if (shell && shell.requestFullscreen) {
         shell.requestFullscreen().catch(() => {});
@@ -985,6 +988,9 @@
       }
       const prev = document.getElementById('presentSlidesPrevButton');
       if (prev) prev.focus({ preventScroll: true });
+      if (tenantPresentationId && typeof syncTenantBrowserHistory === 'function') {
+        syncTenantBrowserHistory('tenantSlidesPage', { presentationId: tenantPresentationId, slidesView: tenantSlidesView || 'edit' });
+      }
     }
 
     function restartTenantPresentation() {

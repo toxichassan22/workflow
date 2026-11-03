@@ -265,34 +265,52 @@
         if (requestedPage === 'tenantVisualConceptPage') {
           const navigation = getTenantNavigationState();
           const currentTenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
-          const savedDraftId = navigation && navigation.draftId &&
+          const savedDraftId = resolvedRequested?.draftId || (navigation && navigation.draftId &&
             (!navigation.tenantId || navigation.tenantId === currentTenantId)
-            ? navigation.draftId : null;
+            ? navigation.draftId : null);
           if (savedDraftId) await openProjectDraftById(savedDraftId);
           await openTenantVisualConceptPage();
         } else if (requestedPage === 'tenantProjectPage') {
-          // The project-form route carries no draft identity in the URL, so a refresh must
-          // reopen the draft remembered in localStorage instead of showing a blank new-project
-          // form. Read the state first: showTenantPage() rewrites it from the still-empty
-          // tenantProjectData, which would erase the draft id we are about to restore.
           const navigation = getTenantNavigationState();
           const currentTenantId = tenantUser && (tenantUser.id || tenantUser.tenantId);
-          const savedDraftId = navigation && navigation.draftId &&
-            (!navigation.tenantId || navigation.tenantId === currentTenantId)
-            ? navigation.draftId : null;
-          if (!(savedDraftId && await openProjectDraftById(savedDraftId))) {
+          const targetDraftId = resolvedRequested?.draftId ||
+            (resolvedRequested?.mode === 'new' ? null : (navigation && navigation.draftId &&
+              (!navigation.tenantId || navigation.tenantId === currentTenantId) ? navigation.draftId : null));
+          if (targetDraftId) {
+            await openProjectDraftById(targetDraftId);
+          } else if (resolvedRequested?.mode === 'new' || !targetDraftId) {
+            await startTenantProject();
+          } else if (!(await openProjectDraftById(targetDraftId))) {
             await startTenantProject();
           }
-          const sectionToShow = requestedSection ||
+          const sectionToShow = resolvedRequested?.activeSection || requestedSection ||
             (navigation && navigation.pageId === 'tenantProjectPage' && navigation.activeSection) || null;
           if (sectionToShow) showSection(sectionToShow, true);
         } else if (requestedPage === 'tenantProjectPresentationsPage') {
-          const requestedDraftId = new URLSearchParams(window.location.search).get('draftId');
+          const requestedDraftId = resolvedRequested?.draftId ||
+            new URLSearchParams(window.location.search).get('draftId') ||
+            (getTenantNavigationState()?.draftId);
           if (requestedDraftId) {
             await openProjectDraftById(requestedDraftId);
             await loadProjectPresentationsPage(requestedDraftId);
           } else {
             await loadProjectPresentationsPage();
+          }
+        } else if (requestedPage === 'tenantSlidesPage') {
+          const targetPresId = resolvedRequested?.presentationId ||
+            (getTenantNavigationState()?.presentationId);
+          if (targetPresId) {
+            await openExistingPresentation(targetPresId);
+            if (resolvedRequested?.slidesView && typeof setSlidesWorkspaceView === 'function') {
+              setSlidesWorkspaceView(resolvedRequested.slidesView);
+            }
+            if (typeof resolvedRequested?.slideIndex === 'number' && typeof selectTenantSlide === 'function') {
+              selectTenantSlide(resolvedRequested.slideIndex);
+            }
+          } else if (!(await restoreTenantNavigation(requestedPage))) {
+            showTenantPage(requestedPage, true);
+            renderTenantSlides();
+            setSlidesEditorInfo('', 0);
           }
         } else if (TENANT_NAVIGATION_CONTEXT_PAGES.has(requestedPage)) {
           // The slides route carries no identity either, and it used to be shown as-is: a refresh
