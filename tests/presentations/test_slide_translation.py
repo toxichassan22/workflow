@@ -225,6 +225,15 @@ class PresentationTranslationApiTests(unittest.TestCase):
             items.append({'id': item['id'], 'text': text})
         return {'content': json.dumps({'items': items}, ensure_ascii=False)}
 
+    def test_translation_spend_is_attributed_to_the_translate_flow(self):
+        """Deck translation is its own spend, not "other".
+
+        The metering context keeps a flow only when it is in AI_USAGE_FLOWS;
+        anything else is stored as 'other', which hid this feature's cost
+        inside the catch-all bucket.
+        """
+        self.assertIn('translate', self.module.AI_USAGE_FLOWS)
+
     def test_translate_creates_english_copy_and_keeps_the_original(self):
         created = self._create()
         with patch.object(self.module, 'call_text_chat', side_effect=self._fake_chat), \

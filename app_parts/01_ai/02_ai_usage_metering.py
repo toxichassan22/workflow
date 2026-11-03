@@ -13,7 +13,7 @@ from numeric_precision import format_precise_number
 
 AI_USAGE_FLOWS = (
     'slide', 'slide_plan', 'designer_chat', 'training_chat', 'land', 'site',
-    'market', 'executive', 'project_data', 'image', 'other',
+    'market', 'executive', 'project_data', 'image', 'translate', 'other',
 )
 
 
