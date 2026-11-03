@@ -160,6 +160,11 @@ def security_headers(response):
     for header, value in SECURITY_HEADERS.items():
         if header not in response.headers:
             response.headers[header] = value
+    host = (request.host or '').lower().split(':')[0]
+    if host != 'landloom.ai' and host != 'www.landloom.ai':
+        response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
+    elif 'X-Robots-Tag' not in response.headers and request.path.startswith(('/app', '/c/', '/superadmin', '/invite/')):
+        response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
     return response
 
 

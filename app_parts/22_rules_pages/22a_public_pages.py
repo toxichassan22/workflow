@@ -22,6 +22,28 @@ def public_landing():
     return _serve_public_page('landing.html')
 
 
+@app.route('/robots.txt')
+def public_robots():
+    host = (request.host or '').lower().split(':')[0]
+    if host != 'landloom.ai' and host != 'www.landloom.ai':
+        body = "User-agent: *\nDisallow:\n"
+    else:
+        body = "User-agent: *\nDisallow: /app\nDisallow: /c/\nDisallow: /superadmin\nDisallow: /invite/\nDisallow: /api/\n"
+    resp = Response(body, mimetype='text/plain')
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
+@app.route('/google<token>.html')
+def google_verification_file(token):
+    """Serve Google Search Console verification HTML file dynamically."""
+    if re.fullmatch(r'[0-9a-fA-F]{16,64}', token):
+        resp = Response(f'google-site-verification: google{token}.html', mimetype='text/html')
+        resp.headers['Cache-Control'] = 'no-cache'
+        return resp
+    return jsonify({'error': 'Not found'}), 404
+
+
 @app.route('/pages/<path:path>')
 def public_page_assets(path):
     return _serve_public_page(path)

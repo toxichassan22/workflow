@@ -3,6 +3,12 @@ Options -Indexes
 
 RewriteEngine On
 
+# Send X-Robots-Tag on staging domain to prevent search indexing
+<IfModule mod_headers.c>
+    SetEnvIfNoCase Host "^lab\.landloom\.ai$" IS_STAGING
+    Header set X-Robots-Tag "noindex, nofollow, noarchive, nosnippet" env=IS_STAGING
+</IfModule>
+
 # Block Facebook meta-externalagent crawler spam before it reaches gunicorn
 RewriteCond %{HTTP_USER_AGENT} meta-externalagent [NC]
 RewriteRule ^.*$ - [F,L]
