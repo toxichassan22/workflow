@@ -66,6 +66,11 @@ class StagingIndexingProtectionTests(unittest.TestCase):
         self.assertIn('https://landloom.ai/', body)
         self.assertIn('<changefreq>weekly</changefreq>', body)
 
+    def test_root_favicon_ico_serves_icon_file(self):
+        resp = self.client.get('/favicon.ico')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.mimetype, 'image/x-icon')
+
     def test_google_verification_file_endpoint(self):
         resp = self.client.get('/google3567ac5386460d70.html')
         self.assertEqual(resp.status_code, 200)

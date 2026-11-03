@@ -681,8 +681,15 @@ def deploy_webhook():
 
 @app.route('/favicon.ico')
 def favicon():
-    if os.path.exists(os.path.join(os.path.dirname(__file__), 'favicon.ico')):
-        return send_from_directory(os.path.dirname(__file__), 'favicon.ico', mimetype='image/vnd.microsoft.icon')
+    for candidate in (
+        os.path.join(os.path.dirname(__file__), 'assets', 'favicon.ico'),
+        os.path.join(os.path.dirname(__file__), 'favicon.ico'),
+    ):
+        norm = os.path.abspath(candidate)
+        if os.path.exists(norm):
+            resp = send_from_directory(os.path.dirname(norm), os.path.basename(norm), mimetype='image/x-icon')
+            resp.headers['Cache-Control'] = 'no-cache'
+            return resp
     return ('', 204)
 
 
