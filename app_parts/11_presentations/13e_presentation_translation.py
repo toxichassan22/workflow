@@ -26,14 +26,40 @@ def _presentation_slides(presentation):
     return value if isinstance(value, list) else []
 
 
-def _translation_project_data(presentation, target_lang):
+def _presentation_project_data(presentation):
     try:
         data = json.loads(presentation.get('project_data') or '{}')
     except (TypeError, ValueError):
         data = {}
-    if not isinstance(data, dict):
-        data = {}
-    data = _translation_copy.deepcopy(data)
+    return data if isinstance(data, dict) else {}
+
+
+def _translation_glossary(tenant_id, project_data):
+    """The owner's English spelling of the company and project names.
+
+    Only pairs the owner filled in on both sides are used: inventing an English
+    name here would put words in the deck that the client never approved.
+    """
+    pairs = {}
+    try:
+        tenant = db.get_tenant_by_id(tenant_id) or {}
+    except Exception:
+        tenant = {}
+    arabic = str(tenant.get('company_name') or '').strip()
+    english = str(tenant.get('company_name_en') or '').strip()
+    if arabic and english and arabic != english:
+        pairs[arabic] = english
+    for arabic_key, english_key in (('project_name', 'project_name_en'),
+                                    ('project_name', 'name_en')):
+        arabic = str(project_data.get(arabic_key) or '').strip()
+        english = str(project_data.get(english_key) or '').strip()
+        if arabic and english and arabic != english:
+            pairs.setdefault(arabic, english)
+    return pairs
+
+
+def _translation_project_data(project_data, target_lang):
+    data = _translation_copy.deepcopy(project_data or {})
     # The copy must keep speaking English if it is ever regenerated, exported or
     # extended: the offer language rides on the project data.
     data['project_language'] = target_lang
@@ -65,6 +91,8 @@ def api_translate_presentation(pres_id):
     if not presentation or not _presentation_in_scope(presentation):
         return jsonify({'error': 'Presentation not found'}), 404
     slides = _presentation_slides(presentation)
+    project_data = _presentation_project_data(presentation)
+    glossary = _translation_glossary(g.tenant_id, project_data)
     if not slide_translator.deck_has_arabic(slides):
         return jsonify({
             'success': False,
@@ -76,7 +104,7 @@ def api_translate_presentation(pres_id):
 
     def _translate_batch(texts):
         response = call_text_chat(
-            slide_translator.translation_prompt(),
+            slide_translator.translation_prompt(glossary),
             slide_translator.build_batch_payload(texts),
             max_tokens=min(8000, 600 + len(texts) * 160),
             response_format={'type': 'json_object'},
@@ -97,7 +125,7 @@ def api_translate_presentation(pres_id):
         return slide_translator.parse_batch_response(content, len(texts))
 
     translated, stats = slide_translator.translate_slides(
-        slides, _translate_batch, target_lang=target_lang)
+        slides, _translate_batch, target_lang=target_lang, glossary=glossary)
     if not stats['translated'] and not stats['titles']:
         return jsonify({
             'success': False,
@@ -106,7 +134,7 @@ def api_translate_presentation(pres_id):
         }), 502
 
     title = '%s (%s)' % (presentation.get('title') or 'عرض', 'English')
-    project_data = _translation_project_data(presentation, target_lang)
+    project_data = _translation_project_data(project_data, target_lang)
     new_id = db.create_presentation(
         g.tenant_id,
         title,

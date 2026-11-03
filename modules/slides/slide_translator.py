@@ -202,8 +202,13 @@ def _translate_batch(texts, translator):
     return list(result)
 
 
-def translate_html(html, translator):
-    """Translate one slide's text; returns (html, stats)."""
+def translate_html(html, translator, glossary=None):
+    """Translate one slide's text; returns (html, stats).
+
+    ``glossary`` maps an Arabic proper name to the owner's English spelling;
+    it is applied to the finished unit so a name the model left in Arabic (or
+    transliterated) lands as the name the owner actually uses.
+    """
     tokens, units = collect_units(html)
     stats = {'units': 0, 'translated': 0, 'skipped': 0}
     if not units:
@@ -215,7 +220,7 @@ def translate_html(html, translator):
     accepted = []
     for unit, translated in zip(units, translations):
         if _accepted(unit['template'], translated):
-            accepted.append(translated)
+            accepted.append(apply_glossary(translated, glossary))
             stats['translated'] += 1
         else:
             accepted.append(None)
@@ -223,7 +228,18 @@ def translate_html(html, translator):
     return _rebuild(tokens, units, accepted), stats
 
 
-def _plain(texts, translator):
+def apply_glossary(text, glossary):
+    """Replace any Arabic proper name the owner has an English spelling for."""
+    if not text or not glossary:
+        return text
+    out = str(text)
+    for arabic, english in glossary.items():
+        if arabic and english and arabic in out:
+            out = out.replace(arabic, english)
+    return out
+
+
+def _plain(texts, translator, glossary=None):
     """Translate plain strings (slide titles, index entries) in one pass."""
     values = [str(text) for text in texts]
     results = []
@@ -231,11 +247,13 @@ def _plain(texts, translator):
         results.extend(_translate_batch(batch, translator))
     out = []
     for source, translated in zip(values, results):
-        out.append(translated if _accepted(source, translated) else None)
+        out.append(
+            apply_glossary(translated, glossary)
+            if _accepted(source, translated) else None)
     return out
 
 
-def translate_slides(slides, translator, target_lang='en'):
+def translate_slides(slides, translator, target_lang='en', glossary=None):
     """Translate a deck's slides in place-free fashion.
 
     ``translator`` is ``callable(list_of_strings) -> list_of_strings`` and owns
@@ -252,12 +270,12 @@ def translate_slides(slides, translator, target_lang='en'):
         stats['slides'] += 1
         html = slide.get('html')
         if isinstance(html, str) and html.strip() and AR_RE.search(html):
-            slide['html'], slide_stats = translate_html(html, translator)
+            slide['html'], slide_stats = translate_html(html, translator, glossary)
             for key in ('units', 'translated', 'skipped'):
                 stats[key] += slide_stats[key]
         title = slide.get('title')
         if isinstance(title, str) and AR_RE.search(title):
-            value = _plain([title], translator)[0]
+            value = _plain([title], translator, glossary)[0]
             if value:
                 slide['title'] = value
                 stats['titles'] += 1
@@ -269,7 +287,7 @@ def translate_slides(slides, translator, target_lang='en'):
                 and AR_RE.search(entry['title'])
             ]
             if pending:
-                values = _plain([entry['title'] for entry in pending], translator)
+                values = _plain([entry['title'] for entry in pending], translator, glossary)
                 for entry, value in zip(pending, values):
                     if value:
                         entry['title'] = value
@@ -288,9 +306,14 @@ def deck_has_arabic(slides):
     )
 
 
-def translation_prompt():
-    """The system prompt the route sends with each batch."""
-    return (
+def translation_prompt(glossary=None):
+    """The system prompt the route sends with each batch.
+
+    ``glossary`` is the owner's own English spelling of a company or project
+    name: it is stated as a binding term so the deck uses one spelling
+    everywhere instead of the model inventing a transliteration per slide.
+    """
+    prompt = (
         'You are a professional Arabic-to-English translator for real-estate '
         'presentation slides. Translate each item into natural, professional '
         'English suitable for an investment deck. Rules: keep every ⟦n⟧ '
@@ -301,6 +324,14 @@ def translation_prompt():
         'short label. Return only JSON: '
         '{"items":[{"id":<id>,"text":"<translation>"}]}'
     )
+    if glossary:
+        lines = ['', 'Names (use exactly this English spelling wherever the Arabic '
+                      'name appears, and never translate them):']
+        for arabic, english in glossary.items():
+            if arabic and english:
+                lines.append('«%s» → %s' % (arabic, english))
+        prompt += '\n'.join(lines)
+    return prompt
 
 
 def build_batch_payload(texts):

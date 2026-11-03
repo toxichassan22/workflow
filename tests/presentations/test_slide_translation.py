@@ -161,6 +161,23 @@ class TranslationEngineTests(unittest.TestCase):
         self.assertEqual(slide_translator.parse_batch_response(content, 2), ['Cover', None])
         self.assertEqual(slide_translator.parse_batch_response('not json', 2), [None, None])
 
+    def test_glossary_replaces_the_arabic_brand_in_the_output(self):
+        html = '<p>شركة لاندلوم للتطوير العقاري</p>'
+
+        def keep(texts):
+            return ['Company ' + text for text in texts]
+
+        translated, _ = slide_translator.translate_html(
+            html, keep, glossary={'شركة لاندلوم': 'LandLoom'})
+        self.assertIn('LandLoom', translated)
+        self.assertNotIn('شركة لاندلوم', translated)
+
+    def test_prompt_carries_the_protected_names(self):
+        prompt = slide_translator.translation_prompt({'شركة لاندلوم': 'LandLoom'})
+        self.assertIn('شركة لاندلوم', prompt)
+        self.assertIn('LandLoom', prompt)
+        self.assertIn('Names', prompt)
+
     def test_deck_has_arabic(self):
         self.assertTrue(slide_translator.deck_has_arabic([{'html': '<p>الغلاف</p>'}]))
         self.assertFalse(slide_translator.deck_has_arabic([{'html': '<p>Cover</p>'}]))
@@ -181,6 +198,9 @@ class PresentationTranslationApiTests(unittest.TestCase):
             db.init_db()
             cls.tenant = db.create_tenant(
                 'Translation Tenant', 'translation@example.test', 'hash', 'translation-tenant')
+            # The owner's English spelling of the company name is the glossary
+            # source; without it the model invents a transliteration per run.
+            db.update_tenant(cls.tenant, company_name='شركة لاندلوم', company_name_en='LandLoom')
         cls.headers = {'Authorization': 'Bearer ' + auth.create_token(
             cls.tenant, 'translation@example.test',
             user_name='Translator', user_role='company_admin')}
@@ -207,6 +227,7 @@ class PresentationTranslationApiTests(unittest.TestCase):
                 'type': 'cover',
                 'html': ('<div class="slide" dir="rtl" style="background:#1a1a1a">'
                          '<h1>واحة النخيل السكنية</h1>'
+                         '<p>شركة لاندلوم للتطوير العقاري</p>'
                          '<p>مشروع مجمع سكني بمساحة 18,500 م²</p></div>'),
                 'indexEntries': [{'title': 'نبذة عن المشروع'}],
             }],
@@ -224,6 +245,32 @@ class PresentationTranslationApiTests(unittest.TestCase):
                 text = text.replace(arabic, english)
             items.append({'id': item['id'], 'text': text})
         return {'content': json.dumps({'items': items}, ensure_ascii=False)}
+
+    def test_company_english_name_reaches_the_prompt_and_the_copy(self):
+        created = self._create()
+        prompts = []
+
+        def chat(system_prompt, user_content, **kwargs):
+            prompts.append(system_prompt)
+            payload = json.loads(user_content)
+            items = [{'id': item['id'], 'text': 'Company ' + item['text']}
+                     for item in payload['items']]
+            return {'content': json.dumps({'items': items}, ensure_ascii=False)}
+
+        with patch.object(self.module, 'call_text_chat', side_effect=chat), \
+                patch.object(self.module, 'extract_chat_content',
+                             side_effect=lambda response, label=None: response.get('content', '')):
+            response = self.client.post(
+                '/api/presentations/%s/translate' % created['presentationId'],
+                headers=self.headers, json={'targetLang': 'en'})
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.assertTrue(any('LandLoom' in prompt for prompt in prompts), prompts)
+        translated = self.client.get(
+            '/api/presentations/%s' % response.get_json()['presentationId'],
+            headers=self.headers).get_json()['presentation']
+        html = translated['slidesData'][0]['html']
+        self.assertIn('LandLoom', html)
+        self.assertNotIn('شركة لاندلوم', html)
 
     def test_translation_spend_is_attributed_to_the_translate_flow(self):
         """Deck translation is its own spend, not "other".
