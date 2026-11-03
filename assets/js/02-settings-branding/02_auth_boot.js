@@ -889,6 +889,7 @@
 
     async function deleteTenantWatermark() {
       if (!(tenantBranding && tenantBranding.watermark_path)) return;
+      if (!confirm(WFT('branding.confirm_delete_watermark', 'هل تريد حذف العلامة المائية؟'))) return;
       let completion = 'تعذر حذف العلامة المائية';
       setWatermarkSettingsBusy(true);
       showLoader('حذف العلامة المائية', 'جاري تحديث الهوية البصرية...', 15, { reset: true, maxProgress: 90 });

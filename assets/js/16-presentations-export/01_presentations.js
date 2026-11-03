@@ -405,14 +405,17 @@
       }
       if (!confirm(WFT('ws.translate_confirm', 'إنشاء نسخة إنجليزية من هذا العرض بنفس التصميم؟ العرض العربي يبقى كما هو.'))) return;
       showLoader(WFT('ws.translate_busy', 'جاري ترجمة العرض...'));
-      const data = await api('POST', '/api/presentations/' + tenantPresentationId + '/translate', { targetLang: 'en' });
-      hideLoader();
-      if (!data || !data.success) {
-        toast((data && data.error) || WFT('ws.translate_failed', 'تعذرت ترجمة العرض.'));
-        return;
+      try {
+        const data = await api('POST', '/api/presentations/' + tenantPresentationId + '/translate', { targetLang: 'en' });
+        if (!data || !data.success) {
+          toast((data && data.error) || WFT('ws.translate_failed', 'تعذرت ترجمة العرض.'));
+          return;
+        }
+        toast(WFT('ws.translate_done', 'تم إنشاء النسخة الإنجليزية ({count} شريحة).', { count: data.slideCount }));
+        await openExistingPresentation(data.presentationId);
+      } finally {
+        hideLoader();
       }
-      toast(WFT('ws.translate_done', 'تم إنشاء النسخة الإنجليزية ({count} شريحة).', { count: data.slideCount }));
-      await openExistingPresentation(data.presentationId);
     }
 
     async function deleteTenantPresentation(presId) {

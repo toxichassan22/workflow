@@ -500,23 +500,26 @@
       if (!force && latInput && latInput.value.trim() && lngInput && lngInput.value.trim()) return true;
       if (!val) { toast('أدخل عنوان الموقع أو رابط قوقل ماب أولاً'); return false; }
       showLoader('جاري تحديد الإحداثيات', '');
-      const payload = { address: val, maps_link: val };
-      const data = await api('POST', '/api/geocode', payload);
-      hideLoader();
-      if (data.success && data.lat && data.lng) {
-        if (latInput) latInput.value = data.lat;
-        if (lngInput) lngInput.value = data.lng;
-        tenantProjectData.location_address = val;
-        tenantProjectData.location_lat = data.lat;
-        tenantProjectData.location_lng = data.lng;
-        tenantProjectData.location_coordinates_confirmed = false;
-        if (data.city || data.district) applyCityDistrictToForm(data.city, data.district, true);
-        const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || val);
-        toast(WFT('location.detected', 'تم تحديد الموقع: {msg}', { msg: wfTr(msg) }));
-        return true;
+      try {
+        const payload = { address: val, maps_link: val };
+        const data = await api('POST', '/api/geocode', payload);
+        if (data.success && data.lat && data.lng) {
+          if (latInput) latInput.value = data.lat;
+          if (lngInput) lngInput.value = data.lng;
+          tenantProjectData.location_address = val;
+          tenantProjectData.location_lat = data.lat;
+          tenantProjectData.location_lng = data.lng;
+          tenantProjectData.location_coordinates_confirmed = false;
+          if (data.city || data.district) applyCityDistrictToForm(data.city, data.district, true);
+          const msg = data.source === 'maps_link' ? 'تم الاستخراج من رابط خرائط جوجل' : (data.formatted_address || val);
+          toast(WFT('location.detected', 'تم تحديد الموقع: {msg}', { msg: wfTr(msg) }));
+          return true;
+        }
+        toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي');
+        return false;
+      } finally {
+        hideLoader();
       }
-      toast(data.error || 'تعذر تحديد الإحداثيات — جربي رابط قوقل ماب مباشر أو عنوان نصي');
-      return false;
     }
 
     function normalizeLandUseStatus(value) {

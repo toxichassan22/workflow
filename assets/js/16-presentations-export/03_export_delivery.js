@@ -130,7 +130,7 @@
       modal.innerHTML =
         '<div style="background:#fff;border-radius:16px;max-width:540px;width:100%;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">' +
         '<h3 style="margin:0 0 8px;color:#1a3a52;font-size:18px;">اعتماد الملف النهائي</h3>' +
-        '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">بوابة الاعتماد الثالثة — قفل إصدار العرض وختم البصمة الرقمية للملف</p>' +
+        '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">قفل إصدار العرض وختم البصمة الرقمية للملف</p>' +
         '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;font-size:13px;line-height:1.8;">' +
         '<div><span style="color:#64748b;">العرض الحالي:</span> <strong>' + escapeHtml(tenantPresentationTitle || 'عرض بدون عنوان') + '</strong></div>' +
         '<div><span style="color:#64748b;">رقم الإصدار:</span> <strong>v' + (tenantPresentationRevision || 1) + '</strong></div>' +

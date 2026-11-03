@@ -114,6 +114,7 @@
     }
 
     function clearAllChatSessions(type) {
+      if (!confirm(WFT('admin.confirm_clear_all_chats', 'هل تريد مسح جميع المحادثات؟ لا يمكن التراجع عن هذا الإجراء.'))) return;
       try {
         localStorage.removeItem(getSessionStorageKey(type));
       } catch (e) { }

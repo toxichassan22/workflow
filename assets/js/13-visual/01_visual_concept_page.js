@@ -656,6 +656,7 @@
 
     function deleteVisualConceptInteriorField(slotId) {
       if (!isVisualConceptInteriorSlot(slotId) || !slotId.includes('::')) return;
+      if (!confirm(WFT('vc.confirm_delete_interior_field', 'هل تريد حذف هذا الحقل الداخلي؟'))) return;
       tenantVisualConceptState = normalizeVisualConceptState(tenantVisualConceptState);
       delete tenantVisualConceptState.slots[slotId];
       const deleted = new Set(tenantVisualConceptState.deletedInteriorSlots || []);
@@ -669,6 +670,7 @@
     function deleteVisualConceptSlotImage(slotId) {
       const slot = tenantVisualConceptState?.slots?.[slotId];
       if (!slot) return;
+      if (!confirm(WFT('vc.confirm_delete_image', 'هل تريد حذف الصورة؟'))) return;
       slot.imageUrl = '';
       slot.approvedImageUrl = '';
       slot.sourceFileId = '';

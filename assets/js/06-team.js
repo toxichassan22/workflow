@@ -661,24 +661,29 @@
       if (!confirm('سيقوم AI بإنشاء الحقول والأقسام مباشرة في قاعدة البيانات. متابعة؟')) return;
 
       const btn = document.getElementById('btnAiBuildFields');
-      btn.disabled = true;
-      btn.textContent = 'جاري البناء...';
-      showLoader('AI يبني حقول المدخلات', 'قد يستغرق لحظات');
-
-      const data = await api('POST', '/api/ai-build-fields', { description });
-      hideLoader();
-      btn.disabled = false;
-      btn.textContent = 'بناء حقول تلقائياً (AI)';
-
-      if (!data.success) {
-        toast(data.error || 'فشل البناء التلقائي');
-        return;
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'جاري البناء...';
       }
-      toast(WFT('fields.auto_created', 'تم إنشاء {n} حقل تلقائياً', { n: data.count || 0 }));
-      await renderTenantFields();
-      const sectionsData = await api('GET', '/api/field-sections');
-      tenantFieldSections = sectionsData.available || [];
-      clearAiFieldBuilder();
+      showLoader('AI يبني حقول المدخلات', 'قد يستغرق لحظات');
+      try {
+        const data = await api('POST', '/api/ai-build-fields', { description });
+        if (!data.success) {
+          toast(data.error || 'فشل البناء التلقائي');
+          return;
+        }
+        toast(WFT('fields.auto_created', 'تم إنشاء {n} حقل تلقائياً', { n: data.count || 0 }));
+        await renderTenantFields();
+        const sectionsData = await api('GET', '/api/field-sections');
+        tenantFieldSections = sectionsData.available || [];
+        clearAiFieldBuilder();
+      } finally {
+        hideLoader();
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'بناء حقول تلقائياً (AI)';
+        }
+      }
     }
 
     async function suggestAiFields() {
@@ -687,22 +692,27 @@
 
       const existingKeys = (tenantFields || []).map(f => f.fieldKey);
       const btn = document.getElementById('btnAiSuggestFields');
-      btn.disabled = true;
-      btn.textContent = 'جاري التحليل...';
-      showLoader('AI يحلل وصف المشروع', 'جاري اقتراح الحقول المناسبة');
-
-      const data = await api('POST', '/api/ai-input-builder', { description, existingKeys });
-      hideLoader();
-      btn.disabled = false;
-      btn.textContent = 'اقتراح حقول بالذكاء الاصطناعي';
-
-      if (!data.success || !data.suggestions) {
-        toast(data.error || 'فشل الاقتراح');
-        return;
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'جاري التحليل...';
       }
-      aiFieldSuggestions = (data.suggestions || []).map(s => ({ ...s, _approved: true }));
-      renderAiFieldSuggestions();
-      document.getElementById('aiFieldSuggestions').style.display = 'block';
+      showLoader('AI يحلل وصف المشروع', 'جاري اقتراح الحقول المناسبة');
+      try {
+        const data = await api('POST', '/api/ai-input-builder', { description, existingKeys });
+        if (!data.success || !data.suggestions) {
+          toast(data.error || 'فشل الاقتراح');
+          return;
+        }
+        aiFieldSuggestions = (data.suggestions || []).map(s => ({ ...s, _approved: true }));
+        renderAiFieldSuggestions();
+        document.getElementById('aiFieldSuggestions').style.display = 'block';
+      } finally {
+        hideLoader();
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'اقتراح حقول بالذكاء الاصطناعي';
+        }
+      }
     }
 
     function renderAiFieldSuggestions() {
@@ -753,26 +763,29 @@
       if (!approved.length) { toast('لا توجد حقول مقبولة للإضافة'); return; }
 
       showLoader('جاري إضافة الحقول', WFT('fields.count_label', 'عدد الحقول: {n}', { n: approved.length }));
-      let added = 0;
-      for (const s of approved) {
-        const payload = {
-          fieldKey: s.fieldKey,
-          fieldLabel: s.fieldLabel,
-          fieldType: s.fieldType,
-          fieldOptions: s.fieldOptions,
-          sectionKey: s.sectionKey || 'general',
-          placeholder: s.placeholder,
-          defaultValue: s.defaultValue,
-          isRequired: s.isRequired,
-          aiHint: s.aiHint
-        };
-        const res = await api('POST', '/api/fields', payload);
-        if (res.success) added++;
+      try {
+        let added = 0;
+        for (const s of approved) {
+          const payload = {
+            fieldKey: s.fieldKey,
+            fieldLabel: s.fieldLabel,
+            fieldType: s.fieldType,
+            fieldOptions: s.fieldOptions,
+            sectionKey: s.sectionKey || 'general',
+            placeholder: s.placeholder,
+            defaultValue: s.defaultValue,
+            isRequired: s.isRequired,
+            aiHint: s.aiHint
+          };
+          const res = await api('POST', '/api/fields', payload);
+          if (res.success) added++;
+        }
+        toast(WFT('fields.added_of', 'تم إضافة {added} من {total} حقل', { added, total: approved.length }));
+        await renderTenantFields();
+        clearAiFieldBuilder();
+      } finally {
+        hideLoader();
       }
-      hideLoader();
-      toast(WFT('fields.added_of', 'تم إضافة {added} من {total} حقل', { added, total: approved.length }));
-      await renderTenantFields();
-      clearAiFieldBuilder();
     }
 
     function rejectAllAiFields() {

@@ -474,47 +474,53 @@
     async function handleLogin(e) {
       e.preventDefault();
       showTenantError('loginError', '');
-      const email = document.getElementById('loginEmail').value.trim();
-      const password = document.getElementById('loginPassword').value;
-      const deviceId = getOrCreateDeviceId();
-      const trustedDeviceToken = getTrustedDeviceToken(email);
-      const deviceFingerprint = getDeviceFingerprint();
-      currentLoginIdentity = email;
+      const submitBtn = e.target ? e.target.querySelector('button[type="submit"]') : document.querySelector('#loginForm button[type="submit"]');
+      if (submitBtn) submitBtn.disabled = true;
+      try {
+        const email = document.getElementById('loginEmail').value.trim();
+        const password = document.getElementById('loginPassword').value;
+        const deviceId = getOrCreateDeviceId();
+        const trustedDeviceToken = getTrustedDeviceToken(email);
+        const deviceFingerprint = getDeviceFingerprint();
+        currentLoginIdentity = email;
 
-      const data = await api('POST', '/api/auth/login', {
-        email,
-        password,
-        deviceId,
-        trustedDeviceToken,
-        deviceFingerprint
-      });
+        const data = await api('POST', '/api/auth/login', {
+          email,
+          password,
+          deviceId,
+          trustedDeviceToken,
+          deviceFingerprint
+        });
 
-      if (data && data.otpRequired && data.challengeToken) {
-        currentLoginChallengeToken = data.challengeToken;
-        const loginForm = document.getElementById('loginForm');
-        const otpForm = document.getElementById('loginOtpForm');
-        const hint = document.getElementById('loginOtpHint');
-        initOtpDigitBoxes();
-        resetOtpBoxes();
-        if (hint && data.maskedEmail) {
-          hint.textContent = WFT('auth.otp_hint_sent_to', 'رمز التحقق مرسل إلى {email}', { email: data.maskedEmail });
+        if (data && data.otpRequired && data.challengeToken) {
+          currentLoginChallengeToken = data.challengeToken;
+          const loginForm = document.getElementById('loginForm');
+          const otpForm = document.getElementById('loginOtpForm');
+          const hint = document.getElementById('loginOtpHint');
+          initOtpDigitBoxes();
+          resetOtpBoxes();
+          if (hint && data.maskedEmail) {
+            hint.textContent = WFT('auth.otp_hint_sent_to', 'رمز التحقق مرسل إلى {email}', { email: data.maskedEmail });
+          }
+          if (loginForm) loginForm.style.display = 'none';
+          if (otpForm) otpForm.style.display = 'block';
+          const firstBox = document.querySelector('#loginOtpBoxes .otp-digit-box');
+          if (firstBox) {
+            setTimeout(() => { firstBox.focus(); firstBox.select(); }, 50);
+          }
+          startOtpResendCooldown(60);
+          return;
         }
-        if (loginForm) loginForm.style.display = 'none';
-        if (otpForm) otpForm.style.display = 'block';
-        const firstBox = document.querySelector('#loginOtpBoxes .otp-digit-box');
-        if (firstBox) {
-          setTimeout(() => { firstBox.focus(); firstBox.select(); }, 50);
-        }
-        startOtpResendCooldown(60);
-        return;
-      }
 
-      if (data && data.success && data.token) {
-        setTenantToken(data.token);
-        setTenantUser(data.tenant);
-        await bootstrapTenant();
-      } else {
-        showTenantError('loginError', (data && data.error) || WFT('auth.login_failed', 'فشل تسجيل الدخول'));
+        if (data && data.success && data.token) {
+          setTenantToken(data.token);
+          setTenantUser(data.tenant);
+          await bootstrapTenant();
+        } else {
+          showTenantError('loginError', (data && data.error) || WFT('auth.login_failed', 'فشل تسجيل الدخول'));
+        }
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     }
 
@@ -532,33 +538,35 @@
       const submitBtn = document.getElementById('loginOtpSubmitBtn');
       if (submitBtn) submitBtn.disabled = true;
 
-      const data = await api('POST', '/api/auth/login/verify-otp', {
-        challengeToken: currentLoginChallengeToken,
-        otp,
-        deviceId,
-        deviceFingerprint,
-        deviceName
-      });
+      try {
+        const data = await api('POST', '/api/auth/login/verify-otp', {
+          challengeToken: currentLoginChallengeToken,
+          otp,
+          deviceId,
+          deviceFingerprint,
+          deviceName
+        });
 
-      if (submitBtn) submitBtn.disabled = false;
-
-      if (data && data.success && data.token) {
-        if (data.trustedDeviceToken) {
-          storeTrustedDeviceToken(data.email || currentLoginIdentity, data.trustedDeviceToken);
+        if (data && data.success && data.token) {
+          if (data.trustedDeviceToken) {
+            storeTrustedDeviceToken(data.email || currentLoginIdentity, data.trustedDeviceToken);
+          }
+          clearInterval(otpResendCooldownTimer);
+          setTenantToken(data.token);
+          setTenantUser(data.tenant);
+          await bootstrapTenant();
+        } else {
+          let msg = (data && data.error) || WFT('auth.otp_invalid', 'رمز التحقق غير صحيح');
+          if (data && typeof data.remainingAttempts === 'number' && data.remainingAttempts > 0) {
+            msg += WFT('auth.otp_attempts_suffix', ' (المحاولات المتبقية: {n})', { n: data.remainingAttempts });
+          }
+          showTenantError('loginError', msg);
+          if (data && data.remainingAttempts === 0) {
+            handleLoginOtpCancel();
+          }
         }
-        clearInterval(otpResendCooldownTimer);
-        setTenantToken(data.token);
-        setTenantUser(data.tenant);
-        await bootstrapTenant();
-      } else {
-        let msg = (data && data.error) || WFT('auth.otp_invalid', 'رمز التحقق غير صحيح');
-        if (data && typeof data.remainingAttempts === 'number' && data.remainingAttempts > 0) {
-          msg += WFT('auth.otp_attempts_suffix', ' (المحاولات المتبقية: {n})', { n: data.remainingAttempts });
-        }
-        showTenantError('loginError', msg);
-        if (data && data.remainingAttempts === 0) {
-          handleLoginOtpCancel();
-        }
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     }
 

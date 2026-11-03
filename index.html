@@ -1311,7 +1311,7 @@
         <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llRechargeDecisionError"></div>
         <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
           <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeDecisionModal')">إلغاء</button>
-          <button type="button" class="btn primary" onclick="llSubmitRechargeDecision()">تسجيل القرار</button>
+          <button type="button" class="btn primary" id="llRechargeDecisionSubmitBtn" onclick="llSubmitRechargeDecision()">تسجيل القرار</button>
         </div>
       </div>
     </div>
@@ -1604,7 +1604,7 @@
             <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
               <button type="button" class="btn ghost" onclick="llRechargeBackToPick()" data-i18n="common.back">رجوع</button>
               <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeModal')">إلغاء</button>
-              <button type="button" class="btn primary" onclick="llCreateRechargeRequest()">إرسال طلب الشحن</button>
+              <button type="button" class="btn primary" id="llRechargeSubmitBtn" onclick="llCreateRechargeRequest()">إرسال طلب الشحن</button>
             </div>
           </div>
         </div>

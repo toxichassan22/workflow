@@ -161,6 +161,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الملف الحالي": "Current file",
   "النقاط التقديرية": "Estimated points",
   "بوابة الاعتماد الثانية — تقدير التكلفة وحجز رصيد المحفظة": "Second approval gate — cost estimate & wallet balance hold",
+    "تقدير التكلفة وحجز رصيد المحفظة لبدء التوليد": "Cost estimate and wallet balance hold to begin generation",
   "توليد هذا القسم يتطلب اعتماده أولًا": "Generating this section requires approving it first",
   "تعذر إعداد خطة القسم": "Could not prepare the section plan",
   "تعذر إكمال التوليد": "Could not complete generation",

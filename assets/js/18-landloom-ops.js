@@ -473,42 +473,51 @@
         if (errBox) errBox.textContent = WFT('recharge.reference_or_receipt_required', 'رقم الحوالة أو إيصال التحويل مطلوب');
         return;
       }
-      const receipt = await llUploadRechargeReceipt();
-      if (receipt && receipt.error) {
-        if (errBox) errBox.textContent = receipt.error;
-        return;
+
+      const submitBtn = document.getElementById('llRechargeSubmitBtn') ||
+        document.querySelector('#llRechargeModal .sag-modal-actions .btn.primary');
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {
+        const receipt = await llUploadRechargeReceipt();
+        if (receipt && receipt.error) {
+          if (errBox) errBox.textContent = receipt.error;
+          return;
+        }
+        const isCustom = packageId === '__custom__';
+        if (isCustom && !(llCustomPackageAmount > 0)) {
+          if (errBox) errBox.textContent = WFT('recharge.invalid_amount', 'أدخل مبلغًا صالحًا');
+          return;
+        }
+        const pkg = llRechargePackages.find(p => p.id === packageId);
+        const data = await api('POST', '/api/recharge-requests', {
+          packageId: isCustom ? null : packageId,
+          packageName: isCustom ? 'باقة مخصصة' : (pkg ? pkg.name : packageId),
+          customAmountSar: isCustom ? llCustomPackageAmount : undefined,
+          referenceNumber: ref.trim(),
+          receiptFileId: receipt ? receipt.id : null
+        }).catch(e => e);
+        if (!data || !data.success) {
+          if (errBox) errBox.textContent = (data && data.error) || 'تعذر إرسال الطلب.';
+          return;
+        }
+        if (document.getElementById('llRechargeRef')) document.getElementById('llRechargeRef').value = '';
+        if (document.getElementById('llRechargeReceipt')) document.getElementById('llRechargeReceipt').value = '';
+        const pkgInput = document.getElementById('llRechargePackage');
+        if (pkgInput) pkgInput.value = '';
+        llCustomPackageAmount = null;
+        document.querySelectorAll('.pkg-custom-input').forEach(i => { i.value = ''; });
+        llUpdateCustomPoints();
+        document.querySelectorAll('.pkg-card.selected').forEach(c => c.classList.remove('selected'));
+        llShowPackageInfo();
+        llShowRechargeStep('pick');
+        if (llRechargeModalSlider) { llRechargeModalSlider.destroy(); llRechargeModalSlider = null; }
+        closeLlModal('llRechargeModal');
+        toast(WFT('recharge.request_sent', 'تم إرسال طلب الشحن بنجاح'));
+        await llLoadRechargeRequests();
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
-      const isCustom = packageId === '__custom__';
-      if (isCustom && !(llCustomPackageAmount > 0)) {
-        if (errBox) errBox.textContent = WFT('recharge.invalid_amount', 'أدخل مبلغًا صالحًا');
-        return;
-      }
-      const pkg = llRechargePackages.find(p => p.id === packageId);
-      const data = await api('POST', '/api/recharge-requests', {
-        packageId: isCustom ? null : packageId,
-        packageName: isCustom ? 'باقة مخصصة' : (pkg ? pkg.name : packageId),
-        customAmountSar: isCustom ? llCustomPackageAmount : undefined,
-        referenceNumber: ref.trim(),
-        receiptFileId: receipt ? receipt.id : null
-      }).catch(e => e);
-      if (!data || !data.success) {
-        if (errBox) errBox.textContent = (data && data.error) || 'تعذر إرسال الطلب.';
-        return;
-      }
-      if (document.getElementById('llRechargeRef')) document.getElementById('llRechargeRef').value = '';
-      if (document.getElementById('llRechargeReceipt')) document.getElementById('llRechargeReceipt').value = '';
-      const pkgInput = document.getElementById('llRechargePackage');
-      if (pkgInput) pkgInput.value = '';
-      llCustomPackageAmount = null;
-      document.querySelectorAll('.pkg-custom-input').forEach(i => { i.value = ''; });
-      llUpdateCustomPoints();
-      document.querySelectorAll('.pkg-card.selected').forEach(c => c.classList.remove('selected'));
-      llShowPackageInfo();
-      llShowRechargeStep('pick');
-      if (llRechargeModalSlider) { llRechargeModalSlider.destroy(); llRechargeModalSlider = null; }
-      closeLlModal('llRechargeModal');
-      toast(WFT('recharge.request_sent', 'تم إرسال طلب الشحن بنجاح'));
-      await llLoadRechargeRequests();
     }
 
     // ── Recharge decision modal: approve (mandatory invoice) or reject (reason) ──
@@ -571,47 +580,55 @@
       const decision = document.getElementById('llRechargeDecisionKind').value;
       const errBox = document.getElementById('llRechargeDecisionError');
       if (errBox) errBox.textContent = '';
-      let invoiceFileId = null;
-      let note = '';
-      if (decision === 'approved') {
-        const input = document.getElementById('llRechargeInvoice');
-        // The client's invoice is part of the approval itself — never optional.
-        if (!input || !input.files || !input.files[0]) {
-          if (errBox) errBox.textContent = WFT('recharge.invoice_required', 'فاتورة الشحن مطلوبة لاعتماد الطلب');
-          return;
+      const submitBtn = document.getElementById('llRechargeDecisionSubmitBtn') ||
+        document.querySelector('#llRechargeDecisionModal .sag-modal-actions .btn.primary');
+      if (submitBtn) submitBtn.disabled = true;
+
+      try {
+        let invoiceFileId = null;
+        let note = '';
+        if (decision === 'approved') {
+          const input = document.getElementById('llRechargeInvoice');
+          // The client's invoice is part of the approval itself — never optional.
+          if (!input || !input.files || !input.files[0]) {
+            if (errBox) errBox.textContent = WFT('recharge.invoice_required', 'فاتورة الشحن مطلوبة لاعتماد الطلب');
+            return;
+          }
+          const form = new FormData();
+          form.append('file', input.files[0]);
+          form.append('fileType', 'recharge_invoice');
+          const up = await api('POST', '/api/project-files', form, true).catch(e => e);
+          if (!up || !up.success) {
+            if (errBox) errBox.textContent = (up && up.error) || 'تعذر رفع الفاتورة';
+            return;
+          }
+          invoiceFileId = up.file.id;
+        } else {
+          const reason = (document.getElementById('llRechargeReason') || {}).value || '';
+          const extra = ((document.getElementById('llRechargeNote') || {}).value || '').trim();
+          note = reason === LL_RECHARGE_OTHER_REASON
+            ? extra
+            : (reason && extra ? reason + ' — ' + extra : (reason || extra));
+          if (!note) {
+            if (errBox) errBox.textContent = WFT('recharge.reason_required', 'سبب الرفض مطلوب');
+            return;
+          }
         }
-        const form = new FormData();
-        form.append('file', input.files[0]);
-        form.append('fileType', 'recharge_invoice');
-        const up = await api('POST', '/api/project-files', form, true).catch(e => e);
-        if (!up || !up.success) {
-          if (errBox) errBox.textContent = (up && up.error) || 'تعذر رفع الفاتورة';
-          return;
+        const payload = { decision: decision };
+        if (invoiceFileId) payload.invoiceFileId = invoiceFileId;
+        if (note) payload.note = note;
+        const data = await api('POST', '/api/admin/recharge-requests/' + encodeURIComponent(requestId) + '/decision', payload).catch(e => e);
+        if (data && data.success) {
+          closeLlModal('llRechargeDecisionModal');
+          toast(decision === 'approved' ? WFT('recharge.approved', 'تم اعتماد الشحن وتوليد الرقم المرجعي المالي') : WFT('recharge.rejected', 'تم رفض طلب الشحن'));
+          if (typeof adminLoadRecharges === 'function') await adminLoadRecharges();
+          if (typeof llLoadRechargeRequests === 'function') await llLoadRechargeRequests('llRechargeList');
+        } else {
+          const msg = (data && data.error) || WFT('recharge.decision_failed', 'تعذر تسجيل القرار');
+          if (errBox) { errBox.textContent = msg; } else { toast(msg); }
         }
-        invoiceFileId = up.file.id;
-      } else {
-        const reason = (document.getElementById('llRechargeReason') || {}).value || '';
-        const extra = ((document.getElementById('llRechargeNote') || {}).value || '').trim();
-        note = reason === LL_RECHARGE_OTHER_REASON
-          ? extra
-          : (reason && extra ? reason + ' — ' + extra : (reason || extra));
-        if (!note) {
-          if (errBox) errBox.textContent = WFT('recharge.reason_required', 'سبب الرفض مطلوب');
-          return;
-        }
-      }
-      const payload = { decision: decision };
-      if (invoiceFileId) payload.invoiceFileId = invoiceFileId;
-      if (note) payload.note = note;
-      const data = await api('POST', '/api/admin/recharge-requests/' + encodeURIComponent(requestId) + '/decision', payload).catch(e => e);
-      if (data && data.success) {
-        closeLlModal('llRechargeDecisionModal');
-        toast(decision === 'approved' ? WFT('recharge.approved', 'تم اعتماد الشحن وتوليد الرقم المرجعي المالي') : WFT('recharge.rejected', 'تم رفض طلب الشحن'));
-        if (typeof adminLoadRecharges === 'function') await adminLoadRecharges();
-        if (typeof llLoadRechargeRequests === 'function') await llLoadRechargeRequests('llRechargeList');
-      } else {
-        const msg = (data && data.error) || WFT('recharge.decision_failed', 'تعذر تسجيل القرار');
-        if (errBox) { errBox.textContent = msg; } else { toast(msg); }
+      } finally {
+        if (submitBtn) submitBtn.disabled = false;
       }
     }
 

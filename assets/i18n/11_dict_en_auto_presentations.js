@@ -55,6 +55,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الصيغة:": "Format:",
   "العرض الحالي:": "Current deck:",
   "بوابة الاعتماد الثالثة — قفل إصدار العرض وختم البصمة الرقمية للملف": "Third approval gate — release lock and digital fingerprint stamp",
+    "قفل إصدار العرض وختم البصمة الرقمية للملف": "Lock presentation version and file digital fingerprint stamp",
   "تعذر تحميل الملف": "Could not load the file",
   "تم إرسال طلب اعتماد الملف النهائي": "Final approval request sent",
   "تم اعتماد وختم الملف النهائي بنجاح": "Final file approved and stamped",

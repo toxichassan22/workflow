@@ -177,6 +177,7 @@
     }
 
     function removeLandPhoto(fileId) {
+      if (!confirm(WFT('files.confirm_remove_land_photo', 'هل تريد حذف صورة الأرض هذه من المشروع؟'))) return;
       tenantProjectData.land_photos_file_meta = (tenantProjectData.land_photos_file_meta || [])
         .filter(item => item && item.id !== fileId);
       tenantProjectData.land_photos_file_ids = (tenantProjectData.land_photos_file_meta || [])
@@ -337,6 +338,7 @@
     // left in place because an older draft revision may still reference it, and the analysis reads
     // this metadata list, so a detached file is no longer sent to the model.
     function removeLandDocument(fileId) {
+      if (!confirm(WFT('files.confirm_remove_land_document', 'هل تريد حذف هذا المستند من المشروع؟'))) return;
       const meta = (tenantProjectData.land_documents_files_file_meta || [])
         .filter(item => item && item.id !== fileId);
       tenantProjectData.land_documents_files_file_meta = meta;
@@ -715,7 +717,7 @@
         modal.innerHTML =
           '<div style="background:#fff;border-radius:16px;max-width:520px;width:100%;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,.2);direction:rtl;text-align:right;">' +
           '<h3 style="margin:0 0 8px;color:#1a3a52;font-size:18px;">اعتماد بدء التوليد وحجز النقاط</h3>' +
-          '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">بوابة الاعتماد الثانية — تقدير التكلفة وحجز رصيد المحفظة</p>' +
+          '<p style="margin:0 0 16px;color:#64748b;font-size:13px;">تقدير التكلفة وحجز رصيد المحفظة لبدء التوليد</p>' +
           '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:16px;display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;">' +
           '<div><span style="color:#64748b;">المشروع:</span> <strong>' + escapeHtml(projectName) + '</strong></div>' +
           (sectionLabel ? '<div><span style="color:#64748b;">القسم:</span> <strong>' + escapeHtml(sectionLabel) + '</strong></div>' : '') +

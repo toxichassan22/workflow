@@ -827,9 +827,9 @@
     async function fetchNearbyLandmarks() {
       const formData = await collectTenantFormData();
       showLoader('جاري معاينة وحساب بيانات الخريطة والمعالم', '');
-      const data = await apiStoppable('POST', '/api/preview-map-data', { projectData: formData });
-      hideLoader();
-      if (data && data.cancelled) {
+      try {
+        const data = await apiStoppable('POST', '/api/preview-map-data', { projectData: formData });
+        if (data && data.cancelled) {
         toast(WFT('gen.stopped_rows_unchanged',
           'تم إيقاف المهمة — لم يتغيّر جدول المعالم'));
         return;
@@ -860,6 +860,9 @@
         applyPreviewedLandmarksToForm(false);
       } else {
         toast(data.error || 'لم يُعثر على معالم قريبة');
+      }
+      } finally {
+        hideLoader();
       }
     }
 

@@ -171,6 +171,11 @@
     }
 
     async function startTenantProject() {
+      if (typeof tenantDraftDirty !== 'undefined' && tenantDraftDirty) {
+        if (!confirm(WFT('project.unsaved_changes_confirm', 'لديك تعديلات غير محفوظة في المشروع الحالي. هل تريد المتابعة وبدء مشروع جديد؟'))) {
+          return;
+        }
+      }
       const projectLanguage = await askProjectLanguage();
       if (!projectLanguage) return;
       setDraftDirty(false);

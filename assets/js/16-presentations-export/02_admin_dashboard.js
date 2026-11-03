@@ -904,15 +904,18 @@
         sections[s.key] = cb ? cb.checked : false;
       });
       showLoader('جاري حفظ الصلاحيات', '');
-      const [permRes, sectionRes] = await Promise.all([
-        api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId + '/permissions', { permissions }),
-        api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId + '/field-sections', { sections })
-      ]);
-      hideLoader();
-      const modal = document.getElementById('sagUserPermissionsModal');
-      if (modal) modal.remove();
-      if (permRes.success && sectionRes.success) { toast('تم حفظ الصلاحيات'); }
-      else { toast(permRes.error || sectionRes.error || 'فشل الحفظ'); }
+      try {
+        const [permRes, sectionRes] = await Promise.all([
+          api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId + '/permissions', { permissions }),
+          api('PUT', '/api/admin/tenants/' + tenantId + '/users/' + userId + '/field-sections', { sections })
+        ]);
+        const modal = document.getElementById('sagUserPermissionsModal');
+        if (modal) modal.remove();
+        if (permRes.success && sectionRes.success) { toast('تم حفظ الصلاحيات'); }
+        else { toast(permRes.error || sectionRes.error || 'فشل الحفظ'); }
+      } finally {
+        hideLoader();
+      }
     }
 
     function openSagUserEdit(tenantId, userId) {
