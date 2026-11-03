@@ -112,6 +112,7 @@ def _create_landloom_tables(conn):
         read_at TEXT
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_notifications_feed ON notifications(tenant_id, user_id, created_at DESC)')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(tenant_id, user_id, read_at)')
 
     # t24/t42: tasks that stay open until the approver or editor acts.
     conn.execute('''CREATE TABLE IF NOT EXISTS approval_tasks (

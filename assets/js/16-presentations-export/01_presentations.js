@@ -77,6 +77,147 @@
       void resumeTenantDesignerChatJob();
     }
 
+    let tenantArchiveAbortController = null;
+    let tenantFilterDebounceTimer = null;
+
+    function renderDraftRow(d, projectCost) {
+      const title = d.title || (typeof WFT === 'function' ? WFT('dashboard.untitled_deck', 'مشروع بدون عنوان') : 'مشروع بدون عنوان');
+      const stMeta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(d.status) : { cls: 'status-draft', label: d.status };
+      const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status, d.approver_name) : (stMeta.label || 'مسودة');
+      const createdAt = (d.created_at || '').slice(0, 16).replace('T', ' ') || '—';
+      const updatedAt = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ') || '—';
+      const projectMapsCost = Number(projectCost?.maps_cost_sar) || 0;
+      const totalCostCell = projectCost ? formatUsageCost(projectCost.cost_sar || 0) : '—';
+      const mapsCostCell = projectCost ? formatUsageCost(projectMapsCost) : '—';
+      const isArchived = d.status === 'archived';
+      const archiveBadge = isArchived
+        ? '<span class="proposal-status-badge status-archived" title="محفوظ لمدة 365 يوماً وفق سياسة الحفظ">أرشيف (محفوظ 365 يوماً)</span>'
+        : '';
+      const statusBadgeHtml = archiveBadge || ('<span class="proposal-status-badge ' + stMeta.cls + '">' + escapeHtml(statusText) + '</span>');
+      const copyBtn = hasPermission('copy_presentation')
+        ? '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); copyProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.copy', 'نسخ العرض') : 'نسخ العرض') + '</button>'
+        : '';
+      // Final delete is a company-admin-only cleanup: the server also refuses
+      // drafts that already carry approval history.
+      const canDelete = Boolean(tenantUser && tenantUser.isAdmin) ||
+        ((tenantUser || {})._userRole || 'company_admin') === 'company_admin';
+      const deleteBtn = canDelete
+        ? '<button type="button" class="btn small ghost danger" onclick="closeTenantDropdown(); deleteProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.delete', 'حذف') : 'حذف') + '</button>'
+        : '';
+      const editLogBtn = '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); showDraftEditLog(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.edit_log', 'سجل التعديلات') : 'سجل التعديلات') + '</button>';
+      const versionsBtn = '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); showDraftVersions(\'' + d.id + '\')">' +
+        (typeof WFT === 'function' ? WFT('draft_versions.button', 'الإصدارات') : 'الإصدارات') + '</button>';
+      const moreBtn = '<div class="tenant-dropdown">' +
+        '<button type="button" class="btn small ghost" onclick="toggleTenantDropdown(this)" aria-haspopup="true">' + (typeof WFT === 'function' ? WFT('projects.more', 'المزيد') : 'المزيد') + '</button>' +
+        '<div class="tenant-dropdown-menu">' +
+          (!isArchived ? copyBtn : '') +
+          editLogBtn +
+          versionsBtn +
+          deleteBtn +
+        '</div>' +
+        '</div>';
+      const primaryBtn = isArchived
+        ? '<button type="button" class="btn small primary" onclick="restoreProposalById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.restore', 'استعادة') : 'استعادة') + '</button>'
+        : '<button type="button" class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.open', 'فتح المشروع') : 'فتح المشروع') + '</button>';
+      const actionsHtml = primaryBtn + moreBtn;
+      const rowCls = isArchived ? 'll-row-archived' : '';
+      return '<tr data-draft-id="' + d.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
+        '<td class="project-title-cell" style="font-weight:700">' + escapeHtml(title) + '</td>' +
+        '<td>' + statusBadgeHtml + '</td>' +
+        '<td>' + totalCostCell + '</td>' +
+        '<td>' + mapsCostCell + '</td>' +
+        '<td><span dir="ltr">' + escapeHtml(createdAt) + '</span></td>' +
+        '<td><span dir="ltr">' + escapeHtml(updatedAt) + '</span></td>' +
+        '<td class="project-actions-cell"><div class="tenant-actions" style="gap:8px">' + actionsHtml + '</div></td>' +
+        '</tr>';
+    }
+
+    function draftTableHtml(rowsHtml, count) {
+      const showingText = typeof WFT === 'function'
+        ? WFT('projects.showing', 'عرض {shown} من إجمالي {total} مشروعاً', { shown: count, total: count })
+        : ('عرض ' + count + ' من إجمالي ' + count + ' مشروعاً');
+      return '<div class="tenant-content-panel tenant-projects-table-panel" style="padding:0;overflow:visible">' +
+        '<div class="table-wrap" style="border:none;border-radius:10px 10px 0 0;overflow-x:auto;overflow-y:visible"><table class="tenant-projects-table"><thead><tr>' +
+        '<th>' + (typeof WFT === 'function' ? WFT('projects.name', 'اسم المشروع') : 'اسم المشروع') + '</th>' +
+        '<th>' + (typeof WFT === 'function' ? WFT('projects.status', 'حالة المشروع') : 'حالة المشروع') + '</th>' +
+        '<th>' + (typeof WFT === 'function' ? WFT('projects.total_cost', 'التكلفة الإجمالية') : 'التكلفة الإجمالية') + '</th>' +
+        '<th>' + (typeof WFT === 'function' ? WFT('projects.maps_cost', 'تكلفة الخرائط') : 'تكلفة الخرائط') + '</th>' +
+        '<th>' + (typeof WFT === 'function' ? WFT('projects.created_at', 'تاريخ الإنشاء') : 'تاريخ الإنشاء') + '</th>' +
+        '<th>' + (typeof WFT === 'function' ? WFT('projects.updated_at', 'تاريخ آخر تعديل') : 'تاريخ آخر تعديل') + '</th>' +
+        '<th style="width:160px;min-width:160px">' + (typeof WFT === 'function' ? WFT('projects.actions', 'الإجراءات') : 'الإجراءات') + '</th>' +
+        '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+        '<div class="tenant-table-footer">' +
+          '<span>' + escapeHtml(showingText) + '</span>' +
+        '</div>' +
+        '</div>';
+    }
+
+    function getProjectArchiveCurrentFilters() {
+      return {
+        search: document.getElementById('projectArchiveSearch')?.value?.trim() || '',
+        status: document.getElementById('projectArchiveStatus')?.value || '',
+        from: document.getElementById('projectArchiveFrom')?.value || '',
+        to: document.getElementById('projectArchiveTo')?.value || ''
+      };
+    }
+
+    function applyProjectArchiveFiltersInMemory(items, filters) {
+      if (!Array.isArray(items)) return [];
+      const searchVal = (filters.search || '').toLowerCase();
+      const statusVal = filters.status || '';
+      const fromVal = filters.from || '';
+      const toVal = filters.to || '';
+
+      return items.filter(d => {
+        if (searchVal) {
+          const t = (d.title || '').toLowerCase();
+          if (!t.includes(searchVal)) return false;
+        }
+        if (statusVal) {
+          const s = d.status || 'draft';
+          if (statusVal === 'draft') {
+            if (['pending_approval', 'approved', 'sections_approved', 'final_approval_pending'].includes(s)) return false;
+          } else if (statusVal === 'approved') {
+            if (!['approved', 'sections_approved'].includes(s)) return false;
+          } else if (statusVal === 'pending_approval' || statusVal === 'pending') {
+            if (!['pending_approval', 'section_approval_pending', 'generation_approval_pending', 'final_approval_pending'].includes(s)) return false;
+          } else if (s !== statusVal) {
+            return false;
+          }
+        }
+        const itemDate = (d.updated_at || d.created_at || '').slice(0, 10);
+        if (fromVal && itemDate && itemDate < fromVal) return false;
+        if (toVal && itemDate && itemDate > toVal) return false;
+        return true;
+      });
+    }
+
+    function filterProjectArchiveInstant() {
+      const list = document.getElementById('tenantPresentationsList');
+      if (!list) return;
+      const filters = getProjectArchiveCurrentFilters();
+
+      if (Array.isArray(tenantAllDraftsMaster)) {
+        const filtered = applyProjectArchiveFiltersInMemory(tenantAllDraftsMaster, filters);
+        updateProjectArchiveStats(filtered);
+        if (!filtered.length) {
+          const emptyHtml = '<div class="tenant-dash-empty-state">' +
+            '<p class="tenant-dash-empty-title">' + escapeHtml(typeof WFT === 'function' ? WFT('projects.empty_title', 'لا توجد مشاريع مطابقة') : 'لا توجد مشاريع مطابقة') + '</p>' +
+            '<p class="tenant-hint">' + escapeHtml(typeof WFT === 'function' ? WFT('projects.empty_hint', 'لم يتم العثور على مشاريع تطابق معايير البحث والتصفية المحددة.') : 'لم يتم العثور على مشاريع تطابق معايير البحث والتصفية المحددة.') + '</p>' +
+            '<button type="button" class="btn ghost small" onclick="clearProjectArchiveFilters()">' + escapeHtml(typeof WFT === 'function' ? WFT('projects.reset', 'إعادة ضبط الفلاتر') : 'إعادة ضبط الفلاتر') + '</button>' +
+            '</div>';
+          list.innerHTML = emptyHtml;
+        } else {
+          list.innerHTML = draftTableHtml(filtered.map(d => renderDraftRow(d, tenantProjectsCostMap[d.id] || null)).join(''), filtered.length);
+        }
+      }
+
+      if (tenantFilterDebounceTimer) clearTimeout(tenantFilterDebounceTimer);
+      tenantFilterDebounceTimer = setTimeout(() => {
+        openTenantPresentations(true, { background: true });
+      }, 350);
+    }
+
     function clearProjectArchiveFilters() {
       const search = document.getElementById('projectArchiveSearch');
       const status = document.getElementById('projectArchiveStatus');
@@ -87,7 +228,14 @@
       if (from) from.value = '';
       if (to) to.value = '';
       tenantArchiveCache = null;
-      openTenantPresentations(true);
+      if (Array.isArray(tenantAllDraftsMaster)) {
+        const list = document.getElementById('tenantPresentationsList');
+        if (list) {
+          updateProjectArchiveStats(tenantAllDraftsMaster);
+          list.innerHTML = draftTableHtml(tenantAllDraftsMaster.map(d => renderDraftRow(d, tenantProjectsCostMap[d.id] || null)).join(''), tenantAllDraftsMaster.length);
+        }
+      }
+      openTenantPresentations(true, { background: Boolean(tenantAllDraftsMaster) });
     }
 
     function updateProjectArchiveStats(items) {
@@ -114,16 +262,12 @@
       if (badgeEl) badgeEl.textContent = '(' + formatExactSystemNumber(total, true) + ' ' + (typeof WFT === 'function' ? WFT('projects.unit', 'مشروعاً') : 'مشروعاً') + ')';
     }
 
-    async function openTenantPresentations(force = false) {
+    async function openTenantPresentations(force = false, options = {}) {
       showTenantPage('tenantPresentationsPage');
       const list = document.getElementById('tenantPresentationsList');
       if (!list) return;
-      const filters = {
-        search: document.getElementById('projectArchiveSearch')?.value?.trim() || '',
-        status: document.getElementById('projectArchiveStatus')?.value || '',
-        from: document.getElementById('projectArchiveFrom')?.value || '',
-        to: document.getElementById('projectArchiveTo')?.value || ''
-      };
+      const background = Boolean(options && options.background);
+      const filters = getProjectArchiveCurrentFilters();
       const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value));
       const tenantKey = (tenantUser && (tenantUser.id || tenantUser.tenantId)) || 'tenant';
       const listLang = ((typeof window.WFI18n !== 'undefined' && window.WFI18n.getLang && window.WFI18n.getLang()) || 'ar');
@@ -132,93 +276,64 @@
         list.innerHTML = tenantArchiveCache.html;
         return;
       }
-      const renderDraftRow = (d, projectCost) => {
-        const title = d.title || (typeof WFT === 'function' ? WFT('dashboard.untitled_deck', 'مشروع بدون عنوان') : 'مشروع بدون عنوان');
-        const stMeta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(d.status) : { cls: 'status-draft', label: d.status };
-        const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status, d.approver_name) : (stMeta.label || 'مسودة');
-        const createdAt = (d.created_at || '').slice(0, 16).replace('T', ' ') || '—';
-        const updatedAt = (d.updated_at || d.created_at || '').slice(0, 16).replace('T', ' ') || '—';
-        const projectMapsCost = Number(projectCost?.maps_cost_sar) || 0;
-        const totalCostCell = projectCost ? formatUsageCost(projectCost.cost_sar || 0) : '—';
-        const mapsCostCell = projectCost ? formatUsageCost(projectMapsCost) : '—';
-        const isArchived = d.status === 'archived';
-        const archiveBadge = isArchived
-          ? '<span class="proposal-status-badge status-archived" title="محفوظ لمدة 365 يوماً وفق سياسة الحفظ">أرشيف (محفوظ 365 يوماً)</span>'
-          : '';
-        const statusBadgeHtml = archiveBadge || ('<span class="proposal-status-badge ' + stMeta.cls + '">' + escapeHtml(statusText) + '</span>');
-        const copyBtn = hasPermission('copy_presentation')
-          ? '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); copyProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.copy', 'نسخ العرض') : 'نسخ العرض') + '</button>'
-          : '';
-        // Final delete is a company-admin-only cleanup: the server also refuses
-        // drafts that already carry approval history.
-        const canDelete = Boolean(tenantUser && tenantUser.isAdmin) ||
-          ((tenantUser || {})._userRole || 'company_admin') === 'company_admin';
-        const deleteBtn = canDelete
-          ? '<button type="button" class="btn small ghost danger" onclick="closeTenantDropdown(); deleteProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.delete', 'حذف') : 'حذف') + '</button>'
-          : '';
-        const editLogBtn = '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); showDraftEditLog(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.edit_log', 'سجل التعديلات') : 'سجل التعديلات') + '</button>';
-        const versionsBtn = '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); showDraftVersions(\'' + d.id + '\')">' +
-          (typeof WFT === 'function' ? WFT('draft_versions.button', 'الإصدارات') : 'الإصدارات') + '</button>';
-        const moreBtn = '<div class="tenant-dropdown">' +
-          '<button type="button" class="btn small ghost" onclick="toggleTenantDropdown(this)" aria-haspopup="true">' + (typeof WFT === 'function' ? WFT('projects.more', 'المزيد') : 'المزيد') + '</button>' +
-          '<div class="tenant-dropdown-menu">' +
-            (!isArchived ? copyBtn : '') +
-            editLogBtn +
-            versionsBtn +
-            deleteBtn +
-          '</div>' +
-          '</div>';
-        const primaryBtn = isArchived
-          ? '<button type="button" class="btn small primary" onclick="restoreProposalById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.restore', 'استعادة') : 'استعادة') + '</button>'
-          : '<button type="button" class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.open', 'فتح المشروع') : 'فتح المشروع') + '</button>';
-        const actionsHtml = primaryBtn + moreBtn;
-        const rowCls = isArchived ? 'll-row-archived' : '';
-        return '<tr data-draft-id="' + d.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
-          '<td class="project-title-cell" style="font-weight:700">' + escapeHtml(title) + '</td>' +
-          '<td>' + statusBadgeHtml + '</td>' +
-          '<td>' + totalCostCell + '</td>' +
-          '<td>' + mapsCostCell + '</td>' +
-          '<td><span dir="ltr">' + escapeHtml(createdAt) + '</span></td>' +
-          '<td><span dir="ltr">' + escapeHtml(updatedAt) + '</span></td>' +
-          '<td class="project-actions-cell"><div class="tenant-actions" style="gap:8px">' + actionsHtml + '</div></td>' +
-          '</tr>';
-      };
-      const draftTableHtml = (rowsHtml, count) => {
-        const showingText = typeof WFT === 'function'
-          ? WFT('projects.showing', 'عرض {shown} من إجمالي {total} مشروعاً', { shown: count, total: count })
-          : ('عرض ' + count + ' من إجمالي ' + count + ' مشروعاً');
-        return '<div class="tenant-content-panel tenant-projects-table-panel" style="padding:0;overflow:visible">' +
-          '<div class="table-wrap" style="border:none;border-radius:10px 10px 0 0;overflow-x:auto;overflow-y:visible"><table class="tenant-projects-table"><thead><tr>' +
-          '<th>' + (typeof WFT === 'function' ? WFT('projects.name', 'اسم المشروع') : 'اسم المشروع') + '</th>' +
-          '<th>' + (typeof WFT === 'function' ? WFT('projects.status', 'حالة المشروع') : 'حالة المشروع') + '</th>' +
-          '<th>' + (typeof WFT === 'function' ? WFT('projects.total_cost', 'التكلفة الإجمالية') : 'التكلفة الإجمالية') + '</th>' +
-          '<th>' + (typeof WFT === 'function' ? WFT('projects.maps_cost', 'تكلفة الخرائط') : 'تكلفة الخرائط') + '</th>' +
-          '<th>' + (typeof WFT === 'function' ? WFT('projects.created_at', 'تاريخ الإنشاء') : 'تاريخ الإنشاء') + '</th>' +
-          '<th>' + (typeof WFT === 'function' ? WFT('projects.updated_at', 'تاريخ آخر تعديل') : 'تاريخ آخر تعديل') + '</th>' +
-          '<th style="width:160px;min-width:160px">' + (typeof WFT === 'function' ? WFT('projects.actions', 'الإجراءات') : 'الإجراءات') + '</th>' +
-          '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
-          '<div class="tenant-table-footer">' +
-            '<span>' + escapeHtml(showingText) + '</span>' +
-          '</div>' +
-          '</div>';
-      };
-      showInlineLoader(list, typeof WFT === 'function' ? WFT('i18n.loading_projects', 'جاري تحميل المشاريع...') : 'جاري تحميل المشاريع...');
+
+      // If we already have items in memory and background refresh, don't show blank spinner
+      const hasExistingRows = Boolean(list.querySelector('[data-draft-id]'));
+      if (!background && !hasExistingRows && !Array.isArray(tenantAllDraftsMaster)) {
+        showInlineLoader(list, typeof WFT === 'function' ? WFT('i18n.loading_projects', 'جاري تحميل المشاريع...') : 'جاري تحميل المشاريع...');
+      }
+
       const stamp = String(Date.now()) + Math.random().toString(16).slice(2);
       list.dataset.archiveStamp = stamp;
-      // Render the list from the lightweight drafts query alone, then enrich each
-      // row with cost data in the background. Waiting for both calls kept the
-      // spinner up for seconds on two rows because usage-totals holds the
-      // response for a provider reconcile.
-      const draftsData = await apiWithTimeout('GET', '/api/project-drafts?' + query.toString(), null, 25000).catch(() => ({ success: false }));
+
+      // Abort prior in-flight request if rapid filter changes occurred
+      if (tenantArchiveAbortController) {
+        try { tenantArchiveAbortController.abort(); } catch (_) {}
+      }
+      tenantArchiveAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
+      // Fetch with limit=200 for fast single-roundtrip retrieval
+      const fetchParams = new URLSearchParams(query);
+      if (!fetchParams.has('limit')) fetchParams.set('limit', '200');
+
+      let draftsData = null;
+      try {
+        draftsData = await apiWithTimeout(
+          'GET',
+          '/api/project-drafts?' + fetchParams.toString(),
+          null,
+          25000,
+          undefined,
+          { signal: tenantArchiveAbortController ? tenantArchiveAbortController.signal : undefined }
+        );
+      } catch (err) {
+        draftsData = { success: false, error: err?.message };
+      }
+
       if (!draftsData || !draftsData.success) {
-        if (list.dataset.archiveStamp === stamp) {
+        if (tenantArchiveAbortController && tenantArchiveAbortController.signal?.aborted) {
+          return;
+        }
+        if (list.dataset.archiveStamp === stamp && !list.querySelector('[data-draft-id]')) {
           renderListLoadError(list, 'openTenantPresentations(true)');
         }
         return;
       }
-      const drafts = Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
-      const projectIds = drafts.map(d => d.id).filter(Boolean);
+
+      const rawDrafts = Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
+      if (!filters.search && !filters.status && !filters.from && !filters.to) {
+        tenantAllDraftsMaster = rawDrafts;
+      } else if (!tenantAllDraftsMaster) {
+        tenantAllDraftsMaster = rawDrafts;
+      }
+
+      const currentFilters = getProjectArchiveCurrentFilters();
+      const drafts = (currentFilters.search || currentFilters.status || currentFilters.from || currentFilters.to)
+        ? applyProjectArchiveFiltersInMemory(tenantAllDraftsMaster || rawDrafts, currentFilters)
+        : rawDrafts;
+
       updateProjectArchiveStats(drafts);
+
       if (!drafts.length) {
         const emptyHtml = '<div class="tenant-dash-empty-state">' +
           '<p class="tenant-dash-empty-title">' + escapeHtml(typeof WFT === 'function' ? WFT('projects.empty_title', 'لا توجد مشاريع مطابقة') : 'لا توجد مشاريع مطابقة') + '</p>' +
@@ -231,23 +346,36 @@
         }
         return;
       }
-      list.innerHTML = draftTableHtml(drafts.map(d => renderDraftRow(d, null)).join(''), drafts.length);
-      tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
-      if (!projectIds.length) return;
-      const totalsData = await apiWithTimeout('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(',')), null, 25000).catch(() => null);
+
+      if (list.dataset.archiveStamp === stamp) {
+        list.innerHTML = draftTableHtml(drafts.map(d => renderDraftRow(d, tenantProjectsCostMap[d.id] || null)).join(''), drafts.length);
+        tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
+      }
+
+      // Check which displayed projects need cost data
+      const missingCostIds = drafts.map(d => d.id).filter(id => id && !(id in tenantProjectsCostMap));
+      if (!missingCostIds.length) return;
+
+      const totalsData = await apiWithTimeout('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(missingCostIds.join(',')), null, 25000).catch(() => null);
       if (list.dataset.archiveStamp !== stamp) return;
       if (!document.contains(list) || !list.querySelector('[data-draft-id]')) return;
+
       let costByProject = {};
-      if (totalsData?.success && totalsData.projects) costByProject = totalsData.projects;
+      if (totalsData?.success && totalsData.projects) {
+        Object.assign(tenantProjectsCostMap, totalsData.projects);
+      }
+      costByProject = tenantProjectsCostMap;
+
       let patched = false;
       drafts.forEach(d => {
         const node = list.querySelector('[data-draft-id="' + d.id + '"]');
         if (!node) return;
         const projectCost = costByProject[d.id];
+        if (!projectCost) return;
         const next = renderDraftRow(d, projectCost);
         if (node.outerHTML !== next) { node.outerHTML = next; patched = true; }
       });
-      if (patched || totalsData?.success) {
+      if (patched) {
         tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
       }
     }
@@ -397,7 +525,7 @@
       const res = await api('POST', '/api/project-draft/copy', { draftId, newTitle: newTitle.trim() });
       if (res && res.success) {
         toast(WFT('proposal.cloned_with_name', 'تم نسخ العرض بنجاح باسم:') + ' ' + (res.copy?.title || newTitle));
-        tenantArchiveCache = null;
+        tenantArchiveCache = null; tenantAllDraftsMaster = null;
         openTenantPresentations(true);
       } else {
         toast(res?.error || 'فشل نسخ العرض');
@@ -412,7 +540,7 @@
       });
       if (res && res.success) {
         toast(WFT('proposal.restored', 'تمت استعادة العرض من الأرشيف'));
-        tenantArchiveCache = null;
+        tenantArchiveCache = null; tenantAllDraftsMaster = null;
         openTenantPresentations(true);
       } else {
         toast(res?.error || 'فشل استعادة العرض');

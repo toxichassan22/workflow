@@ -796,15 +796,41 @@
   gap: 8px;
 }
 
+.tenant-projects-table .project-actions-cell {
+  position: relative;
+}
+
+.tenant-projects-table .project-actions-cell .tenant-dropdown {
+  position: relative;
+}
+
 .tenant-projects-table .project-actions-cell .tenant-dropdown-menu {
-  min-width: 160px;
+  left: 0;
+  right: auto;
+  min-width: 180px;
+  box-shadow: 0 10px 25px -5px rgba(7, 24, 44, 0.15), 0 8px 10px -6px rgba(7, 24, 44, 0.1);
+  border: 1px solid var(--ui-border, #e2e8f0);
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 6px;
+  z-index: 1050;
+}
+
+html[dir="ltr"] .tenant-projects-table .project-actions-cell .tenant-dropdown-menu {
+  left: auto;
+  right: 0;
 }
 
 .tenant-projects-table .project-actions-cell .tenant-dropdown-menu .btn {
   text-align: right;
   justify-content: flex-start;
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: 8px 14px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+html[dir="ltr"] .tenant-projects-table .project-actions-cell .tenant-dropdown-menu .btn {
+  text-align: left;
 }
 
 .tenant-table-footer {

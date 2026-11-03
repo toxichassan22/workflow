@@ -717,7 +717,7 @@ def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', st
     conn = get_db()
     limit = max(1, min(int(limit or 50), 200))
     offset = max(0, int(offset or 0))
-    clauses = ['tenant_id = ?', "COALESCE(parent_draft_id, '') = ''"]
+    clauses = ['tenant_id = ?', "(parent_draft_id IS NULL OR parent_draft_id = '')"]
     params = [tenant_id]
     if accessible_ids is not None:
         ids = [str(i) for i in accessible_ids]
@@ -729,7 +729,7 @@ def get_all_project_draft_summaries(tenant_id, limit=50, offset=0, search='', st
         clauses.append('LOWER(title) LIKE ?')
         params.append('%' + str(search).strip().lower() + '%')
     if status == 'draft':
-        clauses.append("COALESCE(status, 'draft') NOT IN ('pending_approval', 'approved', 'sections_approved', 'final_approval_pending')")
+        clauses.append("(status IS NULL OR status = '' OR status NOT IN ('pending_approval', 'approved', 'sections_approved', 'final_approval_pending'))")
     elif status in {'pending_approval', 'pending'}:
         clauses.append("status IN ('pending_approval', 'section_approval_pending', 'generation_approval_pending', 'final_approval_pending')")
     elif status == 'approved':

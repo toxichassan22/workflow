@@ -171,5 +171,32 @@ class TenantPresentationsListTests(unittest.TestCase):
             self.assertIn(f'"{key}"', self.en_dict, f"Key '{key}' missing from 02_dict_en.js")
 
 
+    def test_dropdown_menu_alignment_prevents_left_clipping(self):
+        """In RTL tables, the action dropdown menu anchors to the left edge so it expands inward without clipping."""
+        self.assertIn('.tenant-projects-table .project-actions-cell .tenant-dropdown-menu', self.css_chrome)
+        self.assertIn('left: 0;', self.css_chrome)
+        self.assertIn('right: auto;', self.css_chrome)
+        self.assertIn('white-space: nowrap;', self.css_chrome)
+        self.assertIn('z-index: 1050;', self.css_chrome)
+        self.assertIn('html[dir="ltr"] .tenant-projects-table .project-actions-cell .tenant-dropdown-menu', self.css_chrome)
+
+    def test_instant_filtering_and_abort_pipeline_defined(self):
+        """Instant in-memory filtering, search debounce, and request cancellation prevent slow reloads and timeouts."""
+        self.assertIn('function filterProjectArchiveInstant()', self.pres_js)
+        self.assertIn('function applyProjectArchiveFiltersInMemory(', self.pres_js)
+        self.assertIn('tenantArchiveAbortController', self.pres_js)
+        self.assertIn('tenantFilterDebounceTimer', self.pres_js)
+        self.assertIn('oninput="filterProjectArchiveInstant()"', self.index_html)
+        self.assertIn('onchange="filterProjectArchiveInstant()"', self.index_html)
+
+    def test_db_draft_summaries_and_notification_unread_optimizations(self):
+        """DB queries for draft summaries and unread counts use index-friendly conditions and dedicated indexes."""
+        schema_file = (ROOT / 'modules' / 'db' / 'db_parts' / '01_schema' / '01a_landloom_platform_schema.py').read_text(encoding='utf-8')
+        drafts_file = (ROOT / 'modules' / 'db' / 'db_parts' / '05_drafts' / '05_project_drafts.py').read_text(encoding='utf-8')
+        self.assertIn('idx_notifications_unread ON notifications(tenant_id, user_id, read_at)', schema_file)
+        self.assertIn("(parent_draft_id IS NULL OR parent_draft_id = '')", drafts_file)
+        self.assertIn("(status IS NULL OR status = '' OR status NOT IN ('pending_approval'", drafts_file)
+
+
 if __name__ == '__main__':
     unittest.main()

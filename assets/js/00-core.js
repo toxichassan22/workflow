@@ -98,6 +98,8 @@
     let tenantFinancialPresentationReport = null;
     let tenantVisualConceptState = null;
     let tenantArchiveCache = null;
+    let tenantAllDraftsMaster = null;
+    let tenantProjectsCostMap = {};
     let tenantLocationGeocodeRequest = null;
 
     // The app renders at a fixed page zoom (`--ui-scale`). getBoundingClientRect
