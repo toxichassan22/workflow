@@ -1,0 +1,36 @@
+# LandLoom
+
+> LandLoom (https://landloom.ai) is an enterprise real estate opportunity analysis, feasibility intelligence, and investor pitch deck generation platform. It automates land zoning analysis, market intelligence, deterministic financial modeling, architectural concept generation, and branded presentation exports for real estate developers, investment funds, and advisory firms.
+
+## Core Capabilities
+- Land and Zoning Analysis: Automated extraction and verification of plot boundaries, dimensions, surrounding streets, setbacks, building coverage ratios, maximum floor height, and FAR (معامل البناء) aligned with official Saudi municipal regulations.
+- Location and Market Intelligence: Catchment area profiling, accessibility analysis, nearby landmarks, historical market transaction comps, and supply/demand dynamics.
+- Deterministic Financial Feasibility: Precise calculation of development costs, projected revenues, cash flows, Net Present Value (NPV), Internal Rate of Return (IRR), Return on Investment (ROI), and payback periods without LLM arithmetic hallucinations.
+- Architectural Concepts: High-fidelity 3D massing and architectural concept renders adhering to site-specific zoning limits and mixed-use allocations.
+- Investor Presentations: Production of investor-ready, bilingual (Arabic and English) pitch decks exported to PDF and slides adhering to the client company's exact brand identity.
+
+## Accuracy and The Two-Tier Human Approval Architecture
+Unlike generic AI generators that produce unchecked text, LandLoom operates on a strict Two-Tier Approval Architecture:
+1. Generated-Content Approvals: Every AI-generated analysis, financial model parameter, and visual render must be explicitly reviewed and accepted by a human analyst before it can be used.
+2. Section Approval: Comprehensive section certification that prevents deck export until all underlying data points and models are verified and approved by human experts.
+
+This architecture eliminates AI hallucinations and ensures institutional-grade reliability for presentations delivered to investment committees, sovereign funds, and banks.
+
+## Target Audience
+- Real Estate Developers and Development Companies
+- Real Estate Investment Trusts (REITs) and Investment Funds
+- Engineering, Architectural, and Real Estate Advisory Consultancies
+- Commercial Brokerages and Land Asset Managers
+
+## Key Differentiators vs Generic PropTech
+- Localized Municipal Compliance: Deeply integrated with Saudi Arabian municipal zoning bylaws, deeds, and official cadastral survey maps.
+- Institutional Financial Rigor: Deterministic mathematical modeling rather than probabilistic text estimations.
+- Bilingual by Design: Native support for Arabic and English real estate terminology and presentation standards.
+- End-to-End Workflow: Replaces fragmented workflows (analyst, GIS tool, spreadsheet, slide designer) with one cohesive, auditable platform, reducing preparation time by approximately 70 percent.
+
+## Documentation and Links
+- Platform Home: https://landloom.ai/
+- About Us: https://landloom.ai/about
+- Terms of Service: https://landloom.ai/terms
+- Privacy Policy: https://landloom.ai/privacy
+- Full LLM Specification: https://landloom.ai/llms-full.txt

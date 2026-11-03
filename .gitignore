@@ -73,6 +73,7 @@ sandbox/
 !requirements.txt
 !tests/i18n_hardcoded_baseline.txt
 !prompts/*.txt
+!pages/*.txt
 *.html
 !index.html
 !pages/*.html

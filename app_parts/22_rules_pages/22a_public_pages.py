@@ -39,6 +39,11 @@ def public_sitemap():
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://landloom.ai/llms.txt</loc>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://landloom.ai/terms</loc>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
@@ -62,10 +67,22 @@ def public_robots():
     if host != 'landloom.ai' and host != 'www.landloom.ai':
         body = "User-agent: *\nDisallow:\n"
     else:
-        body = "User-agent: *\nDisallow: /app\nDisallow: /c/\nDisallow: /superadmin\nDisallow: /invite/\nDisallow: /api/\n"
+        body = "User-agent: *\nDisallow: /app\nDisallow: /c/\nDisallow: /superadmin\nDisallow: /invite/\nDisallow: /api/\n\nSitemap: https://landloom.ai/sitemap.xml\n"
     resp = Response(body, mimetype='text/plain')
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
+
+
+@app.route('/llms.txt')
+def public_llms_txt():
+    """Standard AI/LLM contextual summary file."""
+    return _serve_public_page('llms.txt')
+
+
+@app.route('/llms-full.txt')
+def public_llms_full_txt():
+    """Detailed AI/LLM system specification file."""
+    return _serve_public_page('llms-full.txt')
 
 
 @app.route('/google<token>.html')

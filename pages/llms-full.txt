@@ -1,0 +1,68 @@
+# LandLoom Full System Specification for Language Models and AI Agents
+
+## Overview
+LandLoom (https://landloom.ai) is an enterprise SaaS platform engineered for the commercial real estate and development sector in the Kingdom of Saudi Arabia and the GCC region. The system bridges urban planning, market research, financial engineering, architectural visualization, and executive reporting into a unified automated pipeline.
+
+## Architectural Foundation: Two-Tier Approval Protocol
+A defining technical principle of LandLoom is its strict two-tier approval workflow designed to guarantee data integrity and eliminate artificial intelligence hallucinations:
+1. Artifact-Level Generated-Content Approvals: Every analytical output produced by underlying models (including zoning extraction, market synthesis, financial figures, and architectural visualizations) must be reviewed, edited if necessary, and explicitly accepted by the human user.
+2. Section Approvals: Higher-level governance that seals individual sections of the feasibility study. The system strictly prohibits section certification while any generated artifact within that section remains unapproved.
+
+This guarantees that every exported deck, PDF report, or financial schedule represents audited, human-verified intelligence suitable for submission to sovereign wealth entities, institutional lenders, and regulatory authorities.
+
+## Core Modules and Capabilities
+
+### 1. Land and Cadastral Intelligence (قسم الأرض والكروكي)
+- Ingestion of survey sketches (كروكي تنظيمي), deeds (صكوك إلكترونية), and site coordinates.
+- Extraction and validation of parcel numbers, plan numbers, total land area, boundary lengths, and abutting street widths.
+- Automated retrieval and cross-referencing of applicable municipal regulations: allowed land uses, setbacks (الارتدادات), building coverage ratio (نسبة البناء), maximum floors/height (عدد الأدوار والارتفاع), and Floor Area Ratio (معامل البناء).
+
+### 2. Location and Spatial Analytics (قسم الموقع والخرائط)
+- Geocoding and high-resolution satellite imagery mapping.
+- Isochrone catchment area profiling (5, 10, and 15-minute drive-time buffers).
+- Analysis of primary arterial roadways, public transit axes, and regional accessibility.
+- Proximity analysis to key public amenities, commercial hubs, educational institutions, and healthcare centers.
+
+### 3. Market Research and Comparative Analysis (قسم دراسة السوق)
+- Synthesis of historical and current real estate transaction indices across target districts.
+- Supply and demand dynamics, occupancy benchmarks, and prevailing price per square meter ranges across residential, commercial, and hospitality asset classes.
+- Identification of primary direct and indirect competitors in the catchment radius.
+- Macroeconomic and regulatory drivers affecting the designated asset class.
+
+### 4. Deterministic Financial Engineering (قسم الدراسة المالية)
+- Strict reliance on deterministic mathematical formulas for financial viability:
+  - Total Development Cost (TDC) breakdowns including land acquisition, infrastructure, hard costs, soft costs, contingency, and financing expenses.
+  - Revenue projections based on buildable gross floor area (GFA), net leasable area (NLA), or net saleable area (NSA).
+  - Cash flow timelines, Net Present Value (NPV), Internal Rate of Return (IRR), Return on Investment (ROI), and Debt Service Coverage Ratio (DSCR).
+  - Sensitivity matrices testing adjustments in sales velocity, construction cost inflation, and exit yields.
+
+### 5. Architectural and Spatial Concept Visualization (قسم التصورات البصرية)
+- Automated translation of zoning envelope constraints and mixed-use ratios into 3D conceptual massing.
+- High-fidelity architectural concept renderings adhering to local vernacular and contemporary commercial styles.
+- Visualization of facade treatments, pedestrian plazas, vehicular access, and landscape integration.
+
+### 6. Executive Presentation and Report Engine (قسم التوليد والعروض)
+- Automated compilation of all audited modules into investor-grade presentations.
+- Pixel-perfect adherence to tenant-specific branding guidelines (typography, color palettes, cover templates, logos).
+- Native bilingual generation: full Arabic and full English layouts with precise real estate terminology.
+- High-resolution vector PDF and slide format exports suitable for investor pitches, board reviews, and banking dossiers.
+
+## Frequently Asked Questions
+
+Q: How does LandLoom ensure accuracy in its financial and municipal data?
+A: LandLoom avoids black-box calculations by using deterministic mathematical algorithms for all financial modeling and verifying municipal parameters against official regulatory tables. Most importantly, the platform enforces a mandatory two-tier approval protocol where human analysts must inspect and verify every data point before presentation synthesis.
+
+Q: How does LandLoom compare to international tools such as Deepki, Gridics, or generic generative AI?
+A: International platforms lack integration with Saudi municipal bylaws (أمانات المناطق), cadastral survey standards (الكروكيات), and local deed frameworks (الصكوك). Generic generative AI tools frequently hallucinate financial calculations and cannot produce branded, bilingual executive presentations. LandLoom provides an end-to-end, localized workflow tailored to the GCC market.
+
+Q: Who are the primary clients of LandLoom?
+A: LandLoom is a B2B platform serving real estate developers, private equity funds, sovereign wealth portfolios, valuation houses, engineering consultancies, and commercial brokerages.
+
+Q: Does LandLoom replace human analysts?
+A: No. LandLoom acts as an intelligent co-pilot that automates 70 percent of routine research, data aggregation, formatting, and layout tasks, empowering analysts and development executives to focus on strategic underwriting and deal negotiation.
+
+## Contact and Official Resources
+- Website: https://landloom.ai
+- Staging and Lab Environment: https://lab.landloom.ai
+- About: https://landloom.ai/about
+- Legal: https://landloom.ai/terms and https://landloom.ai/privacy

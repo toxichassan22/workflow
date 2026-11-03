@@ -64,6 +64,7 @@ class StagingIndexingProtectionTests(unittest.TestCase):
         self.assertEqual(resp.mimetype, 'application/xml')
         body = resp.get_data(as_text=True)
         self.assertIn('https://landloom.ai/', body)
+        self.assertIn('https://landloom.ai/llms.txt', body)
         self.assertIn('<changefreq>weekly</changefreq>', body)
 
     def test_root_favicon_ico_serves_icon_file(self):
@@ -120,3 +121,30 @@ class StagingIndexingProtectionTests(unittest.TestCase):
             self.assertIn('/assets/favicon-48.png?v=2', content, f"{page_path.name} must reference favicon-48.png?v=2")
             self.assertNotIn('href="/assets/landloom-logo.png" type="image/png"', content,
                              f"{page_path.name} must not use wide logo as favicon")
+
+    def test_llms_txt_and_full_endpoints(self):
+        resp = self.client.get('/llms.txt')
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_data(as_text=True)
+        self.assertIn('# LandLoom', body)
+        self.assertIn('Two-Tier Approval Architecture', body)
+        self.assertIn('Deterministic Financial Feasibility', body)
+
+        resp_full = self.client.get('/llms-full.txt')
+        self.assertEqual(resp_full.status_code, 200)
+        body_full = resp_full.get_data(as_text=True)
+        self.assertIn('# LandLoom Full System Specification', body_full)
+        self.assertIn('Two-Tier Approval Protocol', body_full)
+
+    def test_geo_structured_data_and_discovery_links(self):
+        with open(ROOT / 'pages' / 'landing.html', 'r', encoding='utf-8') as f:
+            landing_content = f.read()
+        self.assertIn('FAQPage', landing_content)
+        self.assertIn('Two-Tier Approval System', landing_content)
+        self.assertIn('Deterministic Financial Modeling', landing_content)
+        self.assertIn('rel="alternate" type="text/plain" href="https://landloom.ai/llms.txt"', landing_content)
+
+        with open(ROOT / 'pages' / 'about.html', 'r', encoding='utf-8') as f:
+            about_content = f.read()
+        self.assertIn('AboutPage', about_content)
+        self.assertIn('rel="alternate" type="text/plain" href="https://landloom.ai/llms.txt"', about_content)
