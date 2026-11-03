@@ -103,3 +103,20 @@ class StagingIndexingProtectionTests(unittest.TestCase):
         self.assertTrue((assets_dir / 'apple-touch-icon.png').exists())
         self.assertTrue((assets_dir / 'site.webmanifest').exists())
         self.assertTrue((assets_dir / 'og-image.png').exists())
+
+    def test_all_public_pages_use_unified_favicon_suite(self):
+        pages_to_check = [
+            ROOT / 'index.html',
+            ROOT / 'pages' / 'landing.html',
+            ROOT / 'pages' / 'about.html',
+            ROOT / 'pages' / 'privacy.html',
+            ROOT / 'pages' / 'terms.html',
+        ]
+        for page_path in pages_to_check:
+            self.assertTrue(page_path.exists(), f"File {page_path} must exist")
+            with open(page_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            self.assertIn('/assets/favicon.svg?v=2', content, f"{page_path.name} must reference new favicon.svg?v=2")
+            self.assertIn('/assets/favicon-48.png?v=2', content, f"{page_path.name} must reference favicon-48.png?v=2")
+            self.assertNotIn('href="/assets/landloom-logo.png" type="image/png"', content,
+                             f"{page_path.name} must not use wide logo as favicon")
