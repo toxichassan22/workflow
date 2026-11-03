@@ -51,13 +51,30 @@
   var DICTS = { ar: WFI18N_AR, en: WFI18N_EN };
   var SUPPORTED = ['ar', 'en'];
   var STORAGE_KEY = 'wf.lang';
+  // The public landing page has its own toggle and keeps a legacy key
+  // (ll_site_lang, pages/site.js). Both surfaces read and write the pair:
+  // wf.lang is the authority and the site key is kept in step, so a visitor who
+  // chose English on the landing page enters the workspace in English and a
+  // choice made in the app is what the landing page opens with next time.
+  var SITE_LANG_KEY = 'll_site_lang';
   var DEFAULT_LANG = 'ar';
 
-  function getLang() {
+  function readStoredLang(key) {
     try {
-      var stored = window.localStorage.getItem(STORAGE_KEY);
-      if (stored === 'ar' || stored === 'en') return stored;
-    } catch (e) { /* storage unavailable: fall through to default */ }
+      var value = window.localStorage.getItem(key);
+      return (value === 'ar' || value === 'en') ? value : null;
+    } catch (e) { return null; }
+  }
+
+  function getLang() {
+    var stored = readStoredLang(STORAGE_KEY);
+    if (stored) return stored;
+    var fromSite = readStoredLang(SITE_LANG_KEY);
+    if (fromSite) {
+      // Adopt the landing page's choice as this device's language.
+      try { window.localStorage.setItem(STORAGE_KEY, fromSite); } catch (e) { /* ignore */ }
+      return fromSite;
+    }
     return DEFAULT_LANG;
   }
 
@@ -426,6 +443,7 @@
   function setLang(lang) {
     if (lang !== 'ar' && lang !== 'en') return getLang();
     try { window.localStorage.setItem(STORAGE_KEY, lang); } catch (e) { /* ignore */ }
+    try { window.localStorage.setItem(SITE_LANG_KEY, lang); } catch (e) { /* ignore */ }
     autoRestore();
     applyI18nToDOM(document);
     if (lang === 'en') {

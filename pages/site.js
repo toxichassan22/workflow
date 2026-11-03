@@ -6,7 +6,11 @@
 (function () {
   'use strict';
 
-  var LANG_KEY = 'll_site_lang';
+  // Shared with the workspace (assets/i18n.js): wf.lang is the authority, the
+  // legacy landing key is kept in step so a choice follows the visitor between
+  // the public site and the app in both directions.
+  var LANG_KEY = 'wf.lang';
+  var LEGACY_LANG_KEY = 'll_site_lang';
   var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   document.body.classList.add('js');
 
@@ -18,10 +22,18 @@
     document.documentElement.lang = lang;
     document.documentElement.dir = lang === 'en' ? 'ltr' : 'rtl';
     try { localStorage.setItem(LANG_KEY, lang); } catch (e) { /* private mode */ }
+    try { localStorage.setItem(LEGACY_LANG_KEY, lang); } catch (e) { /* private mode */ }
   }
 
   function savedLang() {
-    try { return localStorage.getItem(LANG_KEY); } catch (e) { return null; }
+    var keys = [LANG_KEY, LEGACY_LANG_KEY];
+    for (var i = 0; i < keys.length; i++) {
+      try {
+        var value = localStorage.getItem(keys[i]);
+        if (value === 'ar' || value === 'en') return value;
+      } catch (e) { /* private mode */ }
+    }
+    return null;
   }
 
   function authedSwap() {

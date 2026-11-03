@@ -605,6 +605,104 @@ class I18nFoundationTests(unittest.TestCase):
             unknown, [],
             'data-i18n keys missing from assets/i18n.js: %s' % unknown)
 
+    def test_language_choice_is_shared_with_the_public_site(self):
+        """The landing page and the workspace must agree on one language.
+
+        They kept separate keys (ll_site_lang vs wf.lang) and swapped only
+        their own: a visitor chose English on the landing page, signed in, and
+        the workspace opened in Arabic. wf.lang is the authority now, the
+        legacy key is mirrored, and this runs both scripts the way the browser
+        does: the runtime adopts a landing choice, the app's toggle writes both
+        keys, and the landing page opens with the app's choice.
+        """
+        node = shutil.which('node')
+        if not node:
+            self.skipTest('node is not installed')
+        harness = r'''
+const fs = require('fs');
+const vm = require('vm');
+function storage(initial) {
+  const data = Object.assign({}, initial);
+  return {
+    getItem: function (k) { return (k in data) ? data[k] : null; },
+    setItem: function (k, v) { data[k] = String(v); },
+    removeItem: function (k) { delete data[k]; },
+    _dump: function () { return Object.assign({}, data); }
+  };
+}
+function fakeDoc() {
+  return {
+    readyState: 'complete',
+    title: '',
+    documentElement: { lang: 'ar', dir: 'rtl', classList: { add: function () {}, remove: function () {} } },
+    body: { classList: { add: function () {}, remove: function () {} }, appendChild: function () {} },
+    addEventListener: function () {},
+    removeEventListener: function () {},
+    dispatchEvent: function () {},
+    querySelectorAll: function () { return []; },
+    querySelector: function () { return null; },
+    getElementById: function () { return null; },
+    createTreeWalker: function () { return { nextNode: function () { return null; } }; },
+    createElement: function () { return { style: {}, setAttribute: function () {}, appendChild: function () {} }; }
+  };
+}
+function sandbox(store, doc) {
+  const sb = {
+    localStorage: store,
+    document: doc,
+    console: console,
+    __WFI18N_AR: {},
+    __WFI18N_EN: {},
+    __WFI18N_EN_AUTO: {},
+    NodeFilter: { SHOW_TEXT: 4 },
+    CustomEvent: function (name, opts) { this.type = name; this.detail = opts && opts.detail; },
+    matchMedia: function () { return { matches: false }; }
+  };
+  sb.window = sb;
+  vm.createContext(sb);
+  return sb;
+}
+function run(sb, file) {
+  vm.runInContext(fs.readFileSync(file, 'utf8'), sb, { filename: file });
+}
+// 1. Chose English on the landing page, then opened the workspace.
+const landingStore = storage({ ll_site_lang: 'en' });
+const app = sandbox(landingStore, fakeDoc());
+run(app, 'assets/i18n.js');
+const adopted = app.WFI18n.getLang();
+const afterBoot = landingStore._dump();
+// 2. Switched to Arabic in the workspace.
+app.WFI18n.setLang('ar');
+const afterToggle = landingStore._dump();
+// 3. The landing page must open with the workspace's choice.
+const appStore = storage({ 'wf.lang': 'en' });
+const siteDoc = fakeDoc();
+run(sandbox(appStore, siteDoc), 'pages/site.js');
+process.stdout.write(JSON.stringify({
+  adopted: adopted,
+  afterBoot: afterBoot,
+  afterToggle: afterToggle,
+  landingLang: siteDoc.documentElement.lang,
+  landingStore: appStore._dump()
+}));
+'''
+        proc = subprocess.run([node, '-e', harness], cwd=str(ROOT),
+                              capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0,
+                         'running the language scripts failed:\n%s' % proc.stderr)
+        result = json.loads(proc.stdout)
+        self.assertEqual(result['adopted'], 'en',
+                         'the workspace ignored the landing page language choice')
+        self.assertEqual(result['afterBoot'].get('wf.lang'), 'en',
+                         'the landing choice was not adopted as wf.lang')
+        self.assertEqual(result['afterToggle'].get('wf.lang'), 'ar')
+        self.assertEqual(result['afterToggle'].get('ll_site_lang'), 'ar',
+                         'the app toggle does not reach the landing page key')
+        self.assertEqual(result['landingLang'], 'en',
+                         'the landing page ignored the workspace language key')
+        self.assertEqual(result['landingStore'].get('ll_site_lang'), 'en',
+                         'the landing page did not mirror the choice')
+
     def test_no_hardcoded_ui_locale(self):
         """A date or time must be built with the UI language's locale.
 
