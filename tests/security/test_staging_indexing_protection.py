@@ -80,12 +80,12 @@ class StagingIndexingProtectionTests(unittest.TestCase):
             index_content = f.read()
         self.assertIn('name="robots" content="noindex, nofollow, noarchive"', index_content)
         self.assertIn('name="google-site-verification"', index_content)
-        self.assertIn('href="/assets/favicon.svg"', index_content)
+        self.assertIn('href="/assets/favicon.svg?v=2"', index_content)
 
         with open(ROOT / 'pages' / 'landing.html', 'r', encoding='utf-8') as f:
             landing_content = f.read()
         self.assertIn('name="google-site-verification"', landing_content)
-        self.assertIn('href="/assets/favicon-48.png"', landing_content)
+        self.assertIn('href="/assets/favicon-48.png?v=2"', landing_content)
         self.assertIn('property="og:image"', landing_content)
         self.assertIn('SoftwareApplication', landing_content)
 
