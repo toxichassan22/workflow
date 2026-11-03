@@ -77,6 +77,43 @@
       void resumeTenantDesignerChatJob();
     }
 
+    function clearProjectArchiveFilters() {
+      const search = document.getElementById('projectArchiveSearch');
+      const status = document.getElementById('projectArchiveStatus');
+      const from = document.getElementById('projectArchiveFrom');
+      const to = document.getElementById('projectArchiveTo');
+      if (search) search.value = '';
+      if (status) status.value = '';
+      if (from) from.value = '';
+      if (to) to.value = '';
+      tenantArchiveCache = null;
+      openTenantPresentations(true);
+    }
+
+    function updateProjectArchiveStats(items) {
+      const totalEl = document.getElementById('presStatTotal');
+      const inProgressEl = document.getElementById('presStatInProgress');
+      const approvedEl = document.getElementById('presStatApproved');
+      const draftsEl = document.getElementById('presStatDrafts');
+      const badgeEl = document.getElementById('presentationsCountBadge');
+      if (!totalEl && !badgeEl) return;
+      const total = items.length;
+      let inProgress = 0;
+      let approved = 0;
+      let draftCount = 0;
+      items.forEach(d => {
+        const s = d.status || 'draft';
+        if (s === 'approved') approved++;
+        else if (s === 'draft') draftCount++;
+        else inProgress++;
+      });
+      if (totalEl) totalEl.textContent = formatExactSystemNumber(total, true);
+      if (inProgressEl) inProgressEl.textContent = formatExactSystemNumber(inProgress, true);
+      if (approvedEl) approvedEl.textContent = formatExactSystemNumber(approved, true);
+      if (draftsEl) draftsEl.textContent = formatExactSystemNumber(draftCount, true);
+      if (badgeEl) badgeEl.textContent = '(' + formatExactSystemNumber(total, true) + ' ' + (typeof WFT === 'function' ? WFT('projects.unit', 'مشروعاً') : 'مشروعاً') + ')';
+    }
+
     async function openTenantPresentations(force = false) {
       showTenantPage('tenantPresentationsPage');
       const list = document.getElementById('tenantPresentationsList');
@@ -96,7 +133,7 @@
         return;
       }
       const renderDraftRow = (d, projectCost) => {
-        const title = d.title || 'مشروع بدون عنوان';
+        const title = d.title || (typeof WFT === 'function' ? WFT('dashboard.untitled_deck', 'مشروع بدون عنوان') : 'مشروع بدون عنوان');
         const stMeta = typeof getProposalStatusMeta === 'function' ? getProposalStatusMeta(d.status) : { cls: 'status-draft', label: d.status };
         const statusText = typeof getProposalStatusLabel === 'function' ? getProposalStatusLabel(d.status, d.approver_name) : (stMeta.label || 'مسودة');
         const createdAt = (d.created_at || '').slice(0, 16).replace('T', ' ') || '—';
@@ -110,44 +147,62 @@
           : '';
         const statusBadgeHtml = archiveBadge || ('<span class="proposal-status-badge ' + stMeta.cls + '">' + escapeHtml(statusText) + '</span>');
         const copyBtn = hasPermission('copy_presentation')
-          ? '<button class="btn small ghost" onclick="copyProjectDraftById(\'' + d.id + '\')">نسخ العرض</button>'
+          ? '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); copyProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.copy', 'نسخ العرض') : 'نسخ العرض') + '</button>'
           : '';
         // Final delete is a company-admin-only cleanup: the server also refuses
         // drafts that already carry approval history.
         const canDelete = Boolean(tenantUser && tenantUser.isAdmin) ||
           ((tenantUser || {})._userRole || 'company_admin') === 'company_admin';
         const deleteBtn = canDelete
-          ? '<button class="btn small ghost danger" onclick="deleteProjectDraftById(\'' + d.id + '\')">حذف</button>'
+          ? '<button type="button" class="btn small ghost danger" onclick="closeTenantDropdown(); deleteProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.delete', 'حذف') : 'حذف') + '</button>'
           : '';
-        const actionsHtml = isArchived
-          ? '<button class="btn small primary" onclick="restoreProposalById(\'' + d.id + '\')">استعادة</button>' +
-            '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
-            '<button class="btn small ghost" onclick="showDraftVersions(\'' + d.id + '\')">' +
-              WFT('draft_versions.button', 'الإصدارات') + '</button>' +
-            deleteBtn
-          : '<button class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">فتح المشروع</button>' +
-            copyBtn +
-            '<button class="btn small ghost" onclick="showDraftEditLog(\'' + d.id + '\')">سجل التعديلات</button>' +
-            '<button class="btn small ghost" onclick="showDraftVersions(\'' + d.id + '\')">' +
-              WFT('draft_versions.button', 'الإصدارات') + '</button>' +
-            deleteBtn;
+        const editLogBtn = '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); showDraftEditLog(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.edit_log', 'سجل التعديلات') : 'سجل التعديلات') + '</button>';
+        const versionsBtn = '<button type="button" class="btn small ghost" onclick="closeTenantDropdown(); showDraftVersions(\'' + d.id + '\')">' +
+          (typeof WFT === 'function' ? WFT('draft_versions.button', 'الإصدارات') : 'الإصدارات') + '</button>';
+        const moreBtn = '<div class="tenant-dropdown">' +
+          '<button type="button" class="btn small ghost" onclick="toggleTenantDropdown(this)" aria-haspopup="true">' + (typeof WFT === 'function' ? WFT('projects.more', 'المزيد') : 'المزيد') + '</button>' +
+          '<div class="tenant-dropdown-menu">' +
+            (!isArchived ? copyBtn : '') +
+            editLogBtn +
+            versionsBtn +
+            deleteBtn +
+          '</div>' +
+          '</div>';
+        const primaryBtn = isArchived
+          ? '<button type="button" class="btn small primary" onclick="restoreProposalById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.restore', 'استعادة') : 'استعادة') + '</button>'
+          : '<button type="button" class="btn small primary" onclick="openProjectDraftById(\'' + d.id + '\')">' + (typeof WFT === 'function' ? WFT('projects.open', 'فتح المشروع') : 'فتح المشروع') + '</button>';
+        const actionsHtml = primaryBtn + moreBtn;
         const rowCls = isArchived ? 'll-row-archived' : '';
         return '<tr data-draft-id="' + d.id + '"' + (rowCls ? ' class="' + rowCls + '"' : '') + '>' +
-          '<td style="font-weight:700">' + escapeHtml(title) + '</td>' +
+          '<td class="project-title-cell" style="font-weight:700">' + escapeHtml(title) + '</td>' +
           '<td>' + statusBadgeHtml + '</td>' +
           '<td>' + totalCostCell + '</td>' +
           '<td>' + mapsCostCell + '</td>' +
-          '<td>' + escapeHtml(createdAt) + '</td>' +
-          '<td>' + escapeHtml(updatedAt) + '</td>' +
-          '<td><div class="tenant-actions" style="flex-wrap:wrap">' + actionsHtml + '</div></td>' +
+          '<td><span dir="ltr">' + escapeHtml(createdAt) + '</span></td>' +
+          '<td><span dir="ltr">' + escapeHtml(updatedAt) + '</span></td>' +
+          '<td class="project-actions-cell"><div class="tenant-actions" style="gap:8px">' + actionsHtml + '</div></td>' +
           '</tr>';
       };
-      const draftTableHtml = (rowsHtml) =>
-        '<div class="table-wrap"><table><thead><tr>' +
-        '<th>اسم المشروع</th><th>حالة المشروع</th><th>التكلفة الإجمالية</th><th>تكلفة الخرائط</th>' +
-        '<th>تاريخ الإنشاء</th><th>تاريخ آخر تعديل</th><th>الإجراءات</th>' +
-        '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
-      showInlineLoader(list, 'جاري تحميل المشاريع...');
+      const draftTableHtml = (rowsHtml, count) => {
+        const showingText = typeof WFT === 'function'
+          ? WFT('projects.showing', 'عرض {shown} من إجمالي {total} مشروعاً', { shown: count, total: count })
+          : ('عرض ' + count + ' من إجمالي ' + count + ' مشروعاً');
+        return '<div class="tenant-content-panel tenant-projects-table-panel" style="padding:0;overflow:visible">' +
+          '<div class="table-wrap" style="border:none;border-radius:10px 10px 0 0;overflow-x:auto;overflow-y:visible"><table class="tenant-projects-table"><thead><tr>' +
+          '<th>' + (typeof WFT === 'function' ? WFT('projects.name', 'اسم المشروع') : 'اسم المشروع') + '</th>' +
+          '<th>' + (typeof WFT === 'function' ? WFT('projects.status', 'حالة المشروع') : 'حالة المشروع') + '</th>' +
+          '<th>' + (typeof WFT === 'function' ? WFT('projects.total_cost', 'التكلفة الإجمالية') : 'التكلفة الإجمالية') + '</th>' +
+          '<th>' + (typeof WFT === 'function' ? WFT('projects.maps_cost', 'تكلفة الخرائط') : 'تكلفة الخرائط') + '</th>' +
+          '<th>' + (typeof WFT === 'function' ? WFT('projects.created_at', 'تاريخ الإنشاء') : 'تاريخ الإنشاء') + '</th>' +
+          '<th>' + (typeof WFT === 'function' ? WFT('projects.updated_at', 'تاريخ آخر تعديل') : 'تاريخ آخر تعديل') + '</th>' +
+          '<th style="width:160px;min-width:160px">' + (typeof WFT === 'function' ? WFT('projects.actions', 'الإجراءات') : 'الإجراءات') + '</th>' +
+          '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' +
+          '<div class="tenant-table-footer">' +
+            '<span>' + escapeHtml(showingText) + '</span>' +
+          '</div>' +
+          '</div>';
+      };
+      showInlineLoader(list, typeof WFT === 'function' ? WFT('i18n.loading_projects', 'جاري تحميل المشاريع...') : 'جاري تحميل المشاريع...');
       const stamp = String(Date.now()) + Math.random().toString(16).slice(2);
       list.dataset.archiveStamp = stamp;
       // Render the list from the lightweight drafts query alone, then enrich each
@@ -163,15 +218,20 @@
       }
       const drafts = Array.isArray(draftsData.drafts) ? draftsData.drafts : [];
       const projectIds = drafts.map(d => d.id).filter(Boolean);
+      updateProjectArchiveStats(drafts);
       if (!drafts.length) {
-        const emptyHtml = '<p class="tenant-hint">لا توجد مشاريع مطابقة.</p>';
+        const emptyHtml = '<div class="tenant-dash-empty-state">' +
+          '<p class="tenant-dash-empty-title">' + escapeHtml(typeof WFT === 'function' ? WFT('projects.empty_title', 'لا توجد مشاريع مطابقة') : 'لا توجد مشاريع مطابقة') + '</p>' +
+          '<p class="tenant-hint">' + escapeHtml(typeof WFT === 'function' ? WFT('projects.empty_hint', 'لم يتم العثور على مشاريع تطابق معايير البحث والتصفية المحددة.') : 'لم يتم العثور على مشاريع تطابق معايير البحث والتصفية المحددة.') + '</p>' +
+          '<button type="button" class="btn ghost small" onclick="clearProjectArchiveFilters()">' + escapeHtml(typeof WFT === 'function' ? WFT('projects.reset', 'إعادة ضبط الفلاتر') : 'إعادة ضبط الفلاتر') + '</button>' +
+          '</div>';
         if (list.dataset.archiveStamp === stamp) {
           list.innerHTML = emptyHtml;
           tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: emptyHtml };
         }
         return;
       }
-      list.innerHTML = draftTableHtml(drafts.map(d => renderDraftRow(d, null)).join(''));
+      list.innerHTML = draftTableHtml(drafts.map(d => renderDraftRow(d, null)).join(''), drafts.length);
       tenantArchiveCache = { key: cacheKey, timestamp: Date.now(), html: list.innerHTML };
       if (!projectIds.length) return;
       const totalsData = await apiWithTimeout('GET', '/api/usage-totals?draftIds=' + encodeURIComponent(projectIds.join(',')), null, 25000).catch(() => null);

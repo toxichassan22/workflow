@@ -1072,7 +1072,9 @@
 
     function formatUsageCost(sar) {
       const value = Number(sar) || 0;
-      const text = formatExactSystemNumber(value, true);
+      const rounded = Math.round(value * 100) / 100;
+      const hasDecimals = (rounded % 1) !== 0;
+      const text = formatExactSystemNumber(hasDecimals ? rounded.toFixed(2) : rounded, true);
       return '<span dir="ltr">' + text + '</span> <span>نقطة</span>';
     }
 
