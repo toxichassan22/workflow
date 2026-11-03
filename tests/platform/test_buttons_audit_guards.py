@@ -163,6 +163,17 @@ class ButtonAuditGuardsTests(unittest.TestCase):
         self.assertIn("تقدير التكلفة وحجز رصيد المحفظة لبدء التوليد", files_src)
         self.assertIn("قفل إصدار العرض وختم البصمة الرقمية للملف", export_src)
 
+    def test_google_sheets_tracking_rule_recorded_in_agents_md(self):
+        """AGENTS.md must document the Google Sheets task tracking rule and column structure."""
+        agents_src = self.read_file_text("AGENTS.md")
+        self.assertIn("Task tracking in Google Sheets (owner-managed workflow)", agents_src)
+        self.assertIn("1xvCD6hoAjQBR38aBEA2jskI_UqbaHmGoYGiAAr25JM8", agents_src)
+        self.assertIn("قيد العمل", agents_src)
+        self.assertIn("قيد المراجعة", agents_src)
+        self.assertIn("الملاحظات", agents_src)
+        self.assertIn("مشكله سيستم", agents_src)
+        self.assertIn("صفحه التصميم", agents_src)
+
 
 if __name__ == "__main__":
     unittest.main()
