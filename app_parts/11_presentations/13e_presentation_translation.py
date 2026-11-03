@@ -11,6 +11,7 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 import copy as _translation_copy
+import threading as _translation_threading
 
 
 def _presentation_slides(presentation):
@@ -102,6 +103,9 @@ def api_translate_presentation(pres_id):
         }), 422
 
     failure = {}
+    failure_lock = _translation_threading.Lock()
+    tenant_id = g.tenant_id
+    draft_id = presentation.get('draft_id')
 
     def _translate_batch(texts):
         response = call_text_chat(
@@ -110,9 +114,10 @@ def api_translate_presentation(pres_id):
             max_tokens=min(8000, 600 + len(texts) * 160),
             response_format={'type': 'json_object'},
             model=model_name,
+            reasoning_effort='none',
             usage_ctx={
-                'tenant_id': g.tenant_id,
-                'draft_id': presentation.get('draft_id'),
+                'tenant_id': tenant_id,
+                'draft_id': draft_id,
                 'flow': 'translate',
             },
         )
@@ -120,7 +125,8 @@ def api_translate_presentation(pres_id):
             message = ''
             if isinstance(response, dict):
                 message = str((response.get('error') or {}).get('message') or '')
-            failure.setdefault('message', message or 'تعذّر الوصول إلى موديل الترجمة.')
+            with failure_lock:
+                failure.setdefault('message', message or 'تعذّر الوصول إلى موديل الترجمة.')
             return [None] * len(texts)
         content = extract_chat_content(response, 'TRANSLATE')
         return slide_translator.parse_batch_response(content, len(texts))

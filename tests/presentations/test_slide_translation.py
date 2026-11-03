@@ -347,6 +347,24 @@ class PresentationTranslationApiTests(unittest.TestCase):
             src,
         )
 
+    def test_translation_disables_reasoning_effort_for_fast_throughput(self):
+        created = self._create()
+        recorded_efforts = []
+
+        def capture_chat(*args, **kwargs):
+            recorded_efforts.append(kwargs.get('reasoning_effort'))
+            return self._fake_chat(*args, **kwargs)
+
+        with patch.object(self.module, 'call_text_chat', side_effect=capture_chat), \
+                patch.object(self.module, 'extract_chat_content',
+                             side_effect=lambda response, label=None: response.get('content', '')):
+            response = self.client.post(
+                '/api/presentations/%s/translate' % created['presentationId'],
+                headers=self.headers, json={'targetLang': 'en'})
+        self.assertEqual(response.status_code, 201)
+        self.assertTrue(len(recorded_efforts) > 0)
+        self.assertTrue(all(effort == 'none' for effort in recorded_efforts))
+
     def test_translation_without_a_configured_model_is_refused(self):
         created = self._create()
         with patch.object(self.module, 'TRANSLATION_MODEL', ''):

@@ -22,6 +22,7 @@ Public entry point: :func:`translate_slides`.
 import copy
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 AR_RE = re.compile(r'[\u0600-\u06FF]')
 TAG_SPLIT_RE = re.compile(r'(<[^>]*>)')
@@ -297,7 +298,7 @@ def _recover_pieces(tokens, units, accepted, translator, glossary):
     return recovered
 
 
-def translate_slides(slides, translator, target_lang='en', glossary=None):
+def translate_slides(slides, translator, target_lang='en', glossary=None, max_workers=6):
     """Translate a deck's slides in place-free fashion.
 
     ``translator`` is ``callable(list_of_strings) -> list_of_strings`` and owns
@@ -308,34 +309,58 @@ def translate_slides(slides, translator, target_lang='en', glossary=None):
         raise ValueError('unsupported target language: %s' % target_lang)
     translated_slides = copy.deepcopy(slides or [])
     stats = {'slides': 0, 'units': 0, 'translated': 0, 'skipped': 0, 'titles': 0}
+    if not translated_slides:
+        return translated_slides, stats
+
+    for slide in translated_slides:
+        if isinstance(slide, dict):
+            stats['slides'] += 1
+
+    # 1. Translate all plain text items (titles and index entries) in batch across the deck.
+    # Grouping them avoids dozens of roundtrips for 1-item lists.
+    plain_targets = []
     for slide in translated_slides:
         if not isinstance(slide, dict):
             continue
-        stats['slides'] += 1
-        html = slide.get('html')
-        if isinstance(html, str) and html.strip() and AR_RE.search(html):
-            slide['html'], slide_stats = translate_html(html, translator, glossary)
-            for key in ('units', 'translated', 'skipped'):
-                stats[key] += slide_stats[key]
         title = slide.get('title')
         if isinstance(title, str) and AR_RE.search(title):
-            value = _plain([title], translator, glossary)[0]
-            if value:
-                slide['title'] = value
-                stats['titles'] += 1
+            plain_targets.append(('title', slide, title))
         entries = slide.get('indexEntries')
         if isinstance(entries, list):
-            pending = [
-                entry for entry in entries
-                if isinstance(entry, dict) and isinstance(entry.get('title'), str)
-                and AR_RE.search(entry['title'])
-            ]
-            if pending:
-                values = _plain([entry['title'] for entry in pending], translator, glossary)
-                for entry, value in zip(pending, values):
-                    if value:
-                        entry['title'] = value
-                        stats['titles'] += 1
+            for entry in entries:
+                if isinstance(entry, dict) and isinstance(entry.get('title'), str) and AR_RE.search(entry['title']):
+                    plain_targets.append(('entry', entry, entry['title']))
+
+    if plain_targets:
+        texts = [target[2] for target in plain_targets]
+        translated_texts = _plain(texts, translator, glossary)
+        for (target_type, target_obj, _), val in zip(plain_targets, translated_texts):
+            if val:
+                target_obj['title'] = val
+                stats['titles'] += 1
+
+    # 2. Translate slide HTMLs in parallel using ThreadPoolExecutor.
+    slides_to_translate = []
+    for index, slide in enumerate(translated_slides):
+        if not isinstance(slide, dict):
+            continue
+        html = slide.get('html')
+        if isinstance(html, str) and html.strip() and AR_RE.search(html):
+            slides_to_translate.append((index, html))
+
+    if slides_to_translate:
+        workers = min(max(len(slides_to_translate), 1), max(1, max_workers))
+        def _process_slide(item):
+            idx, html_content = item
+            new_html, s_stats = translate_html(html_content, translator, glossary)
+            return idx, new_html, s_stats
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for idx, new_html, s_stats in executor.map(_process_slide, slides_to_translate):
+                translated_slides[idx]['html'] = new_html
+                for key in ('units', 'translated', 'skipped'):
+                    stats[key] += s_stats[key]
+
     return translated_slides, stats
 
 

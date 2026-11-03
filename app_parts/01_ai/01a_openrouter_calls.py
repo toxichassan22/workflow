@@ -90,6 +90,7 @@ def call_openrouter_chat(system_prompt, user_content,     temperature=0.7, max_t
         payload["temperature"] = temperature
     if reasoning_effort:
         payload["reasoning_effort"] = reasoning_effort
+        payload["reasoning"] = {"effort": reasoning_effort}
     if response_format:
         payload["response_format"] = response_format
     if provider:

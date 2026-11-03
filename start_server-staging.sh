@@ -166,7 +166,7 @@ setsid "$GUNICORN" -b "127.0.0.1:$SELECTED_PORT" app:app \
   --preload \
   --workers 2 \
   --threads 4 \
-  --timeout 300 \
+  --timeout 600 \
   --graceful-timeout 30 \
   --max-requests 2000 \
   --max-requests-jitter 200 \
