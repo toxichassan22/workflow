@@ -845,3 +845,99 @@ html[dir="ltr"] .tenant-projects-table .project-actions-cell .tenant-dropdown-me
   font-weight: 600;
   color: var(--ink-muted, #64748b);
 }
+
+
+/* ── Approvals Hub ────────────────────────────────────────────────────────── */
+.tenant-approvals-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--ui-border, #e2e8f0);
+  padding-bottom: 12px;
+}
+
+.tenant-approvals-tabs .btn {
+  border-radius: 9px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tenant-approval-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--ui-border, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(7, 24, 44, 0.04);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+
+.tenant-approval-card:hover {
+  border-color: var(--teal, #0FA9C4);
+  box-shadow: 0 4px 12px rgba(7, 24, 44, 0.08);
+}
+
+.tenant-approval-card .approval-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.tenant-approval-card .approval-header-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.tenant-approval-card .approval-title {
+  margin: 0;
+  color: var(--ink, #07182C);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.tenant-approval-card .approval-meta {
+  color: var(--ink-muted, #64748b);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tenant-approval-card .approval-meta-dot {
+  color: var(--ui-border-strong, #cbd5e1);
+}
+
+.tenant-approval-card .approval-note-box {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: var(--surface-subtle, #f8fafc);
+  border-right: 3px solid var(--teal, #0FA9C4);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink, #07182C);
+  font-style: italic;
+}
+
+html[dir="ltr"] .tenant-approval-card .approval-note-box {
+  border-right: none;
+  border-left: 3px solid var(--teal, #0FA9C4);
+}
+
+.tenant-approval-card .approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}

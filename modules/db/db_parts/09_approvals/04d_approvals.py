@@ -84,6 +84,27 @@ def get_pending_approvals(tenant_id, accessible_draft_ids=None):
     return attach_approver_names(tenant_id, [dict(r) for r in rows])
 
 
+def get_approval_history(tenant_id, limit=50, accessible_draft_ids=None):
+    """Get decided presentation approvals (approved, rejected) for a tenant."""
+    conn = get_db()
+    query = '''SELECT pa.*, p.title as pres_title, p.slide_count, p.draft_id
+           FROM presentation_approvals pa
+           JOIN presentations p ON pa.presentation_id = p.id
+           WHERE pa.tenant_id = ? AND pa.status != 'pending' '''
+    params = [tenant_id]
+    if accessible_draft_ids is not None:
+        ids = [str(i) for i in accessible_draft_ids]
+        if ids:
+            query += ' AND (p.draft_id IS NULL OR p.draft_id IN (' + ','.join('?' * len(ids)) + '))'
+            params.extend(ids)
+        else:
+            query += ' AND p.draft_id IS NULL'
+    query += ' ORDER BY COALESCE(pa.reviewed_at, pa.created_at) DESC LIMIT ?'
+    params.append(max(1, min(int(limit or 50), 200)))
+    rows = conn.execute(query, params).fetchall()
+    return attach_approver_names(tenant_id, [dict(r) for r in rows])
+
+
 def get_approval(approval_id, tenant_id):
     conn = get_db()
     row = conn.execute(

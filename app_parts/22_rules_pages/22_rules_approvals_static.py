@@ -172,6 +172,19 @@ def api_get_approvals():
     return jsonify({'success': True, 'approvals': approvals})
 
 
+@app.route('/api/approvals/history', methods=['GET'])
+@require_auth
+def api_get_approval_history():
+    """Get decided presentation approvals for the current tenant."""
+    if not _landloom_can('approvals') and not _landloom_has_approver_assignment():
+        return _landloom_forbidden()
+    limit = int(request.args.get('limit', 50)) if request.args.get('limit', '').isdigit() else 50
+    history = db.get_approval_history(
+        g.tenant_id, limit=limit,
+        accessible_draft_ids=db.user_accessible_draft_ids(g.user_id, g.tenant_id))
+    return jsonify({'success': True, 'approvals': history})
+
+
 @app.route('/api/approvals/<approval_id>/review', methods=['POST'])
 @require_auth
 def api_review_approval(approval_id):
