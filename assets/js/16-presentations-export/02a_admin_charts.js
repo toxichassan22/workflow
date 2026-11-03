@@ -130,6 +130,21 @@
       return name + ' ' + (parts[0] || '');
     }
 
+    function sagMonthLabelParts(iso) {
+      const lang = (window.WFI18n && WFI18n.getLang && WFI18n.getLang()) || 'ar';
+      const names = SAG_MONTHS[lang === 'en' ? 'en' : 'ar'];
+      const s = String(iso);
+      const parts = s.split('-');
+      const m = parseInt(parts[1], 10);
+      const name = names[(m || 1) - 1] || s;
+      const year = parts[0] || '';
+      if (parts.length >= 3) {
+        const day = parseInt(parts[2], 10);
+        return { full: day + ' ' + name + ' ' + year, month: day + ' ' + name, year: year };
+      }
+      return { full: name + ' ' + year, month: name, year: year };
+    }
+
     function sagFmtNum(v) {
       return formatExactSystemNumber(Number(v || 0), true);
     }
@@ -254,78 +269,94 @@
     }
 
     function sagLineChart(labels, series) {
-      const W = 660, H = 240, padL = 34, padR = 10, padT = 16, padB = 28;
+      const W = 880, H = 260, padL = 46, padR = 46, padT = 20, padB = 40;
       const innerW = W - padL - padR, innerH = H - padT - padB;
-      const maxV = Math.max(0.01, ...series.flatMap(s => s.values));
-      const sc = sagNiceScale(maxV), top = sc.top;
       const n = labels.length;
-      const x = i => padL + (n === 1 ? innerW / 2 : i * innerW / (n - 1));
-      const y = v => padT + innerH - (v / top) * innerH;
-      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img">';
+
+      // Detect dual-axis needs when series have radically different units/magnitudes
+      const s0Values = series[0]?.values || [];
+      const s1Values = series[1]?.values || [];
+      const max0 = Math.max(0.01, ...s0Values);
+      const max1 = Math.max(0.01, ...s1Values);
+      const isDual = series.length === 2 && (
+        series[0].fmt !== series[1].fmt ||
+        (max0 > 0 && max1 > 0 && (max0 / max1 >= 5 || max1 / max0 >= 5))
+      );
+
+      const sc0 = sagNiceScale(max0);
+      const sc1 = isDual ? sagNiceScale(max1) : sc0;
+
+      const x = i => padL + (n <= 1 ? innerW / 2 : i * innerW / (n - 1));
+      const yFor = (v, sIdx) => {
+        const sc = (isDual && sIdx === 1) ? sc1 : sc0;
+        return padT + innerH - (Math.max(0, v) / sc.top) * innerH;
+      };
+
+      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" preserveAspectRatio="xMidYMid meet">';
+
+      // Horizontal dashed grid lines and Y ticks
       for (let g = 0; g <= 3; g++) {
-        const gv = sc.step * g, gy = y(gv);
-        svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" class="admin-chart-grid"/>' +
-          '<text x="' + (padL - 6) + '" y="' + (gy + 4) + '" class="admin-chart-tick" text-anchor="end">' + sagTickText(gv, top) + '</text>';
+        const gy = padT + innerH - (g / 3) * innerH;
+        svg += '<line x1="' + padL + '" y1="' + gy + '" x2="' + (W - padR) + '" y2="' + gy + '" class="admin-chart-grid" stroke-dasharray="3,3"/>';
+        // Left Y tick (Series 0)
+        const v0 = sc0.step * g;
+        const tickTxt0 = (series[0]?.fmt || sagTickText)(v0, sc0.top);
+        svg += '<text x="' + (padL - 8) + '" y="' + (gy + 4) + '" class="admin-chart-tick admin-chart-tick-left" text-anchor="end">' + tickTxt0 + '</text>';
+        // Right Y tick (Series 1 if dual)
+        if (isDual && series[1]) {
+          const v1 = sc1.step * g;
+          const tickTxt1 = (series[1].fmt || sagTickText)(v1, sc1.top);
+          svg += '<text x="' + (W - padR + 8) + '" y="' + (gy + 4) + '" class="admin-chart-tick admin-chart-tick-right" text-anchor="start">' + tickTxt1 + '</text>';
+        }
       }
-      // X labels sit on a coarse grid plus both range edges. The edge labels
-      // are pinned to the viewBox borders — text-anchor start/end is
-      // direction-relative, so on the RTL page the physical edge flips — which
-      // keeps a long month name inside the frame instead of clipped at the
-      // border. A grid tick whose label would touch a kept neighbour is
-      // dropped; the two edge labels always render.
-      const rtl = typeof document !== 'undefined' && document.documentElement.dir === 'rtl';
-      const tickText = i => sagMonthLabel(labels[i]);
-      const maxLabelW = Math.max(1, ...labels.map((lb, i) => sagTickWidth(tickText(i))));
-      const maxTicks = Math.max(2, Math.floor(innerW / (maxLabelW + 14)));
-      const tickStep = Math.max(1, Math.ceil(n / maxTicks));
+
+      // X-axis ticks & vertical dashed guidelines
+      // When n <= 14 (typical 12-month rollup like in reference image), show EVERY single month!
+      // When n > 14 (e.g. 24 months), step by 2 so 12 ticks are evenly distributed.
+      const tickStep = (n <= 14) ? 1 : Math.max(1, Math.ceil(n / 12));
       const candidates = [];
       if (tickStep <= 1) {
         for (let i = 0; i < n; i++) candidates.push(i);
       } else {
-        const numIntervals = Math.max(1, Math.min(maxTicks - 1, Math.round((n - 1) / tickStep)));
+        const numIntervals = Math.max(1, Math.round((n - 1) / tickStep));
         for (let k = 0; k <= numIntervals; k++) {
           const idx = Math.round(k * (n - 1) / numIntervals);
           if (!candidates.length || candidates[candidates.length - 1] !== idx) candidates.push(idx);
         }
       }
 
-      const tickBox = i => {
-        const w = sagTickWidth(tickText(i));
-        if (n > 1 && i === 0) return [2, 2 + w];
-        if (i === n - 1 && n > 1) return [W - 2 - w, W - 2];
-        return [x(i) - w / 2, x(i) + w / 2];
-      };
-      const kept = [];
       candidates.forEach(i => {
-        if (!kept.length) { kept.push(i); return; }
-        if (i === n - 1) {
-          while (kept.length > 1 && tickBox(kept[kept.length - 1])[1] + 4 > tickBox(i)[0]) kept.pop();
-          kept.push(i);
-          return;
-        }
-        if (tickBox(kept[kept.length - 1])[1] + 4 <= tickBox(i)[0]) kept.push(i);
+        const px = x(i);
+        const lp = sagMonthLabelParts(labels[i]);
+        // Vertical dashed guideline (like OpenAI/OpenRouter reference)
+        svg += '<line x1="' + px.toFixed(1) + '" y1="' + padT + '" x2="' + px.toFixed(1) + '" y2="' + (padT + innerH) + '" class="admin-chart-grid-v"/>';
+        // Month label (top line)
+        svg += '<text x="' + px.toFixed(1) + '" y="' + (H - 18) + '" class="admin-chart-tick" text-anchor="middle">' + escapeHtml(lp.month) + '</text>';
+        // Year label (bottom line)
+        svg += '<text x="' + px.toFixed(1) + '" y="' + (H - 6) + '" class="admin-chart-tick-sub" text-anchor="middle">' + escapeHtml(lp.year) + '</text>';
       });
-      labels.forEach((lb, i) => {
-        if (kept.indexOf(i) === -1) return;
-        const anchor = n === 1 ? 'middle'
-          : i === 0 ? (rtl ? 'end' : 'start')
-          : i === n - 1 ? (rtl ? 'start' : 'end') : 'middle';
-        const lx = n === 1 ? x(i) : (i === 0 ? 2 : (i === n - 1 ? W - 2 : x(i)));
-        svg += '<text x="' + lx + '" y="' + (H - 8) + '" class="admin-chart-tick" text-anchor="' + anchor + '">' + tickText(i) + '</text>';
-      });
-      series.forEach(s => {
+
+      // Solid baseline
+      svg += '<line x1="' + padL + '" y1="' + (padT + innerH) + '" x2="' + (W - padR) + '" y2="' + (padT + innerH) + '" class="admin-chart-baseline"/>';
+
+      // Series curves
+      series.forEach((s, sIdx) => {
         const fmt = s.fmt || sagFmtNum;
-        const pts = s.values.map((v, i) => [x(i), y(v)]);
+        const pts = s.values.map((v, i) => [x(i), yFor(v, sIdx)]);
         const line = sagSmoothPath(pts);
         const area = line + ' L' + x(n - 1) + ' ' + (padT + innerH) + ' L' + x(0) + ' ' + (padT + innerH) + ' Z';
         svg += '<path d="' + area + '" fill="' + s.color + '" opacity="0.10"/>' +
-          '<path d="' + line + '" fill="none" stroke="' + s.color + '" stroke-width="2.4" stroke-linecap="round"/>';
+          '<path d="' + line + '" fill="none" stroke="' + s.color + '" stroke-width="2.2" stroke-linecap="round"/>';
+        // Only draw dots at non-zero peaks so the zero baseline is not cluttered with dots!
         pts.forEach((p, i) => {
-          svg += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.2" fill="' + s.color + '">' +
-            '<title>' + s.name + ': ' + fmt(s.values[i]) + ' — ' + sagMonthLabel(labels[i]) + '</title></circle>';
+          if ((s.values[i] || 0) > 0) {
+            svg += '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2.8" fill="' + s.color + '">' +
+              '<title>' + s.name + ': ' + fmt(s.values[i]) + ' — ' + sagMonthLabel(labels[i]) + '</title></circle>';
+          }
         });
       });
-      return { svg: svg + '</svg>', geom: { W, H, padL, padR, padT, padB, top, n } };
+
+      return { svg: svg + '</svg>', geom: { W, H, padL, padR, padT, padB, top: sc0.top, top1: sc1.top, isDual, n } };
     }
 
     function sagBindChartTooltip(container, labels, series, geom) {
@@ -335,7 +366,10 @@
       const innerW = geom.W - geom.padL - geom.padR;
       const innerH = geom.H - geom.padT - geom.padB;
       const xFor = i => geom.padL + (geom.n === 1 ? innerW / 2 : i * innerW / (geom.n - 1));
-      const yFor = v => geom.padT + innerH - (v / geom.top) * innerH;
+      const yFor = (v, sIdx) => {
+        const top = (geom.isDual && sIdx === 1) ? (geom.top1 || geom.top) : geom.top;
+        return geom.padT + innerH - (Math.max(0, v) / top) * innerH;
+      };
       const guide = document.createElementNS(NS, 'line');
       guide.setAttribute('class', 'admin-chart-guide');
       guide.setAttribute('x1', '0');
@@ -370,7 +404,7 @@
         guide.style.display = '';
         series.forEach((s, si) => {
           dots[si].setAttribute('cx', px.toFixed(1));
-          dots[si].setAttribute('cy', yFor(s.values[i] || 0).toFixed(1));
+          dots[si].setAttribute('cy', yFor(s.values[i] || 0, si).toFixed(1));
           dots[si].style.display = '';
         });
         tip.innerHTML = '<div class="tip-title">' + escapeHtml(sagMonthLabel(labels[i])) + '</div>' +

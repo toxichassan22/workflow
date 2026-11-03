@@ -1,12 +1,15 @@
-"""Tests for the revitalized Tenant Dashboard.
+"""Tests for the revitalized Tenant Dashboard and flexible chart layout.
 
 Covers:
 1. Shell markup: `#dashboardRecentSection` and `#dashRecentProjects` presence,
    data-i18n attributes, no how-to copy, no emojis or icons.
 2. Number & points formatting in `02a_admin_charts.js`: avoids floating point
    artifacts (e.g. 870.2657... -> 870.27, 1129.73... -> 1,129.73).
-3. Month tick distribution in `02a_admin_charts.js`: 12-month interval
-   spacing without erratic tick popping or skipping.
+3. Flexible date matrix in `02a_admin_charts.js`:
+   - 2-line month/year label breakdown (`sagMonthLabelParts`).
+   - Vertical dashed grid lines (`admin-chart-grid-v`).
+   - Dual-axis scaling (`isDual`) for divergent series (spend vs proposals).
+   - Clean zero baseline with dots only on non-zero peaks.
 4. Recent projects rendering in `01_presentations.js`: empty states and populated rows.
 5. Balance pill width in `04_export_responsive.css`: expanded max-width preventing badge truncation.
 """
@@ -71,13 +74,21 @@ class TenantDashboardRevitalizationTests(unittest.TestCase):
         """sagFmtMoneyParts rounds floats to 2 decimal places and handles integers."""
         self.assertIn('const rounded = Math.round(n * 100) / 100;', self.charts_js)
         self.assertIn('const val = hasDecimals ? rounded.toFixed(2) : rounded;', self.charts_js)
-        # Should not pass raw unrounded n into formatExactSystemNumber
         self.assertNotIn('number: formatExactSystemNumber(n, true)', self.charts_js)
 
-    def test_chart_tick_candidate_distribution(self):
-        """Chart candidates are evenly distributed across n-1 intervals when step > 1."""
-        self.assertIn('const numIntervals = Math.max(1, Math.min(maxTicks - 1, Math.round((n - 1) / tickStep)));', self.charts_js)
-        self.assertIn('Math.round(k * (n - 1) / numIntervals)', self.charts_js)
+    def test_flexible_chart_date_breakdown_and_guidelines(self):
+        """Chart provides month/year parts breakdown and vertical dashed guidelines."""
+        self.assertIn('function sagMonthLabelParts(iso)', self.charts_js)
+        self.assertIn('class="admin-chart-grid-v"', self.charts_js)
+        self.assertIn('class="admin-chart-tick-sub"', self.charts_js)
+        self.assertIn('class="admin-chart-baseline"', self.charts_js)
+
+    def test_chart_dual_axis_and_clean_baseline(self):
+        """Chart supports dual-axis scaling for divergent series and suppresses baseline dots."""
+        self.assertIn('isDual', self.charts_js)
+        self.assertIn('admin-chart-tick-right', self.charts_js)
+        # Circles only drawn on non-zero values to avoid 24-dot zero baseline clutter
+        self.assertIn('if ((s.values[i] || 0) > 0)', self.charts_js)
 
     def test_balance_pill_max_width_prevents_badge_truncation(self):
         """Package badge pill allows at least 65% width to prevent '...' truncation."""
@@ -87,12 +98,13 @@ class TenantDashboardRevitalizationTests(unittest.TestCase):
         self.assertGreaterEqual(pct, 65, f"tenant-balance-pill max-width is {pct}%, expected >= 65%")
 
     def test_dashboard_css_classes_in_shell_chrome(self):
-        """Shell chrome stylesheet contains the styling for recent projects and lifecycle strip."""
+        """Shell chrome stylesheet contains the styling for recent projects and chart matrix."""
         self.assertIn('.tenant-recent-projects-panel', self.css_chrome)
         self.assertIn('.tenant-recent-project-row', self.css_chrome)
         self.assertIn('.tenant-dash-empty-state', self.css_chrome)
-        self.assertIn('#dashboardLifecycle .tenant-dash-card', self.css_chrome)
-        self.assertIn('#dashboardStats .tenant-balance-card', self.css_chrome)
+        self.assertIn('.admin-chart-grid-v', self.css_chrome)
+        self.assertIn('.admin-chart-tick-sub', self.css_chrome)
+        self.assertIn('.admin-chart-tick-right', self.css_chrome)
 
     def test_dashboard_i18n_keys_exist_in_both_languages(self):
         """All new dashboard translation keys exist in both Arabic and English dictionaries."""
