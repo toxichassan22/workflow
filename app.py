@@ -63,6 +63,7 @@ import market_study
 import executive_content
 import population_service
 import slide_engine
+import slide_translator
 import change_tracking
 import presentation_assets
 import designer_agent_ids
@@ -398,6 +399,11 @@ TEXT_REASONING_EFFORT = os.environ.get('TEXT_REASONING_EFFORT', 'high')
 DESIGNER_REASONING_EFFORT = os.environ.get('DESIGNER_REASONING_EFFORT', 'low')
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
+# Deck translation runs on its own model: re-writing an existing deck is a
+# mechanical job, and the owner picks what pays for it. There is deliberately no
+# default slug — an empty value makes /api/presentations/<id>/translate refuse
+# with TRANSLATION_MODEL_NOT_CONFIGURED instead of spending on a guess.
+TRANSLATION_MODEL = (os.environ.get('TRANSLATION_MODEL') or '').strip()
 # The plans workflow (verify, boundary, distribution, notes, scene) runs its own
 # text model — default the primary text model, overridable without touching the slide model.
 VISUAL_PLAN_TEXT_MODEL = os.environ.get('VISUAL_PLAN_TEXT_MODEL') or GEMINI_TEXT_MODEL

@@ -380,5 +380,11 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "slide.format_cleared": "تم مسح التنسيق",
   "slide.list_applied": "تم تحويل النص إلى قائمة",
   "slide.list_removed": "تم إرجاع القائمة إلى نص",
-  "slide.inline_color": "تم تلوين الجزء المحدد"
+  "slide.inline_color": "تم تلوين الجزء المحدد",
+  "ws.translate_en": "ترجمة إلى الإنجليزية",
+  "ws.translate_confirm": "إنشاء نسخة إنجليزية من هذا العرض بنفس التصميم؟ العرض العربي يبقى كما هو.",
+  "ws.translate_busy": "جاري ترجمة العرض...",
+  "ws.translate_done": "تم إنشاء النسخة الإنجليزية ({count} شريحة).",
+  "ws.translate_failed": "تعذرت ترجمة العرض.",
+  "ws.translate_none": "افتح العرض أولًا."
 }/*I18N_AR_END*/);

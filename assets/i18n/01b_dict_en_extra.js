@@ -379,5 +379,11 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "slide.format_cleared": "Formatting cleared",
   "slide.list_applied": "Text converted to a list",
   "slide.list_removed": "List converted back to text",
-  "slide.inline_color": "Selected text coloured"
+  "slide.inline_color": "Selected text coloured",
+  "ws.translate_en": "Translate to English",
+  "ws.translate_confirm": "Create an English copy of this deck with the same design? The Arabic deck stays unchanged.",
+  "ws.translate_busy": "Translating the deck...",
+  "ws.translate_done": "English copy created ({count} slides).",
+  "ws.translate_failed": "Could not translate the deck.",
+  "ws.translate_none": "Open the deck first."
 }/*I18N_EN_END*/);

@@ -396,6 +396,25 @@
     }
 
 
+    // The deck is translated as markup, not regenerated: the Arabic copy stays
+    // untouched and the English one comes back with the same design.
+    async function translateTenantPresentationToEnglish() {
+      if (!tenantPresentationId) {
+        toast(WFT('ws.translate_none', 'افتح العرض أولًا.'));
+        return;
+      }
+      if (!confirm(WFT('ws.translate_confirm', 'إنشاء نسخة إنجليزية من هذا العرض بنفس التصميم؟ العرض العربي يبقى كما هو.'))) return;
+      showLoader(WFT('ws.translate_busy', 'جاري ترجمة العرض...'));
+      const data = await api('POST', '/api/presentations/' + tenantPresentationId + '/translate', { targetLang: 'en' });
+      hideLoader();
+      if (!data || !data.success) {
+        toast((data && data.error) || WFT('ws.translate_failed', 'تعذرت ترجمة العرض.'));
+        return;
+      }
+      toast(WFT('ws.translate_done', 'تم إنشاء النسخة الإنجليزية ({count} شريحة).', { count: data.slideCount }));
+      await openExistingPresentation(data.presentationId);
+    }
+
     async function deleteTenantPresentation(presId) {
       if (!confirm(WFT('admin.confirm_delete_deck', 'هل أنت متأكد من حذف هذا العرض؟ لا يمكن التراجع عن هذا الإجراء.'))) return;
       const data = await api('DELETE', '/api/presentations/' + presId);
