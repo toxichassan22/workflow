@@ -484,11 +484,10 @@
         images: buildPresentationPlanAssets()
       };
       if (tenantPresentationId) requestBody.presentationId = tenantPresentationId;
-      if (tenantDraftDirty || !tenantPresentationId) {
-        // A dirty workspace is authoritative for this turn. The saved presentation is only a
-        // fallback before the first local change, so refresh can still discard unsaved work.
-        requestBody.projectData = payload;
-      }
+      // Always send the generation copy: the financial report is attached only
+      // to it, while the saved presentation's project_data does not carry it.
+      // Sending the id alone silently dropped every report table from the plan.
+      requestBody.projectData = payload;
       if (sectionKey) requestBody.sectionKey = sectionKey;
       // The structure is assembled from the project's own sections on the
       // server, so this answer is immediate and nothing waits on a job.

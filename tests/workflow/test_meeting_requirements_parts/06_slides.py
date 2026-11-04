@@ -1950,6 +1950,12 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertNotIn('if (!tenantSlidePlan) {', index_source)
         self.assertNotIn('settingsMaxSlides', index_source)
 
+    def test_structure_request_always_carries_the_generation_payload(self):
+        source = read_frontend_text()
+        body = source.split('function requestTenantSlidePlan', 1)[1][:1200]
+        self.assertIn('requestBody.projectData = payload;', body)
+        self.assertNotIn('tenantDraftDirty || !tenantPresentationId', body)
+
     def test_slide_reasoning_effort_is_configured_and_forwarded(self):
         application = self.application_module
         seen = {}
