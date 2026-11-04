@@ -4,8 +4,18 @@
     let llWalletData = null;
     let llActiveWalletCategory = 'all';
 
+    function llFormatPoints(value) {
+      if (value == null || value === '') return '0';
+      const n = Number(value);
+      if (!Number.isFinite(n)) return '0';
+      return n.toLocaleString('en-US', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 2,
+      });
+    }
+
     function llCopyIban(customText) {
-      const ibanEl = document.getElementById('llWalletIban') || document.getElementById('llWalletIbanMain');
+      const ibanEl = document.getElementById('llWalletIbanMain') || document.getElementById('llWalletIban');
       const text = customText || (ibanEl ? ibanEl.textContent.trim() : 'SA9880000213608010009988');
       if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(text).then(function () {
@@ -130,7 +140,7 @@
       if (balEl) {
         balEl.innerHTML = llEscape(llMoney(balSar)) +
           ' <span class="tenant-wallet-currency">' + llEscape(WFT('wallet.sar_unit', 'ر.س')) + '</span>' +
-          ' <span class="tenant-wallet-pts">(' + llEscape(llMoney(pts)) + ' ' + llEscape(WFT('wallet.points_unit', 'نقطة')) + ')</span>';
+          ' <span class="tenant-wallet-pts">(' + llEscape(llFormatPoints(pts)) + ' ' + llEscape(WFT('wallet.points_unit', 'نقطة')) + ')</span>';
       }
 
       const pkgNameEl = document.getElementById('llWalletPackageName');

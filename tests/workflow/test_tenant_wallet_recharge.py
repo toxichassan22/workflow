@@ -69,6 +69,15 @@ class TenantWalletRechargeUITests(unittest.TestCase):
         self.assertIn('id="llLedgerTable"', self.index_html)
         self.assertIn('id="llLedgerBody"', self.index_html)
 
+        # Hero card must NOT contain the IBAN copy box (role separation)
+        hero_match = re.search(r'id="llWalletHero"[\s\S]*?id="llWalletStatsStrip"', self.index_html)
+        self.assertIsNotNone(hero_match)
+        self.assertNotIn('tenant-wallet-iban-box', hero_match.group(0))
+
+        # Ops tabs must be hidden so they don't pollute the top of the wallet page
+        self.assertIn('id="landloomOpsTabs"', self.index_html)
+        self.assertIn('style="display:none"', self.index_html)
+
     def test_refresh_buttons_use_workspace_icons_and_no_bare_refresh_text(self):
         """Refresh buttons in the wallet pane must use data-ws-icon and carry no bare text."""
         # Find llTabPane_recharge block
@@ -88,6 +97,7 @@ class TenantWalletRechargeUITests(unittest.TestCase):
         self.assertIn('18-landloom-ops/04_wallet_ledger.js', self.FRONTEND_JS_ORDER)
         for fn in (
             'llCopyIban',
+            'llFormatPoints',
             'setWalletCategory',
             'llOnRechargeFilterChange',
             'llUpdateWalletStats',

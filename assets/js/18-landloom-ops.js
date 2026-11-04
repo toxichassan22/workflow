@@ -7,10 +7,20 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
-    function llMoney(value) {
-      if (value == null || value === '') return '0';
+    function llFormatNumber(value, minD, maxD) {
+      if (value == null || value === '') return '0.00';
       const n = Number(value);
-      return Number.isFinite(n) ? formatExactSystemNumber(n, true) : '0';
+      if (!Number.isFinite(n)) return '0.00';
+      const minDec = minD != null ? minD : 2;
+      const maxDec = maxD != null ? maxD : 2;
+      return n.toLocaleString('en-US', {
+        minimumFractionDigits: minDec,
+        maximumFractionDigits: maxDec,
+      });
+    }
+
+    function llMoney(value) {
+      return llFormatNumber(value, 2, 2);
     }
 
     function llStatus(status) {
@@ -46,8 +56,10 @@
     let llActiveTab = 'recharge';
 
     function landloomOpsTabVisible(t) {
+      if (t === 'recharge') return typeof hasPermission === 'function' ? hasPermission('billing') : true;
+      if (t === 'tickets') return typeof hasPermission === 'function' ? hasPermission('support_tickets') : true;
       const btn = document.getElementById('llTabBtn_' + t);
-      return btn && btn.style.display !== 'none';
+      return btn ? btn.style.display !== 'none' : true;
     }
 
     function showLandloomOpsTab(tabKey) {
