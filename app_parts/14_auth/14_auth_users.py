@@ -753,6 +753,7 @@ def api_me():
             'trialEndsAt': t.get('trial_ends_at'),
             'trialState': trial.get('state'),
             'trialDaysLeft': trial.get('days_left'),
+            'creditBalance': float(t.get('credit_balance') or 0.0),
         }
     }
     if g.user_id:

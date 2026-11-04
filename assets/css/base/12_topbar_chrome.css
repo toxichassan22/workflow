@@ -1,0 +1,179 @@
+/* Unified Topbar Chrome: Brand Cluster, Breadcrumb Context, Points Quick Pill */
+/* Unified Topbar Chrome */
+    .tenant-topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      height: 64px;
+      min-height: 64px;
+      padding: 0 clamp(16px, 2.2vw, 32px);
+      background: #ffffff;
+      border-bottom: 1px solid var(--ui-border);
+      box-shadow: 0 1px 3px rgba(7, 24, 44, .04);
+      position: sticky;
+      top: 0;
+      z-index: 90;
+    }
+
+    .tenant-topbar-heading {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      flex: 0 1 auto;
+    }
+
+    .tenant-topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .tenant-topbar-brand .tenant-brand-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 9px;
+      border: 1px solid var(--ui-border);
+      background: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 1px 2px rgba(7, 24, 44, .04);
+    }
+
+    .tenant-topbar-brand h1 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 170px;
+      line-height: 1.25;
+    }
+
+    .tenant-topbar-brand .tenant-plan-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 1px 7px;
+      border-radius: 5px;
+      font-size: 10.5px;
+      font-weight: 800;
+      background: var(--teal-soft);
+      color: var(--teal-dark);
+      margin-top: 2px;
+    }
+
+    .tenant-topbar-divider {
+      width: 1px;
+      height: 22px;
+      background: var(--ui-border);
+      flex-shrink: 0;
+      opacity: 0.8;
+    }
+
+    .tenant-topbar-crumb {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+      font-size: 12.5px;
+    }
+
+    .tenant-topbar-crumb-ctx {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink-muted);
+    }
+
+    .tenant-topbar-crumb-sep {
+      font-size: 11px;
+      color: var(--ink-muted);
+      opacity: 0.5;
+    }
+
+    .tenant-topbar-crumb-title {
+      font-size: 12.5px;
+      font-weight: 800;
+      color: var(--ink);
+    }
+
+    /* Center Points Pill */
+    .tenant-topbar-center {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+
+    .tenant-topbar-points-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      height: 36px;
+      padding: 0 12px 0 6px;
+      background: #ffffff;
+      border: 1px solid rgba(23, 200, 227, 0.35);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all .16s ease;
+      box-shadow: 0 1px 3px rgba(7, 24, 44, .03);
+      user-select: none;
+    }
+
+    .tenant-topbar-points-pill:hover {
+      background: var(--teal-soft);
+      border-color: var(--teal-bright);
+      box-shadow: 0 2px 8px rgba(23, 200, 227, .16);
+    }
+
+    .tenant-topbar-points-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--teal-bright);
+      box-shadow: 0 0 6px rgba(23, 200, 227, .6);
+      flex-shrink: 0;
+    }
+
+    .tenant-topbar-points-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--ink-muted);
+    }
+
+    .tenant-topbar-points-val {
+      font-size: 13px;
+      font-weight: 900;
+      color: var(--ink);
+      letter-spacing: -0.2px;
+    }
+
+    .tenant-topbar-points-unit {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--teal-dark);
+    }
+
+    .tenant-topbar-points-cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 22px;
+      padding: 0 9px;
+      border-radius: 11px;
+      background: var(--sidebar-bg);
+      color: #ffffff;
+      font-size: 10.5px;
+      font-weight: 800;
+      transition: background .16s ease;
+      margin-inline-start: 4px;
+    }
+
+    .tenant-topbar-points-pill:hover .tenant-topbar-points-cta {
+      background: var(--teal-dark);
+    }

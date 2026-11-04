@@ -429,8 +429,24 @@
       planBadgeEl.textContent = packageLabel;
       planBadgeEl.style.display = packageLabel ? '' : 'none';
       updateTenantLogoMark();
+      updateTenantTopbarPoints();
       const adminBtn = document.getElementById('tenantAdminBtn');
       if (adminBtn) adminBtn.classList.toggle('tenant-hidden', !tenantUser.isAdmin);
+    }
+
+    function updateTenantTopbarPoints(pointsVal) {
+      const el = document.getElementById('tenantTopbarPointsVal');
+      const menuValEl = document.getElementById('tenantMenuPoints');
+      const val = (pointsVal !== undefined && pointsVal !== null)
+        ? Number(pointsVal || 0)
+        : (tenantUser && tenantUser.creditBalance !== undefined ? Number(tenantUser.creditBalance || 0) : null);
+      if (val !== null) {
+        const formatted = (typeof llFormatNumber === 'function')
+          ? llFormatNumber(val, 2, 2)
+          : Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (el) el.textContent = formatted;
+        if (menuValEl) menuValEl.textContent = formatted + ' ' + (typeof WFT === 'function' ? WFT('wallet.points_unit', 'نقطة') : 'نقطة');
+      }
     }
 
     function renderTrialBanner() {

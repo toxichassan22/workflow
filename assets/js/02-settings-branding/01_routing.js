@@ -733,13 +733,16 @@
       }
       // The topbar user chip mirrors what the old sidebar account block showed:
       // name, role, and the company line inside the dropdown.
-      const chipName = (tenantUser && (tenantUser._userName || tenantUser.companyName)) || '';
       const chipCompany = wfBilingual(tenantUser && tenantUser.companyName,
-        tenantUser && (tenantUser.companyNameEn || tenantUser.company_name_en));
-      const chipInitial = chipName.trim().charAt(0) || '—';
+        tenantUser && (tenantUser.companyNameEn || tenantUser.company_name_en)) || '';
+      const rawUserName = (tenantUser && tenantUser._userName) || '';
+      const chipName = (rawUserName && rawUserName.trim() !== chipCompany.trim())
+        ? rawUserName.trim()
+        : (isSagAdmin ? WFT('role.super_admin', 'سوبر أدمن') : WFT('role.account_manager', 'مدير الحساب'));
+      const chipInitial = chipName.trim().charAt(0) || 'م';
       [['tenantChipName', chipName], ['tenantMenuName', chipName],
        ['tenantUserAvatar', chipInitial], ['tenantUserAvatarLg', chipInitial],
-       ['tenantMenuSub', WFT(roleData[1], roleData[2]) + ' — ' + chipCompany]]
+       ['tenantMenuSub', WFT(roleData[1], roleData[2]) + (chipCompany ? ' — ' + chipCompany : '')]]
         .forEach(([id, text]) => {
           const el = document.getElementById(id);
           if (el) el.textContent = text;

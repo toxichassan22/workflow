@@ -223,6 +223,23 @@
             <span id="tenantPlan" class="tenant-plan-badge">free</span>
           </div>
         </div>
+        <span class="tenant-topbar-divider" aria-hidden="true"></span>
+        <div class="tenant-topbar-crumb">
+          <span class="tenant-topbar-crumb-ctx" id="tenantCurrentPageContext" data-i18n="chrome.workspace">مساحة العمل</span>
+          <span class="tenant-topbar-crumb-sep">/</span>
+          <span class="tenant-topbar-crumb-title" id="tenantCurrentPageTitle" data-i18n="page.dashboard">لوحة التحكم</span>
+        </div>
+      </div>
+      <div class="tenant-topbar-center">
+        <div class="tenant-topbar-points-pill" id="tenantTopbarPointsPill"
+          onclick="openLandloomOpsPage('recharge')"
+          role="button" tabindex="0" title="المحفظة والشحن">
+          <span class="tenant-topbar-points-dot" aria-hidden="true"></span>
+          <span class="tenant-topbar-points-label" data-i18n="wallet.points_balance">رصيد النقاط</span>
+          <strong id="tenantTopbarPointsVal" class="tenant-topbar-points-val">0.00</strong>
+          <span class="tenant-topbar-points-unit" data-i18n="wallet.points_unit">نقطة</span>
+          <span class="tenant-topbar-points-cta" data-i18n="wallet.recharge_short">شحن</span>
+        </div>
       </div>
       <div class="tenant-topbar-side">
         <div class="tenant-notif tenant-bellbox">
@@ -249,11 +266,11 @@
         <div class="tenant-dropdown tenant-usermenu">
           <button type="button" id="tenantUserChip" class="tenant-userchip"
             onclick="toggleTenantDropdown(this)" aria-haspopup="true">
+            <span class="tenant-userchip-avatar" id="tenantUserAvatar" aria-hidden="true"></span>
             <span class="tenant-userchip-meta">
               <span class="tenant-userchip-name" id="tenantChipName"></span>
-              <span class="tenant-userchip-role" id="tenantWorkspaceRole" data-i18n="role.employee">موظف</span>
+              <span class="tenant-userchip-role" id="tenantWorkspaceRole" data-i18n="role.company_admin">أدمن الشركة</span>
             </span>
-            <span class="tenant-userchip-avatar" id="tenantUserAvatar" aria-hidden="true"></span>
             <span class="tenant-userchip-caret" aria-hidden="true"></span>
           </button>
           <div class="tenant-dropdown-menu tenant-usermenu-menu" role="menu">
@@ -264,6 +281,11 @@
                 <span class="tenant-usermenu-sub" id="tenantMenuSub"></span>
               </span>
             </div>
+            <button type="button" class="tenant-usermenu-item" role="menuitem"
+              onclick="openLandloomOpsPage('recharge'); closeTenantDropdown()">
+              <span data-i18n="nav.wallet">المحفظة والشحن</span>
+              <span class="tenant-usermenu-val" id="tenantMenuPoints">--</span>
+            </button>
             <button type="button" class="tenant-usermenu-item" role="menuitem"
               onclick="toggleAppLanguage(); closeTenantDropdown()">
               <span data-i18n="chrome.language">اللغة</span>

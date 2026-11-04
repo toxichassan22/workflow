@@ -134,6 +134,7 @@
       llWalletData = ledgerData;
       const balSar = Number(ledgerData.balance_sar || 0);
       const pointsObj = ledgerData.points || {};
+      if (typeof updateTenantTopbarPoints === 'function') updateTenantTopbarPoints(balSar);
 
       const balEl = document.getElementById('llWalletBalance');
       if (balEl) {

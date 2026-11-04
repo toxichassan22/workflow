@@ -1,9 +1,9 @@
-    /* Shell chrome: topbar side cluster, user menu, sidebar CTA, logo chip tone.
+/* Shell chrome: topbar side cluster, user menu, sidebar CTA, logo chip tone.
        New module — kept out of 04_export_responsive.css which is over the size
        budget; loaded last in FRONTEND_CSS_ORDER so it wins equal-specificity
        cascades (e.g. the physical right:0 on .tenant-dropdown-menu). */
 
-    .tenant-topbar-side {
+.tenant-topbar-side {
       display: flex;
       align-items: center;
       gap: 10px;
@@ -196,6 +196,15 @@
     }
 
     @media (max-width: 900px) {
+      .tenant-topbar-crumb,
+      .tenant-topbar-divider {
+        display: none;
+      }
+
+      .tenant-topbar-points-label {
+        display: none;
+      }
+
       .tenant-topbar-side {
         justify-content: center;
       }
@@ -222,6 +231,10 @@
     }
 
     @media (max-width: 600px) {
+      .tenant-topbar-center {
+        display: none;
+      }
+
       .tenant-userchip-meta {
         display: none;
       }

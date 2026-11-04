@@ -237,6 +237,7 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/
   "role.company_admin": "Company admin",
   "role.employee": "Employee",
   "role.super_admin": "Super admin",
+  "role.account_manager": "Account Manager",
   "page.admin_dashboard": "Admin dashboard",
   "page.ai_rules": "AI rules",
   "page.approvals": "Offer approvals",
@@ -1219,6 +1220,8 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/
   "admin.bank_note": "Transfer Instructions",
   "admin.bank_fields_required": "Please enter bank name and IBAN",
   "admin.bank_details_saved": "Bank details saved successfully",
-  "admin.bank_save_failed": "Failed to save bank details"
+  "admin.bank_save_failed": "Failed to save bank details",
+  "wallet.points_balance": "Points balance",
+  "wallet.recharge_short": "Recharge"
 }
 /*I18N_EN_END*/);
