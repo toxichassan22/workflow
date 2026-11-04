@@ -80,21 +80,18 @@ class StaffUsersUITests(unittest.TestCase):
         self.assertIn('editingUserPermissions.availableKeys', save_block)
         self.assertNotIn('Object.keys(PERMISSION_LABELS)', save_block)
 
-    def test_sod_modal_hides_the_matrix_and_keeps_the_policies(self):
-        """The staff page keeps the two self-approval policies but no longer
-        renders the separation-of-duties report: no matrix fetch, no
-        self-approval table and no violation counters."""
+    def test_the_separation_of_duties_screen_is_gone(self):
+        """The staff page no longer offers a separation-of-duties screen: its
+        button and both modals are gone. The two self-approval policies stay
+        enforced server-side with their defaults."""
+        html = self._page_html()
+        self.assertNotIn('showSodMatrixModal', html)
         js = self._js('02_users_roles.js')
-        modal_block = js.split('async function showSodMatrixModal()', 1)[1]
-        modal_block = modal_block.split('async function saveSodPolicy()', 1)[0]
-        self.assertIn("api('GET', '/api/policies')", modal_block)
-        self.assertNotIn('/api/approvals/sod-matrix', modal_block)
-        for token in ('self_approvals', 'self_approvals_count', 'extraSections',
-                      'violationsRows', 'cross_gate_approvals'):
-            self.assertNotIn(token, modal_block)
-        for token in ('sodPolicySelect', 'sodGenPolicySelect',
-                      'section_self_approval', 'generation_self_approval'):
-            self.assertIn(token, modal_block)
+        self.assertNotIn('showSodMatrixModal', js)
+        self.assertNotIn('saveSodPolicy', js)
+        self.assertNotIn('/api/policies', js)
+        policies_api = (ROOT / 'app_parts' / '20_admin' / '26_roles_policies.py').read_text(encoding='utf-8')
+        self.assertIn("@app.route('/api/policies', methods=['PUT'])", policies_api)
 
     def test_no_emojis_or_icon_glyphs(self):
         html = self._page_html()
