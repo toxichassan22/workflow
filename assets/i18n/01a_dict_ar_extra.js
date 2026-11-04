@@ -407,6 +407,7 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "team.experience_label": "سنوات الخبرة",
   "team.logo_label": "شعار الجهة",
   "team.logo_empty": "لم يتم اختيار ملف",
+  "team.logo_current": "الشعار المحفوظ",
   "team.choose_file": "اختيار ملف",
   "team.brief_label": "نبذة عن الجهة",
   "team.projects_label": "أبرز المشاريع",

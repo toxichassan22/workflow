@@ -184,6 +184,16 @@ class TeamScreenContractTests(unittest.TestCase):
         self.assertIn("WFT('team.empty_title'", self.js)
         self.assertIn("WFT('team.logo_empty'", self.js)
 
+    def test_the_saved_logo_is_named_and_the_tile_follows_its_tone(self):
+        """Editing an entity with a logo must not read «لم يتم اختيار ملف», and
+        the tile samples the mark like the topbar and the deck do."""
+        self.assertIn("WFT('team.logo_current'", self.js)
+        self.assertIn('adaptTenantLogoChip', self.js)
+        self.assertIn('.team-logo[data-logo-tone="dark"]', self.css)
+        self.assertIn('.team-drawer-logo[data-logo-tone="dark"]', self.css)
+        self.assertIn('.team-logo[data-logo-tone="light"]', self.css)
+        self.assertIn('.team-drawer-logo[data-logo-tone="light"]', self.css)
+
 
 if __name__ == '__main__':
     unittest.main()

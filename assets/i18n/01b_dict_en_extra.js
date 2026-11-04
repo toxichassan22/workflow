@@ -406,6 +406,7 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "team.experience_label": "Years of experience",
   "team.logo_label": "Entity logo",
   "team.logo_empty": "No file selected",
+  "team.logo_current": "Saved logo",
   "team.choose_file": "Choose file",
   "team.brief_label": "About the entity",
   "team.projects_label": "Notable projects",

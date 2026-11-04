@@ -30,6 +30,20 @@ function currentTeamEntity() {
   return tenantTeamEntities.find(item => String(item.id) === String(editingTeamEntityId)) || null;
 }
 
+function updateTeamEntityLogoLabel() {
+  const label = document.getElementById('teamEntityLogoName');
+  if (!label) return;
+  const file = document.getElementById('teamEntityLogo')?.files?.[0];
+  if (file) {
+    label.textContent = file.name;
+    return;
+  }
+  const entity = currentTeamEntity();
+  label.textContent = entity?.logoFileId
+    ? WFT('team.logo_current', 'الشعار المحفوظ')
+    : WFT('team.logo_empty', 'لم يتم اختيار ملف');
+}
+
 function focusTeamOrderButton(entityId) {
   document.querySelectorAll('#tenantTeamList .team-card').forEach(card => {
     if (card.dataset.teamId === String(entityId)) {
@@ -69,6 +83,10 @@ function renderTenantTeamList() {
 
   host.innerHTML = '<div class="team-grid">' + tenantTeamEntities.map(teamEntityCardHtml).join('') + '</div>';
   host.querySelectorAll('img[data-team-logo]').forEach(image => {
+    image.addEventListener('load', () => {
+      const tile = image.closest('.team-logo');
+      if (tile && typeof adaptTenantLogoChip === 'function') adaptTenantLogoChip(image, tile);
+    }, { once: true });
     attachProjectFileThumbnail(image, image.dataset.teamLogo);
   });
   bindTeamDragAndDrop();
@@ -200,6 +218,7 @@ function openTeamEntityDrawer(entityId) {
     document.getElementById('teamEntityProjects').value = entity.notableProjects || '';
   }
   updateTeamEntityDrawerLabels();
+  updateTeamEntityLogoLabel();
   updateTeamEntityPreview();
   const drawer = document.getElementById('teamEntityDrawer');
   if (drawer) {
@@ -224,9 +243,8 @@ function resetTeamEntityForm() {
   const logo = document.getElementById('teamEntityLogo');
   if (logo) logo.value = '';
   releaseTeamLogoObjectUrl();
-  const logoName = document.getElementById('teamEntityLogoName');
-  if (logoName) logoName.textContent = WFT('team.logo_empty', 'لم يتم اختيار ملف');
   updateTeamEntityDrawerLabels();
+  updateTeamEntityLogoLabel();
   updateTeamEntityPreview();
 }
 
@@ -262,12 +280,21 @@ function updateTeamEntityPreview() {
     : (logoId ? 'file:' + logoId : 'mono:' + name);
   if (host.dataset.previewMode === mode) return;
   host.dataset.previewMode = mode;
+  delete host.dataset.logoTone;
 
+  const applyTone = image => {
+    if (typeof adaptTenantLogoChip === 'function') adaptTenantLogoChip(image, host);
+  };
   if (teamLogoObjectUrl) {
     host.innerHTML = '<img src="' + teamLogoObjectUrl + '" alt="">';
+    const image = host.querySelector('img');
+    if (image.complete) applyTone(image);
+    else image.addEventListener('load', () => applyTone(image), { once: true });
   } else if (logoId) {
     host.innerHTML = '<img alt="">';
-    attachProjectFileThumbnail(host.querySelector('img'), logoId);
+    const image = host.querySelector('img');
+    image.addEventListener('load', () => applyTone(image), { once: true });
+    attachProjectFileThumbnail(image, logoId);
   } else {
     host.innerHTML = teamEntityMonogramHtml(name);
   }
@@ -276,14 +303,13 @@ function updateTeamEntityPreview() {
 function handleTeamLogoSelection(input) {
   const file = input?.files?.[0];
   releaseTeamLogoObjectUrl();
-  const logoName = document.getElementById('teamEntityLogoName');
   if (!file) {
-    if (logoName) logoName.textContent = WFT('team.logo_empty', 'لم يتم اختيار ملف');
+    updateTeamEntityLogoLabel();
     updateTeamEntityPreview();
     return;
   }
   teamLogoObjectUrl = URL.createObjectURL(file);
-  if (logoName) logoName.textContent = file.name;
+  updateTeamEntityLogoLabel();
   updateTeamEntityPreview();
 }
 
@@ -376,5 +402,6 @@ document.addEventListener('keydown', event => {
 document.addEventListener('wf:lang', () => {
   if (document.getElementById('tenantTeamList')) renderTenantTeamList();
   updateTeamEntityDrawerLabels();
+  updateTeamEntityLogoLabel();
   updateTeamEntityPreview();
 });
