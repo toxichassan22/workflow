@@ -836,7 +836,40 @@
     async function openAdminPlatformPage() {
       showTenantPage('tenantAdminPlatformPage');
       await Promise.all([llLoadRejectionReasons(), llLoadFxRate(),
-        adminLoadFeatureCatalog(), adminLoadLegalDoc()]);
+        adminLoadFeatureCatalog(), adminLoadLegalDoc(), adminLoadBankDetails()]);
+    }
+
+    async function adminLoadBankDetails() {
+      const data = await api('GET', '/api/admin/settings/bank-details').catch(() => null);
+      const b = (data && data.bank_details) || {};
+      const nameInput = document.getElementById('adminBankName');
+      const ibanInput = document.getElementById('adminBankIban');
+      const beneInput = document.getElementById('adminBankBeneficiary');
+      const noteInput = document.getElementById('adminBankNote');
+      if (nameInput && b.bank_name) nameInput.value = b.bank_name;
+      if (ibanInput && b.iban) ibanInput.value = b.iban;
+      if (beneInput && b.beneficiary_name) beneInput.value = b.beneficiary_name;
+      if (noteInput && b.note) noteInput.value = b.note;
+    }
+
+    async function adminSaveBankDetails(event) {
+      if (event) event.preventDefault();
+      const payload = {
+        bank_name: ((document.getElementById('adminBankName') || {}).value || '').trim(),
+        iban: ((document.getElementById('adminBankIban') || {}).value || '').trim(),
+        beneficiary_name: ((document.getElementById('adminBankBeneficiary') || {}).value || '').trim(),
+        note: ((document.getElementById('adminBankNote') || {}).value || '').trim(),
+      };
+      if (!payload.bank_name || !payload.iban) {
+        toast(WFT('admin.bank_fields_required', 'يرجى إدخال اسم المصرف ورقم الآيبان'));
+        return;
+      }
+      const res = await api('POST', '/api/admin/settings/bank-details', payload).catch(e => e);
+      if (res && res.success) {
+        toast(WFT('admin.bank_details_saved', 'تم حفظ بيانات الحساب البنكي بنجاح'));
+      } else {
+        toast((res && res.error) || WFT('admin.bank_save_failed', 'تعذر حفظ بيانات البنك'));
+      }
     }
 
     /* The feature pool lives in platform settings; the packages page shares

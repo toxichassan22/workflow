@@ -447,5 +447,8 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "إجمالي التعميد الذاتي": "Total self-endorsements",
   "ملف الشركة غير مكتمل": "Company profile is incomplete",
   "مدعو": "Invited",
-  "تقرير المستخدمين": "Users report"
+  "تقرير المستخدمين": "Users report",
+  "حفظ بيانات البنك": "Save bank details",
+  "شركة لاندلوم لتقنية المعلومات": "Landloom Information Technology",
+  "مثال: مصرف الراجحي": "e.g. Al Rajhi Bank"
 }/*I18N_EN_AUTO_END*/);

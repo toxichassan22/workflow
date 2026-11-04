@@ -32,6 +32,15 @@ class TenantWalletRechargeUITests(unittest.TestCase):
                 'Wallet Test Co', 'wallet@test.com', 'hash123', 'wallet-test'
             )
             db.update_tenant(cls.tenant_id, is_active=1)
+            seeded_admin = db.get_tenant_by_email('admin@landloom.ai')
+            if seeded_admin:
+                cls.admin_tenant_id = seeded_admin['id']
+            else:
+                cls.admin_tenant_id = db.create_tenant(
+                    'Platform Admin', 'superadmin@test.com', 'hash123', 'admin-test'
+                )
+                db.get_db().execute('UPDATE tenants SET is_admin = 1, is_active = 1 WHERE id = ?', (cls.admin_tenant_id,))
+                db.get_db().commit()
 
         cls.token = auth.create_token(
             cls.tenant_id,
@@ -176,8 +185,67 @@ class TenantWalletRechargeUITests(unittest.TestCase):
             self.assertIn('balance_sar', data)
             self.assertIn('multiplier', data)
             self.assertIn('points', data)
+            self.assertIn('bank_details', data)
             self.assertIn('entries', data)
             self.assertIsInstance(data['entries'], list)
+
+    def test_bank_transfer_details_endpoints(self):
+        """GET /api/billing/bank-details and admin endpoints allow Super Admin to update details."""
+        with self.app.test_client() as client:
+            # Public/tenant read
+            res = client.get('/api/billing/bank-details')
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertTrue(data.get('success'))
+            self.assertIn('bank_details', data)
+            b = data['bank_details']
+            self.assertIn('bank_name', b)
+            self.assertIn('iban', b)
+
+            # Non-admin cannot update bank details
+            forbidden_res = client.post(
+                '/api/admin/settings/bank-details',
+                json={'bank_name': 'Test'},
+                headers={'Authorization': f'Bearer {self.token}'},
+            )
+            self.assertEqual(forbidden_res.status_code, 403)
+
+            # Super admin update
+            super_admin_token = auth.create_token(
+                self.admin_tenant_id,
+                'admin@landloom.ai',
+                is_admin=True,
+            )
+            update_payload = {
+                'bank_name': 'بنك الرياض',
+                'iban': 'SA1234567890123456789012',
+                'beneficiary_name': 'مؤسسة لاندلوم العقارية',
+                'note': 'يرجى كتابة رقم الطلب في الحوالة',
+            }
+            post_res = client.post(
+                '/api/admin/settings/bank-details',
+                json=update_payload,
+                headers={'Authorization': f'Bearer {super_admin_token}'},
+            )
+            self.assertEqual(post_res.status_code, 200)
+            self.assertEqual(post_res.get_json()['bank_details']['bank_name'], 'بنك الرياض')
+            self.assertEqual(post_res.get_json()['bank_details']['iban'], 'SA1234567890123456789012')
+
+            # Verify public read returns the updated details
+            res2 = client.get('/api/billing/bank-details')
+            self.assertEqual(res2.get_json()['bank_details']['bank_name'], 'بنك الرياض')
+
+    def test_wallet_hero_displays_points_only_and_no_exchange_rate_text(self):
+        """Hero card and JS must display points only for balance/stats and avoid exchange rate text."""
+        # Must use points unit for balance and mini-stats
+        self.assertIn("WFT('wallet.points_unit', 'نقطة')", self.wallet_js)
+        # Exchange rate sentence must not be set on llWalletMeta in 04_wallet_ledger.js
+        self.assertNotIn("metaEl.textContent = WFT('wallet.exchange_rate_info'", self.wallet_js)
+        # Bank details fields exist in shell
+        self.assertIn('id="adminBankName"', self.index_html)
+        self.assertIn('id="adminBankIban"', self.index_html)
+        self.assertIn('id="llWalletBankName"', self.index_html)
+        self.assertIn('id="llWalletBankBeneficiary"', self.index_html)
 
 
 if __name__ == '__main__':

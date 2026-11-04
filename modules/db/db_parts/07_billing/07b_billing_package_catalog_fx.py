@@ -614,3 +614,36 @@ def save_rejection_reasons(reasons):
         if len(clean) >= 30:
             break
     return set_platform_setting('recharge_rejection_reasons', clean)
+
+
+DEFAULT_BANK_TRANSFER_DETAILS = {
+    'bank_name': 'مصرف الراجحي',
+    'bank_name_en': 'Al Rajhi Bank',
+    'iban': 'SA9880000213608010009988',
+    'beneficiary_name': 'شركة لاندلوم لتقنية المعلومات',
+    'beneficiary_name_en': 'Landloom Information Technology Co.',
+    'note': 'بعد التحويل، أرفق إشعار التحويل أو رقم الحوالة في نموذج طلب الشحن.',
+    'note_en': 'After transfer, attach the transfer receipt or reference number in the recharge request form.',
+}
+
+
+def get_bank_transfer_details():
+    """Retrieve bank transfer details for recharge payments. Returns defaults if unset."""
+    stored = get_platform_setting('bank_transfer_details', None)
+    if not isinstance(stored, dict):
+        return dict(DEFAULT_BANK_TRANSFER_DETAILS)
+    res = dict(DEFAULT_BANK_TRANSFER_DETAILS)
+    res.update({k: v for k, v in stored.items() if v is not None and str(v).strip()})
+    return res
+
+
+def set_bank_transfer_details(details):
+    """Store bank transfer details in platform_settings."""
+    if not isinstance(details, dict):
+        raise ValueError('Invalid bank transfer details format')
+    current = get_bank_transfer_details()
+    for field in ('bank_name', 'bank_name_en', 'iban', 'beneficiary_name', 'beneficiary_name_en', 'note', 'note_en'):
+        if field in details and details[field] is not None:
+            current[field] = str(details[field]).strip()
+    return set_platform_setting('bank_transfer_details', current)
+

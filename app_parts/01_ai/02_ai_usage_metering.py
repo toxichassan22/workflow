@@ -835,6 +835,7 @@ def api_billing_ledger():
             'enforced': db.billing_enforcement_enabled(),
             'unbilled': db.get_unbilled_usage(g.tenant_id),
             'points': db.points_overview(g.tenant_id),
+            'bank_details': db.get_bank_transfer_details(),
             'entries': entries,
         })
     except Exception as exc:

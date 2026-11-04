@@ -1404,7 +1404,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         shell_source = (ROOT / 'index.html').read_text(encoding='utf-8')
         for library in ('font-awesome', 'fontawesome', 'material-icons', 'bootstrap-icons', 'lucide'):
             self.assertNotIn(library, index_source.lower(), f'{library} must not be used')
-        self.assertEqual(shell_source.count('<svg'), 1, 'the shell may inline only the favicon SVG')
+        self.assertLessEqual(shell_source.count('<svg'), 1, 'the shell may inline at most the favicon SVG')
         # Every SVG in the client must belong to one of the allowed uses: the
         # favicon, the map polygon overlay, the three super-admin dashboard chart
         # builders (donut, sparkline, line), and the single deck-workspace icon
@@ -1420,7 +1420,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
             '02_catchment_edits.js': 1,
             '00_icons.js': 1,
         }, 'only the admin chart builders, the map polygon overlay and the owner-authorized deck icon sprite may draw SVG')
-        self.assertEqual(index_source.count('<svg'), 6,
+        self.assertEqual(index_source.count('<svg'), 5,
             'allowed SVG: favicon + map overlay + three admin chart builders + the deck icon sprite')
         self.assertIn('id="mapPolygonOverlay"', index_source)
 

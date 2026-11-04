@@ -134,13 +134,11 @@
       llWalletData = ledgerData;
       const balSar = Number(ledgerData.balance_sar || 0);
       const pointsObj = ledgerData.points || {};
-      const pts = (pointsObj && Number(pointsObj.available_points || pointsObj.balance_points || 0)) || (balSar * 1000);
 
       const balEl = document.getElementById('llWalletBalance');
       if (balEl) {
-        balEl.innerHTML = llEscape(llMoney(balSar)) +
-          ' <span class="tenant-wallet-currency">' + llEscape(WFT('wallet.sar_unit', 'ر.س')) + '</span>' +
-          ' <span class="tenant-wallet-pts">(' + llEscape(llFormatPoints(pts)) + ' ' + llEscape(WFT('wallet.points_unit', 'نقطة')) + ')</span>';
+        balEl.innerHTML = llEscape(llFormatNumber(balSar, 2, 2)) +
+          ' <span class="tenant-wallet-currency">' + llEscape(WFT('wallet.points_unit', 'نقطة')) + '</span>';
       }
 
       const pkgNameEl = document.getElementById('llWalletPackageName');
@@ -159,30 +157,42 @@
 
       const metaEl = document.getElementById('llWalletMeta');
       if (metaEl) {
-        const mult = ledgerData.multiplier ? ledgerData.multiplier + 'x' : '1.6x';
-        const mode = ledgerData.enforced
-          ? WFT('wallet.billing_enforced', 'نظام الفوترة مشغل')
-          : WFT('wallet.billing_trial', 'فوترة تجريبية');
-        metaEl.textContent = WFT('wallet.exchange_rate_info', 'سعر الصرف المعتمد: {mult} — {mode}', { mult: mult, mode: mode });
+        metaEl.textContent = '';
       }
 
       const reservedEl = document.getElementById('llWalletReserved');
       if (reservedEl) {
         const resSar = (pointsObj && pointsObj.reserved_sar) || 0;
-        reservedEl.textContent = llMoney(resSar) + ' ' + WFT('wallet.sar_unit', 'ر.س');
+        reservedEl.textContent = llFormatNumber(resSar, 2, 2) + ' ' + WFT('wallet.points_unit', 'نقطة');
       }
 
       const expiredEl = document.getElementById('llWalletExpired');
       if (expiredEl) {
         const expSar = (pointsObj && pointsObj.expired_sar) || 0;
-        expiredEl.textContent = llMoney(expSar) + ' ' + WFT('wallet.sar_unit', 'ر.س');
+        expiredEl.textContent = llFormatNumber(expSar, 2, 2) + ' ' + WFT('wallet.points_unit', 'نقطة');
       }
 
       const consumedEl = document.getElementById('llWalletConsumed');
       if (consumedEl) {
         const conSar = (pointsObj && pointsObj.consumed_sar) || 0;
-        consumedEl.textContent = llMoney(conSar) + ' ' + WFT('wallet.sar_unit', 'ر.س');
+        consumedEl.textContent = llFormatNumber(conSar, 2, 2) + ' ' + WFT('wallet.points_unit', 'نقطة');
       }
+
+      const bankDetails = ledgerData.bank_details || {};
+      const bankNameEl = document.getElementById('llWalletBankName');
+      if (bankNameEl && bankDetails.bank_name) bankNameEl.textContent = bankDetails.bank_name;
+
+      const ibanMainEl = document.getElementById('llWalletIbanMain');
+      if (ibanMainEl && bankDetails.iban) ibanMainEl.textContent = bankDetails.iban;
+
+      const ibanAltEl = document.getElementById('llWalletIban');
+      if (ibanAltEl && bankDetails.iban) ibanAltEl.textContent = bankDetails.iban;
+
+      const beneEl = document.getElementById('llWalletBankBeneficiary');
+      if (beneEl && bankDetails.beneficiary_name) beneEl.textContent = bankDetails.beneficiary_name;
+
+      const noteEl = document.getElementById('llWalletBankNote');
+      if (noteEl && bankDetails.note) noteEl.textContent = bankDetails.note;
 
       const ledgerBody = document.getElementById('llLedgerBody');
       if (ledgerBody) {

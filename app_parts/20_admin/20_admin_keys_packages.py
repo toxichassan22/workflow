@@ -711,3 +711,35 @@ def api_admin_fx_rate_update():
         return jsonify({'error': 'Rate provider unreachable, kept stored rate',
                         'fx': fx}), 503
     return jsonify({'error': 'Invalid mode'}), 400
+
+
+@app.route('/api/billing/bank-details', methods=['GET'])
+def api_billing_bank_details():
+    """Public/tenant endpoint to read current bank transfer details."""
+    return jsonify({
+        'success': True,
+        'bank_details': db.get_bank_transfer_details(),
+    })
+
+
+@app.route('/api/admin/settings/bank-details', methods=['GET'])
+@require_admin
+def api_admin_bank_details_get():
+    """Admin endpoint to view current bank transfer details."""
+    return jsonify({
+        'success': True,
+        'bank_details': db.get_bank_transfer_details(),
+    })
+
+
+@app.route('/api/admin/settings/bank-details', methods=['PUT', 'POST'])
+@require_admin
+def api_admin_bank_details_update():
+    """Admin endpoint to update bank transfer details."""
+    data = request.json or {}
+    try:
+        updated = db.set_bank_transfer_details(data)
+        return jsonify({'success': True, 'bank_details': updated})
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 400
+
