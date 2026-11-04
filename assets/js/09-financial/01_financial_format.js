@@ -592,13 +592,21 @@
       syncTabs();
     }
 
+    function componentOriginNote(component) {
+      if (!component || !component.parkingPlanId || typeof financialParkingPlan !== 'function') return '';
+      const plan = financialParkingPlan();
+      if (String(plan.id || '') !== String(component.parkingPlanId)) return '';
+      return financialParkingAbsorbed(plan)[String(component.id)]
+        ? 'معبّأ من اقتراح المواقف' : 'مولّد من اقتراح المواقف';
+    }
+
     function addComponent(d = {}) {
       const tb = document.querySelector('#componentsTable tbody'); if (!tb) return; const tr = document.createElement('tr'); tr.dataset.componentKey = d.id || ('p_' + Date.now() + '_' + Math.random().toString(16).slice(2)); const units = financialInputNumber(d.units, 1), unitArea = financialInputNumber(d.unitArea, 0), landShareArea = financialInputNumber(d.landShareArea ?? d.unitFootprintArea, ''), model = d.investmentModel || (d.leasable === 'no' ? 'nonRevenue' : 'operating'); const suggestedArea = units * unitArea; const builtArea = financialInputNumber(d.builtArea ?? d.totalArea, suggestedArea); const revenueArea = financialInputNumber(d.revenueArea, (model === 'nonRevenue' ? 0 : financialInputNumber(d.totalArea, suggestedArea)));
       tr.dataset.parkingPlanId = d.parkingPlanId || '';
       tr.dataset.floorRange = d.floorRange || '';
       const parkingLocations = [{ v: 'aboveGround', t: 'فوق الأرض' }, { v: 'basement', t: 'بدروم' }, { v: 'surface', t: 'سطحية' }];
       tr.innerHTML = `
-    <td data-field="name"><input value="${escapeHtml(d.name || '')}" placeholder="مثال: معارض سيارات"></td>
+    <td data-field="name"><input value="${escapeHtml(d.name || '')}" placeholder="مثال: معارض سيارات">${componentOriginNote(d) ? `<div class="component-origin">${escapeHtml(componentOriginNote(d))}</div>` : ''}</td>
     <td data-field="useType"><select>${selectHtml(useTypes, d.useType || 'retail')}</select><div data-field="parkingLocation" class="financial-parking-location" ${d.useType === 'parking' ? '' : 'hidden'}><label>موقع المواقف</label><select>${selectHtml(parkingLocations, d.parkingLocation || 'aboveGround')}</select></div></td>
     <td data-field="units"><input type="number" value="${units}"></td>
     <td data-field="unitArea"><input type="number" value="${unitArea}"></td>

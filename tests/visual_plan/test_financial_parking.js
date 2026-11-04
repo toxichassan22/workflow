@@ -242,6 +242,27 @@ test('approval fills the clients parking row instead of adding a second one', ()
   assert.equal(f.context.financialParkingError(), '');
 });
 
+test('a parking row states whether the proposal filled it or generated it', () => {
+  const f = fixture();
+  const plan = f.proposal(true);
+  plan.absorbedRows = [{ id: 'manual-parking', original: clientParkingRow() }];
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  const note = component => f.context.componentOriginNote(plain(component));
+  assert.equal(note({ id: 'manual-parking', parkingPlanId: 'plan-1' }), 'معبّأ من اقتراح المواقف');
+  assert.equal(note({ id: 'parking_regulatory_surface', parkingPlanId: 'plan-1' }), 'مولّد من اقتراح المواقف');
+  assert.equal(note({ id: 'manual-parking' }), '');
+  assert.equal(note({ id: 'manual-parking', parkingPlanId: 'other-plan' }), '');
+  f.realAddComponent({ id: 'manual-parking', name: 'مواقف قائمة', useType: 'parking',
+    parkingLocation: 'basement', units: 64, unitArea: 30, builtArea: 1920, parkingPlanId: 'plan-1' });
+  assert.match(f.rows.at(-1).innerHTML, /معبّأ من اقتراح المواقف/);
+  f.realAddComponent({ id: 'parking_regulatory_surface', name: 'مواقف السيارات — سطحية',
+    useType: 'parking', parkingLocation: 'surface', units: 66, unitArea: 30, builtArea: 1980,
+    parkingPlanId: 'plan-1' });
+  assert.match(f.rows.at(-1).innerHTML, /مولّد من اقتراح المواقف/);
+  f.context.tenantProjectData.financial_study_model.parkingPlan = null;
+  assert.equal(note({ id: 'manual-parking', parkingPlanId: 'plan-1' }), '');
+});
+
 test('a late response does not replace newer manual edits or another open draft', () => {
   const f = fixture();
   const plan = f.proposal(true);

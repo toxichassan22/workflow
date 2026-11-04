@@ -44,6 +44,12 @@
 .financial-parking.busy .financial-parking-status {
   font-weight: 700;
 }
+.component-origin {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--teal-dark, #0A829B);
+}
 .financial-parking-location {
   margin-top: 8px;
 }
