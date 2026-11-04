@@ -82,6 +82,22 @@ class EmailTemplateTests(unittest.TestCase):
         for name in ('landloom-emblem.png', 'landloom-logo.png', 'landloom-logo-white.png'):
             self.assertTrue((assets / name).is_file(), name)
 
+    def test_emblem_asset_is_square(self):
+        """The email header renders the emblem at equal width and height; a wide
+        export (486x376 was shipped once) shows as a stretched pill."""
+        try:
+            from PIL import Image
+        except Exception:  # pragma: no cover - Pillow ships with the app venv
+            self.skipTest('Pillow is not available')
+        image = Image.open(ROOT / 'assets' / 'landloom-emblem.png').convert('RGBA')
+        bbox = image.split()[-1].getbbox()
+        self.assertIsNotNone(bbox)
+        width = bbox[2] - bbox[0]
+        height = bbox[3] - bbox[1]
+        self.assertLessEqual(
+            abs(width - height) / max(width, height), 0.02,
+            'the emblem mark must be square (measured %dx%d)' % (width, height))
+
 
 if __name__ == '__main__':
     unittest.main()
