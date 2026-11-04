@@ -780,6 +780,7 @@
       const dark = document.getElementById('settingsLogoPreviewDarkBox');
       if (light && !light.querySelector('img')) light.textContent = WFT('settings.logo_placeholder', 'شعار الشركة (PNG/JPG/WEBP)');
       if (dark && !dark.querySelector('img')) dark.textContent = WFT('settings.logo_dark_placeholder', 'شعار الشركة (النسق الداكن)');
+      renderSettingsCompanyPreview();
     });
 
     function updateSettingsLogoPreviews(logoPath) {
@@ -793,6 +794,31 @@
       if (previewDark) {
         previewDark.innerHTML = image || escapeHtml(WFT('settings.logo_dark_placeholder', 'شعار الشركة (النسق الداكن)'));
       }
+    }
+
+    // The company card mirrors the profile fields and the uploaded logo, so the
+    // client sees the identity as it will appear in the presentation headers.
+    function renderSettingsCompanyPreview() {
+      const fill = function (id, value, emptyKey, emptyFallback) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const text = String(value || '').trim();
+        el.textContent = text || WFT(emptyKey, emptyFallback);
+        el.classList.toggle('is-empty', !text);
+      };
+      fill('settingsCompanyPreviewNameAr', getValue('settingsCompanyName'), 'settings.preview_empty_name', 'اسم الشركة');
+      fill('settingsCompanyPreviewNameEn', getValue('settingsCompanyNameEn'), 'settings.preview_empty_name', 'اسم الشركة');
+      fill('settingsCompanyPreviewTagAr', getValue('settingsTagline'), 'settings.preview_empty_tagline', 'الشعار اللفظي');
+      fill('settingsCompanyPreviewTagEn', getValue('settingsTaglineEn'), 'settings.preview_empty_tagline', 'الشعار اللفظي');
+      const logoBox = document.getElementById('settingsCompanyPreviewLogo');
+      if (!logoBox) return;
+      const shownLogo = document.querySelector('#settingsLogoPreview img');
+      if (shownLogo) {
+        logoBox.innerHTML = '<img src="' + escapeHtml(shownLogo.getAttribute('src') || '') + '" alt="logo">';
+        return;
+      }
+      const name = String(getValue('settingsCompanyName') || getValue('settingsCompanyNameEn') || '').trim();
+      logoBox.innerHTML = '<span class="settings-company-preview-monogram">' + escapeHtml(name ? name.charAt(0) : '—') + '</span>';
     }
 
     async function openTenantSettings() {
@@ -816,6 +842,7 @@
       refreshSettingsColorFields();
       updateSettingsPaletteMockup();
       updateSettingsLogoPreviews(b.logo_path);
+      renderSettingsCompanyPreview();
       renderSettingsWatermarkPreview(b);
       await loadTenantFonts();
     }
@@ -850,7 +877,10 @@
         if (picker && hex) picker.value = hex;
         if (t.closest && t.closest('#tenantSettingsPage')) updateSettingsPaletteMockup();
       }
-      if (t.closest && t.closest('#tenantSettingsPage')) setSettingsDirty(true);
+      if (t.closest && t.closest('#tenantSettingsPage')) {
+        setSettingsDirty(true);
+        if (t.closest('#settingsPaneProfile')) renderSettingsCompanyPreview();
+      }
     });
 
     document.addEventListener('change', e => {
@@ -863,7 +893,10 @@
         else if (picker) { t.value = picker.value ? picker.value.toUpperCase() : ''; }
         if (t.closest && t.closest('#tenantSettingsPage')) updateSettingsPaletteMockup();
       }
-      if (t.closest && t.closest('#tenantSettingsPage')) setSettingsDirty(true);
+      if (t.closest && t.closest('#tenantSettingsPage')) {
+        setSettingsDirty(true);
+        if (t.closest('#settingsPaneProfile')) renderSettingsCompanyPreview();
+      }
     });
 
     function setValue(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }

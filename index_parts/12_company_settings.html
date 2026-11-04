@@ -22,27 +22,57 @@
 
         <!-- Tab 1: Profile & Official Data -->
         <div class="settings-tab-pane active" id="settingsPaneProfile">
-          <div class="settings-card">
-            <div class="settings-card-header">
-              <h3 class="settings-card-title" data-i18n="settings.profile_title">بيانات المنشأة الرسمية</h3>
-              <p class="settings-card-desc" data-i18n="settings.profile_desc">المعلومات المعتمدة التي تظهر في ترويسة وغلاف العروض ودراسات الجدوى العقارية</p>
+          <div class="settings-profile-layout">
+            <div class="settings-card">
+              <div class="settings-card-header">
+                <h3 class="settings-card-title" data-i18n="settings.profile_title">بيانات المنشأة الرسمية</h3>
+                <p class="settings-card-desc" data-i18n="settings.profile_desc">المعلومات المعتمدة التي تظهر في ترويسة وغلاف العروض ودراسات الجدوى العقارية</p>
+              </div>
+              <div class="tenant-grid">
+                <div class="tenant-field">
+                  <label data-i18n="settings.name_ar_field">اسم الشركة بالعربية</label>
+                  <input type="text" id="settingsCompanyName" data-i18n-ph="settings.name_ar_placeholder" placeholder="اسم الشركة بالعربية">
+                </div>
+                <div class="tenant-field">
+                  <label data-i18n="company.name_en_field">اسم الشركة بالإنجليزية</label>
+                  <input type="text" id="settingsCompanyNameEn" dir="ltr" data-i18n-ph="company.name_en_placeholder" placeholder="Company name">
+                </div>
+                <div class="tenant-field">
+                  <label data-i18n="settings.tagline_ar_field">الشعار اللفظي / التاغ لاين بالعربية</label>
+                  <input type="text" id="settingsTagline" data-i18n-ph="settings.tagline_ar_placeholder" placeholder="شعار الشركة بالعربية">
+                </div>
+                <div class="tenant-field">
+                  <label data-i18n="company.tagline_en_field">الشعار اللفظي / التاغ لاين بالإنجليزية</label>
+                  <input type="text" id="settingsTaglineEn" dir="ltr" data-i18n-ph="company.tagline_en_placeholder" placeholder="Short tagline">
+                </div>
+              </div>
             </div>
-            <div class="tenant-grid">
-              <div class="tenant-field full">
-                <label data-i18n="settings.name_ar_field">اسم الشركة بالعربية</label>
-                <input type="text" id="settingsCompanyName" data-i18n-ph="settings.name_ar_placeholder" placeholder="اسم الشركة بالعربية">
+
+            <div class="settings-card settings-company-preview">
+              <div class="settings-card-header">
+                <h3 class="settings-card-title" data-i18n="settings.company_card_title">بطاقة الشركة</h3>
+                <p class="settings-card-desc" data-i18n="settings.company_card_desc">معاينة حية للهوية كما تظهر في ترويسة العروض</p>
               </div>
-              <div class="tenant-field full">
-                <label data-i18n="company.name_en_field">اسم الشركة بالإنجليزية</label>
-                <input type="text" id="settingsCompanyNameEn" dir="ltr" data-i18n-ph="company.name_en_placeholder" placeholder="Company name">
-              </div>
-              <div class="tenant-field full">
-                <label data-i18n="settings.tagline_ar_field">الشعار اللفظي / التاغ لاين بالعربية</label>
-                <input type="text" id="settingsTagline" data-i18n-ph="settings.tagline_ar_placeholder" placeholder="شعار الشركة بالعربية">
-              </div>
-              <div class="tenant-field full">
-                <label data-i18n="company.tagline_en_field">الشعار اللفظي / التاغ لاين بالإنجليزية</label>
-                <input type="text" id="settingsTaglineEn" dir="ltr" data-i18n-ph="company.tagline_en_placeholder" placeholder="Short tagline">
+              <div class="settings-company-preview-board">
+                <div class="settings-company-preview-header">
+                  <div class="settings-company-preview-meta">
+                    <div class="settings-company-preview-name" id="settingsCompanyPreviewNameAr"></div>
+                    <div class="settings-company-preview-name-en" id="settingsCompanyPreviewNameEn"></div>
+                    <div class="settings-company-preview-tagline" id="settingsCompanyPreviewTagAr"></div>
+                    <div class="settings-company-preview-tagline-en" id="settingsCompanyPreviewTagEn"></div>
+                  </div>
+                  <div class="settings-company-preview-logo" id="settingsCompanyPreviewLogo"></div>
+                </div>
+                <div class="settings-company-preview-body" aria-hidden="true">
+                  <div class="settings-company-preview-accent"></div>
+                  <div class="settings-company-preview-line"></div>
+                  <div class="settings-company-preview-line is-mid"></div>
+                  <div class="settings-company-preview-line is-short"></div>
+                  <div class="settings-company-preview-blocks">
+                    <div class="settings-company-preview-block"></div>
+                    <div class="settings-company-preview-block"></div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

@@ -168,6 +168,32 @@ class TestCompanySettingsUI(unittest.TestCase):
                          'the tabs bar must not be a scroll container')
         self.assertIn('flex-wrap: wrap', nav_block.group(1))
 
+    def test_settings_profile_uses_a_live_company_card(self):
+        """The profile tab stacked four full-width fields and left the page mostly empty.
+        The fields now pair in two columns beside a live company card that mirrors them,
+        the container uses the page width, and the save bar anchors the bottom."""
+        page_html = self._extract_settings_page_html()
+        self.assertIn('class="settings-profile-layout"', page_html)
+        self.assertNotIn('class="tenant-field full"', page_html)
+        for element_id in ('settingsCompanyPreviewNameAr', 'settingsCompanyPreviewNameEn',
+                           'settingsCompanyPreviewTagAr', 'settingsCompanyPreviewTagEn',
+                           'settingsCompanyPreviewLogo'):
+            self.assertIn('id="%s"' % element_id, page_html,
+                          'the live company card is missing %s' % element_id)
+
+        css = (ROOT / 'assets' / 'css' / 'base' / '14_company_settings.css').read_text(encoding='utf-8')
+        self.assertIn('.settings-profile-layout {', css)
+        self.assertIn('grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);', css)
+        self.assertIn('max-width: 1500px;', css)
+        self.assertIn('min-height: calc(var(--ui-viewport, 100vh) - 120px);', css)
+        self.assertRegex(css, r'\.settings-sticky-bar \{[^}]*margin-top: auto;')
+
+        js = (ROOT / 'assets' / 'js' / '02-settings-branding' / '02_auth_boot.js').read_text(encoding='utf-8')
+        self.assertIn('function renderSettingsCompanyPreview()', js)
+        self.assertGreaterEqual(
+            js.count('renderSettingsCompanyPreview()'), 5,
+            'the card must render on open, on language change, and while typing')
+
     def test_settings_page_strings_are_i18n_bound(self):
         """The redesigned settings page shipped hardcoded Arabic, so the English UI kept
         showing Arabic. Every label, placeholder and status must resolve through the
