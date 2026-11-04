@@ -242,6 +242,29 @@ if [ -n "$local_commit" ]; then
   printf '{"commit":"%s","deployed_at":"%s","source":"github-staging"}\n' \
     "$local_commit" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" > "$APP_DIR/.deployed_commit"
 fi
+
+# Ensure Google Search Console verification fixtures exist in public_html for the root domain
+if [ -d "/home/landloom/public_html" ]; then
+  echo "google-site-verification: google3567ac5386460d70.html" > "/home/landloom/public_html/google3567ac5386460d70.html"
+  chmod 644 "/home/landloom/public_html/google3567ac5386460d70.html" 2>/dev/null || true
+  if [ ! -f "/home/landloom/public_html/index.html" ]; then
+    cat <<'EOF' > "/home/landloom/public_html/index.html"
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>LandLoom</title>
+  <meta name="google-site-verification" content="DjcprG6EDZYXybz9fFyDqEQE7mIPvmsJXTnEDVi7J6c">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+</head>
+<body>
+</body>
+</html>
+EOF
+    chmod 644 "/home/landloom/public_html/index.html" 2>/dev/null || true
+  fi
+fi
+
 write_deploy_status deployed 0
 trap - EXIT
 
