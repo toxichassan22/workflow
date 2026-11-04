@@ -13,6 +13,64 @@
     let notifLastItems = [];
     let notifLastCategories = null;
     let notifStatusState = 'all';
+    let notifCategoryGroup = 'all';
+    const NOTIF_GROUP_CATEGORIES = {
+      projects: ['section_approval', 'generation_approval', 'final_approval', 'job'],
+      finance: ['billing', 'recharge'],
+      support: ['support', 'platform', 'general']
+    };
+
+    function formatNotifNumberSanitized(str) {
+      if (!str) return '';
+      return String(str).replace(/(\d+)\.(\d{3,})/g, (match) => {
+        const val = parseFloat(match);
+        return isNaN(val) ? match : val.toFixed(2);
+      });
+    }
+
+    function notifActionBtn(n) {
+      if (!n) return '';
+      const isAdmin = Boolean(tenantUser && tenantUser.isAdmin);
+      const t = (k, fb) => (typeof WFT === 'function' ? WFT(k, fb) : fb);
+      if (isAdmin) {
+        if (n.entity_type === 'recharge_request') {
+          return '<button type="button" class="btn small primary" onclick="event.stopPropagation();notificationOpen(\'' + llEscape(n.id) + '\')">' + llEscape(t('notif.act_review_recharge', 'مراجعة الشحن')) + '</button>';
+        }
+        if (n.entity_type === 'support_ticket') {
+          return '<button type="button" class="btn small primary" onclick="event.stopPropagation();notificationOpen(\'' + llEscape(n.id) + '\')">' + llEscape(t('notif.act_review_ticket', 'مراجعة التذكرة')) + '</button>';
+        }
+        if (n.entity_type === 'join_request') {
+          return '<button type="button" class="btn small primary" onclick="event.stopPropagation();notificationOpen(\'' + llEscape(n.id) + '\')">' + llEscape(t('notif.act_review_join', 'مراجعة الطلب')) + '</button>';
+        }
+      } else {
+        if (['section_version', 'project_draft', 'generation_approval', 'final_file_approval', 'approval_task'].indexOf(n.entity_type) !== -1) {
+          return '<button type="button" class="btn small primary" onclick="event.stopPropagation();notificationOpen(\'' + llEscape(n.id) + '\')">' + llEscape(t('notif.act_review_approval', 'مراجعة الاعتماد')) + '</button>';
+        }
+        if (n.entity_type === 'generation_job') {
+          return '<button type="button" class="btn small primary" onclick="event.stopPropagation();notificationOpen(\'' + llEscape(n.id) + '\')">' + llEscape(t('notif.act_view_project', 'عرض المشاريع')) + '</button>';
+        }
+        if (['recharge_request', 'wallet'].indexOf(n.entity_type) !== -1) {
+          return '<button type="button" class="btn small primary" onclick="event.stopPropagation();notificationOpen(\'' + llEscape(n.id) + '\')">' + llEscape(t('notif.act_view_wallet', 'عرض المحفظة')) + '</button>';
+        }
+        if (n.entity_type === 'support_ticket') {
+          return '<button type="button" class="btn small primary" onclick="event.stopPropagation();notificationOpen(\'' + llEscape(n.id) + '\')">' + llEscape(t('notif.act_view_ticket', 'عرض التذكرة')) + '</button>';
+        }
+      }
+      if (n.title && (n.title.indexOf('مشروع') !== -1 || n.title.indexOf('عرض') !== -1 || n.title.indexOf('كروكي') !== -1)) {
+        return '<button type="button" class="btn small ghost" onclick="event.stopPropagation();notificationOpen(\'' + llEscape(n.id) + '\')">' + llEscape(t('notif.act_view_details', 'معاينة')) + '</button>';
+      }
+      return '';
+    }
+
+    function notifEmptyHtml() {
+      const t = (k, fb) => (typeof WFT === 'function' ? WFT(k, fb) : fb);
+      return '<div class="tenant-notif-empty-state">' +
+        '<div class="notif-empty-monogram">LL</div>' +
+        '<h3 class="notif-empty-title">' + llEscape(t('notif.empty_title', 'لا توجد إشعارات حالياً')) + '</h3>' +
+        '<p class="notif-empty-desc">' + llEscape(t('notif.empty_desc', 'كافة التنبيهات والعمليات محدثة ولا توجد إشعارات جديدة بانتظار المتابعة.')) + '</p>' +
+        '<button type="button" class="btn small ghost" onclick="openTenantPresentations()">' + llEscape(t('notif.empty_cta', 'الانتقال إلى المشاريع')) + '</button>' +
+        '</div>';
+    }
 
     function notifCategoryLabel(cat) {
       return WFT('notif.cat.' + cat, NOTIF_CATEGORY_FALLBACKS[cat] || cat);
@@ -180,6 +238,16 @@
       await Promise.all(jobs);
     }
 
+    function setNotifCategoryGroup(grp) {
+      notifCategoryGroup = ['all', 'projects', 'finance', 'support'].indexOf(grp) !== -1 ? grp : 'all';
+      document.querySelectorAll('#tenantNotificationsPage [data-notif-category]').forEach(btn => {
+        const active = btn.getAttribute('data-notif-category') === notifCategoryGroup;
+        btn.classList.toggle('primary', active);
+        btn.classList.toggle('ghost', !active);
+      });
+      renderNotificationsPage();
+    }
+
     function setNotifStatusFilter(status) {
       notifStatusState = ['all', 'unread', 'read'].indexOf(status) !== -1 ? status : 'all';
       document.querySelectorAll('#tenantNotificationsPage [data-notif-status]').forEach(btn => {
@@ -214,37 +282,65 @@
       notifLastCategories = data.categories || null;
       fillNotifCategoryFilter(data.categories);
       notifLastItems = data.notifications || [];
+
+      // Update counters & stats strip
+      const allItems = notifLastItems;
+      const total = parseInt(data.total, 10) || allItems.length;
+      const unread = parseInt(data.unreadCount, 10) || allItems.filter(x => !x.read_at).length;
+      const projCount = allItems.filter(x => (NOTIF_GROUP_CATEGORIES.projects || []).indexOf(x.category) !== -1).length;
+      const sysCount = allItems.filter(x => (NOTIF_GROUP_CATEGORIES.finance || []).concat(NOTIF_GROUP_CATEGORIES.support || []).indexOf(x.category) !== -1).length;
+
+      const setEl = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = String(v); };
+      setEl('notifStatTotal', total);
+      setEl('notifStatUnread', unread);
+      setEl('notifStatProjects', projCount);
+      setEl('notifStatSystem', sysCount);
+
       const unreadChip = document.getElementById('notifUnreadCount');
       if (unreadChip) {
-        const unread = parseInt(data.unreadCount, 10) || 0;
         unreadChip.hidden = unread <= 0;
         unreadChip.textContent = unread > 0
           ? WFT('notif.unread_count', '{count} غير مقروءة', { count: unread }) : '';
       }
-      if (!notifLastItems.length) {
-        list.innerHTML = '<p class="tenant-hint">' + llEscape(WFT('notif.empty', 'لا توجد إشعارات')) + '</p>';
+
+      // Filter by category group
+      let itemsToRender = allItems;
+      if (notifCategoryGroup && notifCategoryGroup !== 'all' && NOTIF_GROUP_CATEGORIES[notifCategoryGroup]) {
+        const allowed = NOTIF_GROUP_CATEGORIES[notifCategoryGroup];
+        itemsToRender = itemsToRender.filter(x => allowed.indexOf(x.category) !== -1);
+      }
+
+      if (!itemsToRender.length) {
+        list.innerHTML = notifEmptyHtml();
         return;
       }
-      list.innerHTML = notifLastItems.map(n => notifCardHtml(n)).join('');
+      list.innerHTML = itemsToRender.map(n => notifCardHtml(n)).join('');
     }
 
     // One card layout shared by the full page, the operations tab and the
     // admin dashboard's latest-notifications panel.
     function notifCardHtml(n) {
       const unread = !n.read_at;
-      return '<div class="tenant-presentation-card tenant-notif-card' + (unread ? ' unread' : '') + '"' +
+      const actionBtn = notifActionBtn(n);
+      const title = formatNotifNumberSanitized(n.title || '');
+      const body = formatNotifNumberSanitized(n.body || '');
+      const when = (n.created_at || '').slice(0, 16).replace('T', ' ');
+      return '<div class="tenant-notif-card tenant-notif-card-revamp' + (unread ? ' unread' : '') + '"' +
         ' role="button" tabindex="0" onclick="notificationOpen(\'' + llEscape(n.id) + '\')"' +
         ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + llEscape(n.id) + '\')">' +
-        '<div class="tenant-notif-main">' +
-        '<h3>' + (unread ? '<span class="tenant-notif-dot" aria-hidden="true"></span>' : '') +
-        llEscape(n.title) +
+        '<div class="tenant-notif-main notif-main-area">' +
+        '<div class="notif-header-line">' +
+        '<h3 class="notif-card-title">' + (unread ? '<span class="tenant-notif-dot" aria-hidden="true"></span>' : '') +
+        llEscape(title) +
         (unread ? ' <span class="tenant-notif-new">(' + llEscape(WFT('notif.new', 'جديد')) + ')</span>' : '') + '</h3>' +
-        (n.body ? '<p class="tenant-notif-body">' + llEscape(n.body) + '</p>' : '') +
-        '<div class="meta">' +
-        '<span class="tenant-notif-cat">' + llEscape(notifCategoryLabel(n.category || 'general')) + '</span>' +
-        '<bdi class="tenant-notif-time">' + llEscape((n.created_at || '').slice(0, 16).replace('T', ' ')) + '</bdi>' +
+        '</div>' +
+        (body ? '<p class="tenant-notif-body notif-card-body">' + llEscape(body) + '</p>' : '') +
+        '<div class="meta notif-card-meta">' +
+        '<span class="tenant-notif-cat tenant-notif-cat-badge">' + llEscape(notifCategoryLabel(n.category || 'general')) + '</span>' +
+        '<bdi class="tenant-notif-time">' + llEscape(when) + '</bdi>' +
         '</div></div>' +
-        '<div class="tenant-actions">' +
+        '<div class="tenant-actions notif-card-actions">' +
+        actionBtn +
         '<button type="button" class="btn small ghost"' +
         ' onclick="notificationDelete(event,\'' + llEscape(n.id) + '\')"' +
         ' onkeydown="event.stopPropagation()">' + llEscape(WFT('common.delete', 'حذف')) + '</button>' +

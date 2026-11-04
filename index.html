@@ -1786,29 +1786,63 @@
           <h2 data-i18n="page.notifications">الإشعارات</h2>
         </div>
         <div class="tenant-actions">
+          <button type="button" class="btn small ghost" onclick="renderNotificationsPage()"
+            data-i18n="common.refresh">تحديث</button>
           <span id="notifUnreadCount" class="notif-unread-chip" hidden></span>
           <button type="button" class="btn ghost" onclick="notificationsMarkAllRead()"
             data-i18n="admin.mark_all_read">تحديد الكل كمقروء</button>
         </div>
       </div>
 
-      <div class="notif-toolbar">
-        <div class="sag-tabs notif-status-tabs" role="group" aria-label="حالة القراءة"
-          data-i18n-aria="notif.status_label">
-          <button type="button" class="btn small primary" data-notif-status="all"
-            onclick="setNotifStatusFilter('all')" data-i18n="notif.status_all">الكل</button>
-          <button type="button" class="btn small ghost" data-notif-status="unread"
-            onclick="setNotifStatusFilter('unread')" data-i18n="notif.status_unread">غير مقروءة</button>
-          <button type="button" class="btn small ghost" data-notif-status="read"
-            onclick="setNotifStatusFilter('read')" data-i18n="notif.status_read">مقروءة</button>
+      <div class="tenant-notif-page-wrap">
+        <div class="notif-stats-strip" id="notifStatsStrip">
+          <div class="notif-stat-chip">
+            <span class="notif-stat-label" data-i18n="notif.stat_total">إجمالي الإشعارات</span>
+            <span class="notif-stat-val" id="notifStatTotal">0</span>
+          </div>
+          <div class="notif-stat-chip">
+            <span class="notif-stat-label" data-i18n="notif.stat_unread">غير مقروءة</span>
+            <span class="notif-stat-val" id="notifStatUnread" style="color:var(--teal,#0FA9C4)">0</span>
+          </div>
+          <div class="notif-stat-chip">
+            <span class="notif-stat-label" data-i18n="notif.stat_projects">المشاريع والاعتمادات</span>
+            <span class="notif-stat-val" id="notifStatProjects">0</span>
+          </div>
+          <div class="notif-stat-chip">
+            <span class="notif-stat-label" data-i18n="notif.stat_system">المحفظة والخدمات</span>
+            <span class="notif-stat-val" id="notifStatSystem">0</span>
+          </div>
         </div>
-        <label class="notif-filter-field">
-          <span data-i18n="notif.category_label">التصنيف</span>
-          <select id="notifCategoryFilter" onchange="renderNotificationsPage()" class="tenant-filter-select"></select>
-        </label>
-      </div>
 
-      <div id="tenantNotificationsList"></div>
+        <div class="notif-toolbar">
+          <div class="sag-tabs notif-category-tabs" role="group" aria-label="تصنيف الإشعارات"
+            data-i18n-aria="notif.category_label">
+            <button type="button" class="btn small primary" data-notif-category="all"
+              onclick="setNotifCategoryGroup('all')" data-i18n="notif.cat_all">الكل</button>
+            <button type="button" class="btn small ghost" data-notif-category="projects"
+              onclick="setNotifCategoryGroup('projects')" data-i18n="notif.cat_projects">المشاريع والاعتمادات</button>
+            <button type="button" class="btn small ghost" data-notif-category="finance"
+              onclick="setNotifCategoryGroup('finance')" data-i18n="notif.cat_finance">المحفظة والمالية</button>
+            <button type="button" class="btn small ghost" data-notif-category="support"
+              onclick="setNotifCategoryGroup('support')" data-i18n="notif.cat_support">الدعم والنظام</button>
+          </div>
+          <div class="sag-tabs notif-status-tabs" role="group" aria-label="حالة القراءة"
+            data-i18n-aria="notif.status_label">
+            <button type="button" class="btn small primary" data-notif-status="all"
+              onclick="setNotifStatusFilter('all')" data-i18n="notif.status_all">الكل</button>
+            <button type="button" class="btn small ghost" data-notif-status="unread"
+              onclick="setNotifStatusFilter('unread')" data-i18n="notif.status_unread">غير مقروءة</button>
+            <button type="button" class="btn small ghost" data-notif-status="read"
+              onclick="setNotifStatusFilter('read')" data-i18n="notif.status_read">مقروءة</button>
+          </div>
+          <label class="notif-filter-field" style="display:none">
+            <span data-i18n="notif.category_label">التصنيف</span>
+            <select id="notifCategoryFilter" onchange="renderNotificationsPage()" class="tenant-filter-select"></select>
+          </label>
+        </div>
+
+        <div id="tenantNotificationsList"></div>
+      </div>
 
       <div class="tenant-content-panel" id="notifAnnouncePanel" hidden>
         <div class="tenant-panel-heading">
