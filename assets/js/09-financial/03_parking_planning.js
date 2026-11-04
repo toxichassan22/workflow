@@ -67,8 +67,14 @@
       if (rows.some(row => row.parkingPlanId) && [plan.basementAreaTarget, plan.previousBasementAreaTarget].includes(basement)) {
         basement = financialParkingNumber(plan.baseBasementArea) || 0;
       }
+      // A client row the approved program replaced may no longer exist in the
+      // table (a second row for a location the program already covers); it is
+      // still part of the inputs the proposal was built on.
+      const present = new Set(rows.map(row => String(row.id)));
+      const absorbedOnly = Object.entries(absorbed)
+        .filter(([id]) => !present.has(id)).map(([, original]) => original);
       const components = rows.filter(row => !row.parkingPlanId || absorbed[String(row.id)])
-        .map(row => absorbed[String(row.id)] || row).map(row => {
+        .map(row => absorbed[String(row.id)] || row).concat(absorbedOnly).map(row => {
         const component = {};
         ['id', 'name', 'useType', 'investmentModel', 'parkingLocation'].forEach(key => { component[key] = String(row[key] || '').trim(); });
         ['units', 'unitArea', 'builtArea', 'revenueArea'].forEach(key => { component[key] = financialParkingNumber(row[key]); });
@@ -129,16 +135,18 @@
           </div></div>
         <div id="financialParkingStatus" class="tenant-hint financial-parking-status" role="status" aria-live="polite"></div>
         <div id="financialParkingDetails" hidden>
-          <div class="grid four financial-parking-summary">
+          <div class="grid financial-parking-summary">
             <div><label for="parkingRequiredSpaces">إجمالي المواقف المطلوبة</label><input id="parkingRequiredSpaces" readonly></div>
             <div><label for="parkingExistingSpaces">المواقف المسجلة في الجدول</label><input id="parkingExistingSpaces" readonly></div>
-            <div><label for="parkingAdditionalSpaces">مواقف إضافية مقترحة</label><input id="parkingAdditionalSpaces" readonly></div>
           </div>
           <div class="table-wrap"><table id="parkingRequirementsTable"><thead><tr><th>المكون</th><th>طريقة الاحتساب</th><th>الكمية المعتمدة</th><th>عدد المواقف المطلوبة</th><th>الاشتراط الموثق</th></tr></thead><tbody></tbody></table></div>
           <div class="financial-parking-notes"><div id="financialParkingNotesWrap"><label for="financialParkingNotes">ملاحظات اقتراح المواقف</label><textarea id="financialParkingNotes" readonly rows="4"></textarea></div></div>
         </div>
         <div class="financial-parking-chat" id="financialParkingChat">
-          <h4>محادثة الاقتراح</h4>
+          <div class="financial-parking-chat-header">
+            <h4>محادثة الاقتراح</h4>
+            <button type="button" id="financialParkingNewChat" class="btn ghost" onclick="beginFinancialParkingChat()">${WFT('financial.parking_new_chat', 'بدء محادثة جديدة')}</button>
+          </div>
           <div id="financialParkingChatLog" class="financial-parking-chat-log" role="log" aria-live="polite"></div>
           <div class="financial-parking-chat-compose">
             <textarea id="financialParkingChatInput" rows="2" placeholder="رسالتك" data-i18n-ph="financial.parking_chat_placeholder" oninput="event.stopPropagation()"></textarea>
@@ -183,10 +191,17 @@
       const status = document.getElementById('financialParkingStatus');
       const presentationMode = typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation';
       const sectionLocked = tenantProjectSectionStatuses['section-financial-calc'] === 'approved';
+      // An approved proposal is a closed decision: only its own undo stays on
+      // screen. Re-suggesting, discarding and the conversation return when the
+      // approval is released.
+      const approved = plan.approved === true && !error;
       const suggest = document.getElementById('financialParkingSuggest');
-      if (suggest) suggest.disabled = financialParkingBusy || financialParkingChatBusy || presentationMode || sectionLocked;
+      if (suggest) {
+        suggest.hidden = approved;
+        suggest.disabled = financialParkingBusy || financialParkingChatBusy || presentationMode || sectionLocked;
+      }
       const details = document.getElementById('financialParkingDetails');
-      if (details) details.hidden = (!plan.id && !financialParkingBusy) || plan.approved === true;
+      if (details) details.hidden = (!plan.id && !financialParkingBusy) || approved;
       panel.classList?.toggle('busy', financialParkingBusy);
       panel.setAttribute?.('aria-busy', financialParkingBusy ? 'true' : 'false');
       if (status) status.textContent = financialParkingText(financialParkingBusy ? 'جاري إعداد اقتراح المواقف...' : !plan.id ? 'لا يوجد اقتراح مواقف.'
@@ -195,7 +210,6 @@
       const setValue = (id, value) => { const input = document.getElementById(id); if (input) input.value = !plan.id ? '' : value == null ? '—' : money(value); };
       setValue('parkingRequiredSpaces', plan.requiredSpaces);
       setValue('parkingExistingSpaces', plan.existingSpaces);
-      setValue('parkingAdditionalSpaces', plan.additionalSpaces);
       const body = document.querySelector('#parkingRequirementsTable tbody');
       if (body) body.innerHTML = (plan.requirements || []).map(row => {
         const basis = { units: 'عدد الوحدات', builtArea: 'المساحة المبنية م²', revenueArea: 'المساحة البيعية / التأجيرية م²', landArea: 'مساحة الأرض م²' }[row.basis] || 'غير موثق';
@@ -219,9 +233,11 @@
       if (notesWrap) notesWrap.hidden = !noteLines.length;
       const discard = document.getElementById('financialParkingDiscard');
       if (discard) {
-        discard.hidden = !plan.id;
+        discard.hidden = !plan.id || approved;
         discard.disabled = financialParkingBusy || financialParkingChatBusy || presentationMode || sectionLocked;
       }
+      const chat = document.getElementById('financialParkingChat');
+      if (chat) chat.hidden = approved;
       const approve = document.getElementById('financialParkingApprove');
       if (approve) {
         approve.hidden = !plan.id;
@@ -350,7 +366,24 @@
         ? stored.messages.filter(message => message && String(message.content || '').trim())
           .map(message => ({ role: message.role === 'user' ? 'user' : 'assistant', content: String(message.content) }))
         : [];
-      return { messages, memory: String(stored.memory || '') };
+      return { messages, memory: String(stored.memory || ''),
+        session: financialParkingObject(stored.session) };
+    }
+
+    function beginFinancialParkingChat() {
+      if (financialParkingChatBusy || financialParkingBusy) return false;
+      if (typeof tenantProjectSectionStatuses !== 'undefined'
+          && tenantProjectSectionStatuses['section-financial-calc'] === 'approved') return false;
+      if (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation') return false;
+      const state = financialParkingChatState();
+      if (state.messages.length && typeof confirm === 'function'
+          && !confirm(WFT('financial.parking_new_chat_confirm', 'بدء محادثة جديدة وحذف المحادثة الحالية؟'))) return false;
+      // An empty conversation is also an empty session: the first message
+      // re-reads the project and the regulations once, then speaks from them.
+      tenantProjectData.parkingChat = { messages: [], memory: '', session: {} };
+      triggerAutoSaveDraft();
+      renderFinancialParking();
+      return true;
     }
 
     function renderFinancialParkingChat() {
@@ -368,6 +401,11 @@
       const send = document.getElementById('financialParkingChatSend');
       if (input) input.disabled = financialParkingChatBusy || sectionLocked || presentationMode;
       if (send) send.disabled = financialParkingChatBusy || financialParkingBusy || sectionLocked || presentationMode;
+      const newChat = document.getElementById('financialParkingNewChat');
+      if (newChat) {
+        newChat.textContent = WFT('financial.parking_new_chat', 'بدء محادثة جديدة');
+        newChat.disabled = financialParkingChatBusy || financialParkingBusy || sectionLocked || presentationMode;
+      }
       const status = document.getElementById('financialParkingChatStatus');
       if (status) status.textContent = financialParkingChatBusy ? 'جاري الرد...' : '';
     }
@@ -392,7 +430,8 @@
         const snapshot = financialParkingStable(financialParkingSnapshot());
         const response = await parkingApi('POST', '/api/financial-study/parking/chat', {
           draftId, expectedRevision: tenantDraftRevision, planId: financialParkingPlan().id || '',
-          message, history, memory: state.memory
+          message, history, memory: state.memory,
+          session: state.session && state.session.id ? state.session : null
         }, 180000);
         if (!response?.success) {
           toast(financialParkingText(response?.error || 'تعذر الرد على المحادثة.'));
@@ -400,7 +439,9 @@
         }
         state.messages.push({ role: 'user', content: message }, { role: 'assistant', content: String(response.answer || '') });
         state.memory = String(response.memory || '');
+        if (response.session && response.session.id) state.session = response.session;
         tenantProjectData.parkingChat = state;
+        if (response.revision) setTenantDraftRevision(response.revision);
         if (input) input.value = '';
         if (response.financialModel) {
           const fresh = financialParkingReceive(response, snapshot, draftId);

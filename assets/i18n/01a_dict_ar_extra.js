@@ -77,6 +77,8 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "plans.image_edited": "تم تعديل المخطط.",
   "financial.notes_updated": "تم تحديث الإيضاحات في الدراسة المالية",
   "financial.parking_chat_placeholder": "رسالتك",
+  "financial.parking_new_chat": "بدء محادثة جديدة",
+  "financial.parking_new_chat_confirm": "بدء محادثة جديدة وحذف المحادثة الحالية؟",
   "market.summary_resume_title": "استكمال ملخص السوق",
   "market.research_log_failed": "تعذر تنزيل سجل البحث"
 ,

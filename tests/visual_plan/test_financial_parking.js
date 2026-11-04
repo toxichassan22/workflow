@@ -80,7 +80,7 @@ function fixture() {
     builtArea: 1500, revenueArea: 1200, investmentModel: 'annualRent' });
   const snapshot = () => plain(context.financialParkingSnapshot());
   const proposal = (approved = false) => ({ id: 'plan-1', approved, canApply: true,
-    sourceSnapshot: snapshot(), requiredSpaces: 130, existingSpaces: 0, additionalSpaces: 130,
+    sourceSnapshot: snapshot(), requiredSpaces: 130, existingSpaces: 0,
     baseBasementArea: 600, basementAreaTarget: 3900, parkingArea: 3900, areaPerSpace: 30,
     requirements: [], warnings: [], missing: [], components: [{ id: 'parking-1',
       name: 'مواقف السيارات — البدروم', useType: 'parking', parkingLocation: 'basement',
@@ -242,6 +242,23 @@ test('approval fills the clients parking row instead of adding a second one', ()
   assert.equal(f.context.financialParkingError(), '');
 });
 
+test('a client row removed by the program still counts as a proposal input', () => {
+  const f = fixture();
+  const plan = f.proposal(true);
+  const second = { ...clientParkingRow(), id: 'manual-parking-2', units: 5, builtArea: 150 };
+  plan.absorbedRows = [{ id: 'manual-parking', original: clientParkingRow() },
+    { id: 'manual-parking-2', original: second }];
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  f.add({ ...clientParkingRow(), units: 64, builtArea: 1920, parkingPlanId: 'plan-1' });
+  f.add({ ...plan.components[0], id: 'surface-row', units: 66, builtArea: 1980,
+    parkingPlanId: 'plan-1' });
+  const snapshot = f.snapshot();
+  assert.deepEqual(snapshot.components.map(component => component.id).sort(),
+    ['housing', 'manual-parking', 'manual-parking-2', 'retail']);
+  assert.equal(snapshot.components.find(component => component.id === 'manual-parking').units, 10);
+  assert.equal(snapshot.components.find(component => component.id === 'manual-parking-2').units, 5);
+});
+
 test('a parking row states whether the proposal filled it or generated it', () => {
   const f = fixture();
   const plan = f.proposal(true);
@@ -300,10 +317,10 @@ test('an approved proposal that adds nothing counts the client parking rows', ()
   f.inputs.financialParkingNotes = field('');
   f.add({ ...clientParkingRow(), units: 130, builtArea: 3900 });
   const plan = f.proposal(true);
-  Object.assign(plan, { components: [], existingSpaces: 130, additionalSpaces: 0 });
+  Object.assign(plan, { components: [], existingSpaces: 130 });
   f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
   f.context.renderFinancialParking();
-  assert.equal(f.context.financialParkingPlan().additionalSpaces, 0);
+  assert.equal(f.context.financialParkingPlan().existingSpaces, 130);
   assert.equal(f.context.financialParkingError(), '');
   assert.doesNotMatch(f.inputs.financialParkingNotes.value, /أقل من المطلوب/);
   f.rows.at(-1).querySelector('[data-field="units"] input').value = '100';
@@ -453,12 +470,14 @@ test('component rows render and collect the whole-component land share', () => {
   assert.equal(f.context.getComponentRowsData().at(-1).landShareArea, 80);
 });
 
-test('the proposal summary keeps only the total required spaces', () => {
+test('the proposal summary keeps the required and recorded spaces only', () => {
   const f = fixture();
   const html = f.context.financialParkingMarkup();
   assert.match(html, /إجمالي المواقف المطلوبة/);
+  assert.match(html, /المواقف المسجلة في الجدول/);
+  assert(!html.includes('مواقف إضافية مقترحة'));
+  assert(!html.includes('parkingAdditionalSpaces'));
   assert(!html.includes('المواقف المدخلة سابقًا'));
-  assert(!html.includes('المواقف الإضافية المقترحة'));
   assert(!html.includes('مساحة المواقف المقترحة'));
   assert(!html.includes('شاملة الحركة'));
   assert(!html.includes('البدروم الإضافية المقترحة'));
@@ -508,7 +527,7 @@ test('land shares are capped by the building footprint area', () => {
   assert.equal(ok.valid, true);
 });
 
-test('the discard action only shows while a proposal exists and removes it upon confirmation', async () => {
+test('the discard action only shows while a pending proposal exists and removes it upon confirmation', async () => {
   const f = fixture();
   const discard = { hidden: true, textContent: 'حذف اقتراح المواقف', disabled: false };
   const approve = { hidden: true, textContent: '', disabled: false };
@@ -521,7 +540,7 @@ test('the discard action only shows while a proposal exists and removes it upon 
   f.context.renderFinancialParking();
   assert.equal(discard.hidden, true);
 
-  const plan = f.proposal(true);
+  const plan = f.proposal();
   f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
   f.add(plan.components[0]);
   f.inputs.basementArea.value = '3900';
@@ -557,6 +576,37 @@ test('the discard action only shows while a proposal exists and removes it upon 
   assert.equal(f.context.tenantProjectData.financial_study_model.parkingPlan, undefined);
   assert.equal(f.context.financialParkingError(), '');
   assert.equal(discard.hidden, true);
+});
+
+test('an approved proposal hides the chat and every action but the undo', () => {
+  const f = fixture();
+  const discard = { hidden: false, disabled: false };
+  const suggest = { hidden: false, disabled: false };
+  const chat = { hidden: false };
+  const approve = { hidden: true, textContent: '', disabled: false };
+  const byId = f.context.document.getElementById;
+  f.context.document.getElementById = id => id === 'financialParkingPanel' ? {}
+    : id === 'financialParkingDiscard' ? discard
+    : id === 'financialParkingSuggest' ? suggest
+    : id === 'financialParkingChat' ? chat
+    : id === 'financialParkingApprove' ? approve
+    : id === 'financialParkingStatus' ? { textContent: '' }
+    : byId(id);
+  const plan = f.proposal();
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  f.context.renderFinancialParking();
+  assert.equal(suggest.hidden, false);
+  assert.equal(discard.hidden, false);
+  assert.equal(chat.hidden, false);
+  assert.equal(approve.textContent, 'اعتماد اقتراح المواقف');
+
+  f.context.tenantProjectData.financial_study_model.parkingPlan = f.proposal(true);
+  f.context.renderFinancialParking();
+  assert.equal(suggest.hidden, true);
+  assert.equal(discard.hidden, true);
+  assert.equal(chat.hidden, true);
+  assert.equal(approve.hidden, false);
+  assert.equal(approve.textContent, 'إلغاء اعتماد اقتراح المواقف');
 });
 
 test('financial parking panel is excluded from collected report for PDF and deck', () => {
@@ -606,15 +656,18 @@ test('financial parking panel is excluded from collected report for PDF and deck
   assert.equal(row[1], '130');
 });
 
-test('the chat sends the conversation and rebuilds the proposal from the returned rules', async () => {
+test('the chat sends its fixed session inputs and rebuilds the proposal from the returned rules', async () => {
   const f = fixture();
   const plan = f.proposal(false);
   f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  const session = { id: 'session-1', startedAt: '2026-11-04T00:00:00+00:00',
+    snapshot: { components: [{ id: 'housing' }] }, regulations: { parking_requirements: 'موقف لكل وحدة' } };
+  f.context.tenantProjectData.parkingChat = { messages: [], memory: '', session };
   const calls = [];
   f.context.api = async (method, url, body) => {
     calls.push({ method, url, body: plain(body) });
     return { success: true, answer: 'الصالات لها 35 م² في الاشتراط.', memory: 'digest', changed: true,
-      draftId: 'draft-1', revision: 2, sectionStatuses: {},
+      draftId: 'draft-1', revision: 2, sectionStatuses: {}, session,
       financialModel: { inputs: { basementArea: 600 }, dynamicRows: { components: [] },
         parkingPlan: { ...plan, id: 'plan-2', requiredSpaces: 160 } } };
   };
@@ -625,11 +678,27 @@ test('the chat sends the conversation and rebuilds the proposal from the returne
   assert.match(calls[0].url, /parking\/chat/);
   assert.equal(calls[0].body.message, 'اعتبر الصالات 35 م²');
   assert.deepEqual(calls[0].body.history, []);
+  assert.deepEqual(calls[0].body.session, session);
   assert.equal(f.chat.input.value, '');
   assert.equal(f.context.tenantProjectData.parkingChat.messages.length, 2);
   assert.equal(f.context.tenantProjectData.parkingChat.messages[1].content, 'الصالات لها 35 م² في الاشتراط.');
   assert.equal(f.context.tenantProjectData.parkingChat.memory, 'digest');
+  assert.equal(f.context.tenantProjectData.parkingChat.session.id, 'session-1');
   assert.equal(f.context.tenantProjectData.financial_study_model.parkingPlan.id, 'plan-2');
+});
+
+test('a new chat clears the conversation and the fixed inputs it was reading', () => {
+  const f = fixture();
+  f.context.tenantProjectData.parkingChat = {
+    messages: [{ role: 'user', content: 'سؤال قديم' }], memory: 'digest',
+    session: { id: 'session-1', snapshot: { components: [] } } };
+  f.context.confirm = () => false;
+  assert.equal(f.context.beginFinancialParkingChat(), false);
+  assert.equal(f.context.tenantProjectData.parkingChat.messages.length, 1);
+  f.context.confirm = () => true;
+  assert.equal(f.context.beginFinancialParkingChat(), true);
+  assert.deepEqual(plain(f.context.tenantProjectData.parkingChat), { messages: [], memory: '', session: {} });
+  assert.equal(f.context.dirty, true);
 });
 
 test('an explanation-only chat answer leaves the stored plan untouched', async () => {

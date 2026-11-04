@@ -88,15 +88,22 @@ class FinancialParkingApiTests(unittest.TestCase):
             'draftId': self.draft_id, 'planId': plan['id'], 'approved': approved,
             'expectedRevision': self.draft()['revision']})
 
-    def chat(self, message='ليه الفندق كده؟', payload=None):
+    def chat(self, message='ليه الفندق كده؟', payload=None, session=None):
         body = {'draftId': self.draft_id, 'message': message, 'history': [], 'memory': '',
                 'expectedRevision': self.draft()['revision']}
+        if session is not None:
+            body['session'] = session
         with patch.object(self.application, 'call_text_chat', return_value={
                 'choices': [{'message': {'content': json.dumps(
                     payload or {'answer': 'الاشتراط يوضح الأساس.', 'rules': None},
                     ensure_ascii=False)}}]}) as provider:
             response = self.client.post('/api/financial-study/parking/chat', headers=self.headers, json=body)
         return response, provider
+
+    def change_housing_units(self, units):
+        payload = copy.deepcopy(self.draft()['draft_data'])
+        payload['financial_study_model']['dynamicRows']['components'][0]['units'] = units
+        self.assertEqual(self.save_draft(payload).status_code, 200)
 
     def stored_plan(self):
         model = self.draft()['draft_data']['financial_study_model']
@@ -114,6 +121,33 @@ class FinancialParkingApiTests(unittest.TestCase):
         self.assertNotIn('financialModel', body)
         self.assertEqual(provider.call_args.kwargs['usage_ctx']['draft_id'], self.draft_id)
         self.assertEqual(self.stored_plan()['id'], plan['id'])
+
+    def test_chat_reuses_the_inputs_its_session_started_with(self):
+        self.suggest()
+        first, provider = self.chat()
+        session = first.get_json()['session']
+        self.assertTrue(session['id'])
+        first_context = json.loads(provider.call_args.args[1])
+        self.assertEqual(first_context['project']['components'][0]['units'], 100)
+        # The project changes after the conversation started; the open session
+        # keeps speaking from the inputs it read at its first message.
+        self.change_housing_units(150)
+        second, provider = self.chat(message='والسكني؟', session=session)
+        self.assertEqual(second.status_code, 200, second.get_json())
+        second_context = json.loads(provider.call_args.args[1])
+        self.assertEqual(second_context['project']['components'][0]['units'], 100)
+        self.assertEqual(second.get_json()['session']['id'], session['id'])
+
+    def test_a_new_chat_reads_the_project_again(self):
+        self.suggest()
+        first, _ = self.chat()
+        old_session = first.get_json()['session']
+        self.change_housing_units(150)
+        second, provider = self.chat(message='نبدأ من جديد')
+        self.assertEqual(second.status_code, 200, second.get_json())
+        self.assertNotEqual(second.get_json()['session']['id'], old_session['id'])
+        context = json.loads(provider.call_args.args[1])
+        self.assertEqual(context['project']['components'][0]['units'], 150)
 
     def test_chat_revision_rebuilds_the_plan_deterministically(self):
         self.project['regulatory_constraints'] = (
@@ -341,6 +375,28 @@ class FinancialParkingApiTests(unittest.TestCase):
                   if row.get('parkingPlanId')]
         self.assertTrue(landed)
         self.assertTrue(all(str(row['parkingPlanId']) == str(pending['parkingPlan']['id']) for row in landed))
+        self.assertIsNone(financial_parking.parking_plan_error(self.draft()['draft_data']))
+
+    def test_a_new_suggestion_keeps_the_clients_rows_until_its_approval(self):
+        payload = copy.deepcopy(self.draft()['draft_data'])
+        payload['financial_study_model']['dynamicRows']['components'].append({
+            'id': 'client-parking', 'name': 'مواقف قائمة', 'useType': 'parking',
+            'parkingLocation': 'basement', 'units': 10, 'unitArea': 30, 'builtArea': 300,
+            'revenueArea': 0, 'investmentModel': 'nonRevenue'})
+        self.assertEqual(self.save_draft(payload).status_code, 200)
+        first, _ = self.suggest()
+        self.assertEqual(self.approve(first['financialModel']['parkingPlan']).status_code, 200)
+        second, _ = self.suggest()
+        pending = second['financialModel']['parkingPlan']
+        self.assertFalse(pending['approved'])
+        self.assertTrue(pending.get('absorbedRows'))
+        approved = self.approve(pending)
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        rows = approved.get_json()['financialModel']['dynamicRows']['components']
+        client_row = next(row for row in rows if row['id'] == 'client-parking')
+        self.assertEqual(client_row['parkingPlanId'], pending['id'])
+        self.assertEqual(sum(row['units'] for row in rows if row.get('useType') == 'parking'),
+                         pending['requiredSpaces'])
         self.assertIsNone(financial_parking.parking_plan_error(self.draft()['draft_data']))
 
     def test_provider_conflict_notes_warn_the_approver_without_blocking(self):

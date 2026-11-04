@@ -18,7 +18,7 @@ def _financial_parking_refresh_context(context, project_data):
     context['parking'] = {
         'planId': plan.get('id'), 'approved': not financial_parking.parking_plan_error(source),
         'requiredSpaces': plan.get('requiredSpaces'), 'existingSpaces': plan.get('existingSpaces'),
-        'additionalSpaces': plan.get('additionalSpaces'), 'parkingArea': plan.get('parkingArea'),
+        'parkingArea': plan.get('parkingArea'),
         'areaPerSpace': plan.get('areaPerSpace'), 'areaIsEstimate': plan.get('areaIsEstimate'),
         'areaBasis': plan.get('areaBasis'), 'footprintArea': plan.get('footprintArea'),
     }
@@ -38,7 +38,7 @@ def _financial_parking_visual_brief(context):
     parking = context.get('parking') or {}
     text = 'PARKING PROGRAM FROM THE FINANCIAL STUDY — ' + '; '.join(parts) + '. '
     if parking.get('approved'):
-        text += f"Regulatory demand={parking.get('requiredSpaces')} spaces; existing provision={parking.get('existingSpaces')}; additional provision={parking.get('additionalSpaces')}. "
+        text += f"Regulatory demand={parking.get('requiredSpaces')} spaces; the client's earlier typed provision={parking.get('existingSpaces')} was replaced by this program. "
     if parking.get('areaIsEstimate'):
         text += 'Gross parking area is a concept-planning estimate, not a documented regulatory dimension. '
     return text + 'Keep the exact recorded counts and areas. Surface parking remains outside the building floor stack; basement parking stays below ground. Account for ramps, access and circulation within the recorded parking area; never add parking capacity or floors.'

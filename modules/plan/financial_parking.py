@@ -68,7 +68,9 @@ def parking_snapshot(project):
         basement = parking_number(plan.get('baseBasementArea')) or 0
     absorbed = parking_absorbed_rows(plan)
     components = []
+    model_ids = set()
     for row in rows:
+        model_ids.add(str(row.get('id')))
         if row.get('parkingPlanId'):
             # A row the proposal wrote into reads as it stood before approval, so
             # approving never turns into «تغيّرت بيانات المشروع» afterwards.
@@ -78,6 +80,13 @@ def parking_snapshot(project):
             components.append(_snapshot_component(original))
             continue
         components.append(_snapshot_component(row))
+    # A client parking row the approved program replaced may no longer exist in
+    # the table (a second row for a location the program already covers). It is
+    # still part of the inputs the proposal was built on, so the stored snapshot
+    # must keep reading it.
+    for row_id, original in absorbed.items():
+        if row_id not in model_ids:
+            components.append(_snapshot_component(original))
     analysis = parking_object(project.get('land_documents_analysis'))
     parcels = analysis.get('parcels') if isinstance(analysis.get('parcels'), list) else []
     analysis_texts = []
@@ -119,6 +128,22 @@ def parking_absorbed_rows(plan):
         if isinstance(entry, dict) and entry.get('id') and isinstance(entry.get('original'), dict):
             absorbed[str(entry['id'])] = entry['original']
     return absorbed
+
+
+def parking_chat_session(value):
+    """The fixed inputs a parking chat session was started with.
+
+    A chat reads the project and the documented regulations once, when the
+    session starts, and every later message speaks from that copy — so a
+    conversation cannot silently change its facts between turns. An empty or
+    malformed session is a request to start a new one."""
+    session = parking_object(value)
+    snapshot = session.get('snapshot')
+    if not str(session.get('id') or '').strip() or not isinstance(snapshot, dict) \
+            or not isinstance(snapshot.get('components'), list) \
+            or not all(isinstance(row, dict) for row in snapshot['components']):
+        return {}
+    return session
 
 
 def parking_snapshot_hash(snapshot):
@@ -367,12 +392,16 @@ def _plan_allocations(snapshot, response, required, area_per_space, source_texts
     used = {location: 0 for location in PARKING_LOCATIONS}
     existing = 0
     for row in rows:
-        used[parking_area_pool(row)] += row.get('builtArea') or 0
         if is_parking_component(row):
+            # Approval replaces these rows with the proposal's own program, so
+            # their spaces are reported as what the client had typed and their
+            # area is not counted twice against the space the program may use.
             units = row.get('units')
             if units is not None and float(units).is_integer():
                 existing += int(units)
-    additional = max(0, required - existing)
+            continue
+        used[parking_area_pool(row)] += row.get('builtArea') or 0
+    program = required
     land = snapshot['landArea'] or 0
     site = snapshot['croquisArea'] or land
     coverage = snapshot['coverageRate']
@@ -401,7 +430,7 @@ def _plan_allocations(snapshot, response, required, area_per_space, source_texts
     order = [preferred] if preferred in PARKING_LOCATIONS else []
     order += [location for location in PARKING_LOCATIONS if location not in order]
     allocations = {location: 0 for location in PARKING_LOCATIONS}
-    remaining = additional
+    remaining = program
     for location in order:
         if location == 'basement' and basement_allowed is False:
             continue
@@ -441,18 +470,23 @@ def _plan_allocations(snapshot, response, required, area_per_space, source_texts
             'parkingPlanId': plan_id, 'floorRange': floor_range,
             'notes': _requirement_notes(requirements, required, count),
         })
-    return {'existingSpaces': existing, 'additionalSpaces': additional,
+    return {'existingSpaces': existing,
             'unallocatedSpaces': remaining, 'components': components,
             'baseBasementArea': snapshot['basementArea'], 'basementAreaTarget': basement_target,
             'footprintArea': footprint, 'warnings': warnings}
 
 
-def build_parking_plan(project, response, plan_id):
+def build_parking_plan(project, response, plan_id, snapshot=None, regulation_facts=None):
     response = parking_object(response)
-    snapshot = parking_snapshot(project)
+    # A chat session carries the snapshot it started from, so every message in
+    # that conversation is judged against the same project facts.
+    snapshot = snapshot if isinstance(snapshot, dict) and isinstance(snapshot.get('components'), list) \
+        else parking_snapshot(project)
     source_texts = [snapshot[key] for key in (
         'regulatoryConstraints', 'parkingRequirements', 'analysisParkingRequirements') if snapshot[key]]
-    facts = parking_object(parking_object(project).get('parking_regulation_facts'))
+    facts = parking_object(regulation_facts)
+    if regulation_facts is None:
+        facts = parking_object(parking_object(project).get('parking_regulation_facts'))
     source_texts += [str(facts[key]) for key in ('parking_requirements', 'regulatory_constraints', 'zone_rules') if facts.get(key)]
     rules = response.get('rules') if isinstance(response.get('rules'), list) else []
     requirements, missing, quantity_notes = [], [], []
@@ -499,7 +533,8 @@ def build_parking_plan(project, response, plan_id):
                        and bool(re.search(r'حركة|ممر|إجمالي|اجمالي|gross|circulation', _quote_text(area_quote))))
     area_per_space = documented_area if area_documented else PARKING_PLANNING_AREA_PER_SPACE
     required = sum(item['spaces'] or 0 for item in requirements)
-    plan = {'id': plan_id, 'approved': False, 'sourceSnapshot': snapshot,
+    plan = {'id': plan_id, 'approved': False, 'componentScope': 'program',
+            'sourceSnapshot': snapshot,
             'sourceHash': parking_snapshot_hash(snapshot), 'requirements': requirements,
             'sourceRules': copy.deepcopy(rules),
             'missing': missing, 'requiredSpaces': required if not missing else None,
@@ -545,13 +580,20 @@ def remove_parking_plan(model):
         inputs['basementArea'] = plan.get('baseBasementArea', inputs.get('basementArea'))
     dynamic = model.setdefault('dynamicRows', {})
     kept = []
+    present = set()
     for row in parking_model_components(model):
+        present.add(str(row.get('id')))
         if not row.get('parkingPlanId'):
             kept.append(row)
         elif str(row.get('id')) in absorbed:
             # The client's own row goes back to what it said before approval
             # instead of disappearing along with the generated rows.
             kept.append(copy.deepcopy(absorbed[str(row.get('id'))]))
+    for row_id, original in absorbed.items():
+        if row_id not in present:
+            # A second row the client typed for a location the program already
+            # covered was removed on approval, not rewritten in place.
+            kept.append(copy.deepcopy(original))
     dynamic['components'] = kept
     if isinstance(model.get('financialCalcData'), dict):
         model['financialCalcData']['components'] = copy.deepcopy(dynamic['components'])
@@ -561,55 +603,96 @@ def remove_parking_plan(model):
 
 
 def absorb_parking_rows(model, plan):
-    """Fill in the parking rows the client already typed, create the rest.
+    """The approved program replaces the parking rows the client typed.
 
-    Approval used to append a second parking row next to the one in the table. A
-    parking row with no proposal stamp is the client's own, so it takes the
-    allocation for its location: its own spaces stay counted (the proposal only
-    fills the shortfall) and the row ends at the location's total. Spaces no
-    client row can host become generated rows.
+    One client row per location is rewritten in place — its id survives, so a
+    revenue row linked to it keeps working — and every other client parking row
+    is removed. The originals travel in ``absorbedRows``, so unapproval hands
+    the table back exactly as the client wrote it. Locations the program does
+    not use become generated rows.
+
+    A plan written before ``componentScope='program'`` carries only the
+    shortfall, not the whole program, so it keeps the older behaviour: its rows
+    are added on top of the client's own spaces instead of replacing them.
     """
     plan_id = plan.get('id')
     rows = parking_model_components(model)
     candidates = [row for row in rows
                   if is_parking_component(row) and not row.get('parkingPlanId')]
-    taken = set()
+    if plan.get('componentScope') != 'program':
+        generated, absorbed = [], []
+        taken = set()
+        for component in plan.get('components') or []:
+            if not isinstance(component, dict):
+                continue
+            location = component.get('parkingLocation')
+            match = None
+            for position, row in enumerate(candidates):
+                if position not in taken and row.get('parkingLocation') == location:
+                    match = position
+                    break
+            if match is None:
+                for position, row in enumerate(candidates):
+                    if position not in taken and row.get('parkingLocation') not in PARKING_LOCATIONS:
+                        match = position
+                        break
+            if match is None:
+                generated.append(copy.deepcopy(component))
+                continue
+            taken.add(match)
+            target = candidates[match]
+            absorbed.append({'id': target.get('id'), 'original': copy.deepcopy(target)})
+            units = (parking_number(target.get('units')) or 0) + (parking_number(component.get('units')) or 0)
+            unit_area = parking_number(component.get('unitArea')) or parking_number(target.get('unitArea'))
+            built = units * unit_area if unit_area else parking_number(target.get('builtArea'))
+            target.update({
+                'useType': 'parking', 'parkingLocation': location,
+                'units': int(units) if float(units).is_integer() else units,
+                'unitArea': unit_area, 'builtArea': built,
+                'floorRange': component.get('floorRange') or target.get('floorRange') or '',
+                'parkingPlanId': plan_id,
+            })
+            if not str(target.get('notes') or '').strip():
+                target['notes'] = component.get('notes') or ''
+        replaced = {str(entry['id']) for entry in absorbed}
+        return generated, absorbed, replaced, set()
+    by_location = {}
+    for row in candidates:
+        by_location.setdefault(row.get('parkingLocation') or '', []).append(row)
     generated, absorbed = [], []
+    replaced, removed = set(), set()
     for component in plan.get('components') or []:
         if not isinstance(component, dict):
             continue
         location = component.get('parkingLocation')
-        match = None
-        for position, row in enumerate(candidates):
-            if position not in taken and row.get('parkingLocation') == location:
-                match = position
-                break
-        if match is None:
+        pool = by_location.get(location) or []
+        if not pool:
             # A row still waiting for its location takes whichever allocation
             # is left, rather than leaving a duplicate row beside it.
-            for position, row in enumerate(candidates):
-                if position not in taken and row.get('parkingLocation') not in PARKING_LOCATIONS:
-                    match = position
-                    break
-        if match is None:
+            pool = by_location.get('') or []
+        target = pool.pop(0) if pool else None
+        if target is None:
             generated.append(copy.deepcopy(component))
             continue
-        taken.add(match)
-        target = candidates[match]
         absorbed.append({'id': target.get('id'), 'original': copy.deepcopy(target)})
-        units = (parking_number(target.get('units')) or 0) + (parking_number(component.get('units')) or 0)
-        unit_area = parking_number(component.get('unitArea')) or parking_number(target.get('unitArea'))
-        built = units * unit_area if unit_area else parking_number(target.get('builtArea'))
+        replaced.add(str(target.get('id')))
         target.update({
+            'name': component.get('name') or target.get('name') or '',
             'useType': 'parking', 'parkingLocation': location,
-            'units': int(units) if float(units).is_integer() else units,
-            'unitArea': unit_area, 'builtArea': built,
-            'floorRange': component.get('floorRange') or target.get('floorRange') or '',
+            'units': component.get('units'),
+            'unitArea': component.get('unitArea'),
+            'builtArea': component.get('builtArea'),
+            'revenueArea': component.get('revenueArea', 0),
+            'investmentModel': component.get('investmentModel') or target.get('investmentModel') or 'nonRevenue',
+            'floorRange': component.get('floorRange') or '',
             'parkingPlanId': plan_id,
+            'notes': component.get('notes') or '',
         })
-        if not str(target.get('notes') or '').strip():
-            target['notes'] = component.get('notes') or ''
-    return generated, absorbed
+    for pool in by_location.values():
+        for row in pool:
+            absorbed.append({'id': row.get('id'), 'original': copy.deepcopy(row)})
+            removed.add(str(row.get('id')))
+    return generated, absorbed, replaced, removed
 
 
 def apply_parking_plan(model, plan):
@@ -621,13 +704,22 @@ def apply_parking_plan(model, plan):
                if str(row.get('parkingPlanId') or '') == str(plan.get('id'))]
     model = remove_parking_plan(model)
     if stamped:
+        absorbed = plan.get('absorbedRows') or stored_absorbed or []
         replaced = {str(row.get('id')) for row in stamped}
+        replaced |= {str(entry.get('id')) for entry in absorbed
+                     if isinstance(entry, dict) and entry.get('id')}
+        # `remove_parking_plan` also puts back the client rows it had removed
+        # from the table; a still-approved program must not leave them behind.
         model['dynamicRows']['components'] = [
             row for row in parking_model_components(model)
             if str(row.get('id')) not in replaced]
-        rows, absorbed = stamped, plan.get('absorbedRows') or stored_absorbed or []
+        rows = stamped
     else:
-        rows, absorbed = absorb_parking_rows(model, plan)
+        generated, absorbed, _replaced, removed = absorb_parking_rows(model, plan)
+        model['dynamicRows']['components'] = [
+            row for row in parking_model_components(model)
+            if str(row.get('id')) not in removed]
+        rows = generated
     model['dynamicRows']['components'].extend(rows)
     plan['absorbedRows'] = absorbed
     model['inputs']['basementArea'] = plan['basementAreaTarget']

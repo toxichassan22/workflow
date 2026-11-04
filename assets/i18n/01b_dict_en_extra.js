@@ -76,6 +76,8 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "plans.image_edited": "The plan was edited.",
   "financial.notes_updated": "The notes were updated in the financial study",
   "financial.parking_chat_placeholder": "Your message",
+  "financial.parking_new_chat": "Start a new chat",
+  "financial.parking_new_chat_confirm": "Start a new chat and clear the current conversation?",
   "market.summary_resume_title": "Resuming the market summary",
   "market.research_log_failed": "Could not download the research log"
 ,

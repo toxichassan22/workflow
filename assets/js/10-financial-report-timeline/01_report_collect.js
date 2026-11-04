@@ -197,8 +197,6 @@
       const parts = [{ type: 'heading', level: 2, text: 'المواقف' }];
       const rows = [];
       if (plan.requiredSpaces != null) rows.push(['عدد المواقف المطلوبة نظاميًا', number(plan.requiredSpaces)]);
-      if (plan.existingSpaces) rows.push(['المواقف القائمة', number(plan.existingSpaces)]);
-      if (plan.additionalSpaces) rows.push(['مواقف إضافية مقترحة', number(plan.additionalSpaces)]);
       if (plan.parkingArea) rows.push(['المساحة المخصصة للمواقف م²', number(plan.parkingArea)]);
       if (plan.areaPerSpace) rows.push(['مساحة الموقف شاملة الحركة م²', number(plan.areaPerSpace)]);
       if (plan.unallocatedSpaces) rows.push(['مواقف لم تستوعبها المساحة', number(plan.unallocatedSpaces)]);

@@ -287,6 +287,11 @@ def api_suggest_financial_parking():
     plan = financial_parking.build_parking_plan(project, parsed, _uuid.uuid4().hex)
     if old_plan:
         plan['previousBasementAreaTarget'] = old_plan.get('basementAreaTarget')
+        if old_plan.get('absorbedRows'):
+            # The applied rows stay in the table while this proposal waits, so
+            # a later approval or discard must be able to put the client's own
+            # rows back before the new program is laid out.
+            plan['absorbedRows'] = copy.deepcopy(old_plan.get('absorbedRows'))
     missing_notes = parsed.get('missing') or []
     if not isinstance(missing_notes, list):
         missing_notes = [missing_notes]
@@ -336,11 +341,27 @@ def api_financial_parking_chat():
     project = _financial_parking_project(draft.get('draft_data'))
     model = copy.deepcopy(project['financial_study_model'])
     project['financial_study_model'] = model
-    snapshot = financial_parking.parking_snapshot(project)
+    # A chat session reads the project and the documented regulations once, at
+    # its first message. Every later message speaks from that same copy — a
+    # conversation never silently changes its facts between turns; a new chat
+    # is what refreshes them.
+    session = financial_parking.parking_chat_session(data.get('session'))
+    live_snapshot = financial_parking.parking_snapshot(project)
+    if session:
+        snapshot = {**live_snapshot,
+                    **{key: session['snapshot'][key] for key in live_snapshot
+                       if key in session['snapshot']}}
+        regulations = financial_parking.parking_object(session.get('regulations'))
+    else:
+        snapshot = live_snapshot
+        regulations = _visual_concept_plan_regulation_facts(project)
+        session = {'id': _uuid.uuid4().hex,
+                   'startedAt': datetime.now(timezone.utc).isoformat(),
+                   'snapshot': snapshot, 'regulations': regulations}
     if not snapshot['components']:
         return jsonify({'success': False, 'error': 'مكونات المشروع غير متوفرة.',
                         'error_code': 'PARKING_COMPONENTS_REQUIRED'}), 400
-    project['parking_regulation_facts'] = _visual_concept_plan_regulation_facts(project)
+    project['parking_regulation_facts'] = regulations
     plan = financial_parking.parking_object(model.get('parkingPlan'))
     current_rules = plan.get('sourceRules')
     if not isinstance(current_rules, list) or not current_rules:
@@ -393,9 +414,13 @@ def api_financial_parking_chat():
     if isinstance(rules, list) and rules and json.dumps(
             rules, sort_keys=True, ensure_ascii=False) != json.dumps(
             current_rules, sort_keys=True, ensure_ascii=False):
-        revised = financial_parking.build_parking_plan(project, {'rules': rules}, _uuid.uuid4().hex)
+        revised = financial_parking.build_parking_plan(
+            project, {'rules': rules}, _uuid.uuid4().hex,
+            snapshot=snapshot, regulation_facts=regulations)
         if plan.get('id'):
             revised['previousBasementAreaTarget'] = plan.get('basementAreaTarget')
+            if plan.get('approved') and plan.get('absorbedRows'):
+                revised['absorbedRows'] = copy.deepcopy(plan.get('absorbedRows'))
     project.pop('parking_regulation_facts', None)
     changed = bool(revised) and financial_parking.parking_plan_signature(
         revised) != financial_parking.parking_plan_signature(plan)
@@ -406,11 +431,12 @@ def api_financial_parking_chat():
         payload = stored.get_json() if hasattr(stored, 'get_json') else stored
         if not isinstance(payload, dict) or payload.get('success') is False:
             return stored
-        payload.update({'answer': answer, 'memory': conversation['memory'], 'changed': True})
+        payload.update({'answer': answer, 'memory': conversation['memory'], 'changed': True,
+                        'session': session})
         return jsonify(payload)
     return jsonify({'success': True, 'answer': answer, 'memory': conversation['memory'],
                     'changed': False, 'draftId': draft['id'], 'revision': draft.get('revision'),
-                    'planId': plan.get('id')})
+                    'planId': plan.get('id'), 'session': session})
 
 
 @app.route('/api/financial-study/parking/approval', methods=['POST'])

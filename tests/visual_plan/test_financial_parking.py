@@ -79,27 +79,86 @@ class FinancialParkingTests(unittest.TestCase):
     def approved(self, plan):
         return dict(plan, approved=True, approvedBy=7, approvedAt='2026-11-04T00:00:00+00:00')
 
-    def test_approval_fills_the_clients_parking_row_instead_of_a_duplicate(self):
+    def test_approval_replaces_the_clients_parking_row_with_the_program(self):
         self.project['financial_study_model']['dynamicRows']['components'].append(
             self.manual_parking_row())
         plan = self.build()
+        # The client's recorded spaces stay reported, but the program itself is
+        # laid out over the plot — it is not a top-up on top of them.
         self.assertEqual(plan['existingSpaces'], 10)
-        self.assertEqual(plan['additionalSpaces'], 120)
         self.assertEqual({row['parkingLocation']: row['units'] for row in plan['components']},
-                         {'basement': 54, 'surface': 66})
+                         {'basement': 64, 'surface': 66})
         applied = financial_parking.apply_parking_plan(self.project['financial_study_model'], plan)
         rows = applied['dynamicRows']['components']
         parking = [row for row in rows if row.get('parkingPlanId')]
-        # The row the client typed takes the basement allocation on top of the ten
-        # spaces it already declared, so nothing is counted twice and nothing duplicates.
+        # The client's own row keeps its id — a revenue row linked to it keeps
+        # working — but every value in it comes from the approved program.
         self.assertEqual([row['id'] for row in parking], ['manual-parking', 'parking_regulatory_surface'])
         self.assertEqual(parking[0]['units'], 64)
-        self.assertEqual(parking[0]['name'], 'مواقف قائمة')
+        self.assertEqual(parking[0]['name'], 'مواقف السيارات — البدروم')
+        self.assertEqual(parking[0]['unitArea'], 30)
         self.assertEqual(parking[0]['builtArea'], 1920)
         self.assertEqual(parking[0]['floorRange'], 'بدروم 1')
         self.assertEqual(sum(row['units'] for row in rows if row['useType'] == 'parking'), 130)
         self.assertEqual([item['id'] for item in applied['parkingPlan']['absorbedRows']],
                          ['manual-parking'])
+
+    def test_a_legacy_shortfall_plan_still_tops_up_instead_of_replacing(self):
+        self.project['financial_study_model']['dynamicRows']['components'].append(
+            self.manual_parking_row())
+        plan = self.build()
+        plan.pop('componentScope')
+        plan['components'] = [
+            dict(plan['components'][0], units=54, builtArea=1620),
+            dict(plan['components'][1], units=66, builtArea=1980),
+        ]
+        applied = financial_parking.apply_parking_plan(self.project['financial_study_model'], plan)
+        parking = [row for row in applied['dynamicRows']['components'] if row.get('parkingPlanId')]
+        self.assertEqual(parking[0]['id'], 'manual-parking')
+        self.assertEqual(parking[0]['name'], 'مواقف قائمة')
+        self.assertEqual(parking[0]['units'], 64)
+        self.assertEqual(sum(row['units'] for row in parking), 130)
+
+    def test_approval_removes_a_second_client_row_the_program_already_covers(self):
+        self.project['financial_study_model']['dynamicRows']['components'].extend([
+            self.manual_parking_row(),
+            self.manual_parking_row(id='manual-parking-2', units=5, builtArea=150)])
+        plan = self.build()
+        applied = financial_parking.apply_parking_plan(self.project['financial_study_model'], plan)
+        rows = applied['dynamicRows']['components']
+        parking = [row for row in rows if row.get('useType') == 'parking']
+        self.assertEqual([row['id'] for row in parking],
+                         ['manual-parking', 'parking_regulatory_surface'])
+        self.assertEqual(sum(row['units'] for row in parking), 130)
+        self.assertEqual([item['id'] for item in applied['parkingPlan']['absorbedRows']],
+                         ['manual-parking', 'manual-parking-2'])
+        removed = financial_parking.remove_parking_plan(applied)
+        self.assertEqual([row['id'] for row in removed['dynamicRows']['components']
+                          if row.get('useType') == 'parking'],
+                         ['manual-parking', 'manual-parking-2'])
+        snapshot = financial_parking.parking_snapshot(
+            dict(self.project, financial_study_model=removed))
+        self.assertEqual([row['id'] for row in snapshot['components']
+                          if row.get('useType') == 'parking'],
+                         ['manual-parking', 'manual-parking-2'])
+
+    def test_replacing_rows_keeps_the_stored_snapshot_matching(self):
+        self.project['financial_study_model']['dynamicRows']['components'].extend([
+            self.manual_parking_row(),
+            self.manual_parking_row(id='manual-parking-2', units=5, builtArea=150)])
+        plan = self.approved(self.build())
+        project = copy.deepcopy(self.project)
+        project['financial_study_model'] = financial_parking.apply_parking_plan(
+            project['financial_study_model'], plan)
+        model = project['financial_study_model']
+        model['parkingSnapshot'] = financial_parking.parking_snapshot(
+            dict(project, financial_study_model=model))
+        # Approval must not be reported as «تغيّرت بيانات المشروع» right afterwards.
+        self.assertIsNone(financial_parking.parking_plan_error(project))
+        snapshot = financial_parking.parking_snapshot(project)
+        self.assertEqual([row['id'] for row in snapshot['components']
+                          if row.get('useType') == 'parking'],
+                         ['manual-parking', 'manual-parking-2'])
 
     def test_filling_a_client_row_keeps_the_recorded_snapshot_matching(self):
         self.project['financial_study_model']['dynamicRows']['components'].append(
@@ -194,7 +253,8 @@ class FinancialParkingTests(unittest.TestCase):
         project = dict(self.project, financial_study_model=again)
         next_plan = financial_parking.build_parking_plan(project, self.rules, 'plan-2')
         self.assertEqual(next_plan['requiredSpaces'], plan['requiredSpaces'])
-        self.assertEqual(next_plan['additionalSpaces'], plan['additionalSpaces'])
+        self.assertEqual([(row['parkingLocation'], row['units']) for row in next_plan['components']],
+                         [(row['parkingLocation'], row['units']) for row in plan['components']])
         self.assertEqual(next_plan['basementAreaTarget'], plan['basementAreaTarget'])
 
     def test_changed_program_or_regulation_invalidates_an_approved_proposal(self):
