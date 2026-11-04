@@ -85,6 +85,31 @@ def delete_team_entity(tenant_id, entity_id):
     return cursor.rowcount > 0
 
 
+def reorder_team_entities(tenant_id, entity_ids):
+    """Persist the library order exactly as the client shows it.
+
+    The client sends every id it sees. A partial or foreign list is refused, so
+    a stale tab can never silently drop an entity that was added meanwhile.
+    """
+    conn = get_db()
+    rows = conn.execute(
+        'SELECT id FROM tenant_team_entities WHERE tenant_id = ? ORDER BY sort_order, created_at',
+        (tenant_id,)
+    ).fetchall()
+    existing = {row['id'] for row in rows}
+    wanted = [str(entity_id) for entity_id in (entity_ids or [])]
+    if len(wanted) != len(existing) or set(wanted) != existing:
+        return False
+    changed_at = _utcnow().isoformat()
+    for index, entity_id in enumerate(wanted):
+        conn.execute(
+            'UPDATE tenant_team_entities SET sort_order = ?, updated_at = ? WHERE tenant_id = ? AND id = ?',
+            ((index + 1) * 10, changed_at, tenant_id, entity_id)
+        )
+    conn.commit()
+    return True
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Tenant domain support
 # ─────────────────────────────────────────────────────────────────────────────

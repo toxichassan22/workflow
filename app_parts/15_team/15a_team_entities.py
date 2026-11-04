@@ -42,6 +42,18 @@ def api_create_team_entity():
     return jsonify({'success': True, 'entity': db.get_team_entity(g.tenant_id, entity_id)}), 201
 
 
+@app.route('/api/team-entities/reorder', methods=['POST'])
+@require_permission('company_settings')
+def api_reorder_team_entities():
+    """Persist the visible library order; the client sends every id it sees."""
+    entity_ids = (request.json or {}).get('entityIds')
+    if not isinstance(entity_ids, list) or not entity_ids:
+        return jsonify({'success': False, 'error': 'ترتيب الجهات غير صالح'}), 400
+    if not db.reorder_team_entities(g.tenant_id, entity_ids):
+        return jsonify({'success': False, 'error': 'ترتيب الجهات غير متطابق'}), 400
+    return jsonify({'success': True, 'entities': db.get_team_entities(g.tenant_id)})
+
+
 @app.route('/api/team-entities/<entity_id>', methods=['PUT'])
 @require_permission('company_settings')
 def api_update_team_entity(entity_id):

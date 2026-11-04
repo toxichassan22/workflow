@@ -1,34 +1,79 @@
     <!-- Dynamic Fields -->
     <section id="tenantTeamPage" class="tenant-page">
-      <div
-        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
-        <div>
-          <h2>فريق التطوير</h2>
-        </div>
+      <div class="team-library">
+        <header class="team-lib-header">
+          <div>
+            <div class="team-lib-kicker" data-i18n="team.kicker">فريق العمل والشركاء</div>
+            <h2 class="team-lib-title" data-i18n="team.title">فريق التطوير</h2>
+            <p class="team-lib-sub" data-i18n="team.subtitle">الجهات والخبراء المشاركون في عروض المنشأة ودراساتها العقارية</p>
+          </div>
+          <div class="team-lib-header-actions">
+            <span class="team-lib-count" id="tenantTeamCount"></span>
+            <button type="button" class="team-lib-cta" id="tenantTeamAddBtn" onclick="openTeamEntityDrawer()"
+              data-i18n="team.add_button">إضافة جهة جديدة</button>
+          </div>
+        </header>
+        <div id="tenantTeamList"></div>
       </div>
 
-      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
-        <h3 style="margin:0 0 12px;font-size:15px">إضافة مطور</h3>
-        <div class="tenant-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
-          <div class="tenant-field"><label>اسم المطور</label><input type="text" id="teamEntityName"
-              placeholder="اسم الشركة أو المكتب"></div>
-          <div class="tenant-field"><label>سنوات الخبرة</label><input type="number" id="teamEntityExperience" min="0"
-              placeholder="0"></div>
-          <div class="tenant-field"><label>شعار المطور</label><input type="file" id="teamEntityLogo"
-              accept="image/*,.jpg,.jpeg,.png,.webp"></div>
-          <div class="tenant-field full"><label>نبذة عن المطور</label><textarea id="teamEntityBrief" rows="3"
-              placeholder="نبذة تعريفية عن المطور"></textarea></div>
-          <div class="tenant-field full"><label>أبرز المشاريع</label><textarea id="teamEntityProjects" rows="3"
-              placeholder="مشروع في كل سطر"></textarea></div>
-        </div>
-        <div class="tenant-btns" style="margin-top:12px">
-          <button class="btn primary" id="teamEntitySaveBtn" onclick="submitTeamEntity()">إضافة المطور</button>
-          <button class="btn ghost" id="teamEntityCancelBtn" style="display:none" onclick="resetTeamEntityForm()">إلغاء
-            التعديل</button>
-        </div>
+      <div class="team-drawer-overlay" id="teamEntityDrawer"
+        onclick="if (event.target === this) closeTeamEntityDrawer()">
+        <aside class="team-drawer" role="dialog" aria-modal="true" aria-labelledby="teamEntityDrawerTitle">
+          <div class="team-drawer-head">
+            <h3 id="teamEntityDrawerTitle" data-i18n="team.add_title">إضافة جهة جديدة</h3>
+          </div>
+          <div class="team-drawer-body">
+            <div class="team-drawer-preview">
+              <div class="team-drawer-logo" id="teamEntityPreviewLogo"></div>
+              <div>
+                <div class="team-drawer-name" id="teamEntityPreviewName"></div>
+                <div class="team-drawer-role" id="teamEntityPreviewRole"></div>
+              </div>
+            </div>
+            <div class="team-field">
+              <label for="teamEntityName" data-i18n="team.name_label">اسم الجهة</label>
+              <input type="text" id="teamEntityName" data-i18n-ph="team.name_placeholder"
+                placeholder="اسم الشركة أو المكتب" oninput="updateTeamEntityPreview()">
+            </div>
+            <div class="team-field">
+              <label for="teamEntityRole" data-i18n="team.role_label">الدور</label>
+              <input type="text" id="teamEntityRole" data-i18n-ph="team.role_placeholder"
+                placeholder="دور الجهة في المشروع" oninput="updateTeamEntityPreview()">
+            </div>
+            <div class="team-field">
+              <label for="teamEntityExperience" data-i18n="team.experience_label">سنوات الخبرة</label>
+              <input type="number" id="teamEntityExperience" min="0" placeholder="0">
+            </div>
+            <div class="team-field">
+              <label data-i18n="team.logo_label">شعار الجهة</label>
+              <div class="team-upload">
+                <span id="teamEntityLogoName" data-i18n="team.logo_empty">لم يتم اختيار ملف</span>
+                <button type="button" class="team-upload-button"
+                  onclick="document.getElementById('teamEntityLogo').click()"
+                  data-i18n="team.choose_file">اختيار ملف</button>
+              </div>
+              <input type="file" id="teamEntityLogo" accept="image/*,.jpg,.jpeg,.png,.webp"
+                onchange="handleTeamLogoSelection(this)" hidden>
+            </div>
+            <div class="team-field">
+              <label for="teamEntityBrief" data-i18n="team.brief_label">نبذة عن الجهة</label>
+              <textarea id="teamEntityBrief" rows="3" data-i18n-ph="team.brief_placeholder"
+                placeholder="نبذة تعريفية عن الجهة"></textarea>
+            </div>
+            <div class="team-field">
+              <label for="teamEntityProjects" data-i18n="team.projects_label">أبرز المشاريع</label>
+              <textarea id="teamEntityProjects" rows="3" data-i18n-ph="team.projects_placeholder"
+                placeholder="مشروع في كل سطر"></textarea>
+            </div>
+          </div>
+          <div class="team-drawer-foot">
+            <button type="button" class="team-drawer-save" id="teamEntitySaveBtn" onclick="submitTeamEntity()"
+              data-i18n="team.add_save">إضافة الجهة</button>
+            <button type="button" class="team-drawer-cancel" id="teamEntityCancelBtn" onclick="closeTeamEntityDrawer()"
+              data-i18n="common.cancel">إلغاء</button>
+          </div>
+        </aside>
       </div>
-
-      <div id="tenantTeamList"></div>
     </section>
 
     <section id="tenantFieldsPage" class="tenant-page">
