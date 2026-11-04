@@ -153,6 +153,12 @@
   width: 100%;
 }
 
+.legal-content .updated:empty,
+.legal-notice-box:empty,
+.legal-meta-chip:empty {
+  display: none !important;
+}
+
 html[lang="en"] .legal-content .updated {
   border-right: none;
   border-left: 4px solid var(--teal-bright);

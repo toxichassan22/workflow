@@ -9,10 +9,21 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
+def _pages_dir():
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'pages'),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'pages'),
+        os.path.join(os.getcwd(), 'pages'),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return 'pages'
+
+
 def _serve_public_page(name):
     """Static public pages get the same revalidate policy as the SPA shell."""
-    resp = send_from_directory(
-        os.path.join(os.path.dirname(__file__), 'pages'), name)
+    resp = send_from_directory(_pages_dir(), name)
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
 
@@ -123,6 +134,10 @@ LEGAL_DOCS = ('terms', 'privacy', 'about')
 _LEGAL_MARKERS = {
     'ar': ('<!--LEGAL_AR_START-->', '<!--LEGAL_AR_END-->'),
     'en': ('<!--LEGAL_EN_START-->', '<!--LEGAL_EN_END-->'),
+    'date_ar': ('<!--LEGAL_DATE_AR_START-->', '<!--LEGAL_DATE_AR_END-->'),
+    'date_en': ('<!--LEGAL_DATE_EN_START-->', '<!--LEGAL_DATE_EN_END-->'),
+    'notice_ar': ('<!--LEGAL_NOTICE_AR_START-->', '<!--LEGAL_NOTICE_AR_END-->'),
+    'notice_en': ('<!--LEGAL_NOTICE_EN_START-->', '<!--LEGAL_NOTICE_EN_END-->'),
 }
 
 
@@ -131,18 +146,22 @@ def _legal_setting_key(name):
 
 
 def _serve_legal_page(name):
-    path = os.path.join(os.path.dirname(__file__), 'pages', name + '.html')
+    path = os.path.join(_pages_dir(), name + '.html')
     with open(path, encoding='utf-8') as fh:
         html = fh.read()
     stored = db.get_platform_setting(_legal_setting_key(name))
     if isinstance(stored, dict):
-        for lang, (start, end) in _LEGAL_MARKERS.items():
-            body = stored.get(lang)
-            if not isinstance(body, str) or not body.strip():
+        for field, (start, end) in _LEGAL_MARKERS.items():
+            val = stored.get(field)
+            if val is None:
                 continue
             i, j = html.find(start), html.find(end)
             if i != -1 and j != -1 and j > i:
-                html = html[:i + len(start)] + '\n' + body + '\n      ' + html[j:]
+                if (field.startswith('notice_') or field.startswith('date_')) and not val.strip():
+                    replacement = ''
+                else:
+                    replacement = '\n' + val + '\n      ' if '\n' in val or len(val) > 40 else val
+                html = html[:i + len(start)] + replacement + html[j:]
     resp = Response(html, mimetype='text/html')
     resp.headers['Cache-Control'] = 'no-cache'
     return resp
@@ -158,10 +177,44 @@ def public_privacy():
     return _serve_legal_page('privacy')
 
 
+@app.route('/about')
+def public_about():
+    return _serve_legal_page('about')
+
+
+@app.route('/api/admin/legal/<name>', methods=['GET'])
+@require_admin
+def api_admin_get_legal(name):
+    """Fetch current legal document copy, publication date and notice phrase."""
+    if name not in LEGAL_DOCS:
+        return jsonify({'error': 'Unknown document'}), 404
+    stored = db.get_platform_setting(_legal_setting_key(name)) or {}
+    path = os.path.join(_pages_dir(), name + '.html')
+    defaults = {}
+    if os.path.exists(path):
+        with open(path, encoding='utf-8') as fh:
+            raw_html = fh.read()
+        for field, (start, end) in _LEGAL_MARKERS.items():
+            i, j = raw_html.find(start), raw_html.find(end)
+            if i != -1 and j != -1 and j > i:
+                defaults[field] = raw_html[i + len(start):j].strip()
+    result = {
+        'ar': stored.get('ar') or defaults.get('ar', ''),
+        'en': stored.get('en') or defaults.get('en', ''),
+        'date_ar': stored.get('date_ar') if 'date_ar' in stored else defaults.get('date_ar', ''),
+        'date_en': stored.get('date_en') if 'date_en' in stored else defaults.get('date_en', ''),
+        'notice_ar': stored.get('notice_ar') if 'notice_ar' in stored else defaults.get('notice_ar', ''),
+        'notice_en': stored.get('notice_en') if 'notice_en' in stored else defaults.get('notice_en', ''),
+        'updated_at': stored.get('updated_at', ''),
+        'updated_by': stored.get('updated_by', '')
+    }
+    return jsonify({'success': True, 'document': result})
+
+
 @app.route('/api/admin/legal/<name>', methods=['PUT'])
 @require_admin
 def api_admin_save_legal(name):
-    """Desk-edited Arabic/English copy for a public legal page."""
+    """Desk-edited Arabic/English copy, publication date and notice phrase for a public page."""
     if name not in LEGAL_DOCS:
         return jsonify({'error': 'Unknown document'}), 404
     data = request.json or {}
@@ -173,16 +226,16 @@ def api_admin_save_legal(name):
         if len(body) > 200000:
             return jsonify({'error': 'Content is too large'}), 400
         doc[lang] = body
+    for extra in ('date_ar', 'date_en', 'notice_ar', 'notice_en'):
+        if extra in data:
+            val = data.get(extra)
+            if isinstance(val, str):
+                doc[extra] = val.strip()
     doc['updated_at'] = datetime.now(timezone.utc).isoformat(timespec='seconds')
     doc['updated_by'] = _landloom_actor_name() or ''
     saved = db.set_platform_setting(_legal_setting_key(name), doc)
     _record_audit_event('legal.updated', 'platform_settings', _legal_setting_key(name))
     return jsonify({'success': True, 'document': saved})
-
-
-@app.route('/about')
-def public_about():
-    return _serve_legal_page('about')
 
 
 @app.route('/api/join-requests', methods=['POST'])

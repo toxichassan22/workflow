@@ -1632,7 +1632,8 @@
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">
         <div class="tenant-panel-heading">
-          <h3 class="dash-section-title" data-i18n="admin.legal_pages_title">الصفحات القانونية</h3>
+          <h3 class="dash-section-title" data-i18n="admin.legal_pages_title">الصفحات العامة والتعاقدية</h3>
+          <span class="tenant-hint" data-i18n="admin.legal_pages_sub">تعديل محتوى وتواريخ وتنبيهات صفحات من نحن، شروط الاستخدام، وسياسة الخصوصية</span>
         </div>
         <div class="tenant-grid">
           <div class="tenant-field">
@@ -1644,7 +1645,25 @@
             </select>
           </div>
         </div>
-        <div class="tenant-field">
+        <div class="tenant-grid" style="margin-top:12px">
+          <div class="tenant-field">
+            <label for="adminLegalDateAr" data-i18n="admin.legal_date_ar">تاريخ التحديث بالعربية</label>
+            <input type="text" id="adminLegalDateAr" dir="rtl" placeholder="تحديث: 2026">
+          </div>
+          <div class="tenant-field">
+            <label for="adminLegalDateEn" data-i18n="admin.legal_date_en">تاريخ التحديث بالإنجليزية</label>
+            <input type="text" id="adminLegalDateEn" dir="ltr" placeholder="Updated: 2026">
+          </div>
+          <div class="tenant-field">
+            <label for="adminLegalNoticeAr" data-i18n="admin.legal_notice_ar">الملاحظة التنبيهية بالعربية</label>
+            <input type="text" id="adminLegalNoticeAr" dir="rtl" placeholder="نص مبدئي قابل للتحديث">
+          </div>
+          <div class="tenant-field">
+            <label for="adminLegalNoticeEn" data-i18n="admin.legal_notice_en">الملاحظة التنبيهية بالإنجليزية</label>
+            <input type="text" id="adminLegalNoticeEn" dir="ltr" placeholder="Draft text subject to update">
+          </div>
+        </div>
+        <div class="tenant-field" style="margin-top:12px">
           <label for="adminLegalAr" data-i18n="admin.legal_ar">المحتوى بالعربية (HTML)</label>
           <textarea id="adminLegalAr" rows="14" dir="rtl" style="font-family:Consolas,'Courier New',monospace;font-size:12.5px"></textarea>
         </div>
@@ -1652,8 +1671,8 @@
           <label for="adminLegalEn" data-i18n="admin.legal_en">المحتوى بالإنجليزية (HTML)</label>
           <textarea id="adminLegalEn" rows="14" dir="ltr" style="font-family:Consolas,'Courier New',monospace;font-size:12.5px"></textarea>
         </div>
-        <div class="sag-modal-actions">
-          <button type="button" class="btn primary" onclick="adminSaveLegalDoc()" data-i18n="admin.legal_save">حفظ المحتوى</button>
+        <div class="sag-modal-actions" style="margin-top:16px">
+          <button type="button" class="btn primary" onclick="adminSaveLegalDoc()" data-i18n="admin.legal_save">حفظ المحتوى والتعديلات</button>
         </div>
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">

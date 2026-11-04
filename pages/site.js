@@ -530,8 +530,22 @@
     });
   }
 
+  function initLegal() {
+    document.querySelectorAll('[data-legal-notice-ar], [data-legal-notice-en]').forEach(function (el) {
+      if (!el.textContent.trim()) el.style.display = 'none';
+    });
+    document.querySelectorAll('[data-legal-date-ar], [data-legal-date-en]').forEach(function (el) {
+      if (!el.textContent.trim()) {
+        el.style.display = 'none';
+        var parent = el.closest('.legal-meta-chip');
+        if (parent && !parent.textContent.trim()) parent.style.display = 'none';
+      }
+    });
+  }
+
   initLang();
   authedSwap();
+  initLegal();
   initJoinForm();
   initReveal();
   initTilt();
