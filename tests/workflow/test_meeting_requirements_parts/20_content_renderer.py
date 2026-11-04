@@ -37,6 +37,16 @@ class MeetingRequirementsTestsPart20(MeetingRequirementsTests):
     def test_the_renderer_policy_names_both_owners(self):
         engine = self.application_module.slide_engine
 
+        # Fixed chrome and uploaded media are never model-composed.
+        for fixed_type in ('index', 'section_divider'):
+            self.assertEqual(
+                engine.slide_content_renderer({'type': fixed_type}),
+                engine.CONTENT_RENDERER_DETERMINISTIC, fixed_type)
+        self.assertEqual(
+            engine.slide_content_renderer(
+                {'section_key': 'plans', 'content_source': 'plan_image:1'}),
+            engine.CONTENT_RENDERER_DETERMINISTIC)
+
         # The pages the model composes: a reading, not a table.
         for source, section in (
             ('market_study_data.summary', 'market'),
@@ -62,6 +72,10 @@ class MeetingRequirementsTestsPart20(MeetingRequirementsTests):
             ('financial_report:0:0:1', 'financial', {}, None),
             ('timeline_table_data', 'timeline', {}, timeline_project),
             ('land_boundary_diagram', 'land', {}, None),
+            # The land specifications table and the components table are
+            # approved reference data: a model redrawing them can only drop rows.
+            ('land_specs', 'land', {}, None),
+            ('project_components:0:6', 'components', {}, None),
             # The two location pages beside the maps: approved site fields and
             # the approved site reading, drawn in the designed map frame.
             ('location_detail', 'location', {}, None),
@@ -113,6 +127,39 @@ class MeetingRequirementsTestsPart20(MeetingRequirementsTests):
         # The page is the model's own composition, not the injected table.
         self.assertNotIn('data-market-analysis="1"', html)
         self.assertIn('تركيب تحريري', html)
+
+    def test_land_specs_and_components_render_without_the_model(self):
+        engine = self.application_module.slide_engine
+        project = {
+            'project_name': 'مشروع الاختبار',
+            'croquis_land_area': 24912.95,
+            'approved_floor_count': 12,
+            'project_components_data': json.dumps([
+                {'name': 'مبنى إداري', 'units': 20, 'builtArea': 1485},
+            ], ensure_ascii=False),
+        }
+        calls = []
+
+        def fake_chat(*args, **kwargs):
+            calls.append(args)
+            return {'choices': [{'message': {'content': '<div class="slide"></div>'}}]}
+
+        land_html = engine.generate_single_slide(
+            'sys', {
+                'title': 'مواصفات الأرض والاشتراطات التنظيمية', 'type': 'content',
+                'section_key': 'land', 'design_style': 'specs',
+                'content_source': 'land_specs',
+            }, 9, 12, {'primary_color': '#0b1f33'}, fake_chat, project_data=project)
+        components_html = engine.generate_single_slide(
+            'sys', {
+                'title': 'مكونات المشروع — 1', 'type': 'content',
+                'section_key': 'components', 'design_style': 'table',
+                'content_source': 'project_components:0:1',
+            }, 6, 12, {'primary_color': '#0b1f33'}, fake_chat, project_data=project)
+
+        self.assertFalse(calls)
+        self.assertIn('المحددات التوثيقية والمساحية', land_html)
+        self.assertIn('مبنى إداري', components_html)
 
     def test_the_risk_register_is_rendered_and_paginated_without_the_model(self):
         engine = self.application_module.slide_engine

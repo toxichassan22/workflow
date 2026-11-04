@@ -36,9 +36,13 @@ DETERMINISTIC_CONTENT_SOURCES = (
     'market_study_data.sources',
     # The SWOT matrix: four quadrants, one page.
     'market_study_data.swot',
-    # The plot boundary and the land/building summary.
+    # The plot boundary, the land/building summary and the approved land
+    # specifications table: regulatory and area facts the client signed off.
     'land_boundary_diagram',
     'land_and_building_summary',
+    'land_specs',
+    # The project components table: the approved rows are copied, never redrawn.
+    'project_components',
     # The dated Gantt of the project timeline.
     'timeline_table_data',
     # The location pages: the site data table and the approved site reading.
@@ -80,6 +84,11 @@ def slide_content_renderer(slide, project_data=None):
     source = str(slide.get('content_source') or '').strip()
     section = _slide_section_key(slide)
     chart_type = canonicalize_chart_type(slide.get('chart_type'))
+
+    # The fixed chrome and uploaded-media pages have their own builders; the
+    # model never draws a divider, an index or an image page.
+    if slide.get('type') in ('index', 'section_divider') or _is_visual_concept_media_slide(slide):
+        return CONTENT_RENDERER_DETERMINISTIC
 
     # 1. A source the model must compose wins over every template.
     if is_ai_designed_content_source(source):
