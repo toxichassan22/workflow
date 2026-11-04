@@ -79,53 +79,17 @@
     }
 
     async function showSodMatrixModal() {
-      let matrix = null;
+      let policies = {};
       try {
-        const resp = await api('GET', '/api/approvals/sod-matrix');
-        if (resp && resp.success) matrix = resp.matrix;
+        const resp = await api('GET', '/api/policies');
+        if (resp && resp.success) policies = resp.policies || {};
       } catch (err) {
-        console.warn('SoD matrix error:', err);
+        console.warn('SoD policies error:', err);
       }
 
       const modal = document.createElement('div');
       modal.id = 'sodMatrixModal';
       modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
-      const selfCount = matrix?.self_approvals_count || 0;
-      const selfApprovals = matrix?.self_approvals || [];
-      const violationsRows = selfApprovals.length
-        ? selfApprovals.map(item => {
-            const date = (item.decided_at || '').slice(0, 16).replace('T', ' ');
-            return '<tr style="border-bottom:1px solid #e2e8f0;">' +
-              '<td style="padding:8px;font-weight:600;">' + escapeHtml(item.section_key || item.kind || '') + '</td>' +
-              '<td style="padding:8px;">إصدار ' + (item.version_number || 1) + '</td>' +
-              '<td style="padding:8px;">' + escapeHtml(item.decided_by_name || item.decided_by || '') + '</td>' +
-              '<td style="padding:8px;color:#64748b;font-size:12px;">' + escapeHtml(date) + '</td>' +
-              '<td style="padding:8px;"><span style="font-size:11px;padding:3px 8px;border-radius:10px;background:#fff3bf;color:#8a6d00;">تنبيه: تعميد ذاتي للمحرر</span></td>' +
-              '</tr>';
-          }).join('')
-        : '<tr><td colspan="5" style="padding:16px;text-align:center;color:#1c7a2e;">لا توجد مخالفات في الفصل بين المهام</td></tr>';
-
-      const extraSections = [
-        { key: 'cross_gate_approvals', count: 'cross_gate_count', label: 'اعتماد التوليد والملف لنفس المعتمد', name: i => i.decided_by_name || i.decided_by },
-        { key: 'last_editor_conflicts', count: 'last_editor_conflicts_count', label: 'معتمد الملف هو آخر محرر له', name: i => i.decided_by_name || i.decided_by },
-        { key: 'post_approval_edits', count: 'post_approval_edits_count', label: 'تعديل بعد الاعتماد النهائي بدون صلاحية', name: i => i.user_name || i.user_id },
-        { key: 'client_side_topups', count: 'client_side_topups_count', label: 'شحن محفظة من جهة العميل', name: i => i.actor || '' },
-        { key: 'missing_reason_decisions', count: 'missing_reason_count', label: 'قرار رفض أو إرجاع بدون سبب', name: i => i.decided_by || '' },
-      ];
-      const extraRows = extraSections.map(sec => {
-        const items = matrix?.[sec.key] || [];
-        const count = matrix?.[sec.count] ?? items.length;
-        const itemsHtml = items.length
-          ? items.map(i => '<div style="font-size:12px;color:#475569;padding:2px 0">' + escapeHtml(sec.name(i) || '') +
-              ' — ' + escapeHtml((i.decided_at || i.created_at || '').slice(0, 16).replace('T', ' ')) + '</div>').join('')
-          : '';
-        return '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
-          '<strong style="font-size:13px">' + escapeHtml(sec.label) + '</strong>' +
-          '<div style="margin-top:6px">العدد: <strong style="color:' + (count > 0 ? '#a67c00' : '#1c7a2e') + '">' + count + '</strong></div>' +
-          itemsHtml + '</div>';
-      }).join('');
-
-      const policies = matrix?.policies || {};
       const currentPolicy = policies.section_self_approval || 'allow';
       const policyLabels = { allow: 'سماح مع توثيق', warn: 'سماح مع تنبيه', block: 'منع' };
       const genPolicy = policies.generation_self_approval || 'block';
@@ -154,24 +118,12 @@
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:13px;">' +
         '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
         '<strong>اعتماد المحرر لقسمه (d01):</strong>' +
-        '<div style="margin-top:8px;">إجمالي التعميد الذاتي: <strong style="color:' + (selfCount > 0 ? '#a67c00' : '#1c7a2e') + ';">' + selfCount + '</strong></div>' +
         policySelect +
         '</div>' +
         '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;">' +
         '<strong>اعتماد مقدم طلب التوليد لطلبه (d02):</strong>' +
         '<p style="margin:4px 0 0;color:#64748b;font-size:12px;">فصل إلزامي في مصفوفة الأدوار ما لم تسمح الشركة بالاعتماد الذاتي</p>' +
         genPolicySelect +
-        '</div></div>' +
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;font-size:13px;">' + extraRows + '</div>' +
-        '<div style="flex:1;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;">' +
-        '<table style="width:100%;border-collapse:collapse;font-size:13px;text-align:right;">' +
-        '<thead><tr style="background:#f8fafc;border-bottom:1px solid #e2e8f0;color:#475569;">' +
-        '<th style="padding:8px;">القسم</th>' +
-        '<th style="padding:8px;">الإصدار</th>' +
-        '<th style="padding:8px;">المعتمد</th>' +
-        '<th style="padding:8px;">التاريخ</th>' +
-        '<th style="padding:8px;">الحالة الرقابية</th>' +
-        '</tr></thead><tbody>' + violationsRows + '</tbody></table>' +
         '</div></div>';
 
       document.body.appendChild(modal);
