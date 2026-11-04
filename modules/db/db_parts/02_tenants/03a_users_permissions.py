@@ -727,7 +727,7 @@ def tenant_users_report(tenant_id):
     invites = []
     try:
         for row in conn.execute(
-            'SELECT id, email, token, expires_at, used_at, name, role, email_status, '
+            'SELECT id, email, token, expires_at, used_at, name, role, responsibility, email_status, '
             'email_error, email_attempts, email_sent_at FROM invite_links '
             'WHERE tenant_id = ? ORDER BY expires_at DESC LIMIT 25',
             (tenant_id,),

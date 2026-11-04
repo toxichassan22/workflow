@@ -1,54 +1,124 @@
     <!-- Users Management (company admin only) -->
     <section id="tenantUsersPage" class="tenant-page">
-      <div
-        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-        <div>
-          <h2 style="margin:0">إدارة الموظفين</h2>
+      <div class="staff-container">
+        <div class="staff-header">
+          <div>
+            <h2 class="staff-title" data-i18n="users.page_title">فريق العمل والموظفون</h2>
+            <p class="staff-subtitle" data-i18n="users.page_subtitle">الأدوار والصلاحيات ودعوات الانضمام وحالة كل حساب داخل المنشأة</p>
+          </div>
+          <div class="staff-header-actions">
+            <button type="button" class="btn ghost" onclick="showSodMatrixModal()" data-i18n="users.sod_matrix">مصفوفة الفصل بين المهام</button>
+            <button type="button" class="btn primary" onclick="openStaffInviteModal()" data-i18n="users.invite_new">دعوة موظف جديد</button>
+          </div>
+        </div>
+
+        <div id="staffSummary" class="staff-summary"></div>
+
+        <div class="staff-layout">
+          <div class="staff-card">
+            <div class="staff-card-head">
+              <div>
+                <h3 class="staff-card-title" data-i18n="users.team_title">أعضاء الفريق</h3>
+                <p class="staff-card-desc" data-i18n="users.team_desc">الحسابات النشطة والمعطلة والدعوات التي لم تكتمل بعد</p>
+              </div>
+              <span class="staff-count-chip" id="staffTeamCount"></span>
+            </div>
+            <div class="staff-table-wrap">
+              <table class="staff-table">
+                <thead>
+                  <tr>
+                    <th data-i18n="users.col_member">الموظف</th>
+                    <th data-i18n="users.col_role">الدور</th>
+                    <th data-i18n="users.col_status">الحالة</th>
+                    <th data-i18n="users.col_last_login">آخر دخول</th>
+                    <th data-i18n="users.col_actions">الإجراءات</th>
+                  </tr>
+                </thead>
+                <tbody id="tenantUsersList">
+                  <tr><td colspan="5" class="staff-empty" data-i18n="common.loading">جاري التحميل...</td></tr>
+                </tbody>
+                <tbody id="tenantInvitesList"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <aside class="staff-card staff-roles-card">
+            <h3 class="staff-card-title" data-i18n="users.role_guide_title">الأدوار والصلاحيات</h3>
+            <p class="staff-card-desc" data-i18n="users.role_guide_desc">نطاق كل دور داخل المنشأة قبل إسناد المشاريع</p>
+            <div class="staff-role-guide">
+              <div class="staff-role-guide-row">
+                <span class="staff-role-pill is-owner" data-i18n="users.role_owner">مالك الحساب</span>
+                <p data-i18n="users.role_owner_desc">يدير حساب المنشأة والفوترة والموظفين، وصلاحياته غير قابلة للتعديل من هذه الشاشة.</p>
+              </div>
+              <div class="staff-role-guide-row">
+                <span class="staff-role-pill is-admin" data-i18n="users.role_admin">أدمن</span>
+                <p data-i18n="users.role_admin_desc">كامل صلاحيات الشركة: الإعدادات والموظفون والحقول والاعتمادات.</p>
+              </div>
+              <div class="staff-role-guide-row">
+                <span class="staff-role-pill is-approver" data-i18n="users.role_approver">معتمد</span>
+                <p data-i18n="users.role_approver_desc">يراجع ويعتمد مخرجات المشاريع المسندة إليه.</p>
+              </div>
+              <div class="staff-role-guide-row">
+                <span class="staff-role-pill is-editor" data-i18n="users.role_editor">محرر</span>
+                <p data-i18n="users.role_editor_desc">يحرر بيانات المشاريع المسندة إليه ويطلب اعتماد أقسامها.</p>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
 
-      <div id="tenantUsersList" class="tenant-grid full" style="margin-bottom:20px"></div>
-
-      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px">
-        <h3 style="margin-bottom:12px">إضافة موظف جديد</h3>
-        <div class="tenant-grid">
-          <div class="tenant-field">
-            <label>اسم الموظف *</label>
-            <input type="text" id="newUserName" placeholder="مثال: أحمد محمد">
-          </div>
-          <div class="tenant-field">
-            <label>البريد الإلكتروني *</label>
-            <input type="email" id="newUserEmail" placeholder="ahmed@company.com">
-          </div>
-          <div class="tenant-field">
-            <label>كلمة المرور (اختياري)</label>
-            <div style="position:relative">
-              <input type="password" id="newUserPassword" placeholder="10 أحرف على الأقل، حروف وأرقام" style="padding-left:64px">
-              <button type="button" onclick="togglePasswordVisibility('newUserPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+      <div class="staff-modal-overlay" id="staffInviteModal" hidden role="dialog" aria-modal="true" aria-labelledby="staffInviteModalTitle" onclick="if(event.target===this) closeStaffInviteModal()">
+        <div class="staff-modal">
+          <div class="staff-modal-head">
+            <div>
+              <h3 class="staff-card-title" id="staffInviteModalTitle" data-i18n="users.form_title">دعوة موظف جديد</h3>
+              <p class="staff-card-desc" data-i18n="users.form_desc">إنشاء حساب موظف داخل المنشأة وتحديد مسؤوليته على المشاريع</p>
             </div>
+            <button type="button" class="btn ghost small" onclick="closeStaffInviteModal()" data-i18n="common.close">إغلاق</button>
           </div>
-          <div class="tenant-field">
-            <label>الجوال</label>
-            <input type="text" id="newUserPhone" dir="ltr">
+          <div class="staff-modal-body">
+            <div class="staff-form staff-form-grid">
+              <div class="tenant-field">
+                <label data-i18n="users.field_name">اسم الموظف *</label>
+                <input type="text" id="newUserName" data-i18n-ph="users.field_name_ph" placeholder="مثال: أحمد محمد">
+              </div>
+              <div class="tenant-field">
+                <label data-i18n="users.field_email">البريد الإلكتروني *</label>
+                <input type="email" id="newUserEmail" dir="ltr" placeholder="name@company.com">
+              </div>
+              <div class="tenant-field">
+                <label data-i18n="users.field_responsibility">المسؤولية</label>
+                <select id="newUserResponsibility" onchange="toggleNewUserProjects(); updateStaffRoleHint();">
+                  <option value="editor" data-i18n="users.role_editor">محرر</option>
+                  <option value="approver" data-i18n="users.role_approver">معتمد</option>
+                  <option value="admin" data-i18n="users.role_admin">أدمن</option>
+                </select>
+                <p class="staff-role-hint" id="staffRoleHint"></p>
+              </div>
+              <div class="tenant-field">
+                <label data-i18n="users.field_phone">الجوال</label>
+                <input type="text" id="newUserPhone" dir="ltr">
+              </div>
+              <div class="tenant-field is-full">
+                <label data-i18n="users.field_password">كلمة المرور (اختياري)</label>
+                <div style="position:relative">
+                  <input type="password" id="newUserPassword" data-i18n-ph="users.field_password_ph" placeholder="10 أحرف على الأقل، حروف وأرقام" style="padding-left:64px">
+                  <button type="button" onclick="togglePasswordVisibility('newUserPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px" data-i18n="auth.show">إظهار</button>
+                </div>
+                <p class="staff-field-note" data-i18n="users.password_note">بدون كلمة مرور يحدد الموظف كلمته عبر رابط الدعوة.</p>
+              </div>
+              <div class="tenant-field is-full" id="newUserProjectsField">
+                <label data-i18n="users.invite_projects">ملفات المشاريع</label>
+                <div id="inviteProjectsPicker" class="staff-scope-picker"></div>
+              </div>
+            </div>
+            <div id="inviteResult" style="margin-top:12px"></div>
           </div>
-          <div class="tenant-field">
-            <label>المسؤولية</label>
-            <select id="newUserResponsibility" onchange="toggleNewUserProjects()">
-              <option value="editor">محرر</option>
-              <option value="approver">معتمد</option>
-              <option value="admin">أدمن</option>
-            </select>
-          </div>
-          <div class="tenant-field" id="newUserProjectsField">
-            <label>ملفات المشاريع</label>
-            <div id="inviteProjectsPicker" style="display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow:auto"></div>
+          <div class="staff-modal-foot">
+            <button class="btn primary" onclick="addTenantUser()" data-i18n="users.add_button">إضافة موظف</button>
+            <button type="button" class="btn ghost" onclick="closeStaffInviteModal()" data-i18n="common.cancel">إلغاء</button>
           </div>
         </div>
-        <div class="tenant-btns" style="margin-top:12px">
-          <button class="btn primary" onclick="addTenantUser()">+ إضافة موظف</button>
-        </div>
-        <div id="inviteResult" style="margin-top:12px"></div>
-        <div id="tenantInvitesList" style="margin-top:12px"></div>
       </div>
     </section>
 

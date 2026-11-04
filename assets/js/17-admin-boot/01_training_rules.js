@@ -816,84 +816,228 @@
     }
 
     // ── User Management ──
-    async function openTenantUsers() {
-      showTenantPage('tenantUsersPage');
-      const list = document.getElementById('tenantUsersList');
-      if (!list) return;
-      showInlineLoader(list, WFT('common.loading', 'جاري التحميل...'));
-      const [data, reportData] = await Promise.all([
-        api('GET', '/api/users'),
-        api('GET', '/api/users/report').catch(() => null)
-      ]);
-      if (!data.success || !data.users) { list.innerHTML = '<p>لا يوجد موظفين</p>'; return; }
-      const counts = reportData?.report?.counts || {
-        active: data.users.filter(u => u.is_active).length,
-        invited: 0,
-        disabled: data.users.filter(u => !u.is_active).length,
-        total: data.users.length
+    const STAFF_ROLE_HINTS = {
+      editor: ['users.role_editor_desc', 'يحرر بيانات المشاريع المسندة إليه ويطلب اعتماد أقسامها.'],
+      approver: ['users.role_approver_desc', 'يراجع ويعتمد مخرجات المشاريع المسندة إليه.'],
+      admin: ['users.role_admin_desc', 'كامل صلاحيات الشركة: الإعدادات والموظفون والحقول والاعتمادات.']
+    };
+
+    function staffInitial(name) {
+      const text = String(name || '').trim();
+      return text ? text.charAt(0) : '؟';
+    }
+
+    function formatStaffLastLogin(value) {
+      if (!value) return '';
+      let raw = String(value).trim();
+      if (!/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(raw)) raw = raw.replace(' ', 'T') + 'Z';
+      const parsed = new Date(raw);
+      if (isNaN(parsed.getTime())) return String(value).slice(0, 16).replace('T', ' ');
+      const date = (typeof wfDate === 'function')
+        ? wfDate(parsed, { day: 'numeric', month: 'short' }) : parsed.toISOString().slice(0, 10);
+      const time = (typeof wfTime === 'function')
+        ? wfTime(parsed, { hour: '2-digit', minute: '2-digit' }) : parsed.toISOString().slice(11, 16);
+      const separator = (typeof wfIsEn === 'function' && wfIsEn()) ? ', ' : '، ';
+      return date + separator + time;
+    }
+
+    function updateStaffRoleHint() {
+      const hint = document.getElementById('staffRoleHint');
+      if (!hint) return;
+      const value = (document.getElementById('newUserResponsibility') || {}).value || 'editor';
+      const entry = STAFF_ROLE_HINTS[value] || STAFF_ROLE_HINTS.editor;
+      hint.textContent = WFT(entry[0], entry[1]);
+    }
+
+    function openStaffInviteModal() {
+      const modal = document.getElementById('staffInviteModal');
+      if (!modal) return;
+      if (modal.parentElement !== document.body) document.body.appendChild(modal);
+      modal.hidden = false;
+      modal.classList.add('is-open');
+      document.body.classList.add('staff-modal-open');
+      updateStaffRoleHint();
+      const name = document.getElementById('newUserName');
+      if (name) name.focus();
+    }
+
+    function closeStaffInviteModal() {
+      const modal = document.getElementById('staffInviteModal');
+      if (!modal) return;
+      modal.classList.remove('is-open');
+      modal.hidden = true;
+      document.body.classList.remove('staff-modal-open');
+      const result = document.getElementById('inviteResult');
+      if (result) result.innerHTML = '';
+    }
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape') return;
+      const modal = document.getElementById('staffInviteModal');
+      if (modal && !modal.hidden) closeStaffInviteModal();
+    });
+
+    function toggleStaffInviteLink(inviteId) {
+      const row = document.getElementById('staffInviteLink-' + inviteId);
+      if (!row) return;
+      row.hidden = !row.hidden;
+      if (!row.hidden) {
+        const input = row.querySelector('input');
+        if (input) input.select();
+      }
+    }
+
+    function staffRoleInfo(user, reportUser) {
+      if (user.is_primary) return { label: WFT('role.company_admin', 'أدمن الشركة'), cls: 'is-owner' };
+      if (reportUser.admin_like) return { label: WFT('users.role_admin', 'أدمن'), cls: 'is-admin' };
+      const roles = reportUser.responsibilities || [];
+      const roleLabels = {
+        editor: WFT('users.role_editor', 'محرر'),
+        approver: WFT('users.role_approver', 'معتمد')
       };
-      const reportUsers = {};
-      ((reportData && reportData.report && reportData.report.users) || []).forEach(u => { reportUsers[u.id] = u; });
-      const reportBanner = '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:12px 16px;margin-bottom:14px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;font-size:13px;">' +
-        '<div style="font-weight:700;color:#1a3a52;">تقرير المستخدمين:</div>' +
-        '<div><span>نشط:</span> <strong style="color:var(--green);">' + (counts.active || 0) + '</strong></div>' +
-        '<div><span>مدعو:</span> <strong style="color:#2563eb;">' + (counts.invited || counts.pending_invites || 0) + '</strong></div>' +
-        '<div><span>معطل:</span> <strong style="color:#c33;">' + (counts.disabled || 0) + '</strong></div>' +
-        '<div><span>الإجمالي:</span> <strong>' + (counts.total || data.users.length) + '</strong></div>' +
-        '<button type="button" class="btn small ghost" style="margin-right:auto;" onclick="showSodMatrixModal()">مصفوفة الفصل بين المهام</button>' +
+      const labels = roles.map(r => roleLabels[r] || (ASSIGNMENT_ROLES.find(x => x.key === r) || {}).label || r);
+      if (roles.includes('approver')) {
+        return { label: labels.join('، ') || WFT('users.role_approver', 'معتمد'), cls: 'is-approver' };
+      }
+      if (roles.includes('editor')) {
+        return { label: labels.join('، ') || WFT('users.role_editor', 'محرر'), cls: 'is-editor' };
+      }
+      return { label: USER_ROLE_LABELS[user.role] || WFT('users.role_member', 'موظف'), cls: '' };
+    }
+
+    function renderStaffSummary(counts) {
+      const box = document.getElementById('staffSummary');
+      if (!box) return;
+      const active = Number(counts.active) || 0;
+      const pending = Number(counts.pending_invites ?? counts.invited) || 0;
+      const disabled = Number(counts.disabled) || 0;
+      const all = active + pending + disabled;
+      const total = all;
+      const pct = n => all ? Math.round((n / all) * 1000) / 10 : 0;
+      box.innerHTML =
+        '<div class="staff-summary-metrics">' +
+          '<div class="staff-metric"><span class="staff-metric-value">' + total + '</span><span class="staff-metric-label">' + escapeHtml(WFT('users.metric_total', 'إجمالي الفريق')) + '</span></div>' +
+          '<div class="staff-metric is-accent"><span class="staff-metric-value">' + active + '</span><span class="staff-metric-label">' + escapeHtml(WFT('users.metric_active', 'حسابات نشطة')) + '</span></div>' +
+          '<div class="staff-metric"><span class="staff-metric-value">' + pending + '</span><span class="staff-metric-label">' + escapeHtml(WFT('users.metric_pending', 'دعوات معلقة')) + '</span></div>' +
+          '<div class="staff-metric"><span class="staff-metric-value">' + disabled + '</span><span class="staff-metric-label">' + escapeHtml(WFT('users.metric_disabled', 'حسابات معطلة')) + '</span></div>' +
+        '</div>' +
+        '<div class="staff-composition">' +
+          '<div class="staff-composition-bar">' +
+            '<span class="is-active" style="width:' + pct(active) + '%"></span>' +
+            '<span class="is-pending" style="width:' + pct(pending) + '%"></span>' +
+            '<span class="is-disabled" style="width:' + pct(disabled) + '%"></span>' +
+          '</div>' +
+          '<div class="staff-composition-legend">' +
+            '<span class="staff-legend-item"><span class="staff-legend-dot is-active"></span>' + escapeHtml(WFT('users.status_active', 'نشط')) + ' ' + active + '</span>' +
+            '<span class="staff-legend-item"><span class="staff-legend-dot is-pending"></span>' + escapeHtml(WFT('users.status_pending', 'بانتظار التفعيل')) + ' ' + pending + '</span>' +
+            '<span class="staff-legend-item"><span class="staff-legend-dot is-disabled"></span>' + escapeHtml(WFT('users.status_disabled', 'معطّل')) + ' ' + disabled + '</span>' +
+          '</div>' +
         '</div>';
-      const usersHtml = data.users.length ? data.users.map(u => {
+    }
+
+    function staffUserRows(users, reportUsers) {
+      const rows = users.map(u => {
         const reportUser = reportUsers[u.id] || {};
-        const respLabels = (reportUser.responsibilities || [])
-          .map(r => (ASSIGNMENT_ROLES.find(x => x.key === r) || {}).label || r);
-        const roleLabel = u.is_primary ? WFT('role.company_admin', 'أدمن الشركة')
-          : reportUser.admin_like ? 'أدمن'
-          : respLabels.length ? respLabels.join('، ')
-          : (USER_ROLE_LABELS[u.role] || 'موظف');
-        const statusBadge = u.is_active ? '<span style="color:var(--green)">نشط</span>' : '<span style="color:#c33">معطل</span>';
-        const lastLogin = reportUser.last_login_at
-          ? ' | <span>' + escapeHtml(WFT('users.last_login', 'آخر دخول')) + ':</span> ' + escapeHtml(String(reportUser.last_login_at).slice(0, 16).replace('T', ' '))
-          : '';
+        const role = staffRoleInfo(u, reportUser);
+        const status = u.is_active
+          ? '<span class="staff-status-pill is-active">' + escapeHtml(WFT('users.status_active', 'نشط')) + '</span>'
+          : '<span class="staff-status-pill is-disabled">' + escapeHtml(WFT('users.status_disabled', 'معطّل')) + '</span>';
+        const login = reportUser.last_login_at
+          ? '<span class="staff-last-login">' + escapeHtml(formatStaffLastLogin(reportUser.last_login_at)) + '</span>'
+          : '<span class="staff-last-login is-empty">' + escapeHtml(WFT('users.never_logged', 'لم يسجّل بعد')) + '</span>';
         // The primary row is the company's admin identity — it is managed
         // through the account itself, not employee permissions.
-        const actions = u.is_primary ? '' :
-          '<button class="btn small primary" onclick="openUserPermissionsModal(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">صلاحيات</button>' +
-          '<button class="btn small ghost" onclick="toggleUserActive(\'' + u.id + '\', ' + (u.is_active ? 0 : 1) + ')">' + (u.is_active ? 'تعطيل' : 'تفعيل') + '</button>' +
-          '<button class="btn small danger" onclick="deleteTenantUser(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">حذف</button>';
-        return '<div class="tenant-presentation-card" style="margin-bottom:0">' +
-          '<div><h3>' + escapeHtml(u.name) + '</h3><div class="meta">' + escapeHtml(u.email) + ' | <span>' + roleLabel + '</span> | ' + statusBadge + lastLogin + '</div></div>' +
-          '<div class="tenant-actions" style="gap:6px">' + actions + '</div></div>';
-      }).join('') : '<p class="tenant-hint">لم تتم إضافة موظفين بعد.</p>';
-      list.innerHTML = reportBanner + usersHtml;
-      renderTenantInvites((reportData && reportData.report && reportData.report.invites) || []);
-      populateInviteScopePickers();
+        const actions = u.is_primary
+          ? '<span class="staff-row-note">' + escapeHtml(WFT('users.owner_managed', 'تُدار من حساب المنشأة')) + '</span>'
+          : '<div class="staff-row-actions">' +
+              '<button class="btn small ghost" onclick="openUserPermissionsModal(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">' + escapeHtml(WFT('users.actions_permissions', 'صلاحيات')) + '</button>' +
+              '<button class="btn small ghost" onclick="toggleUserActive(\'' + u.id + '\', ' + (u.is_active ? 0 : 1) + ')">' + escapeHtml(u.is_active ? WFT('users.actions_disable', 'تعطيل') : WFT('users.actions_enable', 'تفعيل')) + '</button>' +
+              '<button class="btn small danger" onclick="deleteTenantUser(\'' + u.id + '\', \'' + escapeHtml(u.name) + '\')">' + escapeHtml(WFT('users.actions_delete', 'حذف')) + '</button>' +
+            '</div>';
+        const monogram = u.is_primary ? ' is-owner' : (!u.is_active ? ' is-disabled' : '');
+        return '<tr class="staff-row">' +
+          '<td class="staff-cell-member"><div class="staff-member"><span class="staff-monogram' + monogram + '">' + escapeHtml(staffInitial(u.name)) + '</span>' +
+            '<div class="staff-member-meta"><div class="staff-member-name">' + escapeHtml(u.name) +
+              (u.is_primary ? '<span class="staff-owner-badge">' + escapeHtml(WFT('users.owner_badge', 'مالك الحساب')) + '</span>' : '') +
+            '</div><div class="staff-member-email">' + escapeHtml(u.email) + '</div></div></div></td>' +
+          '<td data-label="' + escapeHtml(WFT('users.col_role', 'الدور')) + '"><span class="staff-role-pill ' + role.cls + '">' + escapeHtml(role.label) + '</span></td>' +
+          '<td data-label="' + escapeHtml(WFT('users.col_status', 'الحالة')) + '">' + status + '</td>' +
+          '<td data-label="' + escapeHtml(WFT('users.col_last_login', 'آخر دخول')) + '">' + login + '</td>' +
+          '<td data-label="' + escapeHtml(WFT('users.col_actions', 'الإجراءات')) + '" class="staff-cell-actions">' + actions + '</td></tr>';
+      }).join('');
+      return rows || '<tr><td colspan="5" class="staff-empty">' + escapeHtml(WFT('users.empty', 'لا توجد حسابات بعد')) + '</td></tr>';
     }
 
     function renderTenantInvites(invites) {
       const box = document.getElementById('tenantInvitesList');
       if (!box) return;
-      if (!invites.length) { box.innerHTML = ''; return; }
-      const statusLabels = {
-        sent: WFT('users.invite_sent', 'أرسلت'), failed: WFT('users.invite_failed', 'فشل الإرسال'),
-        pending: WFT('users.invite_pending_status', 'قيد الإرسال'), queued: WFT('users.invite_pending_status', 'قيد الإرسال'),
+      const visible = (invites || []).filter(i => !i.is_used);
+      if (!visible.length) { box.innerHTML = ''; return; }
+      box.innerHTML = visible.map(i => {
+        const roleLabel = i.responsibility === 'admin' ? WFT('users.role_admin', 'أدمن')
+          : i.responsibility === 'approver' ? WFT('users.role_approver', 'معتمد')
+          : i.responsibility === 'editor' ? WFT('users.role_editor', 'محرر')
+          : (USER_ROLE_LABELS[i.role] || WFT('users.role_member', 'موظف'));
+        const roleCls = i.responsibility === 'admin' ? 'is-admin'
+          : i.responsibility === 'approver' ? 'is-approver'
+          : i.responsibility === 'editor' ? 'is-editor' : '';
+        const statePill = i.is_expired
+          ? '<span class="staff-status-pill is-disabled">' + escapeHtml(WFT('users.invite_expired', 'منتهية')) + '</span>'
+          : '<span class="staff-status-pill is-pending">' + escapeHtml(WFT('users.status_pending', 'بانتظار التفعيل')) + '</span>';
+        const mailNote = i.email_status === 'failed'
+          ? '<div class="staff-email-note">' + escapeHtml(WFT('users.invite_email_queued', 'تعذر إرسال البريد')) + '</div>' : '';
+        const actions = (!i.is_expired)
+          ? '<div class="staff-row-actions">' +
+              '<button type="button" class="btn small ghost" onclick="resendTenantInvite(\'' + i.id + '\')">' + escapeHtml(WFT('users.invite_resend', 'إعادة الإرسال')) + '</button>' +
+              (i.token ? '<button type="button" class="btn small ghost" onclick="toggleStaffInviteLink(\'' + i.id + '\')">' + escapeHtml(WFT('users.invite_link', 'رابط الدعوة')) + '</button>' : '') +
+            '</div>'
+          : '<span class="staff-row-note">' + escapeHtml(WFT('users.invite_expired_note', 'انتهت صلاحية الرابط')) + '</span>';
+        const linkRow = (!i.is_expired && i.token)
+          ? '<tr class="staff-invite-link-row" id="staffInviteLink-' + i.id + '" hidden><td colspan="5"><input type="text" readonly value="' + escapeHtml(window.location.origin + '/invite/' + i.token) + '" onclick="this.select()"></td></tr>'
+          : '';
+        return '<tr class="staff-row is-invite">' +
+          '<td class="staff-cell-member"><div class="staff-member"><span class="staff-monogram is-pending">' + escapeHtml(staffInitial(i.name || i.email)) + '</span>' +
+            '<div class="staff-member-meta"><div class="staff-member-name">' + escapeHtml(i.name || i.email) + '</div>' +
+            '<div class="staff-member-email">' + escapeHtml(i.email) + '</div>' + mailNote + '</div></div></td>' +
+          '<td data-label="' + escapeHtml(WFT('users.col_role', 'الدور')) + '"><span class="staff-role-pill ' + roleCls + '">' + escapeHtml(roleLabel) + '</span></td>' +
+          '<td data-label="' + escapeHtml(WFT('users.col_status', 'الحالة')) + '">' + statePill + '</td>' +
+          '<td data-label="' + escapeHtml(WFT('users.col_last_login', 'آخر دخول')) + '"><span class="staff-last-login is-empty">' + escapeHtml(WFT('users.never_logged', 'لم يسجّل بعد')) + '</span></td>' +
+          '<td data-label="' + escapeHtml(WFT('users.col_actions', 'الإجراءات')) + '" class="staff-cell-actions">' + actions + '</td></tr>' + linkRow;
+      }).join('');
+    }
+
+    async function openTenantUsers() {
+      showTenantPage('tenantUsersPage');
+      const list = document.getElementById('tenantUsersList');
+      if (!list) return;
+      list.innerHTML = '<tr><td colspan="5" class="staff-empty">' + escapeHtml(WFT('common.loading', 'جاري التحميل...')) + '</td></tr>';
+      const [data, reportData] = await Promise.all([
+        api('GET', '/api/users'),
+        api('GET', '/api/users/report').catch(() => null)
+      ]);
+      if (!data.success || !data.users) {
+        list.innerHTML = '<tr><td colspan="5" class="staff-empty">' + escapeHtml(WFT('users.load_failed', 'تعذر تحميل الموظفين')) + '</td></tr>';
+        return;
+      }
+      const report = (reportData && reportData.report) || {};
+      const counts = report.counts || {
+        active: data.users.filter(u => u.is_active).length,
+        pending_invites: 0,
+        disabled: data.users.filter(u => !u.is_active).length,
+        total: data.users.length
       };
-      box.innerHTML = '<h4 style="margin:8px 0;color:var(--p)">' + escapeHtml(WFT('users.invites_list', 'الدعوات')) + '</h4>' +
-        invites.map(i => {
-          const state = i.is_used ? '<span style="color:#1c7a2e">' + escapeHtml(WFT('users.invite_used', 'مقبولة')) + '</span>'
-            : i.is_expired ? '<span style="color:#c33">' + escapeHtml(WFT('users.invite_expired', 'منتهية')) + '</span>'
-            : '<span style="color:#2563eb">' + escapeHtml(WFT('users.invite_pending', 'معلقة')) + '</span>';
-          const mail = i.email_status ? ' | <span>' + escapeHtml(WFT('users.invite_email_status', 'البريد')) + ':</span> ' + escapeHtml(statusLabels[i.email_status] || i.email_status) : '';
-          const resend = (!i.is_used && !i.is_expired)
-            ? '<button type="button" class="btn small ghost" onclick="resendTenantInvite(\'' + i.id + '\')">' + escapeHtml(WFT('users.invite_resend', 'إعادة الإرسال')) + '</button>'
-            : '';
-          const link = (!i.is_used && !i.is_expired && i.token)
-            ? '<input type="text" readonly value="' + escapeHtml(window.location.origin + '/invite/' + i.token) + '" style="width:100%;font-size:12px;margin-top:6px" onclick="this.select()">'
-            : '';
-          return '<div class="tenant-presentation-card" style="margin-bottom:6px">' +
-            '<div><h3 style="font-size:14px">' + escapeHtml(i.email) + '</h3>' +
-            '<div class="meta">' + (i.name ? escapeHtml(i.name) + ' | ' : '') + escapeHtml(USER_ROLE_LABELS[i.role] || 'موظف') + ' | ' + state + mail + '</div>' + link + '</div>' +
-            '<div class="tenant-actions" style="gap:6px">' + resend + '</div></div>';
-        }).join('');
+      const reportUsers = {};
+      (report.users || []).forEach(u => { reportUsers[u.id] = u; });
+      renderStaffSummary(counts);
+      list.innerHTML = staffUserRows(data.users, reportUsers);
+      const chip = document.getElementById('staffTeamCount');
+      if (chip) {
+        const teamCount = data.users.length + (Number(counts.pending_invites ?? counts.invited) || 0);
+        chip.textContent = WFT('users.team_count', '{count} في الفريق', { count: teamCount });
+      }
+      renderTenantInvites(report.invites || []);
+      populateInviteScopePickers();
+      updateStaffRoleHint();
     }
 
     async function resendTenantInvite(inviteId) {

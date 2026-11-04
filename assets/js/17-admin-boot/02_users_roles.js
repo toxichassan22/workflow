@@ -31,6 +31,7 @@
             '</div>';
           toast(WFT('users.invite_created', 'تم إنشاء الدعوة'));
           resetForm();
+          closeStaffInviteModal();
           openTenantUsers();
         } else {
           if (result) result.innerHTML = '<p style="color:#c33">' + escapeHtml((invite && invite.error) || WFT('common.error', 'فشل')) + '</p>';
@@ -44,6 +45,7 @@
         toast(WFT('users.added', 'تم إضافة الموظف') + (data.emailSent === false ? WFT('users.added_email_failed', ' — تعذر إرسال البريد') : '') +
           (data.assignmentError ? ' — ' + wfTr(assignmentErrorText(data.assignmentError)) : ''));
         resetForm();
+        closeStaffInviteModal();
         openTenantUsers();
       } else {
         toast(data.error || 'فشل إضافة الموظف');
@@ -54,6 +56,7 @@
       const field = document.getElementById('newUserProjectsField');
       const isAdmin = (document.getElementById('newUserResponsibility') || {}).value === 'admin';
       if (field) field.style.display = isAdmin ? 'none' : '';
+      if (typeof updateStaffRoleHint === 'function') updateStaffRoleHint();
     }
 
     function assignmentErrorText(error) {
@@ -226,6 +229,31 @@
     let editingAssignments = [];
     let tenantAssignments = [];
 
+    const STAFF_PERMISSION_GROUPS = [
+      { title: ['users.perm_group_access', 'الوصول والمشاريع'], keys: ['dashboard', 'create_presentation', 'view_presentations', 'copy_presentation'] },
+      { title: ['users.perm_group_generation', 'التوليد والوسائط'], keys: ['generate_images', 'generate_maps'] },
+      { title: ['users.perm_group_approvals', 'الاعتماد والحوكمة'], keys: ['approvals', 'approve_generation', 'approve_final_file', 'post_approval_edit'] },
+      { title: ['users.perm_group_settings', 'الإعدادات والإدارة'], keys: ['company_settings', 'custom_fields', 'manage_users', 'ai_rules', 'training_data', 'export_files', 'billing', 'audit_log', 'support_tickets', 'sag_admin_panel'] }
+    ];
+
+    function showStaffPermTab(tab) {
+      const modal = document.getElementById('userPermissionsModal');
+      if (!modal) return;
+      modal.querySelectorAll('[data-staff-perm-tab]').forEach(btn => {
+        btn.classList.toggle('is-active', btn.dataset.staffPermTab === tab);
+      });
+      modal.querySelectorAll('[data-staff-perm-pane]').forEach(pane => {
+        pane.classList.toggle('is-active', pane.dataset.staffPermPane === tab);
+      });
+    }
+
+    function closeUserPermissionsModal() {
+      const modal = document.getElementById('userPermissionsModal');
+      if (modal) modal.remove();
+      document.body.classList.remove('staff-modal-open');
+      editingUserPermissions = null;
+    }
+
     async function openUserPermissionsModal(userId, userName) {
       const [permData, sectionData, scopeData, assignData, tenantAssignData] = await Promise.all([
         api('GET', '/api/users/' + userId + '/permissions'),
@@ -234,7 +262,7 @@
         api('GET', '/api/users/' + userId + '/assignments').catch(() => null),
         api('GET', '/api/assignments').catch(() => null)
       ]);
-      if (!permData.success || !sectionData.success) { toast('تعذر تحميل الصلاحيات'); return; }
+      if (!permData.success || !sectionData.success) { toast(WFT('users.permissions_load_failed', 'تعذر تحميل الصلاحيات')); return; }
       const perms = permData.permissions || {};
       const keys = permData.availableKeys || [];
       const sections = sectionData.sections || {};
@@ -245,53 +273,75 @@
         draft_id: a.draft_id || '*', role: a.role,
       }));
       tenantAssignments = (tenantAssignData && tenantAssignData.assignments) || [];
-      editingUserPermissions = { userId, userName, availableSections, scopeDrafts };
+      editingUserPermissions = { userId, userName, availableSections, scopeDrafts,
+        availableKeys: permData.availableKeys || [] };
 
-      const permRows = keys.map(key => {
-        const label = PERMISSION_LABELS[key] || key;
-        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">' +
-          '<label>' + label + '</label>' +
-          '<input type="checkbox" id="perm_' + key + '" ' + (perms[key] ? 'checked' : '') + '>' +
-          '</div>';
+      const permGroupsHtml = STAFF_PERMISSION_GROUPS.map(group => {
+        const rows = group.keys.filter(key => keys.includes(key)).map(key => {
+          const label = PERMISSION_LABELS[key] || key;
+          return '<label class="staff-perm-row">' +
+            '<span class="staff-perm-label">' + escapeHtml(wfTr(label)) + '</span>' +
+            '<input type="checkbox" class="staff-toggle" id="perm_' + key + '" ' + (perms[key] ? 'checked' : '') + '>' +
+            '</label>';
+        }).join('');
+        return rows ? '<div class="staff-perm-group"><div class="staff-perm-group-title">' +
+          escapeHtml(WFT(group.title[0], group.title[1])) + '</div>' + rows + '</div>' : '';
       }).join('');
+      const groupedKeys = STAFF_PERMISSION_GROUPS.reduce((acc, group) => acc.concat(group.keys), []);
+      const ungrouped = keys.filter(key => !groupedKeys.includes(key));
+      const ungroupedHtml = ungrouped.length ? '<div class="staff-perm-group"><div class="staff-perm-group-title">' +
+        escapeHtml(WFT('users.perm_group_other', 'صلاحيات أخرى')) + '</div>' +
+        ungrouped.map(key => '<label class="staff-perm-row"><span class="staff-perm-label">' +
+          escapeHtml(wfTr(PERMISSION_LABELS[key] || key)) + '</span><input type="checkbox" class="staff-toggle" id="perm_' +
+          key + '" ' + (perms[key] ? 'checked' : '') + '></label>').join('') + '</div>' : '';
 
-      const sectionRows = availableSections.map(s => {
-        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">' +
-          '<label>' + escapeHtml(s.label) + '</label>' +
-          '<input type="checkbox" id="section_' + s.key + '" ' + (sections[s.key] ? 'checked' : '') + '>' +
-          '</div>';
-      }).join('');
+      const sectionChips = availableSections.length ? availableSections.map(s =>
+        '<label class="staff-check-chip"><input type="checkbox" id="section_' + s.key + '" ' +
+        (sections[s.key] ? 'checked' : '') + '><span>' + escapeHtml(wfTr(s.label)) + '</span></label>'
+      ).join('') : '<p class="staff-perm-empty">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</p>';
 
-      const scopeRows = scopeDrafts.length ? scopeDrafts.map(d =>
-        '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line)">' +
-        '<label>' + escapeHtml(d.title || d.id) + '</label>' +
-        '<input type="checkbox" class="scopeDraftCb" value="' + escapeHtml(d.id) + '" ' + (scopeSet.has(d.id) ? 'checked' : '') + '></div>'
-      ).join('') : '<p class="tenant-hint">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</p>';
+      const scopeChips = scopeDrafts.length ? scopeDrafts.map(d =>
+        '<label class="staff-check-chip"><input type="checkbox" class="scopeDraftCb" value="' + escapeHtml(d.id) + '" ' +
+        (scopeSet.has(d.id) ? 'checked' : '') + '><span>' + escapeHtml(wfTr(d.title || d.id)) + '</span></label>'
+      ).join('') : '<p class="staff-perm-empty">' + escapeHtml(WFT('common.none', 'لا يوجد')) + '</p>';
 
       const modal = document.createElement('div');
       modal.id = 'userPermissionsModal';
-      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px';
-      modal.innerHTML = '<div style="background:#fff;border-radius:20px;padding:24px;max-width:520px;width:100%;max-height:85vh;overflow:auto">' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
-        '<h3><span>صلاحيات:</span> ' + escapeHtml(userName) + '</h3>' +
-        '<button class="btn ghost" onclick="document.getElementById(\'userPermissionsModal\').remove()">إغلاق</button></div>' +
-        '<h4 style="margin:12px 0 8px;color:var(--p)">صلاحيات التطبيق</h4>' +
-        '' +
-        permRows +
-        '<h4 style="margin:20px 0 8px;color:var(--p)">أقسام فورم المشروع</h4>' +
-        '' +
-        sectionRows +
-        '<h4 style="margin:20px 0 8px;color:var(--p)">' + escapeHtml(WFT('users.project_scope', 'ملفات المشاريع المسموحة')) + '</h4>' +
-        scopeRows +
-        '<h4 style="margin:20px 0 8px;color:var(--p)">' + escapeHtml(WFT('users.assignments_title', 'المسؤوليات على المشاريع')) + '</h4>' +
-        '<div id="permAssignmentsList"></div>' +
-        '<div class="tenant-btns" style="margin-top:8px">' +
-        '<button type="button" class="btn small ghost" onclick="addAssignmentRow()">' + escapeHtml(WFT('users.assignment_add', 'إضافة تعيين')) + '</button>' +
+      modal.className = 'staff-modal-overlay';
+      modal.setAttribute('role', 'dialog');
+      modal.setAttribute('aria-modal', 'true');
+      modal.innerHTML = '<div class="staff-modal staff-perm-modal">' +
+        '<div class="staff-modal-head">' +
+          '<div><h3 class="staff-card-title">' + escapeHtml(WFT('users.permissions_title', 'صلاحيات: {name}', { name: userName })) + '</h3>' +
+          '<p class="staff-card-desc">' + escapeHtml(WFT('users.permissions_subtitle', 'ما يستطيع هذا الموظف الوصول إليه وتعديله داخل المنشأة')) + '</p></div>' +
+          '<button type="button" class="btn ghost small" onclick="closeUserPermissionsModal()">' + escapeHtml(WFT('common.close', 'إغلاق')) + '</button>' +
         '</div>' +
-        '<div class="tenant-btns" style="margin-top:16px">' +
-        '<button class="btn primary" onclick="saveUserPermissions()">حفظ الصلاحيات</button>' +
+        '<div class="staff-perm-tabs" role="tablist">' +
+          '<button type="button" class="staff-perm-tab is-active" data-staff-perm-tab="app" onclick="showStaffPermTab(\'app\')">' + escapeHtml(WFT('users.perm_tab_app', 'صلاحيات التطبيق')) + '</button>' +
+          '<button type="button" class="staff-perm-tab" data-staff-perm-tab="sections" onclick="showStaffPermTab(\'sections\')">' + escapeHtml(WFT('users.perm_tab_sections', 'أقسام المشروع')) + '</button>' +
+          '<button type="button" class="staff-perm-tab" data-staff-perm-tab="scope" onclick="showStaffPermTab(\'scope\')">' + escapeHtml(WFT('users.perm_tab_scope', 'المشاريع والمسؤوليات')) + '</button>' +
+        '</div>' +
+        '<div class="staff-modal-body staff-perm-body">' +
+          '<div class="staff-perm-pane is-active" data-staff-perm-pane="app">' + permGroupsHtml + ungroupedHtml + '</div>' +
+          '<div class="staff-perm-pane" data-staff-perm-pane="sections">' +
+            '<div class="staff-perm-group"><div class="staff-perm-group-title">' + escapeHtml(WFT('users.perm_sections_title', 'أقسام فورم المشروع')) + '</div><div class="staff-check-grid">' + sectionChips + '</div></div>' +
+          '</div>' +
+          '<div class="staff-perm-pane" data-staff-perm-pane="scope">' +
+            '<div class="staff-perm-group"><div class="staff-perm-group-title">' + escapeHtml(WFT('users.project_scope', 'ملفات المشاريع المسموحة')) + '</div><div class="staff-check-grid">' + scopeChips + '</div></div>' +
+            '<div class="staff-perm-group"><div class="staff-perm-group-title">' + escapeHtml(WFT('users.assignments_title', 'المسؤوليات على المشاريع')) + '</div><div id="permAssignmentsList"></div>' +
+            '<div style="margin-top:8px"><button type="button" class="btn small ghost" onclick="addAssignmentRow()">' + escapeHtml(WFT('users.assignment_add', 'إضافة تعيين')) + '</button></div></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="staff-modal-foot">' +
+          '<button class="btn primary" onclick="saveUserPermissions()">' + escapeHtml(WFT('users.perm_save', 'حفظ الصلاحيات')) + '</button>' +
+          '<button type="button" class="btn ghost" onclick="closeUserPermissionsModal()">' + escapeHtml(WFT('common.cancel', 'إلغاء')) + '</button>' +
         '</div></div>';
+      modal.addEventListener('click', event => { if (event.target === modal) closeUserPermissionsModal(); });
+      modal.addEventListener('keydown', event => { if (event.key === 'Escape') closeUserPermissionsModal(); });
       document.body.appendChild(modal);
+      document.body.classList.add('staff-modal-open');
+      modal.tabIndex = -1;
+      modal.focus();
       renderAssignmentRows();
     }
 
@@ -353,7 +403,7 @@
 
     async function saveUserPermissions() {
       if (!editingUserPermissions) return;
-      const keys = Object.keys(PERMISSION_LABELS);
+      const keys = editingUserPermissions.availableKeys || [];
       const permissions = {};
       keys.forEach(key => {
         const cb = document.getElementById('perm_' + key);
@@ -380,18 +430,19 @@
       const editorCap = assignRes && assignRes.error_code === 'too_many_editors';
       const failed = conflicted || editorCap;
       if (!failed) {
-        const modal = document.getElementById('userPermissionsModal');
-        if (modal) modal.remove();
+        closeUserPermissionsModal();
       }
       if (conflicted) {
         toast(WFT('users.assignment_conflict', 'المشروع له معتمد آخر بالفعل') + (assignRes.holder ? ': ' + assignRes.holder : ''));
         const tenantData = await api('GET', '/api/assignments').catch(() => null);
         tenantAssignments = (tenantData && tenantData.assignments) || tenantAssignments;
         renderAssignmentRows();
+        showStaffPermTab('scope');
       }
       else if (editorCap) {
         toast(WFT('users.assignment_editor_cap', 'المشروع يقبل خمسة محررين كحد أقصى'));
         renderAssignmentRows();
+        showStaffPermTab('scope');
       }
       else if (permRes.success && sectionRes.success && (!scopeRes || scopeRes.success) && (!assignRes || assignRes.success)) { toast('تم حفظ الصلاحيات'); }
       else { toast(permRes.error || sectionRes.error || (scopeRes && scopeRes.error) || (assignRes && assignRes.error) || 'فشل الحفظ'); }
