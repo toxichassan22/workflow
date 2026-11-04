@@ -148,3 +148,26 @@ class StagingIndexingProtectionTests(unittest.TestCase):
             about_content = f.read()
         self.assertIn('AboutPage', about_content)
         self.assertIn('rel="alternate" type="text/plain" href="https://landloom.ai/llms.txt"', about_content)
+
+    def test_robots_txt_disallows_leaked_staging_path(self):
+        resp = self.client.get('/robots.txt', headers={'Host': 'landloom.ai'})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('Disallow: /lab.landloom.ai/', resp.get_data(as_text=True))
+
+    def test_leaked_staging_directory_returns_410_gone(self):
+        resp = self.client.get('/lab.landloom.ai/', headers={'Host': 'www.landloom.ai'})
+        self.assertEqual(resp.status_code, 410)
+        self.assertIn('noindex', resp.headers.get('X-Robots-Tag', ''))
+
+        resp_sub = self.client.get('/lab.landloom.ai/about', headers={'Host': 'landloom.ai'})
+        self.assertEqual(resp_sub.status_code, 410)
+        self.assertIn('noindex', resp_sub.headers.get('X-Robots-Tag', ''))
+
+        resp_env = self.client.get('/', environ_overrides={'REQUEST_URI': '/lab.landloom.ai/'})
+        self.assertEqual(resp_env.status_code, 410)
+
+    def test_htaccess_prod_carries_410_protection(self):
+        with open(ROOT / '.htaccess_prod', 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('RewriteCond %{HTTP_HOST} ^(www\\.)?landloom\\.ai', content)
+        self.assertIn('RewriteRule ^ - [G,L]', content)

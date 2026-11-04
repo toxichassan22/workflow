@@ -161,11 +161,25 @@ def security_headers(response):
         if header not in response.headers:
             response.headers[header] = value
     host = (request.host or '').lower().split(':')[0]
-    if host != 'landloom.ai' and host != 'www.landloom.ai':
+    raw_uri = request.environ.get('REQUEST_URI', '') or request.path or ''
+    if '/lab.landloom.ai' in raw_uri:
+        response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
+    elif host != 'landloom.ai' and host != 'www.landloom.ai':
         response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
     elif 'X-Robots-Tag' not in response.headers and request.path.startswith(('/app', '/c/', '/superadmin', '/invite/')):
         response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
     return response
+
+
+@app.before_request
+def block_leaked_staging_directory():
+    """Block access to the staging directory if requested via the main domain."""
+    raw_uri = request.environ.get('REQUEST_URI', '') or request.path or ''
+    if '/lab.landloom.ai' in raw_uri:
+        response = Response('This resource has been permanently removed.', status=410, mimetype='text/plain')
+        response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive, nosnippet'
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        return response
 
 
 MAX_DECOMPRESSED_BODY_BYTES = 25 * 1024 * 1024

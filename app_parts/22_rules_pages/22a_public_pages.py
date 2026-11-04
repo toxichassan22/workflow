@@ -67,7 +67,7 @@ def public_robots():
     if host != 'landloom.ai' and host != 'www.landloom.ai':
         body = "User-agent: *\nDisallow:\n"
     else:
-        body = "User-agent: *\nDisallow: /app\nDisallow: /c/\nDisallow: /superadmin\nDisallow: /invite/\nDisallow: /api/\n\nSitemap: https://landloom.ai/sitemap.xml\n"
+        body = "User-agent: *\nDisallow: /app\nDisallow: /c/\nDisallow: /superadmin\nDisallow: /invite/\nDisallow: /api/\nDisallow: /lab.landloom.ai/\n\nSitemap: https://landloom.ai/sitemap.xml\n"
     resp = Response(body, mimetype='text/plain')
     resp.headers['Cache-Control'] = 'no-cache'
     return resp

@@ -7,7 +7,15 @@ RewriteEngine On
 <IfModule mod_headers.c>
     SetEnvIfNoCase Host "^lab\.landloom\.ai$" IS_STAGING
     Header set X-Robots-Tag "noindex, nofollow, noarchive, nosnippet" env=IS_STAGING
+    SetEnvIfNoCase Host "^(www\.)?landloom\.ai" LEAKED_STAGING_PATH
+    Header set X-Robots-Tag "noindex, nofollow, noarchive, nosnippet" env=LEAKED_STAGING_PATH
 </IfModule>
+
+# Block access when this staging directory is requested via the main domain
+# (e.g. https://www.landloom.ai/lab.landloom.ai/ or https://landloom.ai/lab.landloom.ai/)
+# Return HTTP 410 Gone so search engines permanently drop the URL from their index.
+RewriteCond %{HTTP_HOST} ^(www\.)?landloom\.ai(:[0-9]+)?$ [NC]
+RewriteRule ^ - [G,L]
 
 # Block Facebook meta-externalagent crawler spam before it reaches gunicorn
 RewriteCond %{HTTP_USER_AGENT} meta-externalagent [NC]
