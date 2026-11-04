@@ -1,0 +1,212 @@
+/* Public Document & Legal Pages (About, Terms of Service, Privacy Policy)
+   Theme: LandLoom brand palette (50% Navy, 45% White, 5% Turquoise)
+   Zero icons, zero emojis — strictly compliant with AGENTS.md rules. */
+
+:root {
+  --navy: #07182C;
+  --navy-surface: #0A2038;
+  --navy-border: rgba(255, 255, 255, 0.12);
+  --teal-bright: #17C8E3;
+  --teal-dark: #0A829B;
+  --teal-soft: #DFF6FB;
+  --slate-bg: #F8FAFC;
+  --card-border: #E2E8F0;
+  --ink-primary: #1E293B;
+  --ink-muted: #64748B;
+}
+
+/* ── Top Hero Banner for Legal & Public Pages ────────────────────────────── */
+.legal-page-header {
+  background: linear-gradient(165deg, #07182C 0%, #0d2540 65%, #081c33 100%);
+  color: #FFFFFF;
+  padding: 52px 0 38px;
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.legal-page-header::before {
+  content: '';
+  position: absolute;
+  top: -80px;
+  right: -80px;
+  width: 320px;
+  height: 320px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(23, 200, 227, 0.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.legal-header-kicker {
+  display: inline-block;
+  color: var(--teal-bright);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+.legal-header-title {
+  font-size: 32px;
+  font-weight: 800;
+  color: #FFFFFF;
+  margin: 0 0 12px;
+  line-height: 1.3;
+}
+
+.legal-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.legal-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 12px;
+  font-weight: 700;
+  color: #DCE8F2;
+}
+
+.legal-meta-chip.highlight {
+  border-color: rgba(23, 200, 227, 0.45);
+  color: var(--teal-bright);
+  background: rgba(23, 200, 227, 0.08);
+}
+
+/* ── Document Switcher Navigation Tabs ───────────────────────────────────── */
+.legal-nav-tabs {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 4px;
+  gap: 4px;
+}
+
+.legal-nav-link {
+  display: inline-block;
+  padding: 8px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #DCE8F2;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+
+.legal-nav-link:hover {
+  color: #FFFFFF;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.legal-nav-link.active {
+  background: #FFFFFF;
+  color: var(--navy);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+}
+
+/* ── Reading Container & Paper Card ──────────────────────────────────────── */
+.legal-main-wrap {
+  background: var(--slate-bg);
+  min-height: calc(100vh - 360px);
+  padding: 44px 0 76px;
+}
+
+.legal-card-shell {
+  max-width: 860px;
+  margin: 0 auto;
+  background: #FFFFFF;
+  border: 1px solid var(--card-border);
+  border-radius: 16px;
+  box-shadow: 0 4px 15px -2px rgba(7, 24, 44, 0.04), 0 10px 30px -5px rgba(7, 24, 44, 0.06);
+  padding: 48px 44px;
+}
+
+/* ── Document Content Typography & Sections ──────────────────────────────── */
+.legal-content h1 {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--navy);
+  margin: 0 0 14px;
+  line-height: 1.35;
+}
+
+.legal-content .updated {
+  display: block;
+  background: #F0FAFC;
+  border-right: 4px solid var(--teal-bright);
+  border-radius: 6px;
+  padding: 10px 16px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--teal-dark);
+  margin: 0 0 28px;
+  width: 100%;
+}
+
+html[lang="en"] .legal-content .updated {
+  border-right: none;
+  border-left: 4px solid var(--teal-bright);
+}
+
+.legal-content h2 {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--navy);
+  margin: 36px 0 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #F1F5F9;
+  letter-spacing: -0.01em;
+}
+
+.legal-content h2:first-of-type {
+  margin-top: 10px;
+}
+
+.legal-content p {
+  color: var(--ink-primary);
+  font-size: 15.5px;
+  line-height: 1.85;
+  margin: 0 0 16px;
+}
+
+.legal-content ul, .legal-content ol {
+  padding-inline-start: 24px;
+  margin: 12px 0 20px;
+}
+
+.legal-content li {
+  color: var(--ink-primary);
+  font-size: 15px;
+  line-height: 1.85;
+  margin-bottom: 8px;
+}
+
+.legal-content strong {
+  color: var(--navy);
+  font-weight: 700;
+}
+
+/* ── Responsive adjustments ──────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .legal-page-header { padding: 36px 0 24px; }
+  .legal-header-title { font-size: 23px; }
+  .legal-header-meta { gap: 6px; margin-bottom: 16px; }
+  .legal-meta-chip { font-size: 11px; padding: 3px 8px; }
+  .legal-nav-tabs { width: 100%; display: flex; justify-content: space-between; }
+  .legal-nav-link { flex: 1; text-align: center; padding: 7px 6px; font-size: 11.5px; }
+  .legal-main-wrap { padding: 24px 0 48px; }
+  .legal-card-shell { padding: 24px 18px; border-radius: 12px; }
+  .legal-content h1 { font-size: 22px; }
+  .legal-content h2 { font-size: 17.5px; }
+  .legal-content p, .legal-content li { font-size: 14.5px; line-height: 1.75; }
+}

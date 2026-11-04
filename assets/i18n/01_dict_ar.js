@@ -1,7 +1,8 @@
 /* assets/i18n/01_dict_ar.js — Arabic UI dictionary, extracted from i18n.js.
  * Edit entries here; keep the I18N_*_BEGIN/END markers and JSON-compatible
  * quoting (tests parse the block between them). Loaded before i18n.js. */
-window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
+window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/
+{
   "best_use.optional": "اختياري",
   "best_use.generate": "اقتراح أفضل توزيع",
   "best_use.save_failed": "تعذر حفظ المسودة قبل المتابعة.",
@@ -161,7 +162,6 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "best_use_explore.month": "شهر",
   "best_use_explore.night": "ليلة",
   "best_use.basement_area": "مسطحات البدروم المقترحة",
-
   "lang.switch_to_arabic": "عربي",
   "lang.switch_to_english": "English",
   "loader.done": "اكتمل",
@@ -470,6 +470,7 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "admin.legal_doc": "الصفحة",
   "admin.legal_terms": "شروط الاستخدام",
   "admin.legal_privacy": "سياسة الخصوصية",
+  "admin.legal_about": "من نحن",
   "admin.legal_ar": "المحتوى بالعربية (HTML)",
   "admin.legal_en": "المحتوى بالإنجليزية (HTML)",
   "admin.legal_save": "حفظ المحتوى",
@@ -841,9 +842,8 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "sectionver.diff_unchanged": "بدون تغيير",
   "sectionver.self_approval": "اعتماد ذاتي",
   "sectionver.stale": "اعتماد قديم (>30 يوم)",
-  "notif.package_expiring": "باقتكم تنتهي في ",
-  "notif.package_expired": "انتهت باقتكم في {date} — إن رجبتم في التجديد يسعدنا تواصلكم معنا.",
   "notif.package_expiring": "باقتكم تنتهي في {date} — إن رجبتم في التجديد يسعدنا تواصلكم معنا.",
+  "notif.package_expired": "انتهت باقتكم في {date} — إن رجبتم في التجديد يسعدنا تواصلكم معنا.",
   "designer.task_cancelled": "أُلغيت مهمة تعديل العرض — لم تُطبق المهام المتبقية.",
   "gen.section_regenerate_confirm": "سيتم إعادة تخطيط وتوليد قسم «{section}» من صوره وبياناته الحالية. قد يزيد أو يقل عدد شرائحه، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟",
   "agent.title": "وكيل الإدارة الذكي",
@@ -1192,7 +1192,6 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "notif.mark_read_failed": "تعذر تحديث حالة الإشعار",
   "notif.bulk_read_failed": "تعذر تحديث حالة الإشعارات",
   "notif.bulk_delete_failed": "تعذر حذف الإشعارات",
-  "notif.selected_count": "تم تحديد {count}",
   "notif.cat_gen_approval": "اعتماد توليد",
   "notif.cat_sec_approval": "اعتماد قسم:",
   "notif.cat_final_approval": "اعتماد ملف نهائي",
@@ -1206,5 +1205,15 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/{
   "common.invoice": "فاتورة",
   "approvals.section_approval_prefix": "اعتماد قسم: ",
   "approvals.generation_approval": "اعتماد توليد",
-  "approvals.final_file_approval": "اعتماد ملف نهائي"
-}/*I18N_AR_END*/);
+  "approvals.final_file_approval": "اعتماد ملف نهائي",
+  "admin.bank_settings_title": "بيانات الحساب البنكي والتحويل",
+  "admin.bank_settings_sub": "بيانات الآيبان والمصرف التي تظهر للعملاء في صفحة شحن الرصيد",
+  "admin.bank_name": "اسم المصرف",
+  "admin.bank_iban": "رقم الآيبان (IBAN)",
+  "admin.bank_beneficiary": "اسم المستفيد / الحساب",
+  "admin.bank_note": "ملاحظات وتعليمات التحويل",
+  "admin.bank_fields_required": "يرجى إدخال اسم المصرف ورقم الآيبان",
+  "admin.bank_details_saved": "تم حفظ بيانات الحساب البنكي بنجاح",
+  "admin.bank_save_failed": "تعذر حفظ بيانات البنك"
+}
+/*I18N_AR_END*/);

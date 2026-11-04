@@ -119,7 +119,7 @@ def public_page_assets(path):
 # spliced in at serve time — no client fetch, no flash of stale text, and the
 # baked copy stays the fallback when nothing is stored.
 
-LEGAL_DOCS = ('terms', 'privacy')
+LEGAL_DOCS = ('terms', 'privacy', 'about')
 _LEGAL_MARKERS = {
     'ar': ('<!--LEGAL_AR_START-->', '<!--LEGAL_AR_END-->'),
     'en': ('<!--LEGAL_EN_START-->', '<!--LEGAL_EN_END-->'),
@@ -182,7 +182,7 @@ def api_admin_save_legal(name):
 
 @app.route('/about')
 def public_about():
-    return _serve_public_page('about.html')
+    return _serve_legal_page('about')
 
 
 @app.route('/api/join-requests', methods=['POST'])

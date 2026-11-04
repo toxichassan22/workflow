@@ -1,7 +1,8 @@
 /* assets/i18n/02_dict_en.js — English UI dictionary, extracted from i18n.js.
  * Edit entries here; keep the I18N_*_BEGIN/END markers and JSON-compatible
  * quoting (tests parse the block between them). Loaded before i18n.js. */
-window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
+window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/
+{
   "best_use.optional": "Optional",
   "best_use.generate": "Suggest Best Distribution",
   "best_use.save_failed": "Could not save the draft before continuing.",
@@ -161,7 +162,6 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "best_use_explore.month": "Month",
   "best_use_explore.night": "Night",
   "best_use.basement_area": "Proposed Basement Area",
-
   "lang.switch_to_arabic": "عربي",
   "lang.switch_to_english": "English",
   "loader.done": "Done",
@@ -470,6 +470,7 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "admin.legal_doc": "Page",
   "admin.legal_terms": "Terms of Use",
   "admin.legal_privacy": "Privacy Policy",
+  "admin.legal_about": "About Us",
   "admin.legal_ar": "Arabic content (HTML)",
   "admin.legal_en": "English content (HTML)",
   "admin.legal_save": "Save content",
@@ -684,7 +685,7 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "notif.mark_read": "Mark as read",
   "notif.mark_selected_read": "Mark as read",
   "notif.delete_selected": "Delete selected",
-  "notif.selected_count": "{count} selected",
+  "notif.selected_count": "Selected {count}",
   "notif.search_placeholder": "Search notifications...",
   "notif.time_label": "Time",
   "notif.time_all": "All time",
@@ -843,7 +844,6 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "sectionver.stale": "Stale approval (>30 days)",
   "notif.package_expiring": "Your package expires on {date} — we would be glad to help you renew.",
   "notif.package_expired": "Your package expired on {date} — we would be glad to help you renew.",
-  "notif.package_expiring": "Your package expires on {date} — we would be glad to help you renew.",
   "designer.task_cancelled": "The presentation edit task was cancelled — the remaining tasks were not applied.",
   "gen.section_regenerate_confirm": "The section «{section}» will be replanned and regenerated from its current images and data. Its slide count may go up or down, leaving the rest of the presentation as it is. Continue?",
   "agent.title": "Smart management agent",
@@ -1192,7 +1192,6 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "notif.mark_read_failed": "Failed to update notification status",
   "notif.bulk_read_failed": "Failed to update notifications status",
   "notif.bulk_delete_failed": "Failed to delete notifications",
-  "notif.selected_count": "Selected {count}",
   "notif.cat_gen_approval": "Generation approval",
   "notif.cat_sec_approval": "Section approval:",
   "notif.cat_final_approval": "Final file approval",
@@ -1206,5 +1205,15 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "common.invoice": "Invoice",
   "approvals.section_approval_prefix": "Section approval: ",
   "approvals.generation_approval": "Generation approval",
-  "approvals.final_file_approval": "Final file approval"
-}/*I18N_EN_END*/);
+  "approvals.final_file_approval": "Final file approval",
+  "admin.bank_settings_title": "Bank Transfer Details",
+  "admin.bank_settings_sub": "IBAN and bank info shown to clients on the recharge page",
+  "admin.bank_name": "Bank Name",
+  "admin.bank_iban": "IBAN",
+  "admin.bank_beneficiary": "Beneficiary / Account Name",
+  "admin.bank_note": "Transfer Instructions",
+  "admin.bank_fields_required": "Please enter bank name and IBAN",
+  "admin.bank_details_saved": "Bank details saved successfully",
+  "admin.bank_save_failed": "Failed to save bank details"
+}
+/*I18N_EN_END*/);
