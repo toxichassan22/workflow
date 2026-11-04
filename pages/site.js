@@ -268,11 +268,11 @@
       }
       if (pins.length) pins[pins.length - 1].el.classList.toggle('show', t >= lastLand);
 
-      // Wordmark: ultra-tracked blur collapses into the final lockup —
+      // Wordmark: soft blur and push-in settles into the final lockup —
       // revealed only after the last pin has landed.
       var bp = eio(seg(t, 3720, 4700));
       brand.style.opacity = seg(t, 3720, 4280).toFixed(3);
-      brand.style.letterSpacing = lerp(.85, .14, bp).toFixed(3) + 'em';
+      brand.style.transform = 'scale(' + lerp(1.10, 1, bp).toFixed(4) + ')';
       brand.style.filter = 'blur(' + lerp(12, 0, bp).toFixed(1) + 'px)';
     }
 

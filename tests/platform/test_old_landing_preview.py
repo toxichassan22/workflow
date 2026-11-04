@@ -47,6 +47,19 @@ class TestOldLandingPreview(unittest.TestCase):
         self.assertEqual(css_resp.status_code, 200)
         self.assertIn('.op-cue', css_resp.get_data(as_text=True))
 
+    def test_live_landing_intro_centered_and_uses_official_logo(self):
+        resp = self.client.get('/')
+        self.assertEqual(resp.status_code, 200)
+        text = resp.get_data(as_text=True)
+        self.assertIn('intro-brand-logo', text)
+        self.assertIn('landloom-wordmark-white', text)
+
+        css_resp = self.client.get('/pages/site-landing.css')
+        self.assertEqual(css_resp.status_code, 200)
+        css_text = css_resp.get_data(as_text=True)
+        self.assertNotIn('translate(5%, -16%)', css_text)
+        self.assertIn('.intro-brand-logo', css_text)
+
 
 if __name__ == '__main__':
     unittest.main()
