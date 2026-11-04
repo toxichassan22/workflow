@@ -610,6 +610,26 @@ class I18nFoundationTests(unittest.TestCase):
             unknown, [],
             'data-i18n keys missing from assets/i18n.js: %s' % unknown)
 
+    def test_search_placeholders_are_bound_through_data_i18n_ph(self):
+        """The notifications and projects search bars stayed Arabic in English.
+
+        The notifications input carried the unsupported `data-i18n-placeholder`
+        attribute (the runtime reads `data-i18n-ph` only) and the projects search
+        carried no binding at all, so the DOM pass never touched either placeholder.
+        """
+        html = read_shell()
+        self.assertNotIn(
+            'data-i18n-placeholder', html,
+            'the runtime applies data-i18n-ph only; data-i18n-placeholder never does')
+        for input_id, key in (
+                ('notifSearchInput', 'notif.search_placeholder'),
+                ('projectArchiveSearch', 'projects.search_placeholder')):
+            tag = re.search(r'<input[^>]*id="%s"[^>]*>' % input_id, html, re.S)
+            self.assertIsNotNone(tag, '%s is missing from the shell' % input_id)
+            self.assertIn(
+                'data-i18n-ph="%s"' % key, tag.group(),
+                '%s placeholder must be bound to %s' % (input_id, key))
+
     def test_language_choice_is_shared_with_the_public_site(self):
         """The landing page and the workspace must agree on one language.
 

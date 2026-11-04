@@ -1004,6 +1004,7 @@
           <div class="tenant-field project-search-field">
             <label data-i18n="projects.search_label">بحث</label>
             <input type="text" id="projectArchiveSearch" placeholder="بحث باسم المشروع..."
+              data-i18n-ph="projects.search_placeholder"
               oninput="filterProjectArchiveInstant()"
               onkeydown="if(event.key==='Enter') openTenantPresentations(true)">
           </div>
@@ -2187,7 +2188,7 @@
           <div class="notif-controls-row">
             <div class="notif-search-wrap">
               <input type="text" id="notifSearchInput" class="notif-search-input"
-                placeholder="بحث في الإشعارات..." data-i18n-placeholder="notif.search_placeholder"
+                placeholder="بحث في الإشعارات..." data-i18n-ph="notif.search_placeholder"
                 oninput="onNotifSearchInput()" onkeydown="if(event.key==='Enter')applyNotifFilters()">
               <button type="button" class="btn small ghost notif-search-btn" onclick="applyNotifFilters()"
                 data-i18n="common.search">بحث</button>
