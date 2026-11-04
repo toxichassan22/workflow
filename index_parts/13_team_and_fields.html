@@ -47,10 +47,14 @@
             <div class="team-field">
               <label data-i18n="team.logo_label">شعار الجهة</label>
               <div class="team-upload">
-                <span id="teamEntityLogoName" data-i18n="team.logo_empty">لم يتم اختيار ملف</span>
-                <button type="button" class="team-upload-button"
-                  onclick="document.getElementById('teamEntityLogo').click()"
-                  data-i18n="team.choose_file">اختيار ملف</button>
+                <span id="teamEntityLogoName" data-i18n="team.logo_none">لا يوجد شعار</span>
+                <div class="team-upload-actions">
+                  <button type="button" class="team-upload-button" id="teamEntityLogoPick"
+                    onclick="document.getElementById('teamEntityLogo').click()"
+                    data-i18n="team.logo_add">إضافة شعار</button>
+                  <button type="button" class="team-upload-clear" id="teamEntityLogoClear"
+                    onclick="clearTeamEntityLogo()" data-i18n="team.logo_remove" hidden>مسح الشعار</button>
+                </div>
               </div>
               <input type="file" id="teamEntityLogo" accept="image/*,.jpg,.jpeg,.png,.webp"
                 onchange="handleTeamLogoSelection(this)" hidden>

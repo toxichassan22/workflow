@@ -84,6 +84,7 @@
 .team-drawer-save:focus-visible,
 .team-drawer-cancel:focus-visible,
 .team-upload-button:focus-visible,
+.team-upload-clear:focus-visible,
 .team-lib-header button:focus-visible {
   outline: 2px solid var(--teal-bright, #17C8E3);
   outline-offset: 2px;
@@ -469,6 +470,13 @@
   white-space: nowrap;
 }
 
+.team-upload-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
 .team-upload-button {
   flex: none;
   padding: 5px 10px;
@@ -476,6 +484,17 @@
   border-radius: 7px;
   background: #ffffff;
   color: var(--navy, #07182C);
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.team-upload-clear {
+  padding: 5px 4px;
+  border: 0;
+  background: transparent;
+  color: #b91c1c;
   font-family: inherit;
   font-size: 11.5px;
   font-weight: 800;

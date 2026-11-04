@@ -7,6 +7,7 @@
 let tenantTeamEntities = [];
 let editingTeamEntityId = null;
 let teamLogoObjectUrl = null;
+let teamLogoRemoved = false;
 let draggedTeamEntityId = null;
 
 function teamEntityEsc(value) {
@@ -30,18 +31,25 @@ function currentTeamEntity() {
   return tenantTeamEntities.find(item => String(item.id) === String(editingTeamEntityId)) || null;
 }
 
-function updateTeamEntityLogoLabel() {
+function updateTeamEntityLogoState() {
   const label = document.getElementById('teamEntityLogoName');
-  if (!label) return;
   const file = document.getElementById('teamEntityLogo')?.files?.[0];
-  if (file) {
-    label.textContent = file.name;
-    return;
-  }
   const entity = currentTeamEntity();
-  label.textContent = entity?.logoFileId
-    ? WFT('team.logo_current', 'الشعار المحفوظ')
-    : WFT('team.logo_empty', 'لم يتم اختيار ملف');
+  const hasStored = !teamLogoRemoved && !!entity?.logoFileId;
+  if (label) {
+    if (file) label.textContent = file.name;
+    else if (hasStored) label.textContent = WFT('team.logo_current', 'الشعار المحفوظ');
+    else label.textContent = WFT('team.logo_none', 'لا يوجد شعار');
+  }
+  const hasLogo = !!file || hasStored;
+  const pick = document.getElementById('teamEntityLogoPick');
+  if (pick) {
+    pick.textContent = hasLogo
+      ? WFT('team.logo_change', 'تغيير الشعار')
+      : WFT('team.logo_add', 'إضافة شعار');
+  }
+  const clear = document.getElementById('teamEntityLogoClear');
+  if (clear) clear.hidden = !hasLogo;
 }
 
 function focusTeamOrderButton(entityId) {
@@ -218,7 +226,7 @@ function openTeamEntityDrawer(entityId) {
     document.getElementById('teamEntityProjects').value = entity.notableProjects || '';
   }
   updateTeamEntityDrawerLabels();
-  updateTeamEntityLogoLabel();
+  updateTeamEntityLogoState();
   updateTeamEntityPreview();
   const drawer = document.getElementById('teamEntityDrawer');
   if (drawer) {
@@ -236,6 +244,7 @@ function closeTeamEntityDrawer() {
 
 function resetTeamEntityForm() {
   editingTeamEntityId = null;
+  teamLogoRemoved = false;
   ['teamEntityName', 'teamEntityRole', 'teamEntityExperience', 'teamEntityBrief', 'teamEntityProjects'].forEach(id => {
     const field = document.getElementById(id);
     if (field) field.value = '';
@@ -244,7 +253,7 @@ function resetTeamEntityForm() {
   if (logo) logo.value = '';
   releaseTeamLogoObjectUrl();
   updateTeamEntityDrawerLabels();
-  updateTeamEntityLogoLabel();
+  updateTeamEntityLogoState();
   updateTeamEntityPreview();
 }
 
@@ -274,7 +283,7 @@ function updateTeamEntityPreview() {
 
   const host = document.getElementById('teamEntityPreviewLogo');
   if (!host) return;
-  const logoId = entity?.logoFileId || '';
+  const logoId = teamLogoRemoved ? '' : (entity?.logoFileId || '');
   const mode = teamLogoObjectUrl
     ? 'local:' + teamLogoObjectUrl
     : (logoId ? 'file:' + logoId : 'mono:' + name);
@@ -302,14 +311,24 @@ function updateTeamEntityPreview() {
 
 function handleTeamLogoSelection(input) {
   const file = input?.files?.[0];
+  teamLogoRemoved = false;
   releaseTeamLogoObjectUrl();
   if (!file) {
-    updateTeamEntityLogoLabel();
+    updateTeamEntityLogoState();
     updateTeamEntityPreview();
     return;
   }
   teamLogoObjectUrl = URL.createObjectURL(file);
-  updateTeamEntityLogoLabel();
+  updateTeamEntityLogoState();
+  updateTeamEntityPreview();
+}
+
+function clearTeamEntityLogo() {
+  teamLogoRemoved = true;
+  const input = document.getElementById('teamEntityLogo');
+  if (input) input.value = '';
+  releaseTeamLogoObjectUrl();
+  updateTeamEntityLogoState();
   updateTeamEntityPreview();
 }
 
@@ -351,8 +370,9 @@ async function submitTeamEntity() {
   try {
     const logoId = await uploadTeamLogo();
     if (logoId) payload.logoFileId = logoId;
+    else if (teamLogoRemoved) payload.logoFileId = '';
     // Editing without picking a new logo keeps the stored one.
-    if (!logoId && editingTeamEntityId) {
+    else if (editingTeamEntityId) {
       const current = currentTeamEntity();
       if (current?.logoFileId) payload.logoFileId = current.logoFileId;
     }
@@ -402,6 +422,6 @@ document.addEventListener('keydown', event => {
 document.addEventListener('wf:lang', () => {
   if (document.getElementById('tenantTeamList')) renderTenantTeamList();
   updateTeamEntityDrawerLabels();
-  updateTeamEntityLogoLabel();
+  updateTeamEntityLogoState();
   updateTeamEntityPreview();
 });

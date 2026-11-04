@@ -112,6 +112,20 @@ class TeamEntityReorderTests(unittest.TestCase):
             foreign = db.get_team_entity(other_tenant, foreign_id)
         self.assertEqual(foreign['sortOrder'], 10)
 
+    def test_update_can_clear_a_stored_logo(self):
+        entity_id = self._create('جهة بشعار', 10)
+        with self.app.app_context():
+            db.update_team_entity(self.tenant, entity_id, logo_file_id='stored-logo')
+        response = self.client.get('/api/team-entities', headers=self._headers())
+        item = next(item for item in response.get_json()['entities'] if item['id'] == entity_id)
+        self.assertEqual(item['logoFileId'], 'stored-logo')
+
+        cleared = self.client.put(
+            '/api/team-entities/' + entity_id, headers=self._headers(),
+            json={'name': 'جهة بشعار', 'logoFileId': ''})
+        self.assertEqual(cleared.status_code, 200, cleared.get_json())
+        self.assertEqual(cleared.get_json()['entity']['logoFileId'], '')
+
     def test_reorder_requires_company_settings(self):
         first = self._create('جهة أ', 10)
         second = self._create('جهة ب', 20)
@@ -182,7 +196,7 @@ class TeamScreenContractTests(unittest.TestCase):
         self.assertIn('handleTeamOrderKey', self.js)
         self.assertIn('teamLogoObjectUrl', self.js)
         self.assertIn("WFT('team.empty_title'", self.js)
-        self.assertIn("WFT('team.logo_empty'", self.js)
+        self.assertIn("WFT('team.logo_none'", self.js)
 
     def test_the_saved_logo_is_named_and_the_tile_follows_its_tone(self):
         """Editing an entity with a logo must not read «لم يتم اختيار ملف», and
@@ -193,6 +207,13 @@ class TeamScreenContractTests(unittest.TestCase):
         self.assertIn('.team-drawer-logo[data-logo-tone="dark"]', self.css)
         self.assertIn('.team-logo[data-logo-tone="light"]', self.css)
         self.assertIn('.team-drawer-logo[data-logo-tone="light"]', self.css)
+
+    def test_the_logo_can_be_removed_or_added(self):
+        self.assertIn('id="teamEntityLogoPick"', self.team_markup)
+        self.assertIn('id="teamEntityLogoClear"', self.team_markup)
+        self.assertIn('data-i18n="team.logo_remove"', self.team_markup)
+        self.assertIn('clearTeamEntityLogo', self.js)
+        self.assertIn('teamLogoRemoved', self.js)
 
 
 if __name__ == '__main__':
