@@ -38,8 +38,14 @@ class TestOldLandingPreview(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         text = resp.get_data(as_text=True)
         self.assertIn('id="intro"', text)
+        self.assertIn('id="introCue"', text)
+        self.assertIn('class="op-cue"', text)
         self.assertIn('/pages/site-landing.css', text)
         self.assertIn('/pages/site.js', text)
+
+        css_resp = self.client.get('/pages/site-landing.css')
+        self.assertEqual(css_resp.status_code, 200)
+        self.assertIn('.op-cue', css_resp.get_data(as_text=True))
 
 
 if __name__ == '__main__':

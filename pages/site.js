@@ -138,8 +138,10 @@
   function initTopbar() {
     var bar = document.querySelector('.site-topbar.on-dark');
     if (!bar) return;
+    var intro = document.getElementById('intro');
     var onScroll = function () {
-      bar.classList.toggle('scrolled', window.scrollY > 40);
+      var threshold = (intro && document.body.contains(intro)) ? Math.max(intro.offsetHeight - 80, 40) : 40;
+      bar.classList.toggle('scrolled', window.scrollY > threshold);
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();
@@ -305,6 +307,47 @@
     document.addEventListener('keydown', function (ev) {
       if ((ev.key === 'Escape' || ev.key === ' ') && !done) skip();
     });
+
+    var cue = document.getElementById('introCue');
+    function goToSite() {
+      if (!done) finish();
+      var hero = document.querySelector('.hero');
+      if (hero) hero.scrollIntoView({ behavior: 'smooth' });
+    }
+    if (cue) {
+      cue.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        goToSite();
+      });
+      cue.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          goToSite();
+        }
+      });
+    }
+
+    window.addEventListener('wheel', function (ev) {
+      if (ev.deltaY > 10 && window.scrollY <= 10) {
+        goToSite();
+      }
+    }, { passive: true });
+
+    var touchStartY = 0;
+    window.addEventListener('touchstart', function (ev) {
+      if (ev.touches && ev.touches[0]) touchStartY = ev.touches[0].clientY;
+    }, { passive: true });
+
+    window.addEventListener('touchmove', function (ev) {
+      if (ev.touches && ev.touches[0]) {
+        var diffY = touchStartY - ev.touches[0].clientY;
+        if (diffY > 25 && window.scrollY <= 10) {
+          goToSite();
+        }
+      }
+    }, { passive: true });
+
     render(0);
     window.requestAnimationFrame(loop);
   }

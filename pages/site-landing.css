@@ -13,6 +13,7 @@
   background: transparent;
   border-bottom: 0;
   backdrop-filter: none;
+  transition: background .3s ease, border-color .3s ease, backdrop-filter .3s ease;
 }
 
 .site-topbar.on-dark .brand-beta { color: rgba(255, 255, 255, .55); }
@@ -42,7 +43,49 @@
    and reduced motion drops it entirely (rule at the bottom of
    site-sections.css). */
 
-html.intro-lock { overflow: hidden; scrollbar-gutter: stable; }
+html.intro-lock { scrollbar-gutter: stable; }
+
+/* ── Scroll cue: interactive capsule indicating scroll to site content ───── */
+.op-cue {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 26px;
+  height: 42px;
+  border: 2px solid rgba(255, 255, 255, .38);
+  border-radius: 14px;
+  cursor: pointer;
+  z-index: 20;
+  transition: opacity .4s ease, transform .2s ease, border-color .2s ease;
+  background: transparent;
+}
+
+.op-cue:hover,
+.op-cue:focus-visible {
+  transform: translateX(-50%) scale(1.08);
+  border-color: rgba(255, 255, 255, .8);
+  outline: none;
+}
+
+.op-cue::after {
+  content: '';
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  margin-left: -2px;
+  width: 4px;
+  height: 9px;
+  border-radius: 2px;
+  background: var(--teal-bright);
+  box-shadow: 0 0 10px rgba(23, 200, 227, .7);
+  animation: cueDot 1.7s ease-in-out infinite;
+}
+
+@keyframes cueDot {
+  0% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(15px); opacity: 0; }
+}
 
 .intro {
   position: relative;
