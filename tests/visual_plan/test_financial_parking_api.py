@@ -148,6 +148,26 @@ class FinancialParkingApiTests(unittest.TestCase):
         self.assertFalse(plan['canApply'])
         self.assertTrue(any('محلات تجارية' in note for note in plan['missing']))
 
+    def test_approval_accepts_a_documented_requirement_the_plot_cannot_fully_hold(self):
+        ban = 'لا يسمح بإنشاء بدرومات.'
+        self.project['regulatory_constraints'] += ' ' + ban
+        self.rules.update(basementAllowed=False, basementSourceQuote=ban)
+        self.assertEqual(self.save_draft(self.project).status_code, 200)
+        response, _ = self.suggest()
+        plan = response['financialModel']['parkingPlan']
+        self.assertGreater(plan['unallocatedSpaces'], 0, plan)
+        self.assertTrue(plan['canApply'], plan['missing'])
+        approved = self.approve(plan)
+        body = approved.get_json()
+        self.assertEqual(approved.status_code, 200, body)
+        model = body['financialModel']
+        stored = self.stored_plan()
+        self.assertTrue(stored['approved'])
+        self.assertEqual(stored['unallocatedSpaces'], plan['unallocatedSpaces'])
+        rows = [row for row in model['dynamicRows']['components'] if row.get('parkingPlanId')]
+        self.assertEqual(sum(row['units'] for row in rows), plan['requiredSpaces'] - plan['unallocatedSpaces'])
+        self.assertNotIn('basement', [row.get('parkingLocation') for row in rows])
+
     def test_suggestion_uses_scoped_saved_inputs_but_applies_nothing_before_approval(self):
         response, provider = self.suggest(projectData={'regulatory_constraints': 'موقف لكل 1 م²'})
         plan = response['financialModel']['parkingPlan']

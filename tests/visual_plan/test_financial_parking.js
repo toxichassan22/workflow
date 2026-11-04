@@ -479,6 +479,16 @@ test('financial parking panel is excluded from collected report for PDF and deck
   const headings = report.parts.filter(p => p.type === 'heading').map(p => p.text);
   assert.equal(headings.includes('المواقف المقترحة'), false);
   assert.equal(headings.includes('1. ملخص المشروع'), true);
+
+  // The proposal is a working tool until it is approved; an approved one belongs to the study.
+  f.context.tenantProjectData.financial_study_model.parkingPlan = f.proposal(true);
+  const approved = f.context.collectFinancialStudyReport();
+  assert.equal(approved.parts.filter(p => p.type === 'heading').map(p => p.text).includes('المواقف'), true);
+  const row = approved.parts.filter(p => p.type === 'fields')
+    .reduce((all, p) => all.concat(p.rows), [])
+    .find(entry => entry[0] === 'عدد المواقف المطلوبة نظاميًا');
+  assert(row);
+  assert.equal(row[1], '130');
 });
 
 test('the chat sends the conversation and rebuilds the proposal from the returned rules', async () => {

@@ -431,7 +431,7 @@ def api_approve_financial_parking():
                         'error_code': 'PARKING_DECISION_REQUIRED'}), 400
     if data['approved']:
         if not plan.get('canApply'):
-            return jsonify({'success': False, 'error': 'اقتراح المواقف غير مكتمل أو يتجاوز المساحة المتاحة.',
+            return jsonify({'success': False, 'error': 'اقتراح المواقف غير مكتمل: اشتراط المواقف أو أساس حسابه غير موثق.',
                             'error_code': 'PARKING_PLAN_INCOMPLETE'}), 400
         if financial_parking.parking_snapshot_hash(financial_parking.parking_snapshot(project)) != plan.get('sourceHash'):
             return jsonify({'success': False, 'error': FINANCIAL_PARKING_MESSAGES['PARKING_INPUTS_CHANGED'],

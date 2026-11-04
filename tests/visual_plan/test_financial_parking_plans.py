@@ -157,6 +157,28 @@ class FinancialParkingPlanTests(unittest.TestCase):
         self.assertFalse(any(any('المواقف المطلوبة' in row[0] for row in p.get('rows', []))
                              for p in parts if p.get('type') == 'fields'))
 
+    def test_financial_screen_parts_keeps_the_parking_section_once_it_is_approved(self):
+        model = {
+            'parkingPlan': {'id': 'plan-1', 'approved': True},
+            'report': {
+                'parts': [
+                    {'type': 'heading', 'level': 2, 'text': '1. ملخص المشروع'},
+                    {'type': 'heading', 'level': 2, 'text': 'المواقف'},
+                    {'type': 'fields', 'rows': [['عدد المواقف المطلوبة نظاميًا', '130'],
+                                              ['مواقف لم تستوعبها المساحة', '64']]},
+                    {'type': 'table', 'headers': ['المكون', 'المواقف المطلوبة', 'المرجع'],
+                     'rows': [['شقق سكنية', '100', 'موقف لكل وحدة']]},
+                ]
+            }
+        }
+        parts = self.module._financial_screen_parts(model)
+        self.assertIsNotNone(parts)
+        self.assertIn('المواقف', [p.get('text') for p in parts if p.get('type') == 'heading'])
+        self.assertTrue(any('المواقف' in row[0] for p in parts if p.get('type') == 'fields'
+                            for row in p.get('rows', [])))
+        self.assertIn('المواقف المطلوبة', [header for p in parts if p.get('type') == 'table'
+                                        for header in p.get('headers', [])])
+
     def test_financial_data_note_excludes_parking_proposal_from_slide_facts(self):
         import slide_engine
         project = {
@@ -179,6 +201,28 @@ class FinancialParkingPlanTests(unittest.TestCase):
         self.assertNotIn('المواقف المقترحة', note)
         self.assertNotIn('عدد المواقف المطلوبة', note)
 
+    def test_financial_data_note_keeps_the_parking_section_once_it_is_approved(self):
+        import slide_engine
+        project = {
+            'financial_study_model': {
+                'inputs': {'landArea': 5000},
+                'parkingPlan': {'id': 'plan-1', 'approved': True},
+                'report': {
+                    'parts': [
+                        {'type': 'heading', 'level': 2, 'text': '1. ملخص المشروع'},
+                        {'type': 'heading', 'level': 2, 'text': 'المواقف'},
+                        {'type': 'fields', 'rows': [['مواقف لم تستوعبها المساحة', '64']]},
+                        {'type': 'table', 'headers': ['المكون', 'المواقف المطلوبة'],
+                         'rows': [['شقق', '100']]},
+                    ]
+                }
+            }
+        }
+        note = slide_engine._financial_data_note(project)
+        self.assertIn('المواقف', note)
+        self.assertIn('مواقف لم تستوعبها المساحة', note)
+        self.assertIn('المواقف المطلوبة', note)
+
     def test_presentation_plan_normalizer_drops_financial_parking_proposal_slides(self):
         import slide_engine
         plan = {
@@ -191,6 +235,30 @@ class FinancialParkingPlanTests(unittest.TestCase):
         normalized = slide_engine.normalize_presentation_plan(plan, {'project_name': 'تجربة'}, {})
         titles = [s.get('title') for s in normalized.get('slides', [])]
         self.assertNotIn('المواقف المقترحة', titles)
+
+    def test_presentation_plan_builds_parking_slides_from_the_approved_section(self):
+        import slide_engine
+        plan = {'slides': [{'title': 'الغلاف', 'type': 'cover'},
+                          {'title': 'الخاتمة', 'type': 'closing'}]}
+        project = {'project_name': 'تجربة', 'financial_study_model': {
+            'inputs': {'landArea': 5000},
+            'parkingPlan': {'id': 'plan-1', 'approved': True},
+            'report': {'parts': [
+                {'type': 'heading', 'level': 2, 'text': '1. ملخص المشروع'},
+                {'type': 'fields', 'rows': [['طبيعة الإيرادات', 'بيع']]},
+                {'type': 'heading', 'level': 2, 'text': 'المواقف'},
+                {'type': 'fields', 'rows': [['مواقف لم تستوعبها المساحة', '64']]},
+                {'type': 'table', 'headers': ['المكون', 'المواقف المطلوبة'],
+                 'rows': [['شقق', '100']]},
+            ]}}}
+        normalized = slide_engine.normalize_presentation_plan(plan, project, {})
+        financial = [s for s in normalized.get('slides', []) if s.get('section_key') == 'financial']
+        self.assertTrue(financial)
+        self.assertTrue(any('المواقف' in str(slide.get('title')) for slide in financial), financial)
+        import json
+        # The slide carries the report part index; the values are injected from those parts.
+        self.assertTrue(any(str(slide.get('content_source', '')).startswith('financial_report')
+                            for slide in financial), financial)
 
     def test_presentation_plan_normalizer_drops_best_use_slides(self):
         import slide_engine

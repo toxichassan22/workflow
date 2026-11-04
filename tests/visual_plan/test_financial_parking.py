@@ -98,8 +98,27 @@ class FinancialParkingTests(unittest.TestCase):
         self.project['regulatory_constraints'] += ' لا يسمح بإنشاء بدرومات.'
         self.rules.update(basementAllowed=False, basementSourceQuote='لا يسمح بإنشاء بدرومات.')
         plan = self.build()
-        self.assertFalse(plan['canApply'])
+        # A documented ban still rules out basement spaces, but it no longer makes the whole
+        # proposal unapprovable: the shortfall is carried instead of freezing the decision.
+        self.assertTrue(plan['canApply'], plan)
+        self.assertEqual(plan['components'], [])
+        self.assertEqual(plan['unallocatedSpaces'], plan['requiredSpaces'])
+
+    def test_a_requirement_the_plot_cannot_hold_is_approved_with_its_shortfall_recorded(self):
+        self.project['regulatory_constraints'] += ' لا يسمح بإنشاء بدرومات.'
+        self.rules.update(basementAllowed=False, basementSourceQuote='لا يسمح بإنشاء بدرومات.')
+        plan = dict(self.build(), approved=True, approvedBy=7,
+                    approvedAt='2026-11-04T00:00:00+00:00')
         self.assertGreater(plan['unallocatedSpaces'], 0)
+        model = financial_parking.apply_parking_plan(self.project['financial_study_model'], plan)
+        model['parkingPlan'] = plan
+        model['parkingSnapshot'] = financial_parking.parking_snapshot(
+            dict(self.project, financial_study_model=model))
+        stored = financial_parking.parking_object(model.get('parkingPlan'))
+        self.assertTrue(stored['approved'])
+        self.assertGreater(stored['unallocatedSpaces'], 0)
+        self.assertIsNone(financial_parking.parking_plan_error(
+            dict(self.project, financial_study_model=model)))
 
     def test_reapplying_and_regenerating_do_not_duplicate_generated_rows(self):
         plan = self.build()
@@ -192,7 +211,10 @@ class FinancialParkingTests(unittest.TestCase):
         self.project['approved_coverage_ratio'] = 100
         self.project['financial_study_model']['inputs'].update(coverageRate=100, basementArea=0)
         self.project['regulatory_constraints'] += ' لا يسمح بإنشاء بدرومات.'
-        self.assertFalse(self.build()['canApply'])
+        plan = self.build()
+        self.assertTrue(plan['canApply'], plan)
+        self.assertGreater(plan['unallocatedSpaces'], 0)
+        self.assertNotIn('basement', [row['parkingLocation'] for row in plan['components']])
 
     def test_regeneration_keeps_component_ids_for_revenue_links(self):
         plan = self.build()

@@ -406,15 +406,25 @@ def _is_financial_parking_report_part(part):
     return False
 
 
+def _financial_parking_report_approved(model):
+    plan = model.get('parkingPlan') if isinstance(model, dict) else None
+    return isinstance(plan, dict) and plan.get('approved') is True
+
+
 def _financial_screen_parts(model):
     """The study as the screen sent it, or None for a draft saved before that was captured."""
     report = model.get('report') if isinstance(model, dict) else None
     parts = report.get('parts') if isinstance(report, dict) else None
     if not isinstance(parts, list) or not parts:
         return None
+    # The parking proposal is a working tool until it is approved, so an unapproved one is
+    # stripped out of the export. An approved proposal is part of the study the client signed.
+    parking_approved = _financial_parking_report_approved(model)
     cleaned = []
     for part in parts:
-        if not isinstance(part, dict) or _is_financial_parking_report_part(part):
+        if not isinstance(part, dict):
+            continue
+        if not parking_approved and _is_financial_parking_report_part(part):
             continue
         if part.get('type') == 'fields':
             rows = [

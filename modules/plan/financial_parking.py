@@ -491,7 +491,11 @@ def build_parking_plan(project, response, plan_id):
     plan.update(allocations)
     plan['warnings'] = quantity_notes + plan['warnings']
     plan['parkingArea'] = sum(row['builtArea'] for row in plan['components'])
-    plan['canApply'] = not missing and not plan['unallocatedSpaces'] and (snapshot['landArea'] or 0) > 0
+    # What approval certifies is that every requirement is documented and the plot is known —
+    # not that the site happens to fit every space. A plot that cannot host all of them used to
+    # make the proposal permanently unapprovable, so the parking stayed a draft forever; the
+    # shortfall now stays recorded in `unallocatedSpaces` and the warnings, and the study states it.
+    plan['canApply'] = not missing and (snapshot['landArea'] or 0) > 0
     if missing:
         plan['components'] = []
     return plan

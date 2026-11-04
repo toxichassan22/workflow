@@ -563,7 +563,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "تغيّرت البيانات الحالية أثناء إعداد اقتراح المواقف؛ لم تُستبدل مدخلاتك.": "The current data changed while the parking proposal was being prepared; your inputs were not replaced.",
   "تعذر إعداد اقتراح المواقف.": "Could not prepare the parking proposal.",
   "اقتراح المواقف غير متوفر أو تغيّر.": "The parking proposal is unavailable or has changed.",
-  "اقتراح المواقف غير مكتمل أو يتجاوز المساحة المتاحة.": "The parking proposal is incomplete or exceeds the available area.",
+  "اقتراح المواقف غير مكتمل: اشتراط المواقف أو أساس حسابه غير موثق.": "The parking proposal is incomplete: the parking requirement or its calculation basis is not documented.",
   "قرار اعتماد اقتراح المواقف غير متوفر.": "A parking approval decision is required.",
   "مكونات المشروع غير متوفرة.": "Project components are unavailable.",
   "اشتراط المواقف أو أساس حسابه غير موثق للمكون:": "The parking requirement or calculation basis is not documented for component:",
@@ -581,5 +581,15 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "هل تكلفة الصندوق ضمن المشروع؟": "Is fund cost included in project?",
   "هل تكلفة الصندوق ضمن المشروع": "Fund cost included in project",
   "إجمالي تكلفة المشروع شامل تكاليف الصندوق": "Total project cost including fund costs",
-  "أطوال حدود الأرض في جدول الاتجاهات ناقصة أو غير واضحة": "The plot boundary lengths in the directions table are missing or unclear"
+  "أطوال حدود الأرض في جدول الاتجاهات ناقصة أو غير واضحة": "The plot boundary lengths in the directions table are missing or unclear",
+  "الاشتراط": "Requirement",
+  "المرجع": "Reference",
+  "المساحة المخصصة للمواقف م²": "Allocated parking area m²",
+  "المواقف": "Parking",
+  "المواقف القائمة": "Existing parking",
+  "المواقف المطلوبة": "Required parking",
+  "عدد المواقف المطلوبة نظاميًا": "Statutory required parking spaces",
+  "ملاحظات المواقف": "Parking notes",
+  "مواقف إضافية مقترحة": "Proposed additional parking",
+  "مواقف لم تستوعبها المساحة": "Spaces unaccommodated by area"
 }/*I18N_EN_AUTO_END*/);

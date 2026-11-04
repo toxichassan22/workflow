@@ -1454,7 +1454,12 @@ def _financial_data_note(project_data):
     ]
 
     if report_parts:
-        filtered_parts = [p for p in report_parts if not _is_financial_parking_report_part(p)]
+        # An unapproved parking proposal is a working tool and stays out of the deck. Once the
+        # client approves it, it belongs to the study the deck reproduces.
+        parking_plan = _parse_financial_dict(model.get('parkingPlan'))
+        parking_approved = parking_plan.get('approved') is True
+        filtered_parts = [p for p in report_parts
+                          if parking_approved or not _is_financial_parking_report_part(p)]
         if filtered_parts:
             lines.append("\n### نسخة الشاشة المعتمدة بالترتيب والمسميات الظاهرة للمستخدم:")
             lines.append(json.dumps(filtered_parts, ensure_ascii=False, indent=2))

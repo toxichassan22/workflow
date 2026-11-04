@@ -183,6 +183,43 @@
       return { type: 'table', headers: kept.map(({ text }) => text), rows };
     }
 
+    // The parking proposal is a working tool while it is unapproved, which is why it is skipped
+    // above. Once the client approves it, it is part of the study they signed: the requirement,
+    // the spaces it produced and whatever the plot could not host travel to the deck and the PDF.
+    function financialParkingReportParts() {
+      if (typeof financialParkingPlan !== 'function') return [];
+      const plan = financialParkingPlan();
+      if (!plan || !plan.id || plan.approved !== true) return [];
+      const number = value => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed.toLocaleString('en-US') : String(value ?? '');
+      };
+      const parts = [{ type: 'heading', level: 2, text: 'المواقف' }];
+      const rows = [];
+      if (plan.requiredSpaces != null) rows.push(['عدد المواقف المطلوبة نظاميًا', number(plan.requiredSpaces)]);
+      if (plan.existingSpaces) rows.push(['المواقف القائمة', number(plan.existingSpaces)]);
+      if (plan.additionalSpaces) rows.push(['مواقف إضافية مقترحة', number(plan.additionalSpaces)]);
+      if (plan.parkingArea) rows.push(['المساحة المخصصة للمواقف م²', number(plan.parkingArea)]);
+      if (plan.areaPerSpace) rows.push(['مساحة الموقف شاملة الحركة م²', number(plan.areaPerSpace)]);
+      if (plan.unallocatedSpaces) rows.push(['مواقف لم تستوعبها المساحة', number(plan.unallocatedSpaces)]);
+      if (rows.length) parts.push({ type: 'fields', rows });
+      const requirements = (plan.requirements || []).filter(row => row && row.spaces != null);
+      if (requirements.length) {
+        const basis = { units: 'عدد الوحدات', builtArea: 'المساحة المبنية م²',
+          revenueArea: 'المساحة البيعية / التأجيرية م²', landArea: 'مساحة الأرض م²' };
+        parts.push({ type: 'table',
+          headers: ['المكون', 'الاشتراط', 'الكمية', 'المواقف المطلوبة', 'المرجع'],
+          rows: requirements.map(row => [String(row.name || ''),
+            String(row.summary || basis[row.basis] || 'غير موثق'),
+            row.quantity == null ? '' : number(row.quantity), number(row.spaces),
+            String(row.sourceQuote || '').split('\n').filter(Boolean).join(' — ')]) });
+      }
+      const notes = [plan.areaBasis, ...(plan.missing || []), ...(plan.warnings || [])]
+        .filter(Boolean).join(' — ');
+      if (notes) parts.push({ type: 'fields', rows: [['ملاحظات المواقف', notes]] });
+      return parts;
+    }
+
     function collectFinancialStudyReport() {
       const root = document.getElementById('section-financial-calc');
       if (!root) return null;
@@ -265,7 +302,8 @@
         }
         return false;
       });
-      return { title: 'الدراسة المالية والمؤشرات', parts: trimmed };
+      const parkingParts = financialParkingReportParts();
+      return { title: 'الدراسة المالية والمؤشرات', parts: parkingParts.length ? trimmed.concat(parkingParts) : trimmed };
     }
 
     function focusFinancialValidation(validation) {
