@@ -15,6 +15,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -325,7 +326,7 @@ class DraftMergeClientWiringTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         import app as application_module
-        parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+        parts = [shell_text()]
         for name in application_module.FRONTEND_JS_ORDER:
             parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
         cls.source = '\n'.join(parts)

@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,7 +96,7 @@ def read_module_source(name):
 
 def read_frontend_text():
     """The full client source: shell + styles + scripts in load order."""
-    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    parts = [shell_text()]
     for _css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
         parts.append(_css.read_text(encoding='utf-8'))
     for name in FRONTEND_JS_ORDER:

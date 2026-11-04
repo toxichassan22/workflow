@@ -1,0 +1,117 @@
+    <!-- SAG Super Admin -->
+    <section id="tenantAdminPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.admin">لوحة المدير</h2>
+        </div>
+        <div class="tenant-actions">
+          <button type="button" class="btn ghost" onclick="loadAdminDashboard()"><span data-i18n="admin.refresh">تحديث</span></button>
+        </div>
+      </div>
+
+      <!-- KPI cards with sparklines and month-over-month deltas -->
+      <div id="sagAdminStats" class="admin-kpi-grid"></div>
+      <div id="sagOpsAlerts"></div>
+
+      <div class="admin-charts-grid">
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.chart_activity">نشاط المنصة</h3>
+            <div class="admin-chart-heading-side">
+              <div class="admin-chart-legend" id="sagActivityLegend"></div>
+              <div class="admin-range" id="sagActivityRange"></div>
+            </div>
+          </div>
+          <div id="sagActivityChart" class="admin-chart"></div>
+        </div>
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.plan_distribution">الشركات حسب الباقة</h3>
+          </div>
+          <div id="sagPlanDonut" class="admin-donut-wrap"></div>
+        </div>
+      </div>
+
+      <div class="admin-charts-grid">
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.chart_tickets">تذاكر الدعم حسب الحالة</h3>
+          </div>
+          <div id="sagTicketBars"></div>
+        </div>
+        <div class="tenant-content-panel admin-chart-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.reports_title">التقارير القابلة للتصدير</h3>
+          </div>
+          <div id="sagReportsPanel"></div>
+        </div>
+      </div>
+
+      <div class="tenant-admin-grid">
+        <div class="tenant-content-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.pending_actions">إجراءات تحتاج انتباهك</h3>
+          </div>
+          <div id="sagPendingActions"><p class="tenant-hint">جاري التحميل...</p></div>
+        </div>
+        <div class="tenant-content-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.latest_notifications">آخر الإشعارات</h3>
+            <button type="button" class="btn small ghost" onclick="llMarkAllRead()"><span data-i18n="admin.mark_all_read">تحديد الكل كمقروء</span></button>
+          </div>
+          <div id="adminNotificationsList"></div>
+        </div>
+      </div>
+      <div class="tenant-content-panel" style="margin-top:16px">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="admin.announce_title">إشعار للشركات</h3>
+        </div>
+        <div class="tenant-grid" style="grid-template-columns:1fr 1fr;gap:12px">
+          <div class="tenant-field"><label for="adminAnnounceTarget" data-i18n="admin.announce_target">الشركة</label>
+            <select id="adminAnnounceTarget"><option value="all" data-i18n="admin.announce_all">كل الشركات</option></select></div>
+          <div class="tenant-field"><label for="adminAnnounceTitle" data-i18n="admin.announce_subject">العنوان</label>
+            <input type="text" id="adminAnnounceTitle"></div>
+          <div class="tenant-field full" style="grid-column:1/-1"><label for="adminAnnounceBody" data-i18n="admin.announce_body">النص</label>
+            <textarea id="adminAnnounceBody" rows="3"></textarea></div>
+        </div>
+        <div class="sag-modal-actions" style="margin-top:10px">
+          <button type="button" class="btn primary" onclick="adminSendAnnouncement()" data-i18n="admin.announce_send">إرسال الإشعار</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <!-- SUPER ADMIN: companies, top-up requests, support, platform       -->
+    <!-- ═══════════════════════════════════════════════════════════════ -->
+    <section id="tenantCompaniesPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.companies">إدارة الشركات</h2>
+        </div>
+        <div class="tenant-actions">
+          <button type="button" class="btn primary" onclick="openSagCompanyCreate()">إضافة شركة جديدة</button>
+          <button type="button" class="btn ghost" onclick="sagEnsureAllKeys()" id="sagEnsureKeysBtn" data-i18n="admin.keys_issue">إصدار مفاتيح الشركات</button>
+        </div>
+      </div>
+
+      <!-- Search & Filter -->
+      <div class="sag-filters">
+        <input type="text" id="sagSearchInput" placeholder="بحث بالاسم أو الإيميل أو الدومين..."
+          oninput="filterSagTenants()">
+        <select id="sagFilterPlan" onchange="filterSagTenants()">
+          <option value="">كل الباقات</option>
+          <option value="__none__">بدون باقة</option>
+        </select>
+        <select id="sagFilterStatus" onchange="filterSagTenants()">
+          <option value="">كل الحالات</option>
+          <option value="active">نشط</option>
+          <option value="inactive">معطل</option>
+        </select>
+      </div>
+
+      <!-- Tenants List -->
+      <div id="sagTenantsList"></div>
+    </section>
+

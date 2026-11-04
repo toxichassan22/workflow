@@ -1,0 +1,184 @@
+    <!-- Slides Preview -->
+    <section id="tenantSlidesPage" class="tenant-page">
+      <!-- Toolbar at the top -->
+      <div class="ge-topbar slide-workspace-header" id="slidesWorkspaceHeader">
+        <div class="slide-header-context">
+          <!-- The only way back used to be the dashboard, and from there "مشروع جديد" resets the
+               state, so returning to the form showed it blank. The project page is already
+               rendered and filled, so showing it again keeps every value. -->
+          <button type="button" class="slide-header-back" onclick="navigateTenantWorkflow('tenantProjectPage')"
+            data-i18n="ws.back_project">بيانات المشروع</button>
+          <div class="slide-header-identity">
+            <input type="text" id="slidesHeaderTitle" class="slide-header-title" spellcheck="false"
+              data-i18n-ph="ws.title_placeholder" placeholder="اسم العرض"
+              onchange="saveSlidesHeaderTitle()"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+            <div class="slide-header-meta">
+              <span><span id="slidesHeaderCount">0</span> <span id="slidesHeaderCountLabel" data-i18n="ws.slides_label">شريحة</span></span>
+              <span id="slidesHeaderStatusBadge" class="slide-header-badge" hidden></span>
+              <span id="slidesHeaderSaveState" class="slide-header-save" data-i18n="ws.saved_state">محفوظ</span>
+              <span id="slidesEditorInfo" hidden></span>
+            </div>
+          </div>
+        </div>
+        <div class="slide-header-view-switch" role="group">
+          <button type="button" data-slides-view="edit" class="active"
+            onclick="setSlidesWorkspaceView('edit')" data-i18n="ws.view_edit">تحرير</button>
+          <button type="button" data-slides-view="sorter"
+            onclick="setSlidesWorkspaceView('sorter')" data-i18n="ws.view_sorter">سورتر</button>
+          <button type="button" data-slides-view="present"
+            onclick="setSlidesWorkspaceView('present')" data-i18n="ws.view_present">عرض</button>
+        </div>
+        <div class="slide-header-actions">
+          <button type="button" class="btn slide-header-approve"
+            onclick="requestPresentationApproval(tenantPresentationId)" id="btnRequestApproval"
+            data-i18n="ws.approve">تعميد</button>
+          <button type="button" id="presentationSaveButton" class="btn slide-header-save-btn"
+            onclick="savePresentationFromToolbar()" data-i18n="ws.save">حفظ كمسودة</button>
+          <div class="tenant-dropdown slide-header-tools">
+            <button type="button" class="btn slide-header-more-btn" onclick="toggleTenantDropdown(this)"
+              aria-haspopup="true" data-i18n="ws.deck_tools">أدوات العرض</button>
+            <div class="tenant-dropdown-menu deck-tools-menu">
+              <label class="deck-tool-field"><span data-i18n="deck.find">ابحث عن</span>
+                <input type="text" id="deckFindInput" spellcheck="false"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();runDeckFindReplace();}"></label>
+              <label class="deck-tool-field"><span data-i18n="deck.replace_with">استبدل بـ</span>
+                <input type="text" id="deckReplaceInput" spellcheck="false"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();runDeckFindReplace();}"></label>
+              <button type="button" class="btn ghost" onclick="runDeckFindReplace()"
+                data-i18n="deck.replace_all">استبدال الكل</button>
+              <div class="tenant-hint" id="deckFindResult" hidden></div>
+            </div>
+          </div>
+          <div class="tenant-dropdown slide-header-more">
+            <button type="button" class="btn slide-header-more-btn" onclick="toggleTenantDropdown(this)"
+              aria-haspopup="true" data-i18n="ws.more">المزيد</button>
+            <div class="tenant-dropdown-menu">
+              <button type="button" class="btn ghost" data-permission="create_presentation"
+                onclick="openPresentationShareDialog(); closeTenantDropdown()" data-i18n="sh.menu">مشاركة العرض</button>
+              <button type="button" class="btn ghost" data-permission="company_settings"
+                onclick="openPresentationFontSettings(); closeTenantDropdown()" data-i18n="ws.font">نوع الخط</button>
+              <button type="button" class="btn ghost" data-permission="create_presentation"
+                onclick="savePresentationCopy(); closeTenantDropdown()" data-i18n="ws.save_copy">حفظ نسخة مستقلة</button>
+              <button type="button" class="btn ghost" data-permission="create_presentation"
+                onclick="translateTenantPresentationToEnglish(); closeTenantDropdown()" data-i18n="ws.translate_en">ترجمة إلى الإنجليزية</button>
+              <button type="button" class="btn ghost" data-permission="export_files"
+                onclick="exportTenantSlides('pdf'); closeTenantDropdown()" data-i18n="ws.export_pdf">تصدير PDF</button>
+              <button type="button" class="btn ghost" data-permission="export_files"
+                onclick="exportTenantSlides('pptx'); closeTenantDropdown()" data-i18n="ws.export_pptx">تصدير PPTX</button>
+              <button type="button" class="btn ghost"
+                onclick="showTenantPage('tenantDashboardPage'); closeTenantDropdown()" data-i18n="ws.home">عودة للرئيسية</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Undo/redo follow the editing session, not save/export. -->
+      <div class="slides-undo-rail" id="slidesUndoRail">
+        <button type="button" id="presentationUndoButton" class="btn ghost" onclick="undoPresentationChange()"
+          disabled data-i18n="ws.undo">تراجع</button>
+        <button type="button" id="presentationRedoButton" class="btn ghost" onclick="redoPresentationChange()"
+          disabled data-i18n="ws.redo">إعادة التنفيذ</button>
+      </div>
+
+      <!-- Live Generation Banner -->
+      <div id="tenantLiveGenBanner" class="tenant-live-gen-banner" style="display:none;">
+        <div class="tenant-live-gen-main">
+          <div class="tenant-live-gen-info">
+            <span class="tenant-live-gen-tag">توليد حي ومباشر</span>
+            <span id="liveGenSlideTitle" class="tenant-live-gen-title">جاري توليد العرض...</span>
+            <span id="liveGenSlideDetails" class="tenant-live-gen-details"></span>
+          </div>
+          <div class="tenant-live-gen-progress">
+            <div class="tenant-live-gen-bar">
+              <div id="liveGenProgressBar" class="tenant-live-gen-fill" style="width: 0%;"></div>
+            </div>
+            <span id="liveGenProgressPct" class="tenant-live-gen-pct">0%</span>
+          </div>
+          <button id="liveGenResumeButton" type="button" class="btn ghost" style="display:none;white-space:nowrap;"
+            onclick="resumeTenantSlideGeneration()">استكمال التوليد</button>
+          <button id="liveGenStopButton" type="button" class="btn ghost" style="display:none;white-space:nowrap;"
+            data-i18n="gen.stop_generation" onclick="stopTenantGeneration()">إيقاف التوليد</button>
+        </div>
+      </div>
+
+      <!-- Main split body container -->
+      <div class="ge-body">
+        <!-- Right Sidebar: Thumbnails -->
+        <div class="ge-sidebar" id="tenantSlidesSidebar"></div>
+
+        <!-- Center: Slide Cards in Scroll View -->
+        <div class="ge-main" id="tenantSlidesMain"></div>
+
+        <!-- Sorter: the same deck as a grid, with drag reorder and insert gaps -->
+        <div class="ge-sorter" id="tenantSlidesSorter" hidden></div>
+
+        <!-- Left: Smart Designer Chat -->
+        <div class="ge-right-panel" id="tenantSlidesChat">
+          <div class="ge-chat-resize" id="tenantChatResize" aria-hidden="true"></div>
+          <div class="ge-panel-header">
+            <button type="button" class="ge-chat-collapse is-icon" data-ws-icon="chevron"
+              onclick="toggleTenantChatPanel()" aria-label="طي المحادثة" data-i18n-aria="ws.chat_collapse_title"
+              title="طي المحادثة" data-i18n-title="ws.chat_collapse_title"></button>
+            <span class="ge-chat-panel-status" data-i18n="ws.chat_ready">جاهز للتعديل</span>
+            <button type="button" class="ge-chat-new" onclick="startNewTenantDesignerConversation()"
+              data-i18n="ws.new_conversation">محادثة جديدة</button>
+            <button type="button" class="ge-chat-delete" onclick="deleteTenantDesignerConversation()"
+              data-i18n="ws.delete_conversation">حذف المحادثة</button>
+          </div>
+          <button type="button" class="ge-chat-reopen is-icon" data-ws-icon="chevron"
+            onclick="toggleTenantChatPanel()" aria-label="فتح المحادثة" data-i18n-aria="ws.chat_expand_title"
+            title="فتح المحادثة" data-i18n-title="ws.chat_expand_title"></button>
+
+          <div id="tenantChatMessages" class="tenant-chat-messages"
+            style="flex:1; overflow-y:auto; display:flex; flex-direction:column; border:none; border-radius:0;">
+            <div id="tenantDesignerChecklist" class="tenant-designer-checklist" hidden></div>
+          </div>
+
+          <div id="tenantChatComposer" class="tenant-chat-composer">
+            <div class="tenant-chat-input-row">
+              <div id="tenantChatAttachment" class="tenant-chat-attachment" hidden></div>
+              <div class="tenant-chat-entry-row">
+                <input type="file" id="tenantChatImageFile" accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf" hidden multiple
+                  onchange="attachTenantChatImage(this)">
+                <button type="button" class="btn ghost tenant-chat-attach is-icon" data-ws-icon="attach"
+                  aria-label="إرفاق صورة أو ملف" data-i18n-aria="ws.attach_title"
+                  title="إرفاق صورة أو ملف" data-i18n-title="ws.attach_title"
+                  onclick="document.getElementById('tenantChatImageFile').click()"></button>
+                <textarea id="tenantChatInput" data-i18n-ph="ws.chat_placeholder" placeholder="اكتب التعديل المطلوب..." rows="1"
+                  oninput="growTenantChatInput(this)"
+                  onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendTenantDesignerChat();}"></textarea>
+                <button type="button" class="btn ghost tenant-chat-stop is-icon" id="tenantChatStopButton"
+                  data-ws-icon="stop" aria-label="إيقاف" data-i18n-aria="ws.stop"
+                  title="إيقاف" data-i18n-title="ws.stop"
+                  onclick="stopTenantDesignerChat()" hidden></button>
+                <button type="button" class="btn primary tenant-chat-send is-icon" data-ws-icon="send"
+                  aria-label="إرسال" data-i18n-aria="ws.send" title="إرسال" data-i18n-title="ws.send"
+                  onclick="sendTenantDesignerChat()"></button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="tenantPresentOverlay" class="tenant-present-overlay">
+        <div class="present-stage" id="tenantPresentStage"></div>
+        <aside class="present-notes" id="tenantPresentNotes" hidden>
+          <div class="present-notes-title" data-i18n="ws.present_notes">ملاحظات الشريحة</div>
+          <div class="present-notes-body" id="tenantPresentNotesBody"></div>
+        </aside>
+        <div class="present-controls">
+          <button type="button" class="is-icon" id="presentNotesButton" data-ws-icon="notes"
+            onclick="toggleTenantPresentNotes()" hidden
+            aria-label="ملاحظات الشريحة" data-i18n-aria="ws.present_notes"
+            title="ملاحظات الشريحة" data-i18n-title="ws.present_notes"></button>
+          <button type="button" id="presentRestartButton" onclick="restartTenantPresentation()" data-i18n="ws.present_restart">من البداية</button>
+          <button type="button" onclick="stepTenantPresentation(-1)" data-i18n="ws.present_prev">السابق</button>
+          <span class="present-counter" id="tenantPresentCounter">1 / 1</span>
+          <button type="button" onclick="stepTenantPresentation(1)" data-i18n="ws.present_next">التالي</button>
+          <button type="button" onclick="closeTenantPresentation()" data-i18n="ws.present_exit">خروج</button>
+        </div>
+      </div>
+
+    </section>
+

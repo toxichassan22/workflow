@@ -22,6 +22,7 @@ Covers:
 import re
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -29,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class TenantPresentationsListTests(unittest.TestCase):
 
     def setUp(self):
-        self.index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.index_html = shell_text()
         self.pres_js = (ROOT / 'assets' / 'js' / '16-presentations-export' / '01_presentations.js').read_text(encoding='utf-8')
         self.admin_dash_js = (ROOT / 'assets' / 'js' / '16-presentations-export' / '02_admin_dashboard.js').read_text(encoding='utf-8')
         self.css_chrome = (ROOT / 'assets' / 'css' / 'base' / '08_shell_chrome.css').read_text(encoding='utf-8')

@@ -1,0 +1,29 @@
+    <!-- Dynamic Form Project -->
+    <section id="tenantProjectPage" class="tenant-page">
+      <div
+        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <h2 style="margin:0;">بيانات المشروع</h2>
+            <span id="proposalLifecycleBadge" class="proposal-lifecycle-badge" style="display:none;"></span>
+            <span id="draftSyncBadge"
+              style="font-size:12px;padding:3px 10px;border-radius:20px;background:#e2e8f0;color:#475569;font-weight:normal;display:inline-flex;align-items:center;gap:4px;">
+              جاهز للمزامنة</span>
+          </div>
+        </div>
+        <button class="btn ghost" onclick="openTenantFields()">تخصيص الحقول</button>
+      </div>
+      <div class="project-form-layout">
+        <aside id="tenantProjectSidebar" class="project-form-sidebar" aria-label="أقسام بيانات المشروع"></aside>
+        <div class="project-form-content">
+          <div id="tenantProjectForm"></div>
+        </div>
+      </div>
+      <div class="tenant-form-actions">
+        <button class="btn ghost" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
+        <button class="btn primary" id="activeSectionApproveBtn" data-ar-text="اعتماد" onclick="toggleActiveSectionApproval()">اعتماد</button>
+        <button class="btn danger" onclick="confirmDeleteProject()">حذف المشروع</button>
+        <button class="btn ghost" onclick="showTenantPage('tenantDashboardPage')">عودة للرئيسية</button>
+      </div>
+    </section>
+

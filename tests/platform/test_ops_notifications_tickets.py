@@ -10,6 +10,7 @@ import threading
 import unittest
 from datetime import timedelta
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
@@ -21,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def read_frontend_text(order):
     """The full client source: shell + styles + scripts in bundle order."""
-    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    parts = [shell_text()]
     for path in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
         parts.append(path.read_text(encoding='utf-8'))
     for name in order:

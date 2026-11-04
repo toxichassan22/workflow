@@ -14,6 +14,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -646,7 +647,7 @@ class RunControlJobTests(unittest.TestCase):
 
 def _frontend_text(application_module):
     """The full client source: shell + styles + scripts in load order."""
-    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    parts = [shell_text()]
     for css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
         parts.append(css.read_text(encoding='utf-8'))
     for name in application_module.FRONTEND_JS_ORDER:
@@ -662,7 +663,7 @@ class RunControlClientTests(unittest.TestCase):
         import app as application_module
         cls.application_module = application_module
         cls.source = _frontend_text(application_module)
-        cls.shell = (ROOT / 'index.html').read_text(encoding='utf-8')
+        cls.shell = shell_text()
 
     def test_the_banner_and_the_loader_carry_a_stop_button(self):
         self.assertIn('id="liveGenStopButton"', self.shell)

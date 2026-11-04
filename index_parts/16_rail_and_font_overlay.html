@@ -1,0 +1,45 @@
+    <!-- Tenant Global Rail — fixed right sidebar for workflow navigation & inputs -->
+    <aside id="tenantGlobalRail" class="tgr" style="display:none !important;" aria-label="شريط التنقل العام">
+      <div class="tgr-head">
+        <button class="tgr-toggle" onclick="toggleGlobalRail()" title="طي/فتح الشريط">طي</button>
+        <div class="tgr-tabs">
+          <button type="button" data-tgr-tab="nav" class="active" onclick="setGlobalRailTab('nav')">المراحل</button>
+          <button type="button" data-tgr-tab="inputs" onclick="setGlobalRailTab('inputs')">المدخلات</button>
+        </div>
+      </div>
+      <div id="tgrNav" class="tgr-body"></div>
+      <div id="tgrInputs" class="tgr-body tgr-hidden"></div>
+      <div class="tgr-foot">
+        <button type="button" class="tgr-act" onclick="saveProjectAsDraft()">حفظ كمسودة</button>
+        <button type="button" class="tgr-act" onclick="renderGlobalRailInputs()">تحديث الملخص</button>
+      </div>
+    </aside>
+
+
+
+    <div id="presentationFontSettingsPanel" class="presentation-font-overlay" data-a11y-modal
+      onclick="if(event.target === this) closePresentationFontSettings()">
+      <div class="presentation-font-card" role="dialog" aria-modal="true"
+        aria-labelledby="presentationFontSettingsTitle" onclick="event.stopPropagation()">
+        <div class="presentation-font-head">
+          <div>
+            <h3 id="presentationFontSettingsTitle">نوع خط العرض</h3>
+          </div>
+          <button type="button" class="presentation-font-close" onclick="closePresentationFontSettings()"
+            aria-label="إغلاق">×</button>
+        </div>
+        <!-- One selector per script: Arabic and Latin resolve independently on the server, so a
+             deck that mixes both scripts can carry a different family for each. The status line
+             below states what actually ended up applied. -->
+        <label for="presentationFontArabicSelect">الخط العربي</label>
+        <select id="presentationFontArabicSelect" onchange="selectPresentationFont('arabic', this.value)" disabled>
+          <option value="">جاري تحميل الخطوط...</option>
+        </select>
+        <label for="presentationFontLatinSelect">الخط اللاتيني</label>
+        <select id="presentationFontLatinSelect" onchange="selectPresentationFont('latin', this.value)" disabled>
+          <option value="">جاري تحميل الخطوط...</option>
+        </select>
+        <p id="presentationFontStatus" class="tenant-hint" style="margin:10px 0 0"></p>
+      </div>
+    </div>
+

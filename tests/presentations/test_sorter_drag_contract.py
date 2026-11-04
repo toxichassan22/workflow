@@ -9,9 +9,9 @@ tests/presentations/test_sorter_drag.js; these guards pin the wiring.
 import ast
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
-INDEX = ROOT / 'index.html'
 
 
 def _bundle_order(kind):
@@ -29,7 +29,7 @@ def _bundle_order(kind):
 
 
 def read_frontend_text():
-    parts = [INDEX.read_text(encoding='utf-8')]
+    parts = [shell_text()]
     for name in _bundle_order('css'):
         parts.append((ROOT / 'assets' / 'css' / name).read_text(encoding='utf-8'))
     for name in _bundle_order('js'):

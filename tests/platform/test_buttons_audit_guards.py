@@ -3,6 +3,7 @@
 import re
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -148,7 +149,7 @@ class ButtonAuditGuardsTests(unittest.TestCase):
         )
 
         # index.html must have the recharge button IDs
-        index_src = self.read_file_text("index.html")
+        index_src = shell_text()
         self.assertIn('id="llRechargeSubmitBtn"', index_src)
         self.assertIn('id="llRechargeDecisionSubmitBtn"', index_src)
 

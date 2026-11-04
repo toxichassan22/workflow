@@ -10,12 +10,12 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-INDEX = ROOT / 'index.html'
 
 FRONTEND_CSS_ORDER = (
     'base/01_preview_chat.css', 'base/02_tenant_pages.css',
@@ -80,7 +80,7 @@ FRONTEND_JS_ORDER = (
 
 
 def read_shell():
-    return INDEX.read_text(encoding='utf-8')
+    return shell_text()
 
 
 def read_frontend_text():

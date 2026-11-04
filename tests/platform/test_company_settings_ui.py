@@ -3,6 +3,7 @@ import re
 import sys
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -37,8 +38,7 @@ class TestCompanySettingsUI(unittest.TestCase):
         cls.auth_headers = {'Authorization': f'Bearer {cls.token}'}
 
     def _read_index_html(self):
-        index_path = ROOT / 'index.html'
-        return index_path.read_text(encoding='utf-8')
+        return shell_text()
 
     def _extract_settings_page_html(self):
         content = self._read_index_html()
@@ -155,6 +155,53 @@ class TestCompanySettingsUI(unittest.TestCase):
         bundles_file = ROOT / 'app_parts' / '22_rules_pages' / '22f_frontend_bundles.py'
         bundles_code = bundles_file.read_text(encoding='utf-8')
         self.assertIn("'base/14_company_settings.css'", bundles_code)
+
+    def test_settings_tabs_wrap_instead_of_scrolling(self):
+        """The tabs bar showed an unnecessary vertical scrollbar: overflow-x:auto makes
+        overflow-y compute to auto, and the active tab's -2px underline margin overflowed
+        by 2px. The tabs wrap instead, so the bar is never a scroll container."""
+        css_path = ROOT / 'assets' / 'css' / 'base' / '14_company_settings.css'
+        css_content = css_path.read_text(encoding='utf-8')
+        nav_block = re.search(r'\.settings-tabs-nav\s*\{([^}]*)\}', css_content)
+        self.assertIsNotNone(nav_block, '.settings-tabs-nav rule is missing')
+        self.assertNotIn('overflow-x: auto', nav_block.group(1),
+                         'the tabs bar must not be a scroll container')
+        self.assertIn('flex-wrap: wrap', nav_block.group(1))
+
+    def test_settings_page_strings_are_i18n_bound(self):
+        """The redesigned settings page shipped hardcoded Arabic, so the English UI kept
+        showing Arabic. Every label, placeholder and status must resolve through the
+        settings.* dictionary keys."""
+        page_html = self._extract_settings_page_html()
+        for key in (
+                'settings.title', 'settings.subtitle',
+                'settings.tab_profile', 'settings.tab_identity',
+                'settings.tab_assets', 'settings.tab_fonts',
+                'settings.profile_title', 'settings.profile_desc',
+                'settings.name_ar_field', 'settings.tagline_ar_field',
+                'settings.colors_title', 'settings.colors_desc',
+                'settings.color_primary', 'settings.color_secondary',
+                'settings.color_accent', 'settings.color_background',
+                'settings.color_text', 'settings.preview_title',
+                'settings.mockup_project', 'settings.mockup_badge',
+                'settings.mockup_metric', 'settings.mockup_body',
+                'settings.logo_title', 'settings.logo_light', 'settings.logo_dark',
+                'settings.logo_upload', 'settings.watermark_title',
+                'settings.watermark_upload', 'settings.watermark_delete',
+                'settings.fonts_title', 'settings.fonts_desc',
+                'settings.restore', 'settings.save'):
+            self.assertIn('data-i18n="%s"' % key, page_html,
+                          '%s is not bound in the settings page' % key)
+        self.assertIn('data-i18n-ph="settings.name_ar_placeholder"', page_html)
+        self.assertIn('data-i18n-ph="settings.tagline_ar_placeholder"', page_html)
+
+        js_path = ROOT / 'assets' / 'js' / '02-settings-branding' / '02_auth_boot.js'
+        js_content = js_path.read_text(encoding='utf-8')
+        for key in ('settings.saved', 'settings.unsaved',
+                    'settings.logo_placeholder', 'settings.logo_dark_placeholder'):
+            self.assertIn("WFT('%s'" % key, js_content,
+                          '%s must render through WFT in the settings script' % key)
+        self.assertIn("addEventListener('wf:lang'", js_content)
 
     def test_branding_api_get_and_update(self):
         """API endpoints GET and PUT /api/branding work cleanly."""

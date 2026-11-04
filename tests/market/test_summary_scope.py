@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 _WEB_BROWSE = ROOT / 'modules' / 'web_browse'
@@ -17,7 +18,7 @@ import market_study  # noqa: E402
 
 
 def read_frontend_text(order):
-    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    parts = [shell_text()]
     parts.extend(path.read_text(encoding='utf-8')
                  for path in sorted((ROOT / 'assets' / 'css').rglob('*.css')))
     parts.extend((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8')

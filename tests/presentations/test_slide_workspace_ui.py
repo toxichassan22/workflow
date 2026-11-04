@@ -11,9 +11,9 @@ import ast
 import re
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
-INDEX = ROOT / 'index.html'
 
 
 def _bundle_order(kind):
@@ -32,7 +32,7 @@ def _bundle_order(kind):
 
 def read_frontend_text():
     """The whole client source: shell + CSS + JS in bundle order."""
-    parts = [INDEX.read_text(encoding='utf-8')]
+    parts = [shell_text()]
     for name in _bundle_order('css'):
         parts.append((ROOT / 'assets' / 'css' / name).read_text(encoding='utf-8'))
     for name in _bundle_order('js'):
@@ -43,7 +43,7 @@ def read_frontend_text():
 class SlidesWorkspaceHeaderTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.shell = shell_text()
         cls.source = read_frontend_text()
 
     def test_header_answers_context_view_and_actions(self):
@@ -170,7 +170,7 @@ class SlidesSorterTests(unittest.TestCase):
 class DesignerChatPanelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.shell = shell_text()
         cls.source = read_frontend_text()
 
     def test_panel_collapses_resizes_and_manages_conversations(self):
@@ -214,7 +214,7 @@ class SlidesNotesAndMenusTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.shell = shell_text()
         cls.source = read_frontend_text()
 
     def test_notes_are_edited_inline_with_autosave(self):
@@ -250,7 +250,7 @@ class SlidesNotesAndMenusTests(unittest.TestCase):
 class SlidesPresentModeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.shell = shell_text()
         cls.source = read_frontend_text()
 
     def test_present_mode_is_fullscreen_read_only_with_controls(self):
@@ -299,7 +299,7 @@ class SlidesCanvasEditingTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.shell = shell_text()
         cls.source = read_frontend_text()
 
     def test_bundle_loads_the_canvas_layer(self):
@@ -540,7 +540,7 @@ class SlidesCanvasEditingTests(unittest.TestCase):
 class PresentationShareUiTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.shell = shell_text()
         cls.source = read_frontend_text()
 
     def test_share_entry_point_lives_in_the_header_menu(self):
@@ -568,7 +568,7 @@ class SlidesAuthoringTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cls.shell = INDEX.read_text(encoding='utf-8')
+        cls.shell = shell_text()
         cls.source = read_frontend_text()
 
     def test_bundle_loads_the_authoring_layer(self):

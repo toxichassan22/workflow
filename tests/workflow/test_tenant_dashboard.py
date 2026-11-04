@@ -18,6 +18,7 @@ import json
 import re
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -25,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class TenantDashboardRevitalizationTests(unittest.TestCase):
 
     def setUp(self):
-        self.index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.index_html = shell_text()
         self.charts_js = (ROOT / 'assets' / 'js' / '16-presentations-export' / '02a_admin_charts.js').read_text(encoding='utf-8')
         self.pres_js = (ROOT / 'assets' / 'js' / '16-presentations-export' / '01_presentations.js').read_text(encoding='utf-8')
         self.routing_js = (ROOT / 'assets' / 'js' / '02-settings-branding' / '01_routing.js').read_text(encoding='utf-8')

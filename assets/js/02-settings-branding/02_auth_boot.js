@@ -737,6 +737,8 @@
     }
 
     // Settings Navigation & Live Previews
+    var settingsDirtyState = false;
+
     function switchSettingsTab(tabKey) {
       const tabs = { profile: ['settingsTabProfile', 'settingsPaneProfile'], identity: ['settingsTabIdentity', 'settingsPaneIdentity'], assets: ['settingsTabAssets', 'settingsPaneAssets'], fonts: ['settingsTabFonts', 'settingsPaneFonts'] };
       Object.keys(tabs).forEach(k => {
@@ -760,18 +762,37 @@
     }
 
     function setSettingsDirty(dirty) {
+      settingsDirtyState = !!dirty;
       const dot = document.getElementById('settingsStickyDot'), status = document.getElementById('settingsSaveStatus');
       if (dot) dot.classList.toggle('dirty', !!dirty);
-      if (status) status.textContent = dirty ? 'توجد تعديلات غير محفوظة' : 'الإعدادات محفوظة';
+      if (status) status.textContent = dirty
+        ? WFT('settings.unsaved', 'توجد تعديلات غير محفوظة')
+        : WFT('settings.saved', 'الإعدادات محفوظة');
     }
+
+    document.addEventListener('wf:lang', function () {
+      const status = document.getElementById('settingsSaveStatus');
+      if (!status) return;
+      status.textContent = settingsDirtyState
+        ? WFT('settings.unsaved', 'توجد تعديلات غير محفوظة')
+        : WFT('settings.saved', 'الإعدادات محفوظة');
+      const light = document.getElementById('settingsLogoPreview');
+      const dark = document.getElementById('settingsLogoPreviewDarkBox');
+      if (light && !light.querySelector('img')) light.textContent = WFT('settings.logo_placeholder', 'شعار الشركة (PNG/JPG/WEBP)');
+      if (dark && !dark.querySelector('img')) dark.textContent = WFT('settings.logo_dark_placeholder', 'شعار الشركة (النسق الداكن)');
+    });
 
     function updateSettingsLogoPreviews(logoPath) {
       const previewLight = document.getElementById('settingsLogoPreview'), previewDark = document.getElementById('settingsLogoPreviewDarkBox');
-      const content = logoPath
+      const image = logoPath
         ? '<img src="/tenant-assets/' + (tenantUser ? tenantUser.id : '') + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:80px">'
-        : 'شعار الشركة (PNG/JPG/WEBP)';
-      if (previewLight) previewLight.innerHTML = content;
-      if (previewDark) previewDark.innerHTML = content;
+        : '';
+      if (previewLight) {
+        previewLight.innerHTML = image || escapeHtml(WFT('settings.logo_placeholder', 'شعار الشركة (PNG/JPG/WEBP)'));
+      }
+      if (previewDark) {
+        previewDark.innerHTML = image || escapeHtml(WFT('settings.logo_dark_placeholder', 'شعار الشركة (النسق الداكن)'));
+      }
     }
 
     async function openTenantSettings() {

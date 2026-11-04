@@ -1,0 +1,178 @@
+    <!-- Users Management (company admin only) -->
+    <section id="tenantUsersPage" class="tenant-page">
+      <div
+        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <h2 style="margin:0">إدارة الموظفين</h2>
+        </div>
+      </div>
+
+      <div id="tenantUsersList" class="tenant-grid full" style="margin-bottom:20px"></div>
+
+      <div style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px">
+        <h3 style="margin-bottom:12px">إضافة موظف جديد</h3>
+        <div class="tenant-grid">
+          <div class="tenant-field">
+            <label>اسم الموظف *</label>
+            <input type="text" id="newUserName" placeholder="مثال: أحمد محمد">
+          </div>
+          <div class="tenant-field">
+            <label>البريد الإلكتروني *</label>
+            <input type="email" id="newUserEmail" placeholder="ahmed@company.com">
+          </div>
+          <div class="tenant-field">
+            <label>كلمة المرور (اختياري)</label>
+            <div style="position:relative">
+              <input type="password" id="newUserPassword" placeholder="10 أحرف على الأقل، حروف وأرقام" style="padding-left:64px">
+              <button type="button" onclick="togglePasswordVisibility('newUserPassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+            </div>
+          </div>
+          <div class="tenant-field">
+            <label>الجوال</label>
+            <input type="text" id="newUserPhone" dir="ltr">
+          </div>
+          <div class="tenant-field">
+            <label>المسؤولية</label>
+            <select id="newUserResponsibility" onchange="toggleNewUserProjects()">
+              <option value="editor">محرر</option>
+              <option value="approver">معتمد</option>
+              <option value="admin">أدمن</option>
+            </select>
+          </div>
+          <div class="tenant-field" id="newUserProjectsField">
+            <label>ملفات المشاريع</label>
+            <div id="inviteProjectsPicker" style="display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow:auto"></div>
+          </div>
+        </div>
+        <div class="tenant-btns" style="margin-top:12px">
+          <button class="btn primary" onclick="addTenantUser()">+ إضافة موظف</button>
+        </div>
+        <div id="inviteResult" style="margin-top:12px"></div>
+        <div id="tenantInvitesList" style="margin-top:12px"></div>
+      </div>
+    </section>
+
+    <!-- Training Data -->
+    <section id="tenantTrainingPage" class="tenant-page">
+      <div
+        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <h2>تدريب النموذج عبر المحادثة</h2>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+        <!-- Left Sidebar: Chat Sessions History -->
+        <div
+          style="width:260px;min-width:240px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;">
+          <button class="btn primary small" onclick="createNewChatSession('training')"
+            style="width:100%;justify-content:center;gap:6px;font-weight:600;padding:10px;">
+            محادثة جديدة
+          </button>
+          <div
+            style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">
+            <span style="font-size:12px;font-weight:700;color:var(--accent);">سجل المحادثات</span>
+            <button class="btn small danger ghost" onclick="clearAllChatSessions('training')" title="مسح كل السجلات"
+              style="padding:2px 6px;font-size:11px;">مسح الكل</button>
+          </div>
+          <div id="trainingChatSessionsList"
+            style="display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto;"></div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="chatbox" style="flex:1;min-width:320px;margin-bottom:0;">
+          <div id="trainingChatLog" class="chatlog" style="height:350px;"></div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+            <button class="btn small ghost"
+              onclick="setTrainingChatExample('نحب نبرز جودة المواد والتشطيبات الفاخرة في كل عرض تقديمي')">جودة
+              التشطيبات</button>
+            <button class="btn small ghost"
+              onclick="setTrainingChatExample('الشركة تستهدف المستثمرين السعوديين الباحثين عن عوائد سنوية 8% وما فوق')">المستثمرون</button>
+            <button class="btn small ghost"
+              onclick="setTrainingChatExample('اللون الأساسي للشركة هو العنابي الداكن والذهبي، ويجب استخدامه في كل شريحة')">ألوان
+              العلامة</button>
+            <button class="btn small ghost"
+              onclick="setTrainingChatExample('نستخدم مصطلحات مثل: عائد استثمار، نسبة شغل، قيمة مضافة، قرب المرافق')">مصطلحات
+              التسويق</button>
+          </div>
+          <div style="display:flex;gap:10px;margin-top:10px;">
+            <textarea id="trainingChatInput" placeholder="مثال: الشركة تركز على مشاريع سكنية فاخرة في شمال الرياض..."
+              style="flex:1;min-height:60px;resize:none;"
+              onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendTrainingChat();}"></textarea>
+            <button class="btn primary" onclick="sendTrainingChat()" style="align-self:flex-end;">إرسال</button>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+            <button class="btn small ghost" onclick="saveLastTrainingChatMessage()">حفظ آخر رسالة كبيانات
+              تدريب</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- AI Rules -->
+    <section id="tenantAIRulesPage" class="tenant-page">
+      <div
+        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+        <div>
+          <h2>قواعد الذكاء الاصطناعي</h2>
+        </div>
+      </div>
+
+      <div class="tenant-tabs" style="display:flex;gap:8px;border-bottom:1px solid #ddd;margin-bottom:16px;">
+        <button class="btn ghost" id="aiTabTraining" onclick="showAIRuleTab('training')">بيانات التدريب</button>
+        <button class="btn ghost" id="aiTabLog" onclick="showAIRuleTab('log')">سجل التدريب</button>
+      </div>
+
+      <div id="aiRulesTraining" class="ai-rule-tab">
+        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
+          <!-- Left Sidebar: Chat Sessions History -->
+          <div
+            style="width:260px;min-width:240px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;">
+            <button class="btn primary small" onclick="createNewChatSession('ai_rules')"
+              style="width:100%;justify-content:center;gap:6px;font-weight:600;padding:10px;">
+              محادثة جديدة
+            </button>
+            <div
+              style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">
+              <span style="font-size:12px;font-weight:700;color:var(--accent);">سجل المحادثات</span>
+              <button class="btn small danger ghost" onclick="clearAllChatSessions('ai_rules')" title="مسح كل السجلات"
+                style="padding:2px 6px;font-size:11px;">مسح الكل</button>
+            </div>
+            <div id="aiRulesChatSessionsList"
+              style="display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto;"></div>
+          </div>
+
+          <!-- Main Chat Area -->
+          <div class="chatbox" style="flex:1;min-width:320px;margin-bottom:0;">
+            <div id="aiRulesChatLog" class="chatlog" style="height:350px;"></div>
+
+            <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;">
+              <input type="file" id="trainingChatImageFile"
+                accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf,text/plain" style="display:none"
+                onchange="handleChatImageSelected(this)">
+              <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()"
+                title="إرفاق صورة للشات"
+                style="padding:10px 14px;font-size:16px;border:1px solid var(--line);border-radius:10px;background:#f9f9f9;">إرفاق
+                صورة</button>
+              <textarea id="aiRulesChatInput" placeholder="اكتب معلومات لتدريب AI أو أرفق صورة للاستفسار والتحليل..."
+                style="flex:1;min-height:56px;resize:none;"
+                onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendAIRulesChat();}"></textarea>
+              <button class="btn primary" onclick="sendAIRulesChat()" style="padding:10px 20px;">إرسال</button>
+            </div>
+
+            <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+              <button class="btn small ghost" onclick="saveLastAIRulesChatMessage()">حفظ آخر رسالة كبيانات
+                تدريب</button>
+            </div>
+
+            <!-- Hidden consent input for background compatibility -->
+            <input type="checkbox" id="trainingChatImageConsent" checked style="display:none">
+          </div>
+        </div>
+      </div>
+      <div id="aiRulesLog" class="ai-rule-tab" style="display:none;">
+        <div id="aiRulesLogList"></div>
+      </div>
+
+    </section>
+

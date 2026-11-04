@@ -1,0 +1,90 @@
+    <!-- Support inbox: tickets of every company -->
+    <section id="tenantAdminTicketsPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.support_desk">الدعم الفني</h2>
+        </div>
+        <div id="adminTicketsHeadingActions">
+          <select id="adminTicketsStatusFilter" onchange="adminLoadTickets()" class="tenant-filter-select">
+            <option value="" data-i18n="admin.filter_all_statuses">كل الحالات</option>
+            <option value="open" data-i18n="tickets.status_open">مفتوحة</option>
+            <option value="in_progress" data-i18n="tickets.status_in_progress">قيد المعالجة</option>
+            <option value="waiting_customer" data-i18n="support.status_waiting">بانتظار العميل</option>
+            <option value="resolved" data-i18n="tickets.status_resolved">تم الحل</option>
+            <option value="closed" data-i18n="tickets.status_closed">مغلقة</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Desk Sub-navigation: Tickets vs FAQ Management -->
+      <div class="support-filter-bar admin-support-nav-bar" style="margin-bottom:16px;">
+        <button type="button" class="support-filter-btn active" id="adminSupportSubTabTickets" onclick="adminSwitchSupportDeskTab('tickets')">
+          <span data-i18n="admin.faq_tab_tickets">تذاكر الدعم الفني</span>
+        </button>
+        <button type="button" class="support-filter-btn" id="adminSupportSubTabFaq" onclick="adminSwitchSupportDeskTab('faq')">
+          <span data-i18n="admin.faq_tab_faqs">إدارة الأسئلة الشائعة</span>
+        </button>
+      </div>
+
+      <!-- Tab 1: Tickets List -->
+      <div id="adminSupportPaneTickets">
+        <div class="ops-stat-grid">
+          <div class="tenant-dash-card stat">
+            <h3 id="adminStatTicketsOpen">0</h3>
+            <p data-i18n="admin.tickets_open_stat">تذاكر مفتوحة</p>
+          </div>
+        </div>
+        <div class="tenant-content-panel">
+          <div class="tenant-panel-heading">
+            <h3 class="dash-section-title" data-i18n="admin.tickets_inbox">تذاكر الشركات</h3>
+          </div>
+          <div id="adminTicketsList"></div>
+          <div id="adminTicketDetail" style="display:none;margin-top:16px"></div>
+        </div>
+      </div>
+
+      <!-- Tab 2: FAQ Management -->
+      <div id="adminSupportPaneFaq" style="display:none">
+        <div class="tenant-content-panel">
+          <div class="tenant-panel-heading" style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h3 class="dash-section-title" data-i18n="admin.faq_title">الأسئلة الشائعة والإرشادات</h3>
+              <p class="tenant-panel-subtitle" data-i18n="admin.faq_sub" style="font-size:12.5px;color:var(--text-muted);margin-top:4px;">تعديل وإضافة الأسئلة والأجوبة باللغتين العربية والإنجليزية لمركز الدعم</p>
+            </div>
+            <button type="button" class="btn primary small" onclick="adminOpenFaqModal()" data-i18n="admin.faq_add_btn">إضافة سؤال جديد</button>
+          </div>
+          <div id="adminFaqListContainer" style="margin-top:16px;">
+            <!-- Rendered by adminRenderFaqsList() -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Join requests: leads from the public request-access form -->
+    <section id="tenantAdminJoinPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.join_requests">طلبات الانضمام</h2>
+        </div>
+        <select id="adminJoinStatusFilter" onchange="adminLoadJoinRequests()" class="tenant-filter-select">
+          <option value="" data-i18n="admin.filter_all_statuses">كل الحالات</option>
+          <option value="new" data-i18n="admin.join_status_new">جديدة</option>
+          <option value="contacted" data-i18n="admin.join_status_contacted">تم التواصل</option>
+          <option value="closed" data-i18n="admin.join_status_closed">مغلقة</option>
+        </select>
+      </div>
+      <div class="ops-stat-grid">
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatJoinNew">0</h3>
+          <p data-i18n="admin.join_new_stat">طلبات جديدة</p>
+        </div>
+      </div>
+      <div class="tenant-content-panel">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="admin.join_inbox">طلبات الوصول من الصفحة الرئيسية</h3>
+        </div>
+        <div id="adminJoinRequestsList"></div>
+      </div>
+    </section>

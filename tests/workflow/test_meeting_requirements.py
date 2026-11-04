@@ -17,6 +17,7 @@ import time
 import unittest
 import io
 from pathlib import Path
+from tests.frontend_source import shell_text
 from unittest.mock import Mock, mock_open, patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -148,12 +149,12 @@ def _asset_files(subdir, extension, order):
 
 
 def read_frontend_text():
-    """The full client source: shell + styles + scripts in load order.
+    """The full client source: assembled shell + styles + scripts in load order.
 
-    index.html was split into assets/css + assets/js; literal-source
-    assertions must read the combined text, not the shell alone.
+    index.html is a loader over index_parts/; literal-source assertions must
+    read the combined text, never the loader alone.
     """
-    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    parts = [shell_text()]
     for path in _asset_files('css', '.css', _bundle_order('css')):
         parts.append(path.read_text(encoding='utf-8'))
     for path in _asset_files('js', '.js', _bundle_order('js')):
@@ -162,7 +163,7 @@ def read_frontend_text():
 
 
 def read_shell_text():
-    """index.html alone: markup plus resource references, no inline code."""
+    """The assembled shell: loader chrome plus every index_parts body part."""
     return read_frontend_text()
 
 

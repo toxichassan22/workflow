@@ -1,0 +1,194 @@
+    <aside id="tenantSidebar" class="tenant-sidebar">
+      <div class="tenant-sidebar-brand">
+        <div class="tenant-platform-brand">
+          <img src="/assets/landloom-logo.png?v=3" alt="LandLoom">
+        </div>
+      </div>
+      <div class="tenant-sidebar-cta">
+        <button type="button" class="tenant-sidebar-link tenant-sidebar-action"
+          data-permission="create_presentation" data-nav-page="tenantProjectPage"
+          onclick="startTenantProject()" data-i18n="nav.new_proposal">مشروع جديد</button>
+      </div>
+      <div class="tenant-sidebar-scroll">
+        <nav class="tenant-sidebar-nav" data-nav-role="superadmin" aria-label="إدارة المنصة" data-i18n-aria="chrome.platform">
+          <div class="tenant-nav-group">
+            <span class="tenant-nav-label" data-i18n="nav.platform">المنصة</span>
+            <button type="button" class="tenant-sidebar-link tenant-hidden" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminPage" id="tenantAdminBtn" onclick="openTenantAdmin()"
+              data-i18n="nav.admin">لوحة المدير</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantCompaniesPage" onclick="openTenantCompanies()"
+              data-i18n="nav.companies">إدارة الشركات</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminRechargePage" onclick="openAdminRechargePage()"
+              data-i18n="nav.recharge_requests">طلبات الشحن</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminPackagesPage" onclick="openAdminPackagesPage()"
+              data-i18n="nav.packages">الباقات</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminTicketsPage" onclick="openAdminTicketsPage()"
+              data-i18n="nav.support_desk">الدعم الفني</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminJoinPage" onclick="openAdminJoinPage()"
+              data-i18n="nav.join_requests">طلبات الانضمام</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantNotificationsPage" onclick="openNotificationsPage()"
+              data-i18n="nav.notifications">الإشعارات</button>
+            <button type="button" class="tenant-sidebar-link" data-permission="sag_admin_panel"
+              data-nav-page="tenantAdminPlatformPage" onclick="openAdminPlatformPage()"
+              data-i18n="nav.platform_settings">إعدادات المنصة</button>
+          </div>
+        </nav>
+        <nav class="tenant-sidebar-nav" data-nav-role="tenant" aria-label="مساحة العمل" data-i18n-aria="chrome.workspace">
+          <div class="tenant-nav-group">
+            <button type="button" class="tenant-sidebar-link" data-permission="dashboard"
+              data-nav-page="tenantDashboardPage"
+              onclick="showTenantPage('tenantDashboardPage')" data-i18n="nav.dashboard">لوحة التحكم</button>
+          </div>
+          <div class="tenant-nav-group tenant-nav-collapsible" data-nav-group="proposals">
+            <button type="button" class="tenant-nav-label tenant-nav-toggle"
+              onclick="toggleTenantNavGroup('proposals')" aria-expanded="true"
+              data-i18n="nav.proposals">العروض</button>
+            <div class="tenant-nav-items">
+              <button type="button" class="tenant-sidebar-link" data-permission="view_presentations"
+                data-nav-page="tenantPresentationsPage" onclick="openTenantPresentations()"
+                data-i18n="nav.projects">المشاريع</button>
+              <button type="button" class="tenant-sidebar-link" data-permission-any="approvals,approve_generation,approve_final_file"
+                data-nav-page="tenantApprovalsPage" onclick="openTenantApprovals()"
+                data-i18n="nav.approve_offers">تعميد العروض</button>
+            </div>
+          </div>
+          <div class="tenant-nav-group tenant-nav-collapsible" data-nav-group="operations">
+            <button type="button" class="tenant-nav-label tenant-nav-toggle"
+              onclick="toggleTenantNavGroup('operations')" aria-expanded="true"
+              data-i18n="nav.operations">العمليات</button>
+            <div class="tenant-nav-items">
+              <button type="button" class="tenant-sidebar-link"
+                data-nav-page="tenantNotificationsPage"
+                onclick="openNotificationsPage()" data-i18n="nav.notifications">الإشعارات</button>
+              <button type="button" class="tenant-sidebar-link" data-permission="billing"
+                data-nav-page="tenantLandloomOpsPage" data-nav-tab="recharge"
+                onclick="openLandloomOpsPage('recharge')" data-i18n="nav.wallet">المحفظة والشحن</button>
+              <button type="button" class="tenant-sidebar-link" data-permission="support_tickets"
+                data-nav-page="tenantLandloomOpsPage" data-nav-tab="tickets"
+                onclick="openLandloomOpsPage('tickets')" data-i18n="nav.support_desk">الدعم الفني</button>
+            </div>
+          </div>
+          <div class="tenant-nav-group tenant-nav-collapsible" data-nav-group="settings">
+            <button type="button" class="tenant-nav-label tenant-nav-toggle"
+              onclick="toggleTenantNavGroup('settings')" aria-expanded="true"
+              data-i18n="nav.settings">الإعدادات</button>
+            <div class="tenant-nav-items">
+              <button type="button" class="tenant-sidebar-link" data-permission="company_settings"
+                data-nav-page="tenantSettingsPage" onclick="openTenantSettings()"
+                data-i18n="nav.company_settings">إعدادات الشركة</button>
+              <button type="button" class="tenant-sidebar-link" data-permission="company_settings"
+                data-nav-page="tenantTeamPage" onclick="openTenantTeam()"
+                data-i18n="nav.dev_team">فريق التطوير</button>
+              <button type="button" class="tenant-sidebar-link" data-permission="custom_fields"
+                data-nav-page="tenantFieldsPage" onclick="openTenantFields()">
+                <span data-i18n="nav.fields">الحقول</span>
+                <span class="section-status-badge draft" style="margin-inline-start:auto"
+                  data-i18n="status.under_construction">تحت الإنشاء</span>
+              </button>
+              <button type="button" class="tenant-sidebar-link" data-permission="manage_users"
+                data-nav-page="tenantUsersPage" onclick="openTenantUsers()"
+                data-i18n="nav.staff">الموظفون</button>
+              <button type="button" class="tenant-sidebar-link" data-permission="ai_rules"
+                data-nav-page="tenantAIRulesPage" onclick="openTenantAIRules()"
+                data-i18n="nav.ai_rules">قواعد AI</button>
+            </div>
+          </div>
+        </nav>
+      </div>
+    </aside>
+    <div class="tenant-sidebar-backdrop" onclick="closeTenantSidebar()"></div>
+    <header class="tenant-topbar">
+      <div class="tenant-topbar-heading">
+        <button type="button" id="tenantMobileMenuBtn" class="tenant-mobile-nav-btn"
+          onclick="toggleTenantSidebar()" data-i18n="nav.menu">القائمة</button>
+        <div class="tenant-brand tenant-topbar-brand">
+          <span class="tenant-brand-logo" id="tenantBrandChip">
+            <img id="tenantLogo" alt="" class="hidden">
+            <span id="tenantLogoMark" class="tenant-brand-monogram" aria-hidden="true"></span>
+          </span>
+          <div class="tenant-brand-copy">
+            <h1 id="tenantName">الشركة</h1>
+            <span id="tenantPlan" class="tenant-plan-badge">free</span>
+          </div>
+        </div>
+        <span class="tenant-topbar-divider" aria-hidden="true"></span>
+        <div class="tenant-topbar-crumb">
+          <span class="tenant-topbar-crumb-ctx" id="tenantCurrentPageContext" data-i18n="chrome.workspace">مساحة العمل</span>
+          <span class="tenant-topbar-crumb-sep">/</span>
+          <span class="tenant-topbar-crumb-title" id="tenantCurrentPageTitle" data-i18n="page.dashboard">لوحة التحكم</span>
+        </div>
+      </div>
+      <div class="tenant-topbar-center">
+        <div class="tenant-topbar-points-pill" id="tenantTopbarPointsPill"
+          onclick="openLandloomOpsPage('recharge')"
+          role="button" tabindex="0" title="المحفظة والشحن">
+          <span class="tenant-topbar-points-dot" aria-hidden="true"></span>
+          <span class="tenant-topbar-points-label" data-i18n="wallet.points_balance">رصيد النقاط</span>
+          <strong id="tenantTopbarPointsVal" class="tenant-topbar-points-val">0.00</strong>
+          <span class="tenant-topbar-points-unit" data-i18n="wallet.points_unit">نقطة</span>
+          <span class="tenant-topbar-points-cta" data-i18n="wallet.recharge_short">شحن</span>
+        </div>
+      </div>
+      <div class="tenant-topbar-side">
+        <div class="tenant-notif tenant-bellbox">
+          <button type="button" id="tenantBellBtn" class="tenant-bell-btn"
+            onclick="tenantBellClicked(event)" aria-label="الإشعارات"
+            data-i18n-aria="chrome.notifications" title="الإشعارات" data-i18n-title="chrome.notifications">
+            <span class="tenant-bell" aria-hidden="true"><span class="tenant-bell-shape"></span></span>
+            <span id="tenantBellDot" class="tenant-bell-dot hidden" aria-hidden="true"></span>
+            <span id="tenantNotifBadge" class="tenant-notif-badge" hidden>0</span>
+          </button>
+          <div id="tenantBellPanel" class="tenant-bell-panel" hidden>
+            <p class="tenant-bell-empty" data-i18n="chrome.notifications_empty">لا توجد إشعارات</p>
+          </div>
+          <div id="tenantNotifDropdown" class="tenant-notif-dropdown" hidden>
+            <div id="tenantNotifDropdownList" class="tenant-notif-list"></div>
+            <div class="tenant-notif-foot">
+              <button type="button" class="btn small ghost" onclick="notificationsMarkAllRead()"
+                data-i18n="admin.mark_all_read">تحديد الكل كمقروء</button>
+              <button type="button" class="btn small ghost" onclick="openNotificationsPage()"
+                data-i18n="notif.view_all">عرض الكل</button>
+            </div>
+          </div>
+        </div>
+        <div class="tenant-dropdown tenant-usermenu">
+          <button type="button" id="tenantUserChip" class="tenant-userchip"
+            onclick="toggleTenantDropdown(this)" aria-haspopup="true">
+            <span class="tenant-userchip-avatar" id="tenantUserAvatar" aria-hidden="true"></span>
+            <span class="tenant-userchip-meta">
+              <span class="tenant-userchip-name" id="tenantChipName"></span>
+              <span class="tenant-userchip-role" id="tenantWorkspaceRole" data-i18n="role.company_admin">أدمن الشركة</span>
+            </span>
+            <span class="tenant-userchip-caret" aria-hidden="true"></span>
+          </button>
+          <div class="tenant-dropdown-menu tenant-usermenu-menu" role="menu">
+            <div class="tenant-usermenu-head">
+              <span class="tenant-usermenu-avatar" id="tenantUserAvatarLg" aria-hidden="true"></span>
+              <span class="tenant-usermenu-id">
+                <span class="tenant-usermenu-name" id="tenantMenuName"></span>
+                <span class="tenant-usermenu-sub" id="tenantMenuSub"></span>
+              </span>
+            </div>
+            <button type="button" class="tenant-usermenu-item" role="menuitem"
+              onclick="openLandloomOpsPage('recharge'); closeTenantDropdown()">
+              <span data-i18n="nav.wallet">المحفظة والشحن</span>
+              <span class="tenant-usermenu-val" id="tenantMenuPoints">--</span>
+            </button>
+            <button type="button" class="tenant-usermenu-item" role="menuitem"
+              onclick="toggleAppLanguage(); closeTenantDropdown()">
+              <span data-i18n="chrome.language">اللغة</span>
+              <span class="tenant-usermenu-val" id="tenantMenuLang">العربية</span>
+            </button>
+            <button type="button" class="tenant-usermenu-item tenant-usermenu-danger" role="menuitem"
+              onclick="tenantLogout()" data-i18n="nav.logout">خروج</button>
+          </div>
+        </div>
+      </div>
+    </header>
+

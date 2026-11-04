@@ -78,6 +78,7 @@ sandbox/
 *.html
 !index.html
 !pages/*.html
+!index_parts/*.html
 /*.png
 /*.jpg
 /*.jpeg

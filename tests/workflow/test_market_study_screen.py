@@ -7,15 +7,17 @@ register keeps its add/edit/delete behaviour and gains serial numbers.
 import re
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def read_frontend_text():
-    parts = [ROOT / 'index.html']
+    parts = [shell_text()]
     for pattern in ('assets/css/**/*.css', 'assets/js/**/*.js'):
-        parts.extend(sorted(ROOT.glob(pattern), key=lambda path: path.as_posix()))
-    return '\n'.join(path.read_text(encoding='utf-8') for path in parts)
+        parts.extend(path.read_text(encoding='utf-8')
+                     for path in sorted(ROOT.glob(pattern), key=lambda p: p.as_posix()))
+    return '\n'.join(parts)
 
 
 class MarketStudyScreenTests(unittest.TestCase):

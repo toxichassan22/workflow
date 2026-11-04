@@ -2,6 +2,7 @@ import base64
 import tempfile
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 from design_templates import extract_slide_elements
 import slide_engine
@@ -59,7 +60,7 @@ FRONTEND_JS_ORDER = (
 
 def read_frontend_text():
     """The full client source: shell + styles + scripts in load order."""
-    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    parts = [shell_text()]
     for _css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
         parts.append(_css.read_text(encoding='utf-8'))
     for name in FRONTEND_JS_ORDER:

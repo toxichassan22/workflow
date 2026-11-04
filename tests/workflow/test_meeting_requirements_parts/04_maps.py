@@ -1,3 +1,6 @@
+from tests.frontend_source import shell_text
+
+
 class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
 
     def test_local_generated_image_reference_is_embedded_for_moodboard_generation(self):
@@ -1392,7 +1395,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
                for p in sorted((ROOT / 'assets' / 'css').rglob('*.css'))]
             + [f'assets/js/{name}' for name in FRONTEND_JS_ORDER])
         for name in frontend_names + ['slide_engine.py', 'design_templates.py', 'app.py']:
-            source = read_module_source(name)
+            source = shell_text() if name == 'index.html' else read_module_source(name)
             found = sorted({match.group() for match in pictographs.finditer(source)})
             self.assertEqual(found, [], f'{name} still contains icon glyphs: {found}')
 
@@ -1401,7 +1404,7 @@ class MeetingRequirementsTestsPart03(MeetingRequirementsTests):
         # charts (sparkline/line/donut builders emit SVG strings in JS), and the
         # visual-concept parcel boundary editor.
         index_source = read_frontend_text()
-        shell_source = (ROOT / 'index.html').read_text(encoding='utf-8')
+        shell_source = shell_text()
         for library in ('font-awesome', 'fontawesome', 'material-icons', 'bootstrap-icons', 'lucide'):
             self.assertNotIn(library, index_source.lower(), f'{library} must not be used')
         self.assertLessEqual(shell_source.count('<svg'), 1, 'the shell may inline at most the favicon SVG')

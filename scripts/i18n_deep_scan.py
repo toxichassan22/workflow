@@ -11,6 +11,7 @@ DOM would actually show, then classified:
                    core never exact-matches -> stays Arabic too
   ok             = standalone covered unit
 """
+import ast
 import json
 import re
 import sys
@@ -18,7 +19,28 @@ import io
 from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _shell_parts_order():
+    """INDEX_PARTS_ORDER from the bundle module: the one shell order authority."""
+    part = ROOT / 'app_parts' / '22_rules_pages' / '22f_frontend_bundles.py'
+    tree = ast.parse(part.read_text(encoding='utf-8'))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == 'INDEX_PARTS_ORDER'
+                for target in node.targets):
+            return tuple(ast.literal_eval(node.value))
+    return ()
+
+
+def _shell_source():
+    """The assembled shell: index.html loader plus its ordered index_parts body."""
+    skeleton = (ROOT / 'index.html').read_text(encoding='utf-8')
+    parts = ''.join(
+        (ROOT / 'index_parts' / name).read_text(encoding='utf-8')
+        for name in _shell_parts_order())
+    return skeleton.replace('<!--__INDEX_PARTS__-->\n', parts)
 AR_RE = re.compile(r'[؀-ۿ]')
 
 JS_ORDER = (
@@ -205,7 +227,7 @@ def main():
                 if v:
                     rows.append(dict(file=name, line=line, text=v, glued=glued,
                                      markup=False))
-    for kind, v in markup_units((ROOT / 'index.html').read_text(encoding='utf-8')):
+    for kind, v in markup_units(_shell_source()):
         rows.append(dict(file='index.html', line=0, text=v, glued=False,
                          markup=True))
 

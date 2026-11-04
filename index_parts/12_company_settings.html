@@ -1,0 +1,209 @@
+    <!-- Settings -->
+    <section id="tenantSettingsPage" class="tenant-page">
+      <div class="settings-container">
+
+        <!-- Header -->
+        <div class="settings-header-wrap">
+          <div>
+            <h2 class="settings-header-title" data-i18n="settings.title">إعدادات المنشأة والهوية البصرية</h2>
+            <p class="settings-header-sub" data-i18n="settings.subtitle">تخصيص البيانات الرسمية، الهوية البصرية، الشعار والعلامة المائية، وخطوط العروض المعتمدة</p>
+          </div>
+        </div>
+
+        <div id="settingsError" class="auth-error" style="display:none"></div>
+
+        <!-- Segmented Tabs Navigation -->
+        <div class="settings-tabs-nav" role="tablist">
+          <button type="button" class="settings-tab-btn active" id="settingsTabProfile" onclick="switchSettingsTab('profile')" data-i18n="settings.tab_profile">الملف التعريفي والبيانات</button>
+          <button type="button" class="settings-tab-btn" id="settingsTabIdentity" onclick="switchSettingsTab('identity')" data-i18n="settings.tab_identity">الهوية البصرية والألوان</button>
+          <button type="button" class="settings-tab-btn" id="settingsTabAssets" onclick="switchSettingsTab('assets')" data-i18n="settings.tab_assets">الشعار والعلامة المائية</button>
+          <button type="button" class="settings-tab-btn" id="settingsTabFonts" onclick="switchSettingsTab('fonts')" data-permission="company_settings" data-i18n="settings.tab_fonts">خطوط وأوزان العروض</button>
+        </div>
+
+        <!-- Tab 1: Profile & Official Data -->
+        <div class="settings-tab-pane active" id="settingsPaneProfile">
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <h3 class="settings-card-title" data-i18n="settings.profile_title">بيانات المنشأة الرسمية</h3>
+              <p class="settings-card-desc" data-i18n="settings.profile_desc">المعلومات المعتمدة التي تظهر في ترويسة وغلاف العروض ودراسات الجدوى العقارية</p>
+            </div>
+            <div class="tenant-grid">
+              <div class="tenant-field full">
+                <label data-i18n="settings.name_ar_field">اسم الشركة بالعربية</label>
+                <input type="text" id="settingsCompanyName" data-i18n-ph="settings.name_ar_placeholder" placeholder="اسم الشركة بالعربية">
+              </div>
+              <div class="tenant-field full">
+                <label data-i18n="company.name_en_field">اسم الشركة بالإنجليزية</label>
+                <input type="text" id="settingsCompanyNameEn" dir="ltr" data-i18n-ph="company.name_en_placeholder" placeholder="Company name">
+              </div>
+              <div class="tenant-field full">
+                <label data-i18n="settings.tagline_ar_field">الشعار اللفظي / التاغ لاين بالعربية</label>
+                <input type="text" id="settingsTagline" data-i18n-ph="settings.tagline_ar_placeholder" placeholder="شعار الشركة بالعربية">
+              </div>
+              <div class="tenant-field full">
+                <label data-i18n="company.tagline_en_field">الشعار اللفظي / التاغ لاين بالإنجليزية</label>
+                <input type="text" id="settingsTaglineEn" dir="ltr" data-i18n-ph="company.tagline_en_placeholder" placeholder="Short tagline">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Visual Identity & Colors -->
+        <div class="settings-tab-pane" id="settingsPaneIdentity">
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <h3 class="settings-card-title" data-i18n="settings.colors_title">لوحة ألوان العروض والتقارير</h3>
+              <p class="settings-card-desc" data-i18n="settings.colors_desc">الألوان المؤسسية الخمسة المعتمدة لتصميم الشرائح والجداول والرسوم البيانية</p>
+            </div>
+
+            <div class="settings-colors-layout">
+              <!-- Inputs -->
+              <div class="settings-colors-inputs">
+                <div class="settings-color-row">
+                  <div class="settings-color-meta">
+                    <div class="settings-color-name" data-i18n="settings.color_primary">اللون الرئيسي</div>
+                    <div class="settings-color-desc" data-i18n="settings.color_primary_desc">ترويسة الشرائح، الأغلفة، وعناوين الأقسام</div>
+                  </div>
+                  <div class="tenant-color-field">
+                    <input type="color" id="settingsPrimaryColor" oninput="updateSettingsPaletteMockup()">
+                    <input type="text" class="tenant-color-value" data-color-for="settingsPrimaryColor" dir="ltr" maxlength="7" spellcheck="false" autocomplete="off" placeholder="#RRGGBB">
+                  </div>
+                </div>
+
+                <div class="settings-color-row">
+                  <div class="settings-color-meta">
+                    <div class="settings-color-name" data-i18n="settings.color_secondary">اللون الثانوي</div>
+                    <div class="settings-color-desc" data-i18n="settings.color_secondary_desc">بطاقات المؤشرات، الجداول، والأشرطة الفرعية</div>
+                  </div>
+                  <div class="tenant-color-field">
+                    <input type="color" id="settingsSecondaryColor" oninput="updateSettingsPaletteMockup()">
+                    <input type="text" class="tenant-color-value" data-color-for="settingsSecondaryColor" dir="ltr" maxlength="7" spellcheck="false" autocomplete="off" placeholder="#RRGGBB">
+                  </div>
+                </div>
+
+                <div class="settings-color-row">
+                  <div class="settings-color-meta">
+                    <div class="settings-color-name" data-i18n="settings.color_accent">لون التمييز</div>
+                    <div class="settings-color-desc" data-i18n="settings.color_accent_desc">التركيز البصري، الشارات، والأرقام القياسية</div>
+                  </div>
+                  <div class="tenant-color-field">
+                    <input type="color" id="settingsAccentColor" oninput="updateSettingsPaletteMockup()">
+                    <input type="text" class="tenant-color-value" data-color-for="settingsAccentColor" dir="ltr" maxlength="7" spellcheck="false" autocomplete="off" placeholder="#RRGGBB">
+                  </div>
+                </div>
+
+                <div class="settings-color-row">
+                  <div class="settings-color-meta">
+                    <div class="settings-color-name" data-i18n="settings.color_background">لون الخلفية</div>
+                    <div class="settings-color-desc" data-i18n="settings.color_background_desc">مساحة عمل الشرائح وخلفيات الكروت</div>
+                  </div>
+                  <div class="tenant-color-field">
+                    <input type="color" id="settingsBackgroundColor" oninput="updateSettingsPaletteMockup()">
+                    <input type="text" class="tenant-color-value" data-color-for="settingsBackgroundColor" dir="ltr" maxlength="7" spellcheck="false" autocomplete="off" placeholder="#RRGGBB">
+                  </div>
+                </div>
+
+                <div class="settings-color-row">
+                  <div class="settings-color-meta">
+                    <div class="settings-color-name" data-i18n="settings.color_text">لون النص</div>
+                    <div class="settings-color-desc" data-i18n="settings.color_text_desc">النصوص الرئيسية والفقرات والجداول</div>
+                  </div>
+                  <div class="tenant-color-field">
+                    <input type="color" id="settingsTextColor" oninput="updateSettingsPaletteMockup()">
+                    <input type="text" class="tenant-color-value" data-color-for="settingsTextColor" dir="ltr" maxlength="7" spellcheck="false" autocomplete="off" placeholder="#RRGGBB">
+                  </div>
+                </div>
+              </div>
+
+              <!-- Interactive Live Preview -->
+              <div class="settings-palette-preview">
+                <div class="settings-palette-preview-title" data-i18n="settings.preview_title">معاينة تفاعلية لتناسق الألوان في العرض</div>
+                <div class="settings-slide-mockup" id="mockupSlide">
+                  <div class="mockup-header" id="mockupHeader">
+                    <span id="mockupHeaderTitle" data-i18n="settings.mockup_project">مشروع برج الأعمال</span>
+                    <span class="mockup-badge" id="mockupBadge" data-i18n="settings.mockup_badge">شريحة معتمدة</span>
+                  </div>
+                  <div class="mockup-body" id="mockupBody">
+                    <div class="mockup-card" id="mockupCard">
+                      <span id="mockupCardLabel" data-i18n="settings.mockup_metric">مؤشر العائد الداخلي</span>
+                      <strong id="mockupCardValue">24.5%</strong>
+                    </div>
+                    <div style="font-size:10px;line-height:1.4;" id="mockupBodyText" data-i18n="settings.mockup_body">
+                      تحليل استثماري متكامل لفرصة التطوير العقاري وفق أعلى معايير الجودة.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 3: Logo & Watermark -->
+        <div class="settings-tab-pane" id="settingsPaneAssets">
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <h3 class="settings-card-title" data-i18n="settings.logo_title">شعار المنشأة</h3>
+              <p class="settings-card-desc" data-i18n="settings.logo_desc">الأبعاد الموصى بها: 400x120 بكسل بصيغة PNG أو WEBP بخلفية شفافة</p>
+            </div>
+
+            <div class="settings-logo-dual-grid">
+              <div class="settings-logo-preview-box light-mode" id="settingsLogoPreviewLight">
+                <span class="settings-logo-preview-label" data-i18n="settings.logo_light">الخلفية الفاتحة</span>
+                <div id="settingsLogoPreview">شعار الشركة (PNG/JPG/WEBP)</div>
+              </div>
+              <div class="settings-logo-preview-box dark-mode" id="settingsLogoPreviewDark">
+                <span class="settings-logo-preview-label" data-i18n="settings.logo_dark">الخلفية الداكنة</span>
+                <div id="settingsLogoPreviewDarkBox">شعار الشركة (النسق الداكن)</div>
+              </div>
+            </div>
+
+            <div class="tenant-btns" style="margin-top:16px;">
+              <button type="button" class="btn primary" onclick="document.getElementById('logoFileInput').click()" data-i18n="settings.logo_upload">رفع شعار جديد</button>
+              <input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="handleLogoUpload(this)">
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-card-header">
+              <h3 class="settings-card-title" data-i18n="settings.watermark_title">العلامة المائية</h3>
+              <p class="settings-card-desc" data-i18n="settings.watermark_desc">تظهر بشفافية متزنة في خلفية كافة شرائح العرض لحماية حقوق الملكية</p>
+            </div>
+
+            <div class="settings-watermark-preview-box">
+              <div id="settingsWatermarkPreview">لا توجد علامة مائية</div>
+            </div>
+
+            <div class="tenant-btns" style="margin-top:16px;">
+              <button type="button" class="btn ghost" id="settingsWatermarkUploadButton" onclick="document.getElementById('watermarkFileInput').click()" data-i18n="settings.watermark_upload">رفع علامة مائية</button>
+              <button type="button" class="btn ghost danger" id="settingsWatermarkDeleteButton" onclick="deleteTenantWatermark()" data-i18n="settings.watermark_delete">حذف العلامة المائية</button>
+              <input type="file" id="watermarkFileInput" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="handleWatermarkUpload(this)">
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab 4: Typography & Fonts -->
+        <div class="settings-tab-pane" id="settingsPaneFonts">
+          <div class="settings-card" data-permission="company_settings">
+            <div class="settings-card-header">
+              <h3 class="settings-card-title" data-i18n="settings.fonts_title">إدارة أوزان وخطوط العرض الرسمية</h3>
+              <p class="settings-card-desc" data-i18n="settings.fonts_desc">تحديد الخطوط العربية والإنجليزية المعتمدة لتوليد شرائح العروض وملفات التصدير</p>
+            </div>
+            <div id="tenantFontSelections" style="display:grid;gap:12px;margin-top:6px;"></div>
+          </div>
+        </div>
+
+        <!-- Sticky Action Bar -->
+        <div class="settings-sticky-bar">
+          <div class="settings-sticky-status">
+            <span class="settings-sticky-dot" id="settingsStickyDot"></span>
+            <span id="settingsSaveStatus">الإعدادات محفوظة</span>
+          </div>
+          <div class="settings-sticky-actions">
+            <button type="button" class="btn ghost" onclick="openTenantSettings()" data-i18n="settings.restore">استعادة القيم</button>
+            <button type="button" class="btn primary" onclick="saveTenantSettings()" data-i18n="settings.save">حفظ الإعدادات</button>
+          </div>
+        </div>
+
+      </div>
+    </section>
+

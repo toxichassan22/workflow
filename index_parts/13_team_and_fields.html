@@ -1,0 +1,146 @@
+    <!-- Dynamic Fields -->
+    <section id="tenantTeamPage" class="tenant-page">
+      <div
+        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div>
+          <h2>فريق التطوير</h2>
+        </div>
+      </div>
+
+      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin:0 0 12px;font-size:15px">إضافة مطور</h3>
+        <div class="tenant-grid" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px">
+          <div class="tenant-field"><label>اسم المطور</label><input type="text" id="teamEntityName"
+              placeholder="اسم الشركة أو المكتب"></div>
+          <div class="tenant-field"><label>سنوات الخبرة</label><input type="number" id="teamEntityExperience" min="0"
+              placeholder="0"></div>
+          <div class="tenant-field"><label>شعار المطور</label><input type="file" id="teamEntityLogo"
+              accept="image/*,.jpg,.jpeg,.png,.webp"></div>
+          <div class="tenant-field full"><label>نبذة عن المطور</label><textarea id="teamEntityBrief" rows="3"
+              placeholder="نبذة تعريفية عن المطور"></textarea></div>
+          <div class="tenant-field full"><label>أبرز المشاريع</label><textarea id="teamEntityProjects" rows="3"
+              placeholder="مشروع في كل سطر"></textarea></div>
+        </div>
+        <div class="tenant-btns" style="margin-top:12px">
+          <button class="btn primary" id="teamEntitySaveBtn" onclick="submitTeamEntity()">إضافة المطور</button>
+          <button class="btn ghost" id="teamEntityCancelBtn" style="display:none" onclick="resetTeamEntityForm()">إلغاء
+            التعديل</button>
+        </div>
+      </div>
+
+      <div id="tenantTeamList"></div>
+    </section>
+
+    <section id="tenantFieldsPage" class="tenant-page">
+      <div
+        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+        <div>
+          <h2>الحقول المخصصة للمشاريع</h2>
+        </div>
+        <span class="section-status-badge draft" data-i18n="status.under_construction">تحت الإنشاء</span>
+      </div>
+      <div id="tenantFieldsWorkbench" hidden>
+      <div id="tenantFieldsList" style="margin-bottom: 20px;"></div>
+
+      <!-- Custom Sections Manager -->
+      <div style="background:#f0f7ff;border:1px solid #b3d4f0;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin-bottom:6px">إدارة الأقسام</h3>
+        <div id="customSectionsList" style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div class="tenant-field" style="flex:1;min-width:180px">
+            <label>اسم القسم الجديد</label>
+            <input type="text" id="newSectionLabel" placeholder="مثال: معلومات التسويق" style="width:100%">
+          </div>
+          <button class="btn primary" onclick="addCustomSection()">إضافة قسم</button>
+        </div>
+      </div>
+
+      <!-- AI Input Builder -->
+      <div style="background:#fff8e1;border:1px solid #f57f17;border-radius:16px;padding:18px;margin-bottom:20px">
+        <h3 style="margin-bottom:6px">بنّاء الحقول الذكي (AI Input Builder)</h3>
+
+        <div class="tenant-grid full" style="margin-bottom:12px">
+          <div class="tenant-field">
+            <label>وصف المشروع أو طبيعة العمل</label>
+            <textarea id="aiFieldDescription" rows="3"
+              placeholder="مثال: مشروع سكني فاخر في شمال الرياض يتكون من 200 فيلا، معROI هدف 15%، مدة استرداد 5 سنوات..."></textarea>
+          </div>
+        </div>
+
+        <div class="tenant-btns" style="margin-bottom:16px">
+          <button class="btn primary" id="btnAiSuggestFields" onclick="suggestAiFields()">اقتراح حقول بالذكاء
+            الاصطناعي</button>
+          <button class="btn primary" id="btnAiBuildFields" onclick="aiAutoBuildFields()"
+            style="background:#4CAF50;">بناء حقول تلقائياً (AI)</button>
+          <button class="btn ghost" onclick="clearAiFieldBuilder()">تفريغ</button>
+        </div>
+
+        <div id="aiFieldSuggestions" style="display:none">
+          <h4 style="margin-bottom:10px">الاقتراحات</h4>
+          <div id="aiFieldSuggestionsList" class="tenant-grid full" style="margin-bottom:12px"></div>
+          <div class="tenant-btns">
+            <button class="btn primary" onclick="approveAllAiFields()">إضافة كل المقبول</button>
+            <button class="btn danger" onclick="rejectAllAiFields()">رفض الكل</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="tenantFieldEditor"
+        style="background:#F4F9FC;border:1px solid var(--line);border-radius:16px;padding:18px">
+        <h3 id="tenantFieldFormTitle" style="margin-bottom:6px">إضافة حقل جديد يدوياً</h3>
+        <p id="tenantFieldFormHint" class="tenant-hint"></p>
+        <div class="tenant-grid">
+          <div class="tenant-field">
+            <label>اسم الحقل (اللي يظهر للمستخدم) *</label>
+            <input type="text" id="newFieldLabel" placeholder="مثال: حالة البناء">
+          </div>
+          <input type="hidden" id="newFieldKey">
+          <div class="tenant-field">
+            <label>نوع الحقل *</label>
+            <select id="newFieldType" onchange="onNewFieldTypeChange()">
+              <option value="text">نص قصير</option>
+              <option value="textarea">نص طويل (فقرة)</option>
+              <option value="number">رقم</option>
+              <option value="select">قائمة منسدلة</option>
+              <option value="date">تاريخ</option>
+              <option value="image">صورة</option>
+            </select>
+          </div>
+          <div class="tenant-field">
+            <label>القسم *</label>
+            <select id="newFieldSection"></select>
+          </div>
+          <div class="tenant-field" id="newFieldOptionsWrap" style="display:none">
+            <label>خيارات القائمة (افصل بينهم بفاصلة) *</label>
+            <input type="text" id="newFieldOptions" placeholder="جديد، قديم، تحت الإنشاء">
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <button class="btn ghost" type="button" onclick="toggleNewFieldAdvanced()">إعدادات إضافية</button>
+          <div id="newFieldAdvanced" class="tenant-grid" style="display:none;margin-top:12px">
+            <div class="tenant-field">
+              <label>نص توضيحي داخل الحقل (اختياري)</label>
+              <input type="text" id="newFieldPlaceholder" placeholder="مثال: اكتب حالة البناء الحالية">
+            </div>
+            <div class="tenant-field">
+              <label>قيمة افتراضية (اختياري)</label>
+              <input type="text" id="newFieldDefault" placeholder="">
+            </div>
+            <div class="tenant-field" style="display:flex;align-items:center;gap:10px">
+              <label>مطلوب؟</label>
+              <input type="checkbox" id="newFieldRequired" style="width:auto">
+            </div>
+          </div>
+        </div>
+
+        <div class="tenant-btns" style="margin-top:16px">
+          <button id="tenantFieldFormSubmit" class="btn primary" onclick="addTenantField()">إضافة الحقل</button>
+          <button id="tenantFieldEditCancel" class="btn ghost" style="display:none" onclick="clearNewFieldForm()">إلغاء
+            التعديل</button>
+          <button class="btn ghost" onclick="clearNewFieldForm()">تفريغ</button>
+        </div>
+      </div>
+      </div>
+    </section>
+

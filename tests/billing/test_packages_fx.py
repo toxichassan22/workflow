@@ -11,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -286,7 +287,7 @@ class PackagesFxTests(unittest.TestCase):
         self.assertAlmostEqual(project['cost_sar'], 4.0)
 
     def test_frontend_has_no_dollar_strings(self):
-        parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+        parts = [shell_text()]
         for _css in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
             parts.append(_css.read_text(encoding='utf-8'))
         for name in sorted((ROOT / 'assets' / 'js').rglob('*.js')):

@@ -123,6 +123,59 @@ FRONTEND_I18N_ORDER = (
     '17_dict_en_auto_backend_market.js', '18_dict_en_auto_backend_platform.js',
 )
 
+# The SPA shell follows the same contract: index.html is a loader that carries
+# the document chrome and one placeholder, and this tuple is the body markup
+# order. Editing a part is enough — the shell is assembled on the next request
+# with no build step, and the ETag in index() covers the assembled body.
+INDEX_PARTS_ORDER = (
+    '10_app_chrome.html', '11_dashboard.html',
+    '12_company_settings.html', '13_team_and_fields.html',
+    '14_project_form.html', '15_slides_workspace.html',
+    '16_rail_and_font_overlay.html', '17_presentations.html',
+    '18_users_training_rules.html', '19_approvals_hub.html',
+    '20_admin_dashboard.html', '21_admin_modals.html',
+    '22_support_and_join.html', '23_packages.html',
+    '24_platform_settings.html',
+)
+INDEX_PARTS_MARKER = '<!--__INDEX_PARTS__-->'
+_INDEX_SHELL_CACHE = {}
+
+
+def _index_shell_signature():
+    """Per-file signature so editing any part rebuilds the shell, no restart."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    paths = [os.path.join(root, 'index.html')]
+    paths.extend(os.path.join(root, 'index_parts', name) for name in INDEX_PARTS_ORDER)
+    try:
+        return tuple(
+            (path, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+            for path in paths for stat in (os.stat(path),)
+        )
+    except OSError:
+        return None
+
+
+def _build_index_shell():
+    """The served shell: index.html with the ordered body parts spliced in."""
+    signature = _index_shell_signature()
+    if signature is None:
+        raise RuntimeError('index.html or an index_parts file is missing')
+    cached = _INDEX_SHELL_CACHE.get('shell')
+    if cached and cached[0] == signature:
+        return cached[1]
+    root = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(root, 'index.html'), 'r', encoding='utf-8') as fh:
+        skeleton = fh.read()
+    if skeleton.count(INDEX_PARTS_MARKER) != 1:
+        raise RuntimeError('index.html must carry exactly one index-parts placeholder')
+    chunks = []
+    for name in INDEX_PARTS_ORDER:
+        with open(os.path.join(root, 'index_parts', name), 'r', encoding='utf-8') as fh:
+            chunks.append('<!--__PART:%s-->\n%s' % (name, fh.read()))
+    shell = skeleton.replace(INDEX_PARTS_MARKER + '\n', ''.join(chunks))
+    _INDEX_SHELL_CACHE['shell'] = (signature, shell)
+    return shell
+
 
 def _build_frontend_bundle(kind):
     """Concatenate part files in load order with markers, cached by content.

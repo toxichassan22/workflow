@@ -30,9 +30,9 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
-INDEX = ROOT / 'index.html'
 I18N_JS = ROOT / 'assets' / 'i18n.js'
 I18N_DICT_DIR = ROOT / 'assets' / 'i18n'
 BASELINE = Path(__file__).resolve().parent / 'i18n_hardcoded_baseline.txt'
@@ -155,7 +155,7 @@ def read_module_source(name):
 
 
 def read_shell():
-    return INDEX.read_text(encoding='utf-8')
+    return shell_text()
 
 
 def read_frontend_text():
@@ -525,7 +525,7 @@ class I18nFoundationTests(unittest.TestCase):
             self.assertIn(
                 guard, src,
                 'auto-translate skip list must keep %s' % guard)
-        html = INDEX.read_text(encoding='utf-8')
+        html = shell_text()
         self.assertIn('tenantUserChip', html)
         self.assertIn('toggleAppLanguage', html)
 
@@ -747,8 +747,7 @@ process.stdout.write(JSON.stringify({
             for name, text in (
                 (p.name, p.read_text(encoding='utf-8'))
                 for p in [I18N_JS] + list(I18N_DICT_DIR.glob('*.js')) +
-                [ROOT / 'assets' / 'js' / n for n in FRONTEND_JS_ORDER] +
-                [INDEX])
+                [ROOT / 'assets' / 'js' / n for n in FRONTEND_JS_ORDER])
             if pattern.search(text)))
         self.assertEqual(
             offenders, [],

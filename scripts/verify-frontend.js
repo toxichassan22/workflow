@@ -125,6 +125,41 @@ for (const [order, dir, ext] of [[jsOrder || [], 'js', '.js'], [cssOrder || [], 
   if (missing.length) fail(`assets/${dir} files not in the bundle order: ${missing.join(', ')}`);
 }
 
+// 4b. The shell body is assembled from ordered index_parts/ files: the loader
+// must carry exactly one placeholder, and the order authority must match the
+// on-disk set exactly so no part is silently dropped from the served shell.
+const shellPartsOrder = readOrderTuple(appSource, 'INDEX_PARTS_ORDER');
+const partsDir = path.join(ROOT, 'index_parts');
+const partsOnDisk = fs.existsSync(partsDir)
+  ? fs.readdirSync(partsDir).filter((f) => f.endsWith('.html')).sort() : [];
+if (!shellPartsOrder || !shellPartsOrder.length) {
+  fail('22f_frontend_bundles.py must define INDEX_PARTS_ORDER');
+}
+const markerCount = (shell.match(/<!--__INDEX_PARTS__-->/g) || []).length;
+if (markerCount !== 1) fail(`index.html must carry exactly one index-parts placeholder (found ${markerCount})`);
+if (!partsOnDisk.length) fail('index_parts/ HTML parts are missing');
+if (shellPartsOrder && shellPartsOrder.length) {
+  const seenParts = new Set();
+  for (const name of shellPartsOrder) {
+    if (seenParts.has(name)) fail(`INDEX_PARTS_ORDER lists index_parts/${name} twice`);
+    seenParts.add(name);
+    if (!fs.existsSync(path.join(partsDir, name))) fail(`index_parts/${name} is missing`);
+  }
+  const orphanParts = partsOnDisk.filter((f) => !shellPartsOrder.includes(f));
+  if (orphanParts.length) fail(`index_parts files not in INDEX_PARTS_ORDER (never served): ${orphanParts.join(', ')}`);
+  if ([...shellPartsOrder].sort().join() !== partsOnDisk.join()) {
+    fail('INDEX_PARTS_ORDER must match the sorted index_parts file names');
+  }
+  const assembled = shell.replace('<!--__INDEX_PARTS__-->\n', shellPartsOrder.map(
+    (name) => fs.readFileSync(path.join(partsDir, name), 'utf8')).join(''));
+  if (assembled.includes('<!--__INDEX_PARTS__-->')) fail('the index-parts placeholder was not replaced');
+  for (const m of assembled.matchAll(/<style[^>]*>/g)) {
+    fail(`an index part carries an inline <style> block: ${m[0].slice(0, 60)}`);
+  }
+  const partScripts = [...assembled.matchAll(/^\s*<script>\s*$/gm)];
+  if (partScripts.length) fail(`index parts carry ${partScripts.length} inline <script> block(s)`);
+}
+
 // 5. Every part parses on its own, and the concatenated bundle parses as one
 // script/stylesheet (catches a missing-semicolon merge between parts).
 const node = process.execPath;
@@ -165,4 +200,4 @@ if (failures.length) {
   console.error(`verify-frontend: ${failures.length} problem(s):\n- ${failures.join('\n- ')}`);
   process.exit(1);
 }
-console.log(`verify-frontend: OK (shell + bundles ${(jsOrder || []).length} js + ${(cssOrder || []).length} css, all parse)`);
+console.log(`verify-frontend: OK (shell + ${(shellPartsOrder || []).length} parts + bundles ${(jsOrder || []).length} js + ${(cssOrder || []).length} css, all parse)`);

@@ -247,7 +247,8 @@ def api_approval_status(pres_id):
 # 22a_public_pages.py. The shell itself stays reachable through /app, /c/<slug>,
 # /superadmin and /invite/<token>, which all call index().
 def index():
-    resp = send_from_directory(os.path.dirname(__file__), 'index.html', conditional=False)
+    body = _build_index_shell().encode('utf-8')
+    resp = app.response_class(body, mimetype='text/html')
     # Bundle URLs carry a version derived from their source files, so browsers
     # can keep those large assets between refreshes without serving stale code
     # after a deploy. Include the same versions in the shell ETag so a changed
@@ -263,8 +264,6 @@ def index():
             (b'/assets/app.bundle.css', 'css'),
             (b'/assets/app.bundle.js', 'js'),
         )
-        resp.direct_passthrough = False
-        body = resp.get_data()
         for asset_path, kind in replacements:
             version = versions.get(kind)
             if version:
@@ -314,7 +313,7 @@ def company_app_page(slug='', page=''):
 
 @app.route('/invite/<token>')
 def invite_page(token):
-    resp = send_from_directory(os.path.dirname(__file__), 'index.html')
+    resp = app.response_class(_build_index_shell().encode('utf-8'), mimetype='text/html')
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
@@ -538,7 +537,7 @@ def _build_commit():
     return _BUILD_COMMIT
 
 
-BUILD_FINGERPRINT_FILES = ('app.py', 'index.html', 'modules/slides/slide_engine.py',
+BUILD_FINGERPRINT_FILES = ('app.py', 'index.html', 'index_parts', 'modules/slides/slide_engine.py',
                            'modules/slides/design_templates.py',
                            'modules/pdf/generate_pdf_from_preview.py', 'modules/db/db.py',
                            'assets/i18n.js', 'assets/i18n',

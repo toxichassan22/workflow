@@ -46,6 +46,7 @@ Covers:
 import re
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -53,7 +54,7 @@ ROOT = Path(__file__).resolve().parents[2]
 class TenantNotificationsCenterTests(unittest.TestCase):
 
     def setUp(self):
-        self.index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.index_html = shell_text()
         self.notif_js = (ROOT / 'assets' / 'js' / '19-notifications.js').read_text(encoding='utf-8')
         self.css_chrome = (ROOT / 'assets' / 'css' / 'base' / '08_shell_chrome.css').read_text(encoding='utf-8')
         self.ar_dict = (ROOT / 'assets' / 'i18n' / '01_dict_ar.js').read_text(encoding='utf-8')

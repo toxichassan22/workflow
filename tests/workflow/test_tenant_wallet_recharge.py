@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -47,7 +48,7 @@ class TenantWalletRechargeUITests(unittest.TestCase):
             'wallet@test.com',
         )
 
-        cls.index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        cls.index_html = shell_text()
         cls.wallet_js = (ROOT / 'assets' / 'js' / '18-landloom-ops' / '04_wallet_ledger.js').read_text(encoding='utf-8')
         cls.slider_css = (ROOT / 'assets' / 'css' / 'base' / '07_package_slider.css').read_text(encoding='utf-8')
 

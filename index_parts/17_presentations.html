@@ -1,0 +1,93 @@
+    <!-- Presentations -->
+    <section id="tenantPresentationsPage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="projects.kicker">إدارة الدراسات والعروض</span>
+          <h2 style="display:inline-flex;align-items:center;gap:10px">
+            <span data-i18n="nav.projects">المشاريع</span>
+            <span id="presentationsCountBadge" class="tenant-panel-subtitle" style="font-size:14px;font-weight:600;margin:0"></span>
+          </h2>
+        </div>
+        <div>
+          <button type="button" class="btn primary" data-permission="create_presentation"
+            onclick="startTenantProject()" data-i18n="nav.new_proposal">مشروع جديد</button>
+        </div>
+      </div>
+
+      <div class="tenant-projects-stats-strip" id="projectStatsStrip">
+        <div class="tenant-project-stat-chip">
+          <span class="stat-num" id="presStatTotal">0</span>
+          <span class="stat-lbl" data-i18n="projects.stat_total">إجمالي المشاريع</span>
+        </div>
+        <div class="tenant-project-stat-chip">
+          <span class="stat-num in-progress" id="presStatInProgress">0</span>
+          <span class="stat-lbl" data-i18n="projects.stat_in_progress">قيد الإعداد</span>
+        </div>
+        <div class="tenant-project-stat-chip">
+          <span class="stat-num approved" id="presStatApproved">0</span>
+          <span class="stat-lbl" data-i18n="projects.stat_approved">معتمد نهائيًا</span>
+        </div>
+        <div class="tenant-project-stat-chip">
+          <span class="stat-num draft" id="presStatDrafts">0</span>
+          <span class="stat-lbl" data-i18n="projects.stat_drafts">مسودات</span>
+        </div>
+      </div>
+
+      <div class="tenant-projects-filter-panel" style="margin-bottom:20px">
+        <div class="tenant-grid tenant-projects-filter-grid">
+          <div class="tenant-field project-search-field">
+            <label data-i18n="projects.search_label">بحث</label>
+            <input type="text" id="projectArchiveSearch" placeholder="بحث باسم المشروع..."
+              data-i18n-ph="projects.search_placeholder"
+              oninput="filterProjectArchiveInstant()"
+              onkeydown="if(event.key==='Enter') openTenantPresentations(true)">
+          </div>
+          <div class="tenant-field">
+            <label data-i18n="projects.status_label">الحالة</label>
+            <select id="projectArchiveStatus" onchange="filterProjectArchiveInstant()">
+              <option value="" data-i18n="projects.all_statuses">كل الحالات</option>
+              <option value="draft">مسودة</option>
+              <option value="sections_in_progress">قيد إعداد الأقسام</option>
+              <option value="section_approval_pending">بانتظار اعتماد قسم</option>
+              <option value="rejected_for_revision">معاد للتعديل</option>
+              <option value="sections_approved">الأقسام معتمدة</option>
+              <option value="generation_approval_pending">بانتظار اعتماد التوليد</option>
+              <option value="generating">قيد التوليد</option>
+              <option value="generated_draft">مسودة ملف مولد</option>
+              <option value="final_approval_pending">بانتظار اعتماد الملف النهائي</option>
+              <option value="approved">معتمد نهائيًا</option>
+              <option value="archived">مؤرشف</option>
+            </select>
+          </div>
+          <div class="tenant-field">
+            <label data-i18n="projects.from_date">من تاريخ</label>
+            <input type="date" id="projectArchiveFrom" onchange="filterProjectArchiveInstant()">
+          </div>
+          <div class="tenant-field">
+            <label data-i18n="projects.to_date">إلى تاريخ</label>
+            <input type="date" id="projectArchiveTo" onchange="filterProjectArchiveInstant()">
+          </div>
+          <div class="tenant-field filter-actions-field" style="display:flex;align-items:flex-end;gap:8px">
+            <button type="button" class="btn primary" onclick="openTenantPresentations(true)" data-i18n="projects.filter">تصفية</button>
+            <button type="button" class="btn ghost" onclick="clearProjectArchiveFilters()" data-i18n="projects.reset">إعادة ضبط</button>
+          </div>
+        </div>
+      </div>
+      <div id="tenantPresentationsList"></div>
+    </section>
+
+    <section id="tenantProjectPresentationsPage" class="tenant-page">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px">
+        <h2 id="projectPresentationsPageTitle" style="margin:0">العروض السابقة</h2>
+        <button type="button" class="btn ghost" onclick="closeProjectPresentationsTab()">إغلاق التبويب</button>
+      </div>
+      <div class="tenant-grid" style="margin-bottom:16px">
+        <div class="tenant-field full"><label>بحث</label><input type="text" id="projectPresentationsSearch" placeholder="اسم العرض" onkeydown="if(event.key==='Enter') loadProjectPresentationsPage()"></div>
+        <div class="tenant-field"><label>الحالة</label><select id="projectPresentationsStatus"><option value="">كل الحالات</option><option value="draft">مسودة</option><option value="sections_in_progress">قيد إعداد الأقسام</option><option value="section_approval_pending">بانتظار اعتماد قسم</option><option value="rejected_for_revision">معاد للتعديل</option><option value="sections_approved">الأقسام معتمدة</option><option value="generation_approval_pending">بانتظار اعتماد التوليد</option><option value="generating">قيد التوليد</option><option value="generated_draft">مسودة ملف مولد</option><option value="final_approval_pending">بانتظار اعتماد الملف النهائي</option><option value="approved">معتمد نهائيًا</option><option value="archived">مؤرشف</option></select></div>
+        <div class="tenant-field"><label>من تاريخ</label><input type="date" id="projectPresentationsFrom"></div>
+        <div class="tenant-field"><label>إلى تاريخ</label><input type="date" id="projectPresentationsTo"></div>
+        <div class="tenant-field"><button type="button" class="btn primary" onclick="loadProjectPresentationsPage()">تصفية</button></div>
+      </div>
+      <div id="projectPresentationsPageList"></div>
+    </section>
+

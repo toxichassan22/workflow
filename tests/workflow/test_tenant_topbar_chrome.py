@@ -1,13 +1,14 @@
 """Tests for Unified Topbar Chrome: Brand Cluster, Breadcrumb Context, Points Pill, and User Chip."""
 import unittest
 from pathlib import Path
+from tests.frontend_source import shell_text
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 class TenantTopbarChromeTests(unittest.TestCase):
     def setUp(self):
-        self.index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
+        self.index_html = shell_text()
         self.topbar_css = (ROOT / 'assets' / 'css' / 'base' / '12_topbar_chrome.css').read_text(encoding='utf-8')
         self.responsive_css = (ROOT / 'assets' / 'css' / 'base' / '04_export_responsive.css').read_text(encoding='utf-8')
         self.auth_boot_js = (ROOT / 'assets' / 'js' / '02-settings-branding' / '02_auth_boot.js').read_text(encoding='utf-8')

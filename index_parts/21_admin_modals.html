@@ -1,0 +1,160 @@
+    <!-- Company management modals (position:fixed — must live outside .tenant-page which is display:none) -->
+    <div id="sagTenantModal" style="display:none" data-a11y-modal></div>
+
+    <!-- Project language: every new project picks the language its generated
+         proposal is written in before the form opens. -->
+    <div id="projectLanguageModal" class="ll-modal-overlay" data-a11y-modal>
+      <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="projectLanguageModalTitle">
+        <div class="sag-modal-head">
+          <h2 id="projectLanguageModalTitle">لغة المشروع</h2>
+        </div>
+        <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
+          <button type="button" class="btn ghost" id="projectLanguageCancelBtn">إلغاء</button>
+          <button type="button" class="btn primary" id="projectLanguageArBtn">العربية</button>
+          <button type="button" class="btn primary" id="projectLanguageEnBtn">English</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="sagCompanyCreateModal" data-a11y-modal
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:20px">
+        <div role="dialog" aria-modal="true" aria-labelledby="sagCompanyCreateTitle"
+            style="background:#fff;border-radius:20px;padding:28px;max-width:760px;width:100%;max-height:90vh;overflow:auto">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px">
+            <h2 id="sagCompanyCreateTitle" style="margin:0">إضافة شركة جديدة</h2>
+            <button type="button" class="btn ghost" onclick="closeSagCompanyCreate()">إغلاق</button>
+          </div>
+          <div id="sagCompanyCreateError" class="auth-error"></div>
+          <form id="sagCompanyCreateForm" onsubmit="createSagCompany(event)">
+            <div class="tenant-grid">
+              <div class="tenant-field">
+                <label for="sagCreateCompanyName">اسم الشركة</label>
+                <input type="text" id="sagCreateCompanyName" maxlength="120" required>
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreateCompanyNameEn" data-i18n="company.name_en_field">اسم الشركة بالإنجليزية</label>
+                <input type="text" id="sagCreateCompanyNameEn" dir="ltr" maxlength="120" data-i18n-ph="company.name_en_placeholder" placeholder="Company name">
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreateManagerName">اسم مدير الحساب</label>
+                <input type="text" id="sagCreateManagerName" maxlength="120" required>
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreateEmail">البريد الإلكتروني</label>
+                <input type="email" id="sagCreateEmail" autocomplete="off" required>
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreatePhone">رقم الجوال</label>
+                <input type="tel" id="sagCreatePhone" inputmode="tel" autocomplete="off" required>
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreateUsername">اسم المستخدم</label>
+                <input type="text" id="sagCreateUsername" autocomplete="off" minlength="3" maxlength="40" required>
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreateStatus">حالة الحساب</label>
+                <select id="sagCreateStatus">
+                  <option value="active">نشط</option>
+                  <option value="inactive">موقوف</option>
+                </select>
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreateTrialDays">مدة التجربة بالأيام</label>
+                <input type="number" id="sagCreateTrialDays" min="0" max="365" dir="ltr">
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreatePackage">الباقة</label>
+                <select id="sagCreatePackage"><option value="">بدون باقة</option></select>
+              </div>
+              <div class="tenant-field">
+                <label for="sagCreatePasswordMode">إعداد كلمة المرور</label>
+                <select id="sagCreatePasswordMode" onchange="toggleSagCompanyPassword()">
+                  <option value="set_link">رابط تعيين كلمة المرور</option>
+                  <option value="manual">كلمة مرور يحددها المدير</option>
+                </select>
+              </div>
+              <div class="tenant-field" id="sagCreatePasswordWrap" style="display:none">
+                <label for="sagCreatePassword">كلمة المرور</label>
+                <div style="display:flex;gap:8px">
+                  <div style="position:relative;flex:1;min-width:0">
+                    <input type="password" id="sagCreatePassword" minlength="10" autocomplete="new-password" style="width:100%;padding-left:64px">
+                    <button type="button" onclick="togglePasswordVisibility('sagCreatePassword', this)" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);border:0;background:none;color:var(--p);font-weight:800;font-size:13px;font-family:inherit;cursor:pointer;padding:4px 6px">إظهار</button>
+                  </div>
+                  <button type="button" class="btn ghost" onclick="generateSagCompanyPassword()">توليد تلقائي</button>
+                </div>
+              </div>
+              <div class="tenant-field full">
+                <label style="display:flex;align-items:center;gap:8px;margin:0">
+                  <input type="checkbox" id="sagCreateWelcomeEmail" checked style="width:auto">
+                  إرسال رسالة الترحيب
+                </label>
+              </div>
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:18px">
+              <button type="button" class="btn ghost" onclick="closeSagCompanyCreate()">إلغاء</button>
+              <button type="submit" class="btn primary" id="sagCreateCompanySubmit">إنشاء الحساب</button>
+            </div>
+          </form>
+          <div id="sagCompanyCreateResult" style="display:none"></div>
+        </div>
+      </div>
+
+    <!-- Top-up requests: super-admin review queue -->
+    <section id="tenantAdminRechargePage" class="tenant-page">
+      <div class="tenant-page-heading">
+        <div>
+          <span class="tenant-page-kicker" data-i18n="chrome.platform">إدارة المنصة</span>
+          <h2 data-i18n="nav.recharge_requests">طلبات الشحن</h2>
+        </div>
+      </div>
+      <div class="ops-stat-grid">
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatRechargePending">0</h3>
+          <p data-i18n="admin.recharge_pending_stat">بانتظار المراجعة</p>
+        </div>
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatRechargeApproved">0</h3>
+          <p data-i18n="admin.recharge_approved_stat">معتمدة</p>
+        </div>
+        <div class="tenant-dash-card stat">
+          <h3 id="adminStatRechargeRejected">0</h3>
+          <p data-i18n="admin.recharge_rejected_stat">مرفوضة</p>
+        </div>
+      </div>
+      <div class="tenant-content-panel">
+        <div class="tenant-panel-heading">
+          <h3 class="dash-section-title" data-i18n="admin.recharge_inbox">طلبات الشحن من الشركات</h3>
+          <select id="sagRechargeStatusFilter" onchange="adminLoadRecharges()" class="tenant-filter-select" aria-label="فلترة حسب الحالة">
+            <option value="">كل الحالات</option>
+            <option value="pending">بانتظار المراجعة</option>
+            <option value="approved">معتمدة</option>
+            <option value="rejected">مرفوضة</option>
+          </select>
+        </div>
+        <div id="sagRechargeRequestsList"></div>
+      </div>
+    </section>
+
+    <!-- Modal: Recharge decision — top-level like every overlay; nested inside
+         a .tenant-page it would stay invisible whenever that page is inactive. -->
+    <div id="llRechargeDecisionModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llRechargeDecisionModal')">
+      <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llRechargeDecisionTitle">
+        <div class="sag-modal-head">
+          <h2 id="llRechargeDecisionTitle">قرار طلب الشحن</h2>
+          <button type="button" class="btn ghost small" onclick="closeLlModal('llRechargeDecisionModal')">إغلاق</button>
+        </div>
+        <input type="hidden" id="llRechargeDecisionId">
+        <input type="hidden" id="llRechargeDecisionKind">
+        <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
+          <div class="tenant-field" id="llRechargeInvoiceField" style="display:none"><label for="llRechargeInvoice">الفاتورة (إجباري)</label><input type="file" id="llRechargeInvoice" accept=".pdf,.png,.jpg,.jpeg" required></div>
+          <div class="tenant-field" id="llRechargeReasonField" style="display:none"><label for="llRechargeReason">سبب الرفض</label><select id="llRechargeReason" onchange="llRechargeReasonChanged()"></select></div>
+          <div class="tenant-field" id="llRechargeNoteField" style="display:none"><label for="llRechargeNote" id="llRechargeNoteLabel">ملاحظة إضافية</label><input type="text" id="llRechargeNote"></div>
+        </div>
+        <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llRechargeDecisionError"></div>
+        <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
+          <button type="button" class="btn ghost" onclick="closeLlModal('llRechargeDecisionModal')">إلغاء</button>
+          <button type="button" class="btn primary" id="llRechargeDecisionSubmitBtn" onclick="llSubmitRechargeDecision()">تسجيل القرار</button>
+        </div>
+      </div>
+    </div>
+
