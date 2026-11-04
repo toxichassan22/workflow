@@ -736,16 +736,55 @@
       toast('تم رفع خط الشركة');
     }
 
-    // Settings
+    // Settings Navigation & Live Previews
+    function switchSettingsTab(tabKey) {
+      const tabs = { profile: ['settingsTabProfile', 'settingsPaneProfile'], identity: ['settingsTabIdentity', 'settingsPaneIdentity'], assets: ['settingsTabAssets', 'settingsPaneAssets'], fonts: ['settingsTabFonts', 'settingsPaneFonts'] };
+      Object.keys(tabs).forEach(k => {
+        const isTarget = (k === tabKey), b = document.getElementById(tabs[k][0]), p = document.getElementById(tabs[k][1]);
+        if (b) b.classList.toggle('active', isTarget);
+        if (p) p.classList.toggle('active', isTarget);
+      });
+    }
+
+    function updateSettingsPaletteMockup() {
+      const primary = getValue('settingsPrimaryColor') || '#07182C', secondary = getValue('settingsSecondaryColor') || '#254B66';
+      const accent = getValue('settingsAccentColor') || '#17C8E3', bg = getValue('settingsBackgroundColor') || '#F4F9FC', text = getValue('settingsTextColor') || '#333333';
+      const h = document.getElementById('mockupHeader'), b = document.getElementById('mockupBody'), c = document.getElementById('mockupCard');
+      const badge = document.getElementById('mockupBadge'), txt = document.getElementById('mockupBodyText'), val = document.getElementById('mockupCardValue');
+      if (h) { h.style.background = primary; h.style.color = '#ffffff'; }
+      if (b) b.style.background = bg;
+      if (c) { c.style.background = secondary; c.style.color = '#ffffff'; }
+      if (badge) { badge.style.background = accent; badge.style.color = primary; }
+      if (txt) txt.style.color = text;
+      if (val) val.style.color = accent;
+    }
+
+    function setSettingsDirty(dirty) {
+      const dot = document.getElementById('settingsStickyDot'), status = document.getElementById('settingsSaveStatus');
+      if (dot) dot.classList.toggle('dirty', !!dirty);
+      if (status) status.textContent = dirty ? 'توجد تعديلات غير محفوظة' : 'الإعدادات محفوظة';
+    }
+
+    function updateSettingsLogoPreviews(logoPath) {
+      const previewLight = document.getElementById('settingsLogoPreview'), previewDark = document.getElementById('settingsLogoPreviewDarkBox');
+      const content = logoPath
+        ? '<img src="/tenant-assets/' + (tenantUser ? tenantUser.id : '') + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:80px">'
+        : 'شعار الشركة (PNG/JPG/WEBP)';
+      if (previewLight) previewLight.innerHTML = content;
+      if (previewDark) previewDark.innerHTML = content;
+    }
+
     async function openTenantSettings() {
       showTenantPage('tenantSettingsPage');
       showTenantError('settingsError', '');
+      switchSettingsTab('profile');
+      setSettingsDirty(false);
       const data = await api('GET', '/api/branding');
       if (!data.success || !data.branding) { toast('تعذر تحميل الإعدادات'); return; }
       tenantBranding = data.branding;
       const b = data.branding;
       setValue('settingsCompanyName', b.company_name || '');
-    setValue('settingsCompanyNameEn', b.company_name_en || '');
+      setValue('settingsCompanyNameEn', b.company_name_en || '');
       setValue('settingsTagline', b.tagline || '');
       setValue('settingsTaglineEn', b.tagline_en || '');
       setValue('settingsPrimaryColor', b.primary_color || '#07182C');
@@ -754,9 +793,8 @@
       setValue('settingsBackgroundColor', b.background_color || '#F4F9FC');
       setValue('settingsTextColor', b.text_color || '#333333');
       refreshSettingsColorFields();
-      // previews
-      const logoPreview = document.getElementById('settingsLogoPreview');
-      if (logoPreview) logoPreview.innerHTML = b.logo_path ? '<img src="/tenant-assets/' + tenantUser.id + '/logo?t=' + Date.now() + '" alt="logo" style="max-height:120px">' : 'اضغط لرفع لوجو الشركة (PNG/JPG/WEBP)';
+      updateSettingsPaletteMockup();
+      updateSettingsLogoPreviews(b.logo_path);
       renderSettingsWatermarkPreview(b);
       await loadTenantFonts();
     }
@@ -782,44 +820,41 @@
       if (t.type === 'color' && t.id) {
         const el = document.querySelector('.tenant-color-value[data-color-for="' + t.id + '"]');
         if (el) el.value = String(t.value).toUpperCase();
+        if (t.closest && t.closest('#tenantSettingsPage')) updateSettingsPaletteMockup();
         return;
       }
       if (t.classList && t.classList.contains('tenant-color-value')) {
         const picker = document.getElementById(t.getAttribute('data-color-for'));
         const hex = normalizeHexColorValue(t.value);
         if (picker && hex) picker.value = hex;
+        if (t.closest && t.closest('#tenantSettingsPage')) updateSettingsPaletteMockup();
       }
+      if (t.closest && t.closest('#tenantSettingsPage')) setSettingsDirty(true);
     });
 
     document.addEventListener('change', e => {
       const t = e.target;
-      if (!t || !t.classList || !t.classList.contains('tenant-color-value')) return;
-      const picker = document.getElementById(t.getAttribute('data-color-for'));
-      const hex = normalizeHexColorValue(t.value);
-      if (hex) {
-        t.value = hex;
-        if (picker) picker.value = hex;
-      } else if (picker) {
-        t.value = picker.value ? picker.value.toUpperCase() : '';
+      if (!t) return;
+      if (t.classList && t.classList.contains('tenant-color-value')) {
+        const picker = document.getElementById(t.getAttribute('data-color-for'));
+        const hex = normalizeHexColorValue(t.value);
+        if (hex) { t.value = hex; if (picker) picker.value = hex; }
+        else if (picker) { t.value = picker.value ? picker.value.toUpperCase() : ''; }
+        if (t.closest && t.closest('#tenantSettingsPage')) updateSettingsPaletteMockup();
       }
+      if (t.closest && t.closest('#tenantSettingsPage')) setSettingsDirty(true);
     });
 
     function setValue(id, v) { const el = document.getElementById(id); if (el) el.value = v || ''; }
     function getValue(id) { const el = document.getElementById(id); return el ? el.value : ''; }
 
-    // The page only exposes the brand fields below; layout/map/slide-count
-    // keys stay on the stored branding row and are managed elsewhere.
     function collectSettings() {
       return {
-        company_name: getValue('settingsCompanyName'),
-      company_name_en: getValue('settingsCompanyNameEn'),
-        tagline: getValue('settingsTagline'),
-        tagline_en: getValue('settingsTaglineEn'),
-        primary_color: getValue('settingsPrimaryColor'),
-        secondary_color: getValue('settingsSecondaryColor'),
-        accent_color: getValue('settingsAccentColor'),
-        background_color: getValue('settingsBackgroundColor'),
-        text_color: getValue('settingsTextColor'),
+        company_name: getValue('settingsCompanyName'), company_name_en: getValue('settingsCompanyNameEn'),
+        tagline: getValue('settingsTagline'), tagline_en: getValue('settingsTaglineEn'),
+        primary_color: getValue('settingsPrimaryColor'), secondary_color: getValue('settingsSecondaryColor'),
+        accent_color: getValue('settingsAccentColor'), background_color: getValue('settingsBackgroundColor'),
+        text_color: getValue('settingsTextColor')
       };
     }
 
@@ -830,6 +865,8 @@
       if (data.success) {
         tenantBranding = data.branding;
         await loadTenantBranding();
+        setSettingsDirty(false);
+        updateSettingsPaletteMockup();
         toast('تم حفظ إعدادات الشركة');
       } else {
         showTenantError('settingsError', data.error || 'فشل الحفظ');
@@ -843,8 +880,7 @@
       const data = await api('POST', '/api/upload/logo', form, true);
       if (data.success) {
         await loadTenantBranding();
-        const preview = document.getElementById('settingsLogoPreview');
-        if (preview) preview.innerHTML = '<img src="/tenant-assets/' + tenantUser.id + '/logo?r=' + Date.now() + '" alt="logo">';
+        updateSettingsLogoPreviews(true);
         toast('تم رفع اللوجو');
       } else {
         toast(data.error || 'فشل رفع اللوجو');

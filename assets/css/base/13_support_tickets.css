@@ -281,10 +281,23 @@
   background: rgba(0, 0, 0, 0.02);
 }
 
-.support-faq-toggle-label {
-  font-size: 11px;
-  font-weight: 500;
+.support-faq-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   color: var(--teal-dark, #0A829B);
+  transition: transform 0.2s ease;
+}
+
+.support-faq-chevron .ws-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.support-faq-item.open .support-faq-chevron {
+  transform: rotate(-90deg);
 }
 
 .support-faq-a {

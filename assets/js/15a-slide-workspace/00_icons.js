@@ -1,7 +1,8 @@
 /* Deck workspace icons. The owner authorized icons on the presentation page
    (2026-10-31) after the page shipped text-only: send, attach, stop, collapse,
    and the compact slide actions. This is the only icon sprite in the client;
-   it stays a local stroke set, never a library, font, emoji or glyph label. */
+   it stays a local stroke set, never a library, font, emoji or glyph label.
+   The support FAQ accordion reuses `chevron` (owner request, 2026-11-04). */
 
     const WS_ICON_PATHS = {
       send: '<path d="M21 3 3 10.6l7.2 2.8 2.7 7.6L21 3Z"/><path d="M10.2 13.4 21 3"/>',

@@ -324,12 +324,8 @@ function llToggleFaq(btn) {
   if (!btn) return;
   const item = btn.closest('.support-faq-item');
   if (!item) return;
-  const isOpen = item.classList.contains('open');
-  item.classList.toggle('open', !isOpen);
-  const toggleLabel = item.querySelector('.support-faq-toggle-label');
-  if (toggleLabel) {
-    toggleLabel.textContent = !isOpen ? WFT('common.hide', 'إخفاء') : WFT('common.show', 'عرض');
-  }
+  const isOpen = item.classList.toggle('open');
+  btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
 }
 
 /* ── Super Admin Support Desk ────────────────────────────────────────────── */
@@ -547,17 +543,6 @@ async function adminSetTicketStatus(id, status) {
   await adminLoadTickets();
 }
 
-function llToggleFaq(btn) {
-  if (!btn) return;
-  const item = btn.closest('.support-faq-item');
-  if (!item) return;
-  const isOpen = item.classList.toggle('open');
-  const label = btn.querySelector('.support-faq-toggle-label');
-  if (label) {
-    label.textContent = isOpen ? WFT('common.hide', 'إخفاء') : WFT('common.show', 'عرض');
-  }
-}
-
 async function llLoadSupportFaqs() {
   const container = document.getElementById('llClientFaqList');
   if (!container) return;
@@ -571,9 +556,9 @@ async function llLoadSupportFaqs() {
     const q = (typeof wfBilingual === 'function' ? wfBilingual(faq.question_ar, faq.question_en) : faq.question_ar) || faq.question_ar || faq.question_en || '';
     const a = (typeof wfBilingual === 'function' ? wfBilingual(faq.answer_ar, faq.answer_en) : faq.answer_ar) || faq.answer_ar || faq.answer_en || '';
     return '<div class="support-faq-item">' +
-      '<button type="button" class="support-faq-q" onclick="llToggleFaq(this)">' +
+      '<button type="button" class="support-faq-q" aria-expanded="false" onclick="llToggleFaq(this)">' +
         '<span>' + llEscape(q) + '</span>' +
-        '<span class="support-faq-toggle-label">' + llEscape(WFT('common.show', 'عرض')) + '</span>' +
+        '<span class="support-faq-chevron" aria-hidden="true">' + wsIcon('chevron') + '</span>' +
       '</button>' +
       '<div class="support-faq-a">' + llEscape(a) + '</div>' +
     '</div>';

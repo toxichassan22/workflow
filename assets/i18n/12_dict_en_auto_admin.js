@@ -29,6 +29,7 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "استعادة نسخة سابقة": "Restore Previous Version",
   "استعادة هذه النسخة كنسخة جديدة؟ النسخ المحفوظة الحالية ستبقى في السجل.": "Restore this version as a new version? Current saved versions will remain in the log.",
   "اسحب ملف الخط هنا أو اضغط لاختياره": "Drag the font file here or click to select it",
+  "اكتب الإجابة المفصلة بالعربية...": "Write detailed answer in Arabic...",
   "اسم الشركة": "Company name",
   "اسم المستخدم": "Username",
   "اسم مدير الحساب": "Account manager name",
@@ -451,6 +452,9 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "حفظ بيانات البنك": "Save bank details",
   "شركة لاندلوم لتقنية المعلومات": "Landloom Information Technology",
   "مثال: مصرف الراجحي": "e.g. Al Rajhi Bank",
+  "مثال: كم يستغرق الرد على التذاكر؟": "Example: How long does ticket response take?",
   "تحديث: 2026": "Update: 2026",
-  "نص مبدئي قابل للتحديث": "Initial placeholder text"
+  "نص مبدئي قابل للتحديث": "Initial placeholder text",
+  "يجب إدخال الإجابة بالعربية أو الإنجليزية على الأقل": "Please enter an answer in Arabic or English at least",
+  "يجب إدخال السؤال بالعربية أو الإنجليزية على الأقل": "Please enter a question in Arabic or English at least"
 }/*I18N_EN_AUTO_END*/);

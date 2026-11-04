@@ -3,16 +3,30 @@
 warning, and support-ticket priority/attachment rules."""
 import io
 import os
+import re
 import sys
 import tempfile
 import threading
 import unittest
 from datetime import timedelta
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 import auth
 import db
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def read_frontend_text(order):
+    """The full client source: shell + styles + scripts in bundle order."""
+    parts = [(ROOT / 'index.html').read_text(encoding='utf-8')]
+    for path in sorted((ROOT / 'assets' / 'css').rglob('*.css')):
+        parts.append(path.read_text(encoding='utf-8'))
+    for name in order:
+        parts.append((ROOT / 'assets' / 'js' / name).read_text(encoding='utf-8'))
+    return '\n'.join(parts)
 
 
 class OpsSectionTests(unittest.TestCase):
@@ -829,6 +843,38 @@ class OpsSectionTests(unittest.TestCase):
         # Invalid payload validation
         bad_req = self.client.put('/api/admin/support/faqs', headers=self.headers(admin), json={'faqs': 'not-a-list'})
         self.assertEqual(bad_req.status_code, 400)
+
+    def test_support_faq_toggle_is_a_rotating_chevron(self):
+        """Owner rule: the FAQ accordion toggles with a chevron, not an «إظهار» label. It starts
+        pointing left, rotates down while the answer is open, and aria-expanded follows the
+        state. The sprite part must load before the support part that draws it."""
+        order = self.application_module.FRONTEND_JS_ORDER
+        self.assertLess(
+            order.index('15a-slide-workspace/00_icons.js'),
+            order.index('18-landloom-ops/05_support_tickets.js'),
+            'the icon sprite must load before the support FAQ that uses it')
+        frontend = read_frontend_text(order)
+
+        self.assertEqual(frontend.count('function llToggleFaq(btn)'), 1,
+                         'llToggleFaq must have a single definition')
+        toggle_match = re.search(r'function llToggleFaq\(btn\) \{(.*?)\n\}', frontend, re.S)
+        self.assertIsNotNone(toggle_match, 'llToggleFaq is missing')
+        toggle = toggle_match.group(1)
+        self.assertIn("item.classList.toggle('open')", toggle)
+        self.assertIn("btn.setAttribute('aria-expanded'", toggle)
+        self.assertNotIn('WFT(', toggle)
+
+        render_start = frontend.index('function llLoadSupportFaqs()')
+        render_block = frontend[render_start:frontend.index('/* ── Super Admin FAQ Desk', render_start)]
+        self.assertIn('class="support-faq-chevron"', render_block)
+        self.assertIn("wsIcon('chevron')", render_block)
+        self.assertIn('aria-expanded="false"', render_block)
+
+        self.assertNotIn('support-faq-toggle-label', frontend)
+        self.assertIn(
+            '.support-faq-item.open .support-faq-chevron {\n  transform: rotate(-90deg);\n}',
+            frontend)
+        self.assertIn('.support-faq-chevron .ws-icon {', frontend)
 
 
 if __name__ == '__main__':

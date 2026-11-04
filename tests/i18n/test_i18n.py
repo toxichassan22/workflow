@@ -46,6 +46,7 @@ FRONTEND_CSS_ORDER = (
     'base/07_package_slider.css', 'base/08_shell_chrome.css',
     'base/09_slide_workspace.css', 'base/10_slide_canvas.css', 'base/11_slide_chat_present.css',
     'base/12_topbar_chrome.css', 'base/13_support_tickets.css',
+    'base/14_company_settings.css',
     'project-form/01_sections_changelog.css',
     'project-form/01a_location_maps.css',
     'project-form/02_fields_tables_rail.css',
