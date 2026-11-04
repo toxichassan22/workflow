@@ -173,6 +173,9 @@ class ButtonAuditGuardsTests(unittest.TestCase):
         self.assertIn("الملاحظات", agents_src)
         self.assertIn("مشكله سيستم", agents_src)
         self.assertIn("صفحه التصميم", agents_src)
+        self.assertIn("DD/Mon/YYYY", agents_src)
+        self.assertIn("strictly forbidden for ANY model or agent to write a completion date into column F", agents_src)
+        self.assertIn("Auto-numbered by spreadsheet formula automatically", agents_src)
 
 
 if __name__ == "__main__":
