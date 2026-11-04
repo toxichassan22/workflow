@@ -1796,19 +1796,19 @@
 
       <div class="tenant-notif-page-wrap">
         <div class="notif-stats-strip" id="notifStatsStrip">
-          <div class="notif-stat-chip">
+          <div class="notif-stat-chip notif-stat-clickable" onclick="setNotifStatusFilter('all'); setNotifCategoryGroup('all')">
             <span class="notif-stat-label" data-i18n="notif.stat_total">إجمالي الإشعارات</span>
             <span class="notif-stat-val" id="notifStatTotal">0</span>
           </div>
-          <div class="notif-stat-chip">
+          <div class="notif-stat-chip notif-stat-clickable" onclick="setNotifStatusFilter('unread')">
             <span class="notif-stat-label" data-i18n="notif.stat_unread">غير مقروءة</span>
             <span class="notif-stat-val" id="notifStatUnread" style="color:var(--teal,#0FA9C4)">0</span>
           </div>
-          <div class="notif-stat-chip">
+          <div class="notif-stat-chip notif-stat-clickable" onclick="setNotifCategoryGroup('projects')">
             <span class="notif-stat-label" data-i18n="notif.stat_projects">المشاريع والاعتمادات</span>
             <span class="notif-stat-val" id="notifStatProjects">0</span>
           </div>
-          <div class="notif-stat-chip">
+          <div class="notif-stat-chip notif-stat-clickable" onclick="setNotifCategoryGroup('finance')">
             <span class="notif-stat-label" data-i18n="notif.stat_system">المحفظة والخدمات</span>
             <span class="notif-stat-val" id="notifStatSystem">0</span>
           </div>
@@ -1841,6 +1841,22 @@
           </label>
         </div>
 
+        <div class="notif-selection-bar" id="notifSelectionBar">
+          <label class="notif-select-all-label">
+            <input type="checkbox" id="notifSelectAll" onchange="toggleNotifSelectAll(this.checked)">
+            <span data-i18n="common.select_all">تحديد الكل</span>
+          </label>
+          <div class="notif-bulk-actions" id="notifBulkActions" style="display:none">
+            <span class="notif-selected-count" id="notifSelectedCount">تم تحديد 0</span>
+            <button type="button" class="btn small primary" onclick="bulkMarkNotificationsRead()"
+              data-i18n="notif.mark_selected_read">تعليم كمقروء</button>
+            <button type="button" class="btn small ghost notif-bulk-del-btn" onclick="bulkDeleteNotifications()"
+              data-i18n="notif.delete_selected">حذف المحدد</button>
+            <button type="button" class="btn small ghost" onclick="clearNotifSelection()"
+              data-i18n="common.cancel">إلغاء</button>
+          </div>
+        </div>
+
         <div id="tenantNotificationsList"></div>
       </div>
 
@@ -1861,13 +1877,7 @@
         </div>
       </div>
 
-      <div class="tenant-content-panel notif-prefs-panel">
-        <div class="tenant-panel-heading">
-          <h3 class="dash-section-title" data-i18n="notif.prefs_title">تفضيلات الإشعارات</h3>
-          <span class="tenant-hint" id="notifPrefsSummary"></span>
-        </div>
-        <div id="tenantNotifPrefs" class="tenant-notif-prefs"></div>
-      </div>
+
     </section>
   </div><!-- close tenantAppPage -->
 

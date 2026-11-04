@@ -3,8 +3,11 @@
 Covers:
 1. Shell markup in index.html:
    - Header with kicker (`#notifPageKicker`), title (`page.notifications`), unread chip (`#notifUnreadCount`),
-     refresh button calling `renderNotificationsPage()`, and mark-all-read button.
-   - 4-chip stats strip (`#notifStatsStrip`): total, unread, projects & approvals, and system & wallet.
+     refresh button with `common.refresh` calling `renderNotificationsPage()`, and mark-all-read button.
+   - 4-chip stats strip (`#notifStatsStrip`) with clickable filter targets (`notif-stat-clickable`).
+   - Selection bar (`#notifSelectionBar`) with master checkbox (`#notifSelectAll`), select count,
+     bulk mark read, bulk delete, and cancel.
+   - Redundant preferences panel completely removed.
    - Centered container (`.tenant-notif-page-wrap`).
    - Dual toolbar with category group tabs (`.notif-category-tabs`) and reading status tabs (`.notif-status-tabs`).
    - List container (`#tenantNotificationsList`).
@@ -12,14 +15,18 @@ Covers:
    - Category group filter (`setNotifCategoryGroup`) and mappings (`NOTIF_GROUP_CATEGORIES`).
    - Number sanitization (`formatNotifNumberSanitized`) eliminating floating-point noise.
    - Direct contextual action buttons (`notifActionBtn`) for projects, approvals, wallet, and support tickets.
-   - Designed empty state (`notifEmptyHtml`) with 'LL' monogram and navigation CTA.
-   - Revitalized card layout (`notifCardHtml`) with `.tenant-notif-card-revamp`.
+   - Individual single mark-read button (`notificationMarkSingleRead`) on unread cards.
+   - Multi-selection management (`toggleNotifSelect`, `toggleNotifSelectAll`, `clearNotifSelection`, `updateNotifSelectionUI`).
+   - Bulk actions (`bulkMarkNotificationsRead`, `bulkDeleteNotifications`).
+   - Clean empty state (`notifEmptyHtml`) without any monogram logo or icon boxes.
+   - Revitalized card layout (`notifCardHtml`) with `.tenant-notif-card-revamp`, checkbox and selection highlighting.
    - Stats strip populated during `renderNotificationsPage()`.
 3. CSS rules in assets/css/base/08_shell_chrome.css:
    - Container max-width and centering (`.tenant-notif-page-wrap`).
-   - Responsive stats strip (`.notif-stats-strip`, `.notif-stat-chip`).
-   - Revitalized card styling (`.tenant-notif-card-revamp`, `.unread` with turquoise accent).
-   - Designed empty state (`.tenant-notif-empty-state`, `.notif-empty-monogram`).
+   - Responsive stats strip (`.notif-stats-strip`, `.notif-stat-chip`, `.notif-stat-clickable`).
+   - Selection bar and bulk actions (`.notif-selection-bar`, `.notif-bulk-actions`, `.notif-card-checkbox`).
+   - Revitalized card styling (`.tenant-notif-card-revamp`, `.unread` with turquoise accent, `.selected`).
+   - Clean empty state without monogram logo box.
 4. i18n parity across assets/i18n/01_dict_ar.js and assets/i18n/02_dict_en.js.
 5. Strict product rules:
    - Zero how-to instructional copy.
@@ -48,23 +55,26 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         return self.index_html.split('id="tenantNotificationsPage"')[1].split('</section>')[0]
 
     def test_page_heading_actions_and_refresh(self):
-        """Notifications page has unified heading, kicker, refresh button, unread chip, and mark-all-read."""
+        """Notifications page has unified heading, kicker, refresh button with key common.refresh, unread chip, and mark-all-read."""
         block = self._get_page_block()
         self.assertIn('class="tenant-page-heading"', block)
         self.assertIn('id="notifPageKicker"', block)
         self.assertIn('data-i18n="page.notifications"', block)
+        self.assertIn('data-i18n="common.refresh"', block)
         self.assertIn('renderNotificationsPage()', block)
         self.assertIn('id="notifUnreadCount"', block)
         self.assertIn('notificationsMarkAllRead()', block)
 
     def test_page_statistics_strip(self):
-        """Page has a 4-chip executive stats strip."""
+        """Page has a 4-chip executive stats strip with clickable filter handlers."""
         block = self._get_page_block()
         self.assertIn('id="notifStatsStrip"', block)
         self.assertIn('id="notifStatTotal"', block)
         self.assertIn('id="notifStatUnread"', block)
         self.assertIn('id="notifStatProjects"', block)
         self.assertIn('id="notifStatSystem"', block)
+        self.assertIn('notif-stat-clickable', block)
+        self.assertIn("setNotifStatusFilter('unread')", block)
 
     def test_dual_toolbar_tabs(self):
         """Toolbar includes category group tabs and read status tabs."""
@@ -80,6 +90,28 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         self.assertIn('setNotifStatusFilter(\'unread\')', block)
         self.assertIn('setNotifStatusFilter(\'read\')', block)
 
+    def test_selection_bar_and_bulk_actions_markup(self):
+        """Notifications markup includes selection bar with master checkbox and bulk action triggers."""
+        block = self._get_page_block()
+        self.assertIn('id="notifSelectionBar"', block)
+        self.assertIn('id="notifSelectAll"', block)
+        self.assertIn('toggleNotifSelectAll(this.checked)', block)
+        self.assertIn('data-i18n="common.select_all"', block)
+        self.assertIn('id="notifBulkActions"', block)
+        self.assertIn('id="notifSelectedCount"', block)
+        self.assertIn('bulkMarkNotificationsRead()', block)
+        self.assertIn('data-i18n="notif.mark_selected_read"', block)
+        self.assertIn('bulkDeleteNotifications()', block)
+        self.assertIn('data-i18n="notif.delete_selected"', block)
+        self.assertIn('clearNotifSelection()', block)
+        self.assertIn('data-i18n="common.cancel"', block)
+
+    def test_redundant_preferences_panel_removed(self):
+        """The redundant notification preferences panel is completely removed from the page."""
+        block = self._get_page_block()
+        self.assertNotIn('notif-prefs-panel', block)
+        self.assertNotIn('tenantNotifPrefs', block)
+
     def test_page_container_wrap(self):
         """List is wrapped in a bounded container avoiding full-screen stretch."""
         block = self._get_page_block()
@@ -89,7 +121,6 @@ class TenantNotificationsCenterTests(unittest.TestCase):
     def test_js_number_sanitizer(self):
         """JS sanitizer formats long decimal floats cleanly to 2 decimal places."""
         self.assertIn('formatNotifNumberSanitized', self.notif_js)
-        # Test the regex pattern directly in Python to verify logic parity
         pattern = r'(\d+)\.(\d{3,})'
         sample_text = 'تم استهلاك 36.71981688999991 نقطة في عملية توليد الخرائط'
         replaced = re.sub(pattern, lambda m: f"{float(m.group(0)):.2f}", sample_text)
@@ -112,32 +143,50 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         self.assertIn('notifStatProjects', self.notif_js)
         self.assertIn('notifStatSystem', self.notif_js)
 
-    def test_js_empty_state_monogram(self):
-        """Empty state uses the text monogram LL with zero icons or emojis."""
+    def test_js_clean_empty_state_without_monogram(self):
+        """Empty state is clean with title and description, without any monogram logo box."""
         self.assertIn('function notifEmptyHtml()', self.notif_js)
         self.assertIn('tenant-notif-empty-state', self.notif_js)
-        self.assertIn('notif-empty-monogram', self.notif_js)
-        self.assertIn('>LL<', self.notif_js)
+        self.assertNotIn('notif-empty-monogram', self.notif_js)
+        self.assertNotIn('>LL<', self.notif_js)
         self.assertIn('openTenantPresentations()', self.notif_js)
 
+    def test_js_multi_selection_and_single_read(self):
+        """JS supports individual mark-read and full multi-selection lifecycle."""
+        self.assertIn('function toggleNotifSelect', self.notif_js)
+        self.assertIn('function toggleNotifSelectAll', self.notif_js)
+        self.assertIn('function clearNotifSelection', self.notif_js)
+        self.assertIn('function updateNotifSelectionUI', self.notif_js)
+        self.assertIn('function notificationMarkSingleRead', self.notif_js)
+        self.assertIn('function bulkMarkNotificationsRead', self.notif_js)
+        self.assertIn('function bulkDeleteNotifications', self.notif_js)
+        self.assertIn('notif-card-checkbox', self.notif_js)
+        self.assertIn('notif.mark_read', self.notif_js)
+
     def test_css_rules_in_shell_chrome(self):
-        """CSS includes styles for page wrap, stats strip, revamp cards, and empty state."""
+        """CSS includes styles for page wrap, stats strip, revamp cards, selection bar, and clean empty state."""
         self.assertIn('.tenant-notif-page-wrap', self.css_chrome)
         self.assertIn('.notif-stats-strip', self.css_chrome)
         self.assertIn('.notif-stat-chip', self.css_chrome)
+        self.assertIn('.notif-stat-clickable', self.css_chrome)
+        self.assertIn('.notif-selection-bar', self.css_chrome)
+        self.assertIn('.notif-card-checkbox', self.css_chrome)
         self.assertIn('.tenant-notif-card-revamp', self.css_chrome)
+        self.assertIn('.tenant-notif-card-revamp.selected', self.css_chrome)
         self.assertIn('.tenant-notif-empty-state', self.css_chrome)
-        self.assertIn('.notif-empty-monogram', self.css_chrome)
+        self.assertNotIn('.notif-empty-monogram', self.css_chrome)
 
     def test_i18n_parity(self):
-        """All notification keys are present in both Arabic and English dictionaries."""
+        """All notification and action keys are present in both Arabic and English dictionaries."""
         keys = [
+            'common.refresh', 'common.select_all', 'common.cancel',
             'notif.stat_total', 'notif.stat_unread', 'notif.stat_projects', 'notif.stat_system',
             'notif.cat_all', 'notif.cat_projects', 'notif.cat_finance', 'notif.cat_support',
             'notif.act_review_approval', 'notif.act_view_project', 'notif.act_view_wallet',
             'notif.act_view_ticket', 'notif.act_view_details',
             'notif.act_review_recharge', 'notif.act_review_ticket', 'notif.act_review_join',
-            'notif.empty_title', 'notif.empty_desc', 'notif.empty_cta'
+            'notif.empty_title', 'notif.empty_desc', 'notif.empty_cta',
+            'notif.mark_read', 'notif.mark_selected_read', 'notif.delete_selected', 'notif.selected_count'
         ]
         for k in keys:
             self.assertIn(f'"{k}"', self.ar_dict, f"Missing key {k} in Arabic dictionary")

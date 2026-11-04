@@ -14,6 +14,8 @@
     let notifLastCategories = null;
     let notifStatusState = 'all';
     let notifCategoryGroup = 'all';
+    let notifSelectedIds = new Set();
+    let notifRenderedItems = [];
     const NOTIF_GROUP_CATEGORIES = {
       projects: ['section_approval', 'generation_approval', 'final_approval', 'job'],
       finance: ['billing', 'recharge'],
@@ -65,7 +67,6 @@
     function notifEmptyHtml() {
       const t = (k, fb) => (typeof WFT === 'function' ? WFT(k, fb) : fb);
       return '<div class="tenant-notif-empty-state">' +
-        '<div class="notif-empty-monogram">LL</div>' +
         '<h3 class="notif-empty-title">' + llEscape(t('notif.empty_title', 'لا توجد إشعارات حالياً')) + '</h3>' +
         '<p class="notif-empty-desc">' + llEscape(t('notif.empty_desc', 'كافة التنبيهات والعمليات محدثة ولا توجد إشعارات جديدة بانتظار المتابعة.')) + '</p>' +
         '<button type="button" class="btn small ghost" onclick="openTenantPresentations()">' + llEscape(t('notif.empty_cta', 'الانتقال إلى المشاريع')) + '</button>' +
@@ -233,7 +234,7 @@
       }
       const announcePanel = document.getElementById('notifAnnouncePanel');
       if (announcePanel) announcePanel.hidden = !isAdmin;
-      const jobs = [renderNotificationsPage(), renderNotificationPrefs()];
+      const jobs = [renderNotificationsPage()];
       if (isAdmin) jobs.push(fillAnnounceTargets(document.getElementById('notifAnnounceTarget')));
       await Promise.all(jobs);
     }
@@ -309,25 +310,128 @@
         const allowed = NOTIF_GROUP_CATEGORIES[notifCategoryGroup];
         itemsToRender = itemsToRender.filter(x => allowed.indexOf(x.category) !== -1);
       }
+      notifRenderedItems = itemsToRender;
 
       if (!itemsToRender.length) {
+        notifSelectedIds.clear();
+        updateNotifSelectionUI();
         list.innerHTML = notifEmptyHtml();
         return;
       }
       list.innerHTML = itemsToRender.map(n => notifCardHtml(n)).join('');
+      updateNotifSelectionUI();
+    }
+
+    // ── Multi-selection and bulk actions ─────────────────────────────────
+    function toggleNotifSelect(ev, id) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      const strId = String(id);
+      if (notifSelectedIds.has(strId)) {
+        notifSelectedIds.delete(strId);
+      } else {
+        notifSelectedIds.add(strId);
+      }
+      updateNotifSelectionUI();
+    }
+
+    function toggleNotifSelectAll(checked) {
+      if (!checked) {
+        notifSelectedIds.clear();
+      } else {
+        (notifRenderedItems || []).forEach(n => notifSelectedIds.add(String(n.id)));
+      }
+      updateNotifSelectionUI();
+    }
+
+    function clearNotifSelection() {
+      notifSelectedIds.clear();
+      updateNotifSelectionUI();
+    }
+
+    function updateNotifSelectionUI() {
+      const count = notifSelectedIds.size;
+      const bar = document.getElementById('notifBulkActions');
+      const countEl = document.getElementById('notifSelectedCount');
+      const masterCb = document.getElementById('notifSelectAll');
+      if (bar) bar.style.display = count > 0 ? 'inline-flex' : 'none';
+      if (countEl) countEl.textContent = WFT('notif.selected_count', 'تم تحديد {count}', { count: count });
+      if (masterCb && (notifRenderedItems || []).length > 0) {
+        masterCb.checked = count > 0 && notifRenderedItems.every(n => notifSelectedIds.has(String(n.id)));
+        masterCb.indeterminate = count > 0 && !masterCb.checked;
+      } else if (masterCb) {
+        masterCb.checked = false;
+        masterCb.indeterminate = false;
+      }
+      document.querySelectorAll('#tenantNotificationsList .tenant-notif-card-revamp').forEach(card => {
+        const cb = card.querySelector('.notif-card-checkbox');
+        if (cb) {
+          const isSel = notifSelectedIds.has(cb.getAttribute('data-notif-id'));
+          cb.checked = isSel;
+          card.classList.toggle('selected', isSel);
+        }
+      });
+    }
+
+    async function notificationMarkSingleRead(ev, id) {
+      if (ev && ev.stopPropagation) ev.stopPropagation();
+      const data = await api('POST', '/api/notifications/read', { ids: [id] }).catch(() => null);
+      if (!data || !data.success) {
+        toast(WFT('notif.mark_read_failed', 'تعذر تحديث حالة الإشعار'));
+        return;
+      }
+      notifSelectedIds.delete(String(id));
+      refreshNotificationBadge();
+      renderNotificationsPage();
+    }
+
+    async function bulkMarkNotificationsRead() {
+      if (!notifSelectedIds.size) return;
+      const ids = Array.from(notifSelectedIds);
+      const data = await api('POST', '/api/notifications/read', { ids: ids }).catch(() => null);
+      if (!data || !data.success) {
+        toast(WFT('notif.mark_read_failed', 'تعذر تحديث حالة الإشعارات'));
+        return;
+      }
+      notifSelectedIds.clear();
+      refreshNotificationBadge();
+      renderNotificationsPage();
+    }
+
+    async function bulkDeleteNotifications() {
+      if (!notifSelectedIds.size) return;
+      const ids = Array.from(notifSelectedIds);
+      const data = await api('POST', '/api/notifications/delete', { ids: ids }).catch(() => null);
+      if (!data || !data.success) {
+        toast(WFT('notif.delete_failed', 'تعذر حذف الإشعارات'));
+        return;
+      }
+      notifSelectedIds.clear();
+      notifLastItems = (notifLastItems || []).filter(x => !ids.includes(String(x.id)));
+      refreshNotificationBadge();
+      renderNotificationsPage();
     }
 
     // One card layout shared by the full page, the operations tab and the
     // admin dashboard's latest-notifications panel.
     function notifCardHtml(n) {
       const unread = !n.read_at;
+      const isSelected = notifSelectedIds.has(String(n.id));
       const actionBtn = notifActionBtn(n);
       const title = formatNotifNumberSanitized(n.title || '');
       const body = formatNotifNumberSanitized(n.body || '');
       const when = (n.created_at || '').slice(0, 16).replace('T', ' ');
-      return '<div class="tenant-notif-card tenant-notif-card-revamp' + (unread ? ' unread' : '') + '"' +
+      const singleReadBtn = unread
+        ? '<button type="button" class="btn small ghost" onclick="notificationMarkSingleRead(event,\'' + llEscape(n.id) + '\')">' + llEscape(WFT('notif.mark_read', 'تعليم كمقروء')) + '</button>'
+        : '';
+      const checkboxHtml = '<input type="checkbox" class="notif-card-checkbox" data-notif-id="' + llEscape(n.id) + '"' +
+        (isSelected ? ' checked' : '') +
+        ' onclick="toggleNotifSelect(event,\'' + llEscape(n.id) + '\')"' +
+        ' aria-label="' + llEscape(title) + '">';
+
+      return '<div class="tenant-notif-card tenant-notif-card-revamp' + (unread ? ' unread' : '') + (isSelected ? ' selected' : '') + '"' +
         ' role="button" tabindex="0" onclick="notificationOpen(\'' + llEscape(n.id) + '\')"' +
         ' onkeydown="if(event.key===\'Enter\')notificationOpen(\'' + llEscape(n.id) + '\')">' +
+        checkboxHtml +
         '<div class="tenant-notif-main notif-main-area">' +
         '<div class="notif-header-line">' +
         '<h3 class="notif-card-title">' + (unread ? '<span class="tenant-notif-dot" aria-hidden="true"></span>' : '') +
@@ -340,6 +444,7 @@
         '<bdi class="tenant-notif-time">' + llEscape(when) + '</bdi>' +
         '</div></div>' +
         '<div class="tenant-actions notif-card-actions">' +
+        singleReadBtn +
         actionBtn +
         '<button type="button" class="btn small ghost"' +
         ' onclick="notificationDelete(event,\'' + llEscape(n.id) + '\')"' +
