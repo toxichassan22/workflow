@@ -1466,12 +1466,12 @@
           <h2 data-i18n="nav.support_desk">الدعم الفني</h2>
         </div>
         <select id="adminTicketsStatusFilter" onchange="adminLoadTickets()" class="tenant-filter-select">
-          <option value="">كل الحالات</option>
-          <option value="open">مفتوحة</option>
-          <option value="in_progress">قيد المعالجة</option>
-          <option value="waiting_customer">بانتظار العميل</option>
-          <option value="resolved">تم الحل</option>
-          <option value="closed">مغلقة</option>
+          <option value="" data-i18n="admin.filter_all_statuses">كل الحالات</option>
+          <option value="open" data-i18n="tickets.status_open">مفتوحة</option>
+          <option value="in_progress" data-i18n="tickets.status_in_progress">قيد المعالجة</option>
+          <option value="waiting_customer" data-i18n="support.status_waiting">بانتظار العميل</option>
+          <option value="resolved" data-i18n="tickets.status_resolved">تم الحل</option>
+          <option value="closed" data-i18n="tickets.status_closed">مغلقة</option>
         </select>
       </div>
       <div class="ops-stat-grid">
@@ -1827,11 +1827,65 @@
 
       <!-- Tab 3: Support Tickets -->
       <div id="llTabPane_tickets" style="display:none">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h3 class="dash-section-title" style="margin:0">تذاكر الدعم</h3>
-          <button type="button" class="btn primary small" id="llTicketNewBtn" data-permission="support_tickets" onclick="openLlModal('llTicketModal')">تذكرة دعم جديدة</button>
+        <div class="support-tickets-hub">
+          <div class="support-tickets-header">
+            <div class="support-header-text">
+              <h3 data-i18n="tickets.hub_title">مركز الدعم الفني والتذاكر</h3>
+              <p data-i18n="tickets.hub_sub">متابعة طلبات المساعدة والاستفسارات التقنية والمالية</p>
+            </div>
+            <button type="button" class="btn primary small" id="llTicketNewBtn" data-permission="support_tickets" onclick="openLlModal('llTicketModal')" data-i18n="tickets.new_ticket">فتح تذكرة جديدة</button>
+          </div>
+
+          <div class="support-filter-bar">
+            <button type="button" class="support-filter-btn active" data-filter="all" onclick="llFilterTickets('all')">
+              <span data-i18n="tickets.filter_all">كافة التذاكر</span>
+              <span class="filter-count" id="llCountAll">0</span>
+            </button>
+            <button type="button" class="support-filter-btn" data-filter="active" onclick="llFilterTickets('active')">
+              <span data-i18n="tickets.filter_active">تذاكر جارية</span>
+              <span class="filter-count" id="llCountActive">0</span>
+            </button>
+            <button type="button" class="support-filter-btn" data-filter="closed" onclick="llFilterTickets('closed')">
+              <span data-i18n="tickets.filter_closed">تذاكر مغلقة</span>
+              <span class="filter-count" id="llCountClosed">0</span>
+            </button>
+          </div>
+
+          <div class="support-hub-grid">
+            <div id="llTicketsList"></div>
+            <aside class="support-faq-card" aria-label="الأسئلة الشائعة">
+              <h4 class="support-faq-title" data-i18n="tickets.faq_title">الأسئلة الشائعة</h4>
+              <span class="support-faq-sub" data-i18n="tickets.faq_sub">إجابات سريعة لاستفسارات المنصة الأكثر تكرارًا</span>
+              <div class="support-faq-item">
+                <button type="button" class="support-faq-q" onclick="llToggleFaq(this)">
+                  <span data-i18n="tickets.faq_q1">كم يستغرق الرد على التذاكر؟</span>
+                  <span class="support-faq-toggle-label" data-i18n="common.view">عرض</span>
+                </button>
+                <div class="support-faq-a" data-i18n="tickets.faq_a1">
+                  يقوم فريق الدعم الفني بمراجعة التذاكر العادية خلال 4 ساعات عمل، والتذاكر العاجلة خلال ساعة واحدة.
+                </div>
+              </div>
+              <div class="support-faq-item">
+                <button type="button" class="support-faq-q" onclick="llToggleFaq(this)">
+                  <span data-i18n="tickets.faq_q2">كيف يتم احتساب استهلاك الرصيد؟</span>
+                  <span class="support-faq-toggle-label" data-i18n="common.view">عرض</span>
+                </button>
+                <div class="support-faq-a" data-i18n="tickets.faq_a2">
+                  يتم استقطاع التكلفة المباشرة لعمليات التوليد والخرائط بالريال السعودي عند اكتمال العملية بنجاح فقط.
+                </div>
+              </div>
+              <div class="support-faq-item">
+                <button type="button" class="support-faq-q" onclick="llToggleFaq(this)">
+                  <span data-i18n="tickets.faq_q3">هل يمكن إعادة فتح تذكرة مغلقة؟</span>
+                  <span class="support-faq-toggle-label" data-i18n="common.view">عرض</span>
+                </button>
+                <div class="support-faq-a" data-i18n="tickets.faq_a3">
+                  عند إغلاق التذكرة بنجاح، يفضل فتح تذكرة جديدة لأي استفسار مستجد لضمان سرعة المتابعة.
+                </div>
+              </div>
+            </aside>
+          </div>
         </div>
-        <div id="llTicketsList" style="margin-bottom:24px"></div>
       </div>
 
       <!-- Modal 2: Recharge Request — step 1 picks a card, step 2 takes the
@@ -1868,41 +1922,41 @@
       <div id="llTicketModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llTicketModal')">
         <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llTicketModalTitle">
           <div class="sag-modal-head">
-            <h2 id="llTicketModalTitle">تذكرة دعم جديدة</h2>
-            <button type="button" class="btn ghost small" onclick="closeLlModal('llTicketModal')">إغلاق</button>
+            <h2 id="llTicketModalTitle" data-i18n="tickets.new_ticket">فتح تذكرة جديدة</h2>
+            <button type="button" class="btn ghost small" onclick="closeLlModal('llTicketModal')" data-i18n="common.close">إغلاق</button>
           </div>
           <div class="tenant-grid" style="grid-template-columns:1fr;gap:12px">
-            <div class="tenant-field full"><label for="llTicketSubject">الموضوع</label><input type="text" id="llTicketSubject" placeholder="ملخص المشكلة"></div>
-            <div class="tenant-field"><label for="llTicketCategory">الفئة</label>
+            <div class="tenant-field full"><label for="llTicketSubject" data-i18n="tickets.subject_label">موضوع التذكرة</label><input type="text" id="llTicketSubject" data-i18n-ph="tickets.subject_placeholder" placeholder="ملخص المشكلة أو الاستفسار"></div>
+            <div class="tenant-field"><label for="llTicketCategory" data-i18n="tickets.category">الفئة</label>
               <select id="llTicketCategory">
-                <option value="general">عام</option>
-                <option value="billing">الفوترة والرصيد</option>
-                <option value="technical">مشكلة تقنية</option>
-                <option value="generation">التوليد</option>
-                <option value="files">الملفات والتنزيلات</option>
-                <option value="account">الحساب والصلاحيات</option>
-                <option value="other">أخرى</option>
+                <option value="general" data-i18n="tickets.category_general">استفسار عام</option>
+                <option value="billing" data-i18n="tickets.category_billing">الفوترة والرصيد</option>
+                <option value="technical" data-i18n="tickets.category_technical">مشكلة تقنية</option>
+                <option value="generation" data-i18n="tickets.category_generation">التوليد والذكاء الاصطناعي</option>
+                <option value="files" data-i18n="tickets.category_files">الملفات والتنزيلات</option>
+                <option value="account" data-i18n="tickets.category_account">الحساب والصلاحيات</option>
+                <option value="other" data-i18n="tickets.category_other">أخرى</option>
               </select>
             </div>
-            <div class="tenant-field"><label for="llTicketAttachment">مرفق</label>
+            <div class="tenant-field"><label for="llTicketAttachment" data-i18n="tickets.attachment">مرفق</label>
               <input type="file" id="llTicketAttachment">
             </div>
-            <div class="tenant-field full"><label for="llTicketBody">التفاصيل</label><textarea id="llTicketBody" rows="4" placeholder="تفاصيل المشكلة"></textarea></div>
+            <div class="tenant-field full"><label for="llTicketBody" data-i18n="tickets.body_label">التفاصيل الكاملة</label><textarea id="llTicketBody" rows="4" data-i18n-ph="tickets.body_placeholder" placeholder="اكتب تفاصيل التذكرة بدقة..."></textarea></div>
           </div>
           <div style="color:var(--danger,#c0392b);font-size:12px;margin-top:8px" id="llTicketsError"></div>
           <div class="sag-modal-actions" style="gap:8px;margin-top:16px">
-            <button type="button" class="btn ghost" onclick="closeLlModal('llTicketModal')">إلغاء</button>
-            <button type="button" class="btn primary" onclick="llCreateTicket()">إرسال التذكرة</button>
+            <button type="button" class="btn ghost" onclick="closeLlModal('llTicketModal')" data-i18n="common.cancel">إلغاء</button>
+            <button type="button" class="btn primary" onclick="llCreateTicket()" data-i18n="tickets.send_ticket">إرسال التذكرة</button>
           </div>
         </div>
       </div>
 
       <!-- Modal 3b: ticket conversation (opens from a tickets-table row) -->
       <div id="llTicketViewModal" class="ll-modal-overlay" data-a11y-modal onclick="if(event.target===this)closeLlModal('llTicketViewModal')">
-        <div class="ll-modal-card" role="dialog" aria-modal="true" aria-labelledby="llTicketViewTitle">
+        <div class="ll-modal-card ll-modal-wide" role="dialog" aria-modal="true" aria-labelledby="llTicketViewTitle">
           <div class="sag-modal-head">
-            <h2 id="llTicketViewTitle">التذكرة</h2>
-            <button type="button" class="btn ghost small" onclick="closeLlModal('llTicketViewModal')">إغلاق</button>
+            <h2 id="llTicketViewTitle" data-i18n="tickets.ticket_details">تفاصيل التذكرة</h2>
+            <button type="button" class="btn ghost small" onclick="closeLlModal('llTicketViewModal')" data-i18n="common.close">إغلاق</button>
           </div>
           <div id="llTicketViewBody"></div>
         </div>

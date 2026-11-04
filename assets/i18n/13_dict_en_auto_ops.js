@@ -5,7 +5,8 @@
  * add a string to the part that owns its screen. Edit entries only;
  * keep the I18N_EN_AUTO_BEGIN/END markers and JSON quoting (the Python
  * suite parses the block between them). Loaded before i18n.js. */
-window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN_AUTO_BEGIN*/{
+window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN_AUTO_BEGIN*/
+{
   "تصنيف الطلبات": "Request Categories",
   "تصنيف الإشعارات": "Notification Categories",
   "إيصال": "Receipt",
@@ -152,5 +153,45 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "أدخل اسمًا وسعرًا صالحًا": "Enter a valid name and price",
   "مبلغ غير صالح": "Invalid amount",
   "المزايا المتاحة:": "Included features:",
-  "المزايا المتاحة في الباقة": "Features included in this package"
-}/*I18N_EN_AUTO_END*/);
+  "المزايا المتاحة في الباقة": "Features included in this package",
+  "إرسال الرد": "Send reply",
+  "إسناد إلى": "Assign to",
+  "استفسار عام": "General inquiry",
+  "اكتب الرد الرسمي من فريق الدعم الفني...": "Write the official reply from the support team...",
+  "اكتب ردك أو استفسارك هنا...": "Write your reply or inquiry here...",
+  "التذكرة والموضوع": "Ticket and subject",
+  "التوليد والذكاء الاصطناعي": "Generation and AI",
+  "العميل": "Client",
+  "تاريخ التحديث": "Update date",
+  "تعذر إنشاء التذكرة": "Could not create ticket",
+  "تعذر تحميل التذاكر حاليًا.": "Could not load tickets currently.",
+  "تفاصيل التذكرة": "Ticket details",
+  "تفاصيل التذكرة مطلوبة": "Ticket details are required",
+  "تم الحل وإغلاق التذكرة": "Resolved and closed ticket",
+  "فتح تذكرة جديدة": "Open new ticket",
+  "فريق الدعم الفني": "Technical support team",
+  "فريق المنصة": "Platform team",
+  "لا توجد تذاكر دعم في هذا التبويب": "No support tickets in this tab",
+  "موضوع التذكرة مطلوب": "Ticket subject is required",
+  "هذه التذكرة مغلقة.": "This ticket is closed.",
+  "هذه التذكرة مغلقة. إذا كانت لديك استفسارات إضافية، يرجى فتح تذكرة جديدة.": "This ticket is closed. If you have further inquiries, please open a new ticket.",
+  "يمكنك فتح تذكرة جديدة وسيقوم فريق الدعم الفني بمراجعتها والتواصل معك.": "You can open a new ticket and the technical support team will review it and get in touch with you.",
+  "مركز الدعم الفني والتذاكر": "Technical Support & Tickets Hub",
+  "متابعة طلبات المساعدة والاستفسارات التقنية والمالية": "Track assistance requests and technical and billing inquiries",
+  "كافة التذاكر": "All Tickets",
+  "تذاكر جارية": "Active Tickets",
+  "تذاكر مغلقة": "Closed Tickets",
+  "الأسئلة الشائعة": "Frequently Asked Questions",
+  "إجابات سريعة لاستفسارات المنصة الأكثر تكرارًا": "Quick answers to the most common platform questions",
+  "كم يستغرق الرد على التذاكر؟": "How long does it take to respond to tickets?",
+  "يقوم فريق الدعم الفني بمراجعة التذاكر العادية خلال 4 ساعات عمل، والتذاكر العاجلة خلال ساعة واحدة.": "The technical support team reviews regular tickets within 4 business hours, and urgent tickets within 1 hour.",
+  "كيف يتم احتساب استهلاك الرصيد؟": "How is usage balance deducted?",
+  "يتم استقطاع التكلفة المباشرة لعمليات التوليد والخرائط بالريال السعودي عند اكتمال العملية بنجاح فقط.": "The direct cost of generation and mapping in SAR is deducted only upon successful completion.",
+  "هل يمكن إعادة فتح تذكرة مغلقة؟": "Can a closed ticket be reopened?",
+  "عند إغلاق التذكرة بنجاح، يفضل فتح تذكرة جديدة لأي استفسار مستجد لضمان سرعة المتابعة.": "Once a ticket is resolved, please open a new ticket for new inquiries to ensure fast follow-up.",
+  "موضوع التذكرة": "Ticket Subject",
+  "ملخص المشكلة أو الاستفسار": "Summary of the issue or inquiry",
+  "التفاصيل الكاملة": "Full Details",
+  "اكتب تفاصيل التذكرة بدقة...": "Write ticket details precisely..."
+}
+/*I18N_EN_AUTO_END*/);
