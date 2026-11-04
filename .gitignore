@@ -66,6 +66,7 @@ sandbox/
 # default digest path reads rules/*.json and regulation_pdf_paths() skips
 # files that are absent.
 *.pdf
+!assets/brand/**/*.pdf
 *.md
 !README.md
 !clean*.md
