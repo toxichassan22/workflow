@@ -86,12 +86,12 @@ class StagingIndexingProtectionTests(unittest.TestCase):
             index_content = f.read()
         self.assertIn('name="robots" content="noindex, nofollow, noarchive"', index_content)
         self.assertIn('name="google-site-verification"', index_content)
-        self.assertIn('href="/assets/favicon.svg?v=2"', index_content)
+        self.assertIn('href="/assets/favicon.svg?v=3"', index_content)
 
         with open(ROOT / 'pages' / 'landing.html', 'r', encoding='utf-8') as f:
             landing_content = f.read()
         self.assertIn('name="google-site-verification"', landing_content)
-        self.assertIn('href="/assets/favicon-48.png?v=2"', landing_content)
+        self.assertIn('href="/assets/favicon-48.png?v=3"', landing_content)
         self.assertIn('property="og:image"', landing_content)
         self.assertIn('SoftwareApplication', landing_content)
 
@@ -132,8 +132,8 @@ class StagingIndexingProtectionTests(unittest.TestCase):
             self.assertTrue(page_path.exists(), f"File {page_path} must exist")
             with open(page_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            self.assertIn('/assets/favicon.svg?v=2', content, f"{page_path.name} must reference new favicon.svg?v=2")
-            self.assertIn('/assets/favicon-48.png?v=2', content, f"{page_path.name} must reference favicon-48.png?v=2")
+            self.assertIn('/assets/favicon.svg?v=3', content, f"{page_path.name} must reference new favicon.svg?v=3")
+            self.assertIn('/assets/favicon-48.png?v=3', content, f"{page_path.name} must reference favicon-48.png?v=3")
             self.assertNotIn('href="/assets/landloom-logo.png" type="image/png"', content,
                              f"{page_path.name} must not use wide logo as favicon")
 
