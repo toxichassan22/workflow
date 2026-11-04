@@ -1918,12 +1918,12 @@
             <div class="notif-search-wrap">
               <input type="text" id="notifSearchInput" class="notif-search-input"
                 placeholder="بحث في الإشعارات..." data-i18n-placeholder="notif.search_placeholder"
-                oninput="onNotifSearchInput()" onkeydown="if(event.key==='Enter')renderNotificationsPage()">
-              <button type="button" class="btn small ghost notif-search-btn" onclick="renderNotificationsPage()"
+                oninput="onNotifSearchInput()" onkeydown="if(event.key==='Enter')applyNotifFilters()">
+              <button type="button" class="btn small ghost notif-search-btn" onclick="applyNotifFilters()"
                 data-i18n="common.search">بحث</button>
             </div>
             <div class="notif-time-filter">
-              <select id="notifTimeFilter" class="tenant-filter-select notif-time-select" onchange="renderNotificationsPage()">
+              <select id="notifTimeFilter" class="tenant-filter-select notif-time-select" onchange="applyNotifFilters()">
                 <option value="all" data-i18n="notif.time_all">كل الأوقات</option>
                 <option value="today" data-i18n="notif.time_today">اليوم</option>
                 <option value="week" data-i18n="notif.time_week">آخر 7 أيام</option>

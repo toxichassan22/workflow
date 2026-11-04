@@ -14,14 +14,16 @@ Covers:
    - List container (`#tenantNotificationsList`).
 2. Frontend logic in assets/js/19-notifications.js:
    - Category group filter (`setNotifCategoryGroup`) and mappings (`NOTIF_GROUP_CATEGORIES`).
-   - Search filtering (`notifMatchesQuery`) and time range filtering (`notifMatchesTime`).
-   - Live debounced search input handler (`onNotifSearchInput`).
+   - Multi-word token search with Arabic normalization (`notifNormalizeText`, `notifMatchesQuery`).
+   - Time range filtering (`notifMatchesTime`).
+   - In-memory instant filtering (`applyNotifFilters`) and filter reset (`clearNotifFilters`).
+   - Live search input handler (`onNotifSearchInput`).
    - Number sanitization (`formatNotifNumberSanitized`) eliminating floating-point noise.
    - Direct contextual action buttons (`notifActionBtn`) for projects, approvals, wallet, and support tickets.
    - Individual single mark-read button (`notificationMarkSingleRead`) on unread cards.
    - Multi-selection management (`toggleNotifSelect`, `toggleNotifSelectAll`, `clearNotifSelection`, `updateNotifSelectionUI`).
    - Bulk actions (`bulkMarkNotificationsRead`, `bulkDeleteNotifications`).
-   - Clean empty state (`notifEmptyHtml`) without any monogram logo or icon boxes.
+   - Clean empty state (`notifEmptyHtml`) without any monogram logo or icon boxes, with search empty fallback.
    - Revitalized card layout (`notifCardHtml`) with `.tenant-notif-card-revamp`, checkbox and selection highlighting.
    - Stats strip populated during `renderNotificationsPage()`.
 3. CSS rules in assets/css/base/08_shell_chrome.css:
@@ -43,7 +45,6 @@ Covers:
 
 import re
 import unittest
-from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -144,10 +145,39 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         self.assertEqual(replaced, 'تم استهلاك 36.72 نقطة في عملية توليد الخرائط')
 
     def test_js_search_and_time_filters(self):
-        """JS includes search matching and time range filtering functions."""
-        self.assertIn('function onNotifSearchInput()', self.notif_js)
+        """JS includes search matching and time range filtering functions with Arabic normalization."""
+        self.assertIn('function notifNormalizeText(s)', self.notif_js)
         self.assertIn('function notifMatchesQuery(n, q)', self.notif_js)
         self.assertIn('function notifMatchesTime(createdAt, timeFilter)', self.notif_js)
+        self.assertIn('function applyNotifFilters()', self.notif_js)
+        self.assertIn('function clearNotifFilters()', self.notif_js)
+
+        # Python-level verification of Arabic normalization and token search parity
+        def norm(s):
+            if not s: return ''
+            s = s.lower()
+            s = re.sub(r'[\u064B-\u065F\u0670]', '', s)
+            s = re.sub(r'[أإآٱ]', 'ا', s)
+            s = re.sub(r'ة', 'ه', s)
+            s = re.sub(r'ى', 'ي', s)
+            return s
+
+        def match(title, body, cat, q):
+            clean_q = (q or '').strip()
+            if not clean_q: return True
+            tokens = [norm(t) for t in clean_q.split() if t.strip()]
+            haystack = norm(f"{title} {body} {cat}")
+            return all(tok in haystack for tok in tokens)
+
+        target_title = 'فشلت مهمة التوليد'
+        target_body = 'انتهت مهلة التوليد — حرر الحجز تلقائيا'
+        target_cat = 'مهام التوليد'
+
+        # Must match user queries like 'فشل مهم', 'فشلت مهمه', 'مهمة فشل', 'iconic'
+        self.assertTrue(match(target_title, target_body, target_cat, 'فشل مهم'))
+        self.assertTrue(match(target_title, target_body, target_cat, 'فشلت مهمه'))
+        self.assertTrue(match(target_title, target_body, target_cat, 'مهمة فشل'))
+        self.assertTrue(match(target_title, target_body, target_cat, 'توليد'))
 
     def test_js_action_buttons(self):
         """JS includes notifActionBtn helper generating contextual direct action buttons."""
@@ -168,11 +198,12 @@ class TenantNotificationsCenterTests(unittest.TestCase):
 
     def test_js_clean_empty_state_without_monogram(self):
         """Empty state is clean with title and description, without any monogram logo box."""
-        self.assertIn('function notifEmptyHtml()', self.notif_js)
+        self.assertIn('function notifEmptyHtml(', self.notif_js)
         self.assertIn('tenant-notif-empty-state', self.notif_js)
         self.assertNotIn('notif-empty-monogram', self.notif_js)
         self.assertNotIn('>LL<', self.notif_js)
         self.assertIn('openTenantPresentations()', self.notif_js)
+        self.assertIn('clearNotifFilters()', self.notif_js)
 
     def test_js_multi_selection_and_single_read(self):
         """JS supports individual mark-read and full multi-selection lifecycle."""
@@ -215,6 +246,7 @@ class TenantNotificationsCenterTests(unittest.TestCase):
             'notif.act_view_ticket', 'notif.act_view_details',
             'notif.act_review_recharge', 'notif.act_review_ticket', 'notif.act_review_join',
             'notif.empty_title', 'notif.empty_desc', 'notif.empty_cta',
+            'notif.empty_search_title', 'notif.empty_search_desc', 'notif.clear_filters',
             'notif.mark_read', 'notif.mark_selected_read', 'notif.delete_selected', 'notif.selected_count',
             'notif.search_placeholder', 'notif.time_label', 'notif.time_all', 'notif.time_today', 'notif.time_week', 'notif.time_month'
         ]

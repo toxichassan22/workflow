@@ -65,13 +65,30 @@
       return '';
     }
 
-    function notifEmptyHtml() {
+    function notifEmptyHtml(isFiltered) {
       const t = (k, fb) => (typeof WFT === 'function' ? WFT(k, fb) : fb);
+      const title = isFiltered
+        ? t('notif.empty_search_title', 'لا توجد نتائج مطابقة للبحث')
+        : t('notif.empty_title', 'لا توجد إشعارات حالياً');
+      const desc = isFiltered
+        ? t('notif.empty_search_desc', 'جرّب البحث بكلمات أخرى أو تغيير خيارات التصفية والوقت.')
+        : t('notif.empty_desc', 'كافة التنبيهات والعمليات محدثة ولا توجد إشعارات جديدة بانتظار المتابعة.');
       return '<div class="tenant-notif-empty-state">' +
-        '<h3 class="notif-empty-title">' + llEscape(t('notif.empty_title', 'لا توجد إشعارات حالياً')) + '</h3>' +
-        '<p class="notif-empty-desc">' + llEscape(t('notif.empty_desc', 'كافة التنبيهات والعمليات محدثة ولا توجد إشعارات جديدة بانتظار المتابعة.')) + '</p>' +
-        '<button type="button" class="btn small ghost" onclick="openTenantPresentations()">' + llEscape(t('notif.empty_cta', 'الانتقال إلى المشاريع')) + '</button>' +
+        '<h3 class="notif-empty-title">' + llEscape(title) + '</h3>' +
+        '<p class="notif-empty-desc">' + llEscape(desc) + '</p>' +
+        (isFiltered
+          ? '<button type="button" class="btn small ghost" onclick="clearNotifFilters()">' + llEscape(t('notif.clear_filters', 'إعادة ضبط الفلاتر')) + '</button>'
+          : '<button type="button" class="btn small ghost" onclick="openTenantPresentations()">' + llEscape(t('notif.empty_cta', 'الانتقال إلى المشاريع')) + '</button>') +
         '</div>';
+    }
+
+    function clearNotifFilters() {
+      const s = document.getElementById('notifSearchInput');
+      if (s) s.value = '';
+      const t = document.getElementById('notifTimeFilter');
+      if (t) t.value = 'all';
+      setNotifCategoryGroup('all');
+      setNotifStatusFilter('all');
     }
 
     function notifCategoryLabel(cat) {
@@ -272,20 +289,27 @@
       sel.dataset.filled = '1';
     }
 
-    function onNotifSearchInput() {
-      if (notifSearchTimer) clearTimeout(notifSearchTimer);
-      notifSearchTimer = setTimeout(() => {
-        renderNotificationsPage();
-      }, 200);
+    function notifNormalizeText(s) {
+      if (!s) return '';
+      return String(s)
+        .toLowerCase()
+        .replace(/[ً-ٰٟ]/g, '')
+        .replace(/[أإآٱ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي');
     }
 
     function notifMatchesQuery(n, q) {
       if (!q) return true;
-      const query = q.trim().toLowerCase();
-      if (!query) return true;
-      const title = (n.title || '').toLowerCase();
-      const body = (n.body || '').toLowerCase();
-      return title.indexOf(query) !== -1 || body.indexOf(query) !== -1;
+      const cleanQ = String(q).trim();
+      if (!cleanQ) return true;
+      const tokens = notifNormalizeText(cleanQ).split(/\s+/).filter(Boolean);
+      if (!tokens.length) return true;
+      const catLabel = typeof notifCategoryLabel === 'function' ? notifCategoryLabel(n.category || '') : (n.category || '');
+      const haystack = notifNormalizeText(
+        (n.title || '') + ' ' + (n.body || '') + ' ' + catLabel + ' ' + (n.entity_type || '')
+      );
+      return tokens.every(tok => haystack.indexOf(tok) !== -1);
     }
 
     function notifMatchesTime(createdAt, timeFilter) {
@@ -306,6 +330,44 @@
         return itemDate >= monthAgo;
       }
       return true;
+    }
+
+    function onNotifSearchInput() {
+      applyNotifFilters();
+    }
+
+    function applyNotifFilters() {
+      const list = document.getElementById('tenantNotificationsList');
+      if (!list || !Array.isArray(notifLastItems)) return;
+      const allItems = notifLastItems;
+
+      let itemsToRender = allItems;
+      if (notifCategoryGroup && notifCategoryGroup !== 'all' && NOTIF_GROUP_CATEGORIES[notifCategoryGroup]) {
+        const allowed = NOTIF_GROUP_CATEGORIES[notifCategoryGroup];
+        itemsToRender = itemsToRender.filter(x => allowed.indexOf(x.category) !== -1);
+      }
+
+      const query = (document.getElementById('notifSearchInput') || {}).value || '';
+      if (query) {
+        itemsToRender = itemsToRender.filter(x => notifMatchesQuery(x, query));
+      }
+
+      const timeVal = (document.getElementById('notifTimeFilter') || {}).value || 'all';
+      if (timeVal !== 'all') {
+        itemsToRender = itemsToRender.filter(x => notifMatchesTime(x.created_at, timeVal));
+      }
+
+      notifRenderedItems = itemsToRender;
+
+      if (!itemsToRender.length) {
+        notifSelectedIds.clear();
+        updateNotifSelectionUI();
+        const isFiltered = Boolean(query || (timeVal && timeVal !== 'all') || (notifCategoryGroup && notifCategoryGroup !== 'all') || (notifStatusState && notifStatusState !== 'all'));
+        list.innerHTML = notifEmptyHtml(isFiltered);
+        return;
+      }
+      list.innerHTML = itemsToRender.map(n => notifCardHtml(n)).join('');
+      updateNotifSelectionUI();
     }
 
     async function renderNotificationsPage() {
@@ -344,35 +406,7 @@
           ? WFT('notif.unread_count', '{count} غير مقروءة', { count: unread }) : '';
       }
 
-      // Filter by category group
-      let itemsToRender = allItems;
-      if (notifCategoryGroup && notifCategoryGroup !== 'all' && NOTIF_GROUP_CATEGORIES[notifCategoryGroup]) {
-        const allowed = NOTIF_GROUP_CATEGORIES[notifCategoryGroup];
-        itemsToRender = itemsToRender.filter(x => allowed.indexOf(x.category) !== -1);
-      }
-
-      // Filter by search query
-      const query = (document.getElementById('notifSearchInput') || {}).value || '';
-      if (query) {
-        itemsToRender = itemsToRender.filter(x => notifMatchesQuery(x, query));
-      }
-
-      // Filter by time
-      const timeVal = (document.getElementById('notifTimeFilter') || {}).value || 'all';
-      if (timeVal !== 'all') {
-        itemsToRender = itemsToRender.filter(x => notifMatchesTime(x.created_at, timeVal));
-      }
-
-      notifRenderedItems = itemsToRender;
-
-      if (!itemsToRender.length) {
-        notifSelectedIds.clear();
-        updateNotifSelectionUI();
-        list.innerHTML = notifEmptyHtml();
-        return;
-      }
-      list.innerHTML = itemsToRender.map(n => notifCardHtml(n)).join('');
-      updateNotifSelectionUI();
+      applyNotifFilters();
     }
 
     // ── Multi-selection and bulk actions ─────────────────────────────────
