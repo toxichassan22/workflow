@@ -88,16 +88,17 @@
             <input type="text" id="adminLegalNoticeEn" dir="ltr" placeholder="Draft text subject to update">
           </div>
         </div>
-        <div class="tenant-field" style="margin-top:12px">
-          <label for="adminLegalAr" data-i18n="admin.legal_ar">المحتوى بالعربية (HTML)</label>
-          <textarea id="adminLegalAr" rows="14" dir="rtl" style="font-family:Consolas,'Courier New',monospace;font-size:12.5px"></textarea>
+        <div class="ll-legal-sections-head">
+          <span class="ll-legal-sections-title" data-i18n="admin.legal_sections">أقسام الصفحة</span>
+          <span class="tenant-hint" data-i18n="admin.legal_sections_hint">لكل قسم عنوان ونص ونقاط، بالعربية والإنجليزية</span>
         </div>
-        <div class="tenant-field" style="margin-top:12px">
-          <label for="adminLegalEn" data-i18n="admin.legal_en">المحتوى بالإنجليزية (HTML)</label>
-          <textarea id="adminLegalEn" rows="14" dir="ltr" style="font-family:Consolas,'Courier New',monospace;font-size:12.5px"></textarea>
+        <div id="adminLegalSections" class="ll-legal-sections"></div>
+        <div style="margin-top:10px">
+          <button type="button" class="btn ghost small" onclick="adminAddLegalSection()" data-i18n="admin.legal_add_section">إضافة قسم</button>
         </div>
         <div class="sag-modal-actions" style="margin-top:16px">
-          <button type="button" class="btn primary" onclick="adminSaveLegalDoc()" data-i18n="admin.legal_save">حفظ المحتوى والتعديلات</button>
+          <a id="adminLegalPreview" class="btn ghost" href="/terms" target="_blank" rel="noopener" data-i18n="admin.legal_preview">معاينة الصفحة</a>
+          <button type="button" class="btn primary" id="adminLegalSaveBtn" onclick="adminSaveLegalDoc()" data-i18n="admin.legal_save">حفظ المحتوى والتعديلات</button>
         </div>
       </div>
       <div class="tenant-content-panel" style="margin-top:16px">
