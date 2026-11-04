@@ -209,6 +209,7 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/
   "chrome.language": "Language",
   "auth.tagline": "Real-estate proposal and study platform",
   "auth.sign_in": "Sign in",
+  "auth.otp_title": "OTP verification",
   "auth.otp_hint_generic": "A verification code was sent to your email",
   "auth.otp_hint_sent_to": "Verification code sent to {email}",
   "auth.otp_code_label": "Verification code",

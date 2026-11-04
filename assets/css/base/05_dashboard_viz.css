@@ -555,11 +555,13 @@
       display: flex;
     }
 
+    /* Split portal: the navy identity panel owns the brand side, the white
+       form panel owns the fields — the 50/45/5 brand ratio lives here. */
     .auth-card {
-      display: flex;
-      flex-direction: column;
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
       width: 100%;
-      max-width: 440px;
+      max-width: 1000px;
       padding: 0;
       overflow: hidden;
       text-align: start;
@@ -570,33 +572,43 @@
       position: relative;
     }
 
-    .auth-card::before {
-      content: "";
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 4px;
-      background: linear-gradient(90deg, #17C8E3, #07182C);
-    }
-
     .auth-brand {
+      background: #07182C;
+      color: #ffffff;
+      padding: 46px 38px;
       display: flex;
       flex-direction: column;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 26px;
+      text-align: start;
+    }
+
+    .auth-brand-head {
+      display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 10px;
-      padding: 38px 32px 12px 32px;
-      background: #ffffff;
-      text-align: center;
     }
 
     .auth-brand-logo {
       display: block;
       height: 38px;
       width: auto;
-      max-width: 200px;
+      max-width: 220px;
       object-fit: contain;
+    }
+
+    .auth-brand-mid {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-width: 0;
+    }
+
+    .auth-brand-rule {
+      width: 44px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--teal-bright, #17C8E3);
     }
 
     .auth-brand-beta {
@@ -604,7 +616,7 @@
       font-weight: 800;
       letter-spacing: .6px;
       text-transform: uppercase;
-      color: rgba(7, 24, 44, .42);
+      color: rgba(255, 255, 255, .55);
     }
 
     .auth-lang-toggle {
@@ -627,25 +639,28 @@
 
     .auth-card .auth-brand-tag {
       margin: 0;
-      color: #475569;
-      font-size: 13px;
+      color: rgba(255, 255, 255, .75);
+      font-size: 13.5px;
       font-weight: 600;
-      line-height: 1.5;
+      line-height: 1.8;
     }
 
     .auth-body {
-      padding: 12px 36px 36px 36px;
+      padding: 46px 42px;
       background: #ffffff;
       width: 100%;
       box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
 
     .auth-card .auth-title {
       margin: 0 0 22px;
       color: #07182C;
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 800;
-      text-align: center;
+      text-align: start;
     }
 
     .auth-form input[type="email"],
@@ -713,21 +728,24 @@
       min-height: 48px;
       border: none;
       border-radius: 12px;
-      background: linear-gradient(135deg, #0FA9C4, #17C8E3);
-      color: #07182C;
-      font-size: 16px;
+      background: #07182C;
+      color: #ffffff;
+      font-size: 15px;
       font-weight: 800;
       cursor: pointer;
-      transition: all .18s ease;
+      transition: background-color .18s ease;
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
     .auth-btn:hover {
-      background: linear-gradient(135deg, #17C8E3, #4FD7ED);
-      box-shadow: 0 6px 18px rgba(15, 169, 196, .28);
-      transform: translateY(-1px);
+      background: #122B47;
+    }
+
+    .auth-btn:disabled {
+      opacity: .6;
+      cursor: default;
     }
 
     .auth-secondary-actions {
@@ -738,18 +756,44 @@
       gap: 10px;
     }
 
+    @media (max-width: 880px) {
+      .auth-card {
+        grid-template-columns: 1fr;
+        max-width: 460px;
+      }
+
+      .auth-brand {
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 24px;
+        gap: 14px;
+      }
+
+      .auth-brand-mid,
+      .auth-brand-beta {
+        display: none;
+      }
+
+      .auth-lang-toggle {
+        top: 24px;
+        color: #ffffff;
+        border-color: rgba(255, 255, 255, .35);
+      }
+
+      .auth-lang-toggle:hover {
+        border-color: rgba(255, 255, 255, .7);
+      }
+
+      .auth-body {
+        padding: 28px 24px 30px;
+      }
+    }
+
     @media (max-width: 640px) {
       .auth-card {
         max-width: 100%;
         border-radius: 20px;
-      }
-
-      .auth-brand {
-        padding: 28px 20px 10px 20px;
-      }
-
-      .auth-body {
-        padding: 10px 20px 28px 20px;
       }
 
       .otp-digit-box {

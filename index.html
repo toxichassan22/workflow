@@ -60,16 +60,20 @@
   <div id="tenantAuthPage" class="tenant-auth">
     <div class="auth-card">
       <button type="button" class="lang-toggle-btn auth-lang-toggle" onclick="toggleAppLanguage()">English</button>
-      <div class="auth-brand">
-        <img class="auth-brand-logo" src="/assets/landloom-logo.png?v=3" alt="LandLoom">
+      <aside class="auth-brand">
+        <div class="auth-brand-head">
+          <img class="auth-brand-logo" src="/assets/brand/wordmark/landloom-wordmark-white.svg" alt="LandLoom">
+        </div>
+        <div class="auth-brand-mid">
+          <span class="auth-brand-rule" aria-hidden="true"></span>
+          <p class="auth-brand-tag" data-i18n="auth.tagline">منصة توليد العروض والدراسات العقارية</p>
+        </div>
         <span class="auth-brand-beta" data-i18n="auth.beta">نسخة تجريبية</span>
-        <p class="auth-brand-tag" data-i18n="auth.tagline">منصة توليد العروض والدراسات العقارية</p>
-      </div>
+      </aside>
       <div class="auth-body">
-        <p class="auth-title" data-i18n="auth.sign_in">تسجيل الدخول</p>
-
         <div id="loginError" class="auth-error"></div>
         <form id="loginForm" class="auth-form active" onsubmit="handleLogin(event)">
+          <p class="auth-title" data-i18n="auth.sign_in">تسجيل الدخول</p>
           <label data-i18n="auth.email">البريد الإلكتروني</label>
           <input type="email" id="loginEmail" autocomplete="email" required>
           <label data-i18n="auth.password">كلمة المرور</label>
@@ -80,6 +84,7 @@
           <button type="submit" class="auth-btn" data-i18n="auth.login">دخول</button>
         </form>
         <form id="loginOtpForm" class="auth-form" onsubmit="handleLoginOtpVerify(event)" style="display:none">
+          <p class="auth-title" data-i18n="auth.otp_title">التحقق برمز OTP</p>
           <p class="tenant-hint" id="loginOtpHint" style="margin-bottom:14px;text-align:center;color:#475569;font-weight:600" data-i18n="auth.otp_hint_generic">رمز التحقق مرسل إلى البريد الإلكتروني</p>
           <label style="text-align:center;margin-bottom:8px" data-i18n="auth.otp_code_label">رمز التحقق</label>
 

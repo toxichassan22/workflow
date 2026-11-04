@@ -209,6 +209,7 @@ window.__WFI18N_AR = Object.assign(window.__WFI18N_AR || {}, /*I18N_AR_BEGIN*/
   "chrome.language": "اللغة",
   "auth.tagline": "منصة توليد العروض والدراسات العقارية",
   "auth.sign_in": "تسجيل الدخول",
+  "auth.otp_title": "التحقق برمز OTP",
   "auth.otp_hint_generic": "رمز التحقق مرسل إلى البريد الإلكتروني",
   "auth.otp_hint_sent_to": "رمز التحقق مرسل إلى {email}",
   "auth.otp_code_label": "رمز التحقق",
