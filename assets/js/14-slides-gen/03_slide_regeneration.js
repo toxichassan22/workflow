@@ -1,29 +1,5 @@
-    /* ── Tenant slide regeneration: plan-job polling, section-targeted
-       regen, snapshot replacement and the assets sent to the planner. ── */
-
-
-    // The planner reads every section of the project, so it can take minutes. The server queues it
-    // and answers with a job id, because the hosting proxy drops a request held open that long and
-    // the browser then reported a timeout for a plan the server had actually produced.
-    async function pollTenantSlidePlanJob(jobId, onProgress) {
-      const started = Date.now();
-      let res = null;
-      while (Date.now() - started < 2 * 60 * 1000) {
-        await new Promise(resolve => setTimeout(resolve, 2500));
-        res = await apiWithTimeout('GET', '/api/slide-plan/jobs/' + encodeURIComponent(jobId), null,
-          30000);
-        const status = String(res && res.status || '');
-        if (typeof onProgress === 'function') onProgress(res);
-        if (status === 'completed' || status === 'failed' || status === 'cancelled' || (res && res.plan)) break;
-        if (!res || res.failureReason === 'job_not_found') break;
-        // The user stopped the plan: stop waiting for it.
-        if (tenantGenerationStopRequested) break;
-      }
-      if (res && !res.plan && !res.error) {
-        res = { success: false, error: 'تعذر إعداد خطة الشرائح في الوقت المتاح', error_code: 'PLAN_JOB_TIMEOUT' };
-      }
-      return res;
-    }
+    /* ── Tenant slide regeneration: section-targeted regen, snapshot
+       replacement and the assets sent with the structure request. ── */
 
     // A slide can take longer than the shared hosting proxy allows. Queueing the request keeps the
     // browser connected only to short status calls and guarantees that a timeout cannot start the
@@ -179,16 +155,15 @@
 
     async function requestTenantSectionSlidePlans(sectionKey) {
       const plannerKey = TENANT_SECTION_PLANNER_KEYS[sectionKey];
-      if (!plannerKey) throw new Error('القسم غير مدعوم لإعادة التخطيط');
-      const response = await requestTenantSlidePlan(tenantProjectData, job => {
-        setLiveGenBanner(true, WFT('gen.replanning_section', 'إعادة تخطيط قسم {section}', { section: wfTr(TENANT_PRESENTATION_SECTION_TITLES[sectionKey] || sectionKey) }),
-          (job && job.message) || 'تحليل الصور والبيانات وتحديد عدد الشرائح المناسب', 12);
-      }, plannerKey);
+      if (!plannerKey) throw new Error('القسم غير مدعوم لإعادة التوليد');
+      setLiveGenBanner(true, WFT('gen.regenerating_section', 'إعادة توليد قسم {section}', { section: wfTr(TENANT_PRESENTATION_SECTION_TITLES[sectionKey] || sectionKey) }),
+        WFT('gen.regenerating_section_detail', 'تجهيز شرائح القسم من بياناته المعتمدة'), 12);
+      const response = await requestTenantSlidePlan(tenantProjectData, plannerKey);
       if (!response?.success || !response.plan) {
-        throw new Error(response?.error || 'تعذر إعداد خطة القسم الجديدة');
+        throw new Error(response?.error || 'تعذر تجهيز شرائح القسم');
       }
       const slides = (response.plan.slides || []).filter(slide => tenantSectionPlanMatchesSection(slide, sectionKey));
-      if (!slides.length) throw new Error('لم تنتج خطة القسم شرائح قابلة للتوليد؛ لم يتم تغيير العرض.');
+      if (!slides.length) throw new Error('لم ينتج قسم العرض شرائح قابلة للتوليد؛ لم يتم تغيير العرض.');
       return { plan: response.plan, slides };
     }
 
@@ -313,7 +288,7 @@
         return false;
       }
       if (tenantSlidePlanRequest) {
-        toast('يوجد إعداد خطة جارٍ حاليًا');
+        toast(WFT('gen.structure_busy', 'يوجد تجهيز شرائح جارٍ حاليًا'));
         return false;
       }
       if (hasResumableTenantSlideGeneration()) {
@@ -339,7 +314,7 @@
       const targetNumbers = targetIndexes.map(index => index + 1).join('، ');
       if (sectionKey === 'financial' && typeof validateFinancialStudyBeforeProceed === 'function'
         && !(await validateFinancialStudyBeforeProceed())) return false;
-      if (!confirm(WFT('gen.section_regenerate_confirm', 'سيتم إعادة تخطيط وتوليد قسم «{section}» من صوره وبياناته الحالية. قد يزيد أو يقل عدد شرائحه، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟', { section: sectionLabel }))) return false;
+      if (!confirm(WFT('gen.section_regenerate_confirm', 'سيتم إعادة توليد قسم «{section}» من صوره وبياناته الحالية. قد يزيد أو يقل عدد شرائحه، مع إبقاء باقي العرض كما هو. هل تريد المتابعة؟', { section: sectionLabel }))) return false;
 
       const previousSlides = tenantSlidesData.slice();
       const previousPlan = tenantSlidePlan;
@@ -379,7 +354,7 @@
         triggerAutoSaveDraft();
         tenantDesignerMessages.push({
           role: 'assistant',
-          content: WFT('gen.section_replanned', 'تم إعادة تخطيط وتوليد قسم {section} فقط ({new} شرائح بدلًا من {old})، مع إبقاء باقي العرض كما هو.', { section: wfTr(sectionLabel), new: plannedSlides.length, old: targetIndexes.length }),
+          content: WFT('gen.section_replanned', 'تم إعادة توليد قسم {section} فقط ({new} شرائح بدلًا من {old})، مع إبقاء باقي العرض كما هو.', { section: wfTr(sectionLabel), new: plannedSlides.length, old: targetIndexes.length }),
           slides: Array.from({ length: plannedSlides.length }, (_, offset) => firstIndex + offset + 1)
         });
         renderTenantDesignerChat();
@@ -491,7 +466,7 @@
           title: item.title || '', description: item.description || ''
         })),
         land_photos: assets.land_photos || [],
-        // The planner must know that approved maps are real assets.  Omitting
+        // The structure must know that approved maps are real assets.  Omitting
         // this field made it instruct the model that every map was unavailable,
         // even though the later slide request had the map images in memory.
         map_placeholders: assets.map_placeholders || {},
@@ -500,16 +475,8 @@
       };
     }
 
-    // Billing/provider refusals the planner must surface verbatim: hiding one
-    // behind the emergency fallback plan would only defer the same refusal to
-    // the first paid slide call.
-    const TENANT_GENERATION_FATAL_CODES = new Set([
-      'INSUFFICIENT_BALANCE', 'INSUFFICIENT_CREDITS', 'PROVIDER_CREDITS_EXHAUSTED',
-      'TRIAL_EXPIRED', 'NO_TENANT_KEY', 'TENANT_KEY_CHECK_FAILED', 'BILLING_CHECK_UNAVAILABLE'
-    ]);
-
     let tenantSlidePlanRequest = null;
-    function requestTenantSlidePlan(projectData, onProgress, sectionKey = '') {
+    function requestTenantSlidePlan(projectData, sectionKey = '') {
       if (tenantSlidePlanRequest) return tenantSlidePlanRequest;
       const payload = typeof slimGenerationProjectData === 'function'
         ? slimGenerationProjectData(projectData) : projectData;
@@ -523,28 +490,9 @@
         requestBody.projectData = payload;
       }
       if (sectionKey) requestBody.sectionKey = sectionKey;
+      // The structure is assembled from the project's own sections on the
+      // server, so this answer is immediate and nothing waits on a job.
       tenantSlidePlanRequest = apiWithTimeout('POST', '/api/slide-plan', requestBody)
-        .then(async res => {
-          if (!(res && res.jobId && !res.plan)) return res;
-          // The queued answer already carries the real step list, so the card
-          // shows the plan from the first moment instead of a blank wait.
-          if (typeof onProgress === 'function') {
-            try { onProgress(res); } catch (progressError) { /* display-only */ }
-          }
-          // The plan is a paid call too: its run handle is stoppable.
-          registerTenantGenerationRun(res.jobId);
-          const completed = await pollTenantSlidePlanJob(res.jobId, onProgress);
-          releaseTenantGenerationRun(res.jobId);
-          if (completed?.plan || !res.fallbackPlan) return completed;
-          if (completed && completed.success === false && TENANT_GENERATION_FATAL_CODES.has(completed.error_code)) {
-            return completed;
-          }
-          return {
-            success: true,
-            plan: { ...res.fallbackPlan, source: 'fallback', source_error: completed?.error || 'planner_timeout' },
-            planSource: 'fallback'
-          };
-        })
         .finally(() => { tenantSlidePlanRequest = null; });
       return tenantSlidePlanRequest;
     }

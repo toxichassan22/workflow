@@ -1324,7 +1324,7 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         )
         self.assertIsNone(engine.filter_presentation_plan_sections(full_plan, ('team',)))
 
-    def test_financial_section_presentation_api_ignores_full_deck_minimum_and_frontend_saves_it(self):
+    def test_financial_section_presentation_plan_is_deterministic_and_ignores_full_deck_minimum(self):
         project = {'project_name': 'مشروع الاختبار', 'financial_study_model': {
             'inputs': {'projectCost': 1234567},
             'report': {'parts': [
@@ -1333,19 +1333,9 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
                  'rows': [['2027', '100'], ['2028', '150']]},
             ]},
         }}
-        planner = json.dumps({'slides': [
-            {'title': 'الغلاف', 'type': 'cover'},
-            {'title': 'الفهرس', 'type': 'index'},
-            {'title': 'نبذة', 'type': 'content', 'section_key': 'overview',
-             'bullets': ['أ', 'ب', 'ج']},
-            {'title': 'الدراسة المالية', 'type': 'content', 'section_key': 'financial',
-             'content_source': 'financial_indicators'},
-            {'title': 'الخاتمة', 'type': 'closing'},
-        ]}, ensure_ascii=False)
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_text_chat_parallel', return_value={
-            'choices': [{'message': {'content': planner}}]
-        }):
+        with patch.object(self.application_module, 'call_text_chat_parallel',
+                          side_effect=AssertionError('planning must not call AI')) as planner:
             response = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
                 'projectData': project,
                 'sectionKey': 'section-financial-calc',
@@ -1354,20 +1344,18 @@ class MeetingRequirementsTestsPart02(MeetingRequirementsTests):
         self.assertEqual(response.status_code, 200, response.get_json())
         payload = response.get_json()
         self.assertTrue(payload['success'])
+        self.assertEqual(planner.call_count, 0)
         slides = payload['plan']['slides']
         self.assertLess(len(slides), 14)
         self.assertEqual(
             {slide.get('section_key') for slide in slides},
             {'cover', 'index', 'financial', 'closing'},
         )
-        with self.app.app_context(), patch.object(
-                self.application_module, 'call_text_chat_parallel', return_value={
-                    'choices': [{'message': {'content': planner}}]
-                }):
+        with self.app.app_context():
             # Slide counts are platform-fixed now: a stored tenant value cannot
             # force a section-scoped regeneration up to a locked count.
             branding = dict(db.get_branding(self.tenant_a) or {})
-            locked_payload = self.application_module._execute_slide_plan(
+            locked_payload = self.application_module._build_deterministic_slide_plan(
                 project, self.tenant_a, branding, target_section_keys=('financial',))
         self.assertTrue(locked_payload['success'])
         self.assertLess(len(locked_payload['plan']['slides']), 30)

@@ -3,13 +3,10 @@
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 from slide_engine import (
-    build_slide_plan_prompt, parse_slide_plan, validate_slide_plan,
-    generate_all_slides, CONTENT_DISTRIBUTION_RULES,
-    resolve_slide_bounds, build_fallback_plan, _suggest_design_style,
+    generate_all_slides, resolve_slide_bounds,
     _timeline_data_note, _financial_data_note,
 )
 import context_contracts
-import task_progress
 
 
 PROJECT_SECTION_PRESENTATION_TARGETS = {
@@ -96,305 +93,135 @@ def _ensure_required_location_slides(plan, project_data):
     return plan
 
 
-def _execute_slide_plan(project_data, tenant_id, branding, images=None, target_section_keys=None, progress=None):
-    """Ask the planner for a slide plan, then enforce the company's slide bounds on it."""
-    report = progress if callable(progress) else (lambda *_args, **_kwargs: None)
+def _minimum_slide_floor(project_data, tenant_id, branding, section_mode):
+    """The slide floor: the platform minimum plus any explicit company rule."""
+    if section_mode:
+        return 1
+    minimum = resolve_slide_bounds(branding)[0]
+    training_context = db.get_training_context(
+        tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data)) or ''
+    matches = re.findall(
+        r'(?:أقل|لا يقل عن|بدون أن يقل عن|الحد الأدنى|من|حوالي|أقل عدد|عدد الشرائح.*?لا يقل عن|الالتزام بـ).*?(\d+)',
+        training_context)
+    numbers = [int(match) for match in matches if 1 <= int(match) <= 50]
+    if numbers:
+        minimum = max(minimum, max(numbers))
+    return minimum
+
+
+def _build_deterministic_slide_plan(project_data, tenant_id, branding, images=None,
+                                    target_section_keys=None):
+    """Build the deck structure from the project's own sections.
+
+    There is no planning model call and no planning job. The cover, index and
+    closing are fixed, and every content slide the deck can support comes from
+    the canonical normalizer (maps, media, components, financial report parts,
+    market tables, team, executive content). The answer is ready immediately,
+    so generation starts without a separate planning phase.
+    """
     target_section_keys = tuple(
         key for key in (target_section_keys or ())
         if key in slide_engine.PRESENTATION_SECTION_ORDER
     )
     section_mode = bool(target_section_keys)
-    training_context = db.get_training_context(
-        tenant_id, offer_lang=slide_engine.resolve_offer_lang(project_data)) or ''
-    # Slide bounds are platform constants now — there is no company slide-count
-    # setting to honour or to lock, only the planner's floor and the open ceiling.
-    configured_min, configured_max, _fallback_count = resolve_slide_bounds(branding)
-
-    effective_max_slides = max(1, configured_max)
-    effective_min_slides = 1 if section_mode else min(configured_min, effective_max_slides)
-
-    if not section_mode:
-        # Search training context only for explicit min slide constraints
-        matches = re.findall(r'(?:أقل|لا يقل عن|بدون أن يقل عن|الحد الأدنى|من|حوالي|أقل عدد|عدد الشرائح.*?لا يقل عن|الالتزام بـ).*?(\d+)', training_context)
-        if matches:
-            try:
-                nums = [int(m) for m in matches if 1 <= int(m) <= 50]
-                if nums:
-                    detected_min = max(nums)
-                    effective_min_slides = min(max(effective_min_slides, detected_min), effective_max_slides)
-            except ValueError:
-                pass
-
-    prompt = build_slide_plan_prompt(
-        project_data, branding, tenant_id=tenant_id, images=images,
-        section_keys=target_section_keys if section_mode else None)
     offer_lang = slide_engine.resolve_offer_lang(project_data)
-    if section_mode:
-        target_titles = '، '.join(slide_engine.section_title(key, offer_lang) for key in target_section_keys)
-        prompt = (
-            "## نطاق العرض المستقل\n"
-            f"أنشئ خطة للغلاف والفهرس والأقسام التالية فقط ثم الخاتمة: {target_titles}.\n"
-            "لا تضف أي قسم آخر، ولا تطبق الحد الأدنى لعدد شرائح العرض الكامل.\n\n"
-            + prompt
-        )
-    if training_context:
-        # The count follows the content; this header states the floor without
-        # naming a maximum the prompt itself calls open.
-        count_rule = (
-            "هذا عرض مستقل لقسم محدد، وعدد شرائحه يتبع محتوى القسم فقط."
-            if section_mode else
-            f"لا يقل عدد الشرائح عن {effective_min_slides} شريحة، ولا يوجد حد أعلى: "
-            "وزّع كل المحتوى المتاح على ما يحتاجه من شرائح دون اختصار أو دمج، "
-            "وابقِ كل شريحة بفكرة واحدة غير مزدحمة."
-        )
-        prompt = f"## بيانات خاصة بالشركة وقاعدة عدد الشرائح\nتنبيه هام جداً: {count_rule}\n{training_context}\n\n---\n\n{prompt}"
-
-    plan = None
-    last_error = None
-    report('inputs')
-    # The planner must finish before the web worker timeout so a slow provider can fall back cleanly.
-    max_attempts = 1
-    for attempt in range(1, max_attempts + 1):
-        try:
-            report('ai', 'تحليل بيانات المشروع بالذكاء الاصطناعي')
-            response = call_text_chat_parallel(
-                "أنت خبير في تحليل المحتوى وتوزيعه على شرائح العروض التقديمية الاستثمارية.",
-                prompt,
-                # The outline is compact; a bounded fast-model request avoids the five-minute
-                # Gunicorn kill that previously left the background job stuck at 8 percent.
-                max_tokens=12000,
-                attempts=1,
-                timeout=75,
-                model=LUNA_TEXT_MODEL,
-                usage_ctx=_usage_ctx('slide_plan', project_data, tenant_id=tenant_id)
-            )
-            # A stopped plan must not become the generic fallback structure:
-            # the user asked for the work to stop, not for a different deck.
-            run_control.raise_if_cancelled(response)
-            content = extract_chat_content(response, "SLIDE-PLAN")
-            plan = parse_slide_plan(content, branding, project_data)
-            print(f"[SLIDE-PLAN] Parsed on attempt {attempt}")
-            break
-        except Exception as e:
-            # A deterministic refusal (wallet/key/trial) must not hide behind a
-            # deterministic fallback plan — the file would "succeed" on empty
-            # credit and the client would never see the real cause.
-            if getattr(e, 'fatal_ai_error', False) or \
-                    getattr(e, 'error_code', None) in _FATAL_AI_ERROR_CODES:
-                return {
-                    'success': False,
-                    'error': _client_safe_llm_error(
-                        getattr(e, 'ai_message', '') or str(e)),
-                    'error_code': getattr(e, 'error_code', None) or 'GENERATION_FAILED',
-                    'http_status': getattr(e, 'http_status', None) or 503,
-                }
-            last_error = e
-            print(f"[SLIDE-PLAN ATTEMPT {attempt} FAILED] {e}")
-            if attempt < max_attempts:
-                time.sleep(1)
-
-    # A failed planner used to be invisible: the generic fallback structure shipped as if the model
-    # had produced it, so every such file came out with the same titles and the same count and it
-    # looked like a fixed slide count instead of a failure.
-    plan_source = 'model'
-    plan_error = ''
-    if not plan:
-        print(f"[SLIDE-PLAN FALLBACK] Using fallback plan after {max_attempts} attempts. Last error: {last_error}")
-        plan = build_fallback_plan(branding, project_data)
-        plan_source = 'fallback'
-        plan_error = str(last_error or '')
-
-    # The model call is over: every later change is local assembly, so these
-    # are the boundaries the progress card can name honestly.
-    report('arrange', f'{len(plan.get("slides") or [])} شريحة من المحلل')
+    plan = {'slides': [
+        {'title': slide_engine.offer_chrome('cover', offer_lang), 'type': 'cover'},
+        {'title': slide_engine.offer_chrome('index', offer_lang), 'type': 'index'},
+        {'title': slide_engine.section_title('closing', offer_lang), 'type': 'closing'},
+    ]}
     plan = _ensure_required_location_slides(plan, project_data)
     # A project with no financial study gets no financial slides at all, from any source.
     plan = slide_engine.strip_financial_slides(plan, project_data)
     # There are no photographs of the site, so a slide built to hold them holds empty frames.
     plan = slide_engine.strip_street_view_slides(plan)
     plan = slide_engine.normalize_presentation_plan(plan, project_data, images, tenant_id=tenant_id)
-    has_financial = slide_engine.project_has_financial_study(project_data)
-
-    # Enforce min and max slide counts strictly on generated plan
-    slides = plan.get('slides', [])
-
-    if len(slides) < effective_min_slides:
-        print(f"[SLIDE-PLAN ENFORCE] Plan returned {len(slides)} slides, auto-padding to effective_min_slides ({effective_min_slides})")
-        needed_extra = effective_min_slides - len(slides)
-        if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
-            extra_topics = [
-                {'title': 'Technical Specifications & Material Quality', 'style': 'cards', 'bullets': ['Finishing quality and materials used', 'HVAC and thermal insulation systems', 'Warranties and after-sales services']},
-                {'title': 'Environmental Analysis & Immediate Surroundings', 'style': 'text', 'bullets': ['Accessibility and key arterials', 'Proximity to amenities and vital centers', 'Quality of the surrounding built environment']},
-                {'title': 'Timeline & Development Phases', 'style': 'timeline', 'bullets': ['Planning and initial studies phase', 'Execution and construction phase', 'Handover and operation phase']},
-            ]
-        else:
-            extra_topics = [
-                {'title': 'المواصفات الفنية وجودة المواد', 'style': 'cards', 'bullets': ['جودة التشطيبات والمواد المستخدمة', 'أنظمة التكييف والعزل الحراري', 'الضمانات وخدمات ما بعد البيع']},
-                {'title': 'التحليل البيئي والمحيط المباشر', 'style': 'text', 'bullets': ['سهولة الوصول والمحاور الرئيسية', 'قرب المشروع من المرافق والمراكز الحيوية', 'جودة البيئة العمرانية المحيطة']},
-                {'title': 'الخطة الزمنية ومراحل التطوير', 'style': 'timeline', 'bullets': ['مرحلة التخطيط والدراسات الأولية', 'مرحلة التنفيذ والإنشاءات', 'مرحلة التسليم والتشغيل']},
-            ]
-        if has_financial:
-            if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
-                extra_topics.insert(0, {'title': 'Performance Metrics & Added Value', 'style': 'dashboard', 'bullets': ['Expected investment return analysis', 'Occupancy and sustainability rate', 'Long-term asset value']})
-            else:
-                extra_topics.insert(0, {'title': 'مؤشرات الأداء والقيمة المضافة', 'style': 'dashboard', 'bullets': ['تحليل العائد الاستثماري المتوقع', 'معدل الإشغال والاستدامة', 'قيمة الأصول على المدى الطويل']})
-        insert_idx = max(1, len(slides) - 1)
-        if len(slides) >= 2 and slides[-2].get('type') == 'moodboard':
-            insert_idx = max(1, len(slides) - 2)
-
-        for i in range(needed_extra):
-            topic = extra_topics[i % len(extra_topics)]
-            new_slide = {
-                'title': topic['title'] + (f" ({i+1})" if i >= len(extra_topics) else ""),
-                'type': 'content',
-                'design_style': topic['style'],
-                'requires_image': False,
-                'bullets': topic['bullets'],
-                'content_density': 'medium',
-            }
-            slides.insert(insert_idx, new_slide)
-            insert_idx += 1
-
-    plan['slides'] = slides
-    plan = slide_engine.normalize_presentation_plan(plan, project_data, images, tenant_id=tenant_id)
-    slides = plan['slides']
-
-    # Trimming only happens for a tenant who locked the count: without a lock the maximum is
-    # SLIDE_COUNT_OPEN, so a long plan is kept exactly as the planner produced it.
-    if len(slides) > effective_max_slides:
-        print(f"[SLIDE-PLAN TRIM] Plan returned {len(slides)} slides, trimming strictly to effective_max_slides ({effective_max_slides})")
-        if effective_max_slides == 1:
-            slides = slides[:1]
-        else:
-            first_slides = slides[:1]
-            last_slides = slides[-1:]
-            middle_count = max(0, effective_max_slides - 2)
-            middle_slides = slides[1:1+middle_count]
-            slides = first_slides + middle_slides + last_slides
-
-    plan['proposed_count'] = len(slides)
-    plan['slides'] = slides
-    plan = slide_engine.refresh_index_entries(plan)
+    if not section_mode:
+        plan = _pad_plan_to_minimum(
+            plan, project_data, branding, offer_lang,
+            _minimum_slide_floor(project_data, tenant_id, branding, section_mode))
     if section_mode:
         filtered_plan = slide_engine.filter_presentation_plan_sections(plan, target_section_keys)
         if not filtered_plan:
-            target_titles = '، '.join(slide_engine.PRESENTATION_SECTION_TITLES[key] for key in target_section_keys)
+            target_titles = '، '.join(
+                slide_engine.PRESENTATION_SECTION_TITLES[key] for key in target_section_keys)
             return {
                 'success': False,
                 'error': f'لا توجد بيانات متاحة لتوليد عرض قسم {target_titles}',
                 'failureReason': 'section_empty',
             }
         plan = filtered_plan
-    plan['source'] = plan_source
-    if plan_error:
-        plan['source_error'] = plan_error[:400]
-
-    is_valid, issues = validate_slide_plan(plan, branding)
+    plan = slide_engine.refresh_index_entries(plan)
+    plan['source'] = 'deterministic'
+    is_valid, issues = slide_engine.validate_slide_plan(plan, branding)
     if not is_valid:
         print(f"[SLIDE-PLAN] Validation issues: {issues}")
-
-    report('ready', f'{len(plan.get("slides") or [])} شريحة في الخطة')
     return {
         'success': True,
         'plan': plan,
-        'planSource': plan_source,
+        'planSource': 'deterministic',
         'validation': {'isValid': is_valid, 'issues': issues},
     }
 
 
-def _emergency_slide_plan(project_data, branding, images, tenant_id, target_section_keys=None):
-    plan = build_fallback_plan(branding, project_data)
-    plan = _ensure_required_location_slides(plan, project_data)
-    plan = slide_engine.strip_financial_slides(plan, project_data)
-    plan = slide_engine.strip_street_view_slides(plan)
-    plan = slide_engine.normalize_presentation_plan(plan, project_data, images, tenant_id=tenant_id)
-    if target_section_keys:
-        filtered = slide_engine.filter_presentation_plan_sections(plan, target_section_keys)
-        if filtered:
-            plan = filtered
-    plan = slide_engine.refresh_index_entries(plan)
-    plan['source'] = 'fallback'
-    return plan
+def _pad_plan_to_minimum(plan, project_data, branding, offer_lang, minimum):
+    """Reach the slide floor on a thin project without inventing a structure.
 
-
-def _slide_plan_job_worker(flask_app, tenant_id, project_data, branding, images, job_id, target_section_keys=None):
-    with flask_app.app_context():
-        # The stop button reaches this plan through the run registry; the
-        # thread dies with the worker, so the handle cannot leak into another
-        # request.
-        run_control.bind_run(job_id, tenant_id)
-        fallback_plan = _emergency_slide_plan(
-            project_data, branding, images, tenant_id, target_section_keys=target_section_keys)
-        _write_job('.plan_jobs', tenant_id, job_id, {
-            'status': 'running',
-            'success': True,
-            'message': 'جاري تحليل بيانات المشروع وإعداد هيكل العرض...',
-            'fallbackPlan': fallback_plan,
+    The normalizer already emitted every slide the data supports, so only a
+    minimal file gets here. The padding topics are ordinary content pages and
+    are the same topics the earlier floor used.
+    """
+    slides = list(plan.get('slides') or [])
+    if len(slides) >= minimum:
+        return plan
+    needed_extra = minimum - len(slides)
+    if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+        extra_topics = [
+            {'title': 'Technical Specifications & Material Quality', 'style': 'cards', 'bullets': ['Finishing quality and materials used', 'HVAC and thermal insulation systems', 'Warranties and after-sales services']},
+            {'title': 'Environmental Analysis & Immediate Surroundings', 'style': 'text', 'bullets': ['Accessibility and key arterials', 'Proximity to amenities and vital centers', 'Quality of the surrounding built environment']},
+            {'title': 'Timeline & Development Phases', 'style': 'timeline', 'bullets': ['Planning and initial studies phase', 'Execution and construction phase', 'Handover and operation phase']},
+        ]
+    else:
+        extra_topics = [
+            {'title': 'المواصفات الفنية وجودة المواد', 'style': 'cards', 'bullets': ['جودة التشطيبات والمواد المستخدمة', 'أنظمة التكييف والعزل الحراري', 'الضمانات وخدمات ما بعد البيع']},
+            {'title': 'التحليل البيئي والمحيط المباشر', 'style': 'text', 'bullets': ['سهولة الوصول والمحاور الرئيسية', 'قرب المشروع من المرافق والمراكز الحيوية', 'جودة البيئة العمرانية المحيطة']},
+            {'title': 'الخطة الزمنية ومراحل التطوير', 'style': 'timeline', 'bullets': ['مرحلة التخطيط والدراسات الأولية', 'مرحلة التنفيذ والإنشاءات', 'مرحلة التسليم والتشغيل']},
+        ]
+    if slide_engine.project_has_financial_study(project_data):
+        if offer_lang == slide_engine.OFFER_LANG_ENGLISH:
+            extra_topics.insert(0, {'title': 'Performance Metrics & Added Value', 'style': 'dashboard', 'bullets': ['Expected investment return analysis', 'Occupancy and sustainability rate', 'Long-term asset value']})
+        else:
+            extra_topics.insert(0, {'title': 'مؤشرات الأداء والقيمة المضافة', 'style': 'dashboard', 'bullets': ['تحليل العائد الاستثماري المتوقع', 'معدل الإشغال والاستدامة', 'قيمة الأصول على المدى الطويل']})
+    body = slides[:-1] if slides and slides[-1].get('type') == 'closing' else slides
+    closing = slides[len(body):]
+    insert_idx = len(body)
+    for i in range(needed_extra):
+        topic = extra_topics[i % len(extra_topics)]
+        body.insert(insert_idx, {
+            'title': topic['title'] + (f" ({i+1})" if i >= len(extra_topics) else ""),
+            'type': 'content',
+            'design_style': topic['style'],
+            'requires_image': False,
+            'bullets': topic['bullets'],
+            'content_density': 'medium',
         })
-        def report_plan_step(step_key, detail=''):
-            update = task_progress.payload('slide_plan', step_key, detail=detail)
-            _write_job('.plan_jobs', tenant_id, job_id, {
-                **update,
-                'status': 'running',
-                'success': True,
-                'message': detail or update['stepLabel'],
-            })
-
-        try:
-            payload = _execute_slide_plan(
-                project_data, tenant_id, branding, images,
-                target_section_keys=target_section_keys,
-                progress=report_plan_step,
-            )
-            succeeded = bool(payload.get('success'))
-            # A stop that landed after the planner's last provider call must
-            # still close the job as cancelled, not as a finished plan.
-            cancelled = (payload.get('error_code') == run_control.CANCELLED_ERROR_CODE
-                         or run_control.current_run_cancelled())
-            _write_job('.plan_jobs', tenant_id, job_id, {
-                **payload,
-                **(task_progress.payload('slide_plan', 'ready', complete=True) if succeeded else {}),
-                'status': 'completed' if succeeded else ('cancelled' if cancelled else 'failed'),
-                'message': ('تم إيقاف المهمة' if cancelled else
-                            'تم إعداد خطة الشرائح' if succeeded else payload.get('error', 'تعذر إعداد خطة الشرائح')),
-            })
-        except Exception as exc:
-            print(f'[SLIDE-PLAN JOB FAILED] {exc}')
-            if getattr(exc, 'fatal_ai_error', False):
-                _write_job('.plan_jobs', tenant_id, job_id, {
-                    'status': 'failed',
-                    'success': False,
-                    'error': _client_safe_llm_error(
-                        getattr(exc, 'ai_message', '') or str(exc)),
-                    'error_code': getattr(exc, 'error_code', None) or 'GENERATION_FAILED',
-                    'failureReason': 'billing_refused',
-                })
-                return
-            _write_job('.plan_jobs', tenant_id, job_id, {
-                'status': 'failed',
-                'success': False,
-                'error': f'تعذر إعداد خطة الشرائح: {exc}',
-                'failureReason': 'job_failed',
-            })
+        insert_idx += 1
+    plan['slides'] = body + closing
+    plan['proposed_count'] = len(plan['slides'])
+    return plan
 
 
 @app.route('/api/slide-plan', methods=['POST'])
 @require_permission('create_presentation')
 def api_slide_plan():
-    """
-    AI analyzes project data and proposes a slide plan.
-    Input: {projectData: {...}}
-    Output: {jobId} in production, or {proposed_count, reasoning, slides: [...]} in tests.
+    """Build the deck structure from the project's own data.
 
-    The planner needs minutes on a full project, and the live hosting proxy drops a request that
-    stays open that long — the browser then saw a timeout for work the server had completed. So the
-    plan is queued and polled, the same way the croquis and market-study jobs are.
+    Output: {success, plan, planSource, validation}. The answer is local and
+    immediate: there is no planning model call and no job to poll, so the
+    design generation starts as soon as the client asks for it.
     """
     data = request.json or {}
     project_data = clean_project_data(data.get('projectData', {}))
-    _billing_guard = _require_billing_balance('slide_plan')
-    if _billing_guard is not None:
-        return _billing_guard
     presentation_id = str(data.get('presentationId') or '').strip()
     if presentation_id and not project_data:
         presentation = db.get_presentation(presentation_id, tenant_id=g.tenant_id)
@@ -419,7 +246,7 @@ def api_slide_plan():
         # A section-scoped plan is bound to that section's own approval — the
         # all-sections gate belongs to the full-file generation only. Only a
         # draft the request actually names can be checked; a draftless call
-        # (e.g. replanning slides of a saved presentation) has nothing to
+        # (e.g. rebuilding slides of a saved presentation) has nothing to
         # verify against and passes.
         section_draft_id = (project_data.get('draftId') or project_data.get('draft_id')
                             or data.get('draftId'))
@@ -431,58 +258,11 @@ def api_slide_plan():
                             'error_code': 'section_not_approved'}), 409
 
     target_section_keys = section_target[0] if section_target else None
-    use_background = (not current_app.config.get('TESTING')) or bool(data.get('background'))
-    if not use_background:
-        payload = _execute_slide_plan(
-            project_data, g.tenant_id, branding, images,
-            target_section_keys=target_section_keys,
-        )
-        return jsonify(payload), 200 if payload.get('success') else int(payload.get('http_status') or 400)
-
-    job_id = str(_uuid.uuid4())
-    fallback_plan = _emergency_slide_plan(
-        project_data, branding, images, g.tenant_id, target_section_keys=target_section_keys)
-    _write_job('.plan_jobs', g.tenant_id, job_id, {
-        **task_progress.payload('slide_plan', 'inputs'),
-        'status': 'queued',
-        'success': True,
-        'message': 'تم استلام طلب إعداد هيكل العرض',
-        'fallbackPlan': fallback_plan,
-        'payload': {
-            'projectData': project_data,
-            'images': images,
-            'targetSectionKeys': target_section_keys,
-        },
-    })
-    threading.Thread(
-        target=_slide_plan_job_worker,
-        args=(current_app._get_current_object(), g.tenant_id, project_data, dict(branding), images, job_id, target_section_keys),
-        daemon=True,
-    ).start()
-    return jsonify({
-        **task_progress.payload('slide_plan', 'inputs'),
-        'success': True,
-        'jobId': job_id,
-        'status': 'queued',
-        'message': 'بدأ إعداد هيكل العرض في الخلفية',
-        'fallbackPlan': fallback_plan,
-    }), 202
-
-
-@app.route('/api/slide-plan/jobs/<job_id>', methods=['GET'])
-@require_permission('create_presentation')
-def api_slide_plan_job(job_id):
-    if not re.fullmatch(r'[A-Za-z0-9-]{8,64}', str(job_id or '')):
-        return jsonify({'success': False, 'error': 'معرف مهمة غير صالح'}), 400
-    job = _read_job('.plan_jobs', g.tenant_id, job_id)
-    if not job:
-        return jsonify({
-            'success': False,
-            'status': 'not_found',
-            'error': 'المهمة غير موجودة أو انتهت صلاحيتها',
-            'failureReason': 'job_not_found',
-        }), 404
-    return jsonify(_public_job(job, job_id, g.tenant_id))
+    payload = _build_deterministic_slide_plan(
+        project_data, g.tenant_id, branding, images,
+        target_section_keys=target_section_keys,
+    )
+    return jsonify(payload), 200 if payload.get('success') else 400
 
 
 def _generation_map_marker_side(images, project_data, view='overview'):

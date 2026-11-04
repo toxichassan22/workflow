@@ -159,7 +159,7 @@ def _resume_interrupted_jobs():
 def _resume_interrupted_jobs_locked():
     orphan_fail_seconds = int(os.environ.get('JOB_ORPHAN_FAIL_SECONDS') or 900)
     resumed = 0
-    for namespace in ('.market_jobs', '.plan_jobs', '.land_jobs', '.slide_jobs',
+    for namespace in ('.market_jobs', '.land_jobs', '.slide_jobs',
                       '.designer_chat_jobs'):
         base = os.path.join(UPLOADS_DIR, namespace)
         if not os.path.isdir(base):
@@ -232,19 +232,6 @@ def _redispatch_job(namespace, tenant_id, job_id, job):
                 args=(current_app._get_current_object(), tenant_id, kind,
                       payload.get('data') or {}, job_id),
                 kwargs={'actor': actor},
-                daemon=True,
-            ).start()
-            return True
-        if namespace == '.plan_jobs':
-            branding = db.get_branding(tenant_id)
-            if not branding:
-                return False
-            threading.Thread(
-                target=_slide_plan_job_worker,
-                args=(current_app._get_current_object(), tenant_id,
-                      payload.get('projectData') or {}, dict(branding),
-                      payload.get('images') or {}, job_id,
-                      payload.get('targetSectionKeys')),
                 daemon=True,
             ).start()
             return True

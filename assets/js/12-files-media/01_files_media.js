@@ -539,53 +539,28 @@
       if (!(await preparePresentationGenerationTarget('section:' + sectionKey))) return;
       const projectName = tenantProjectData.project_name || tenantProjectData.projectName || 'عرض بدون عنوان';
       const presentationTitle = projectName + ' - ' + resolvedLabel;
-      // The approval gate opens before any page change or billable call — same
-      // order as the full-file run. It used to sit after the slides-page
-      // navigation and the AI plan request, so an empty wallet (402 on
-      // slide-plan) or a dead provider left the user stranded on the design
-      // page with the modal never appearing. The estimate prices the section's
-      // current slides when they exist; a first run falls back to the modal's
-      // own default count.
-      const plannerKeys = Object.keys(TENANT_SECTION_PLANNER_KEYS || {})
-        .filter(key => TENANT_SECTION_PLANNER_KEYS[key] === sectionKey);
-      const priorSectionSlides = plannerKeys.length && typeof tenantSectionPlanMatchesSection === 'function'
-        ? [tenantSlidesData, tenantSlidePlan && tenantSlidePlan.slides]
-          .map(list => (Array.isArray(list) ? list : [])
-            .filter(slide => plannerKeys.some(pk => tenantSectionPlanMatchesSection(slide, pk))).length)
-          .find(count => count > 0)
-        : 0;
+
+      // The section structure is assembled from its own approved data, so it
+      // is ready before the gate and nothing waits on a planning job.
+      const planResponse = await requestTenantSlidePlan(tenantProjectData, sectionKey);
+      if (!planResponse?.success || !planResponse.plan) {
+        toast(planResponse?.error || 'تعذر تجهيز شرائح القسم');
+        return;
+      }
+      tenantSlidePlan = planResponse.plan;
+      tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+      const planCount = (tenantSlidePlan.slides || []).length;
+
       const gateApproved = await showGenerationApprovalModal({
         draftId: tenantProjectData.draftId || tenantProjectData.draft_id,
-        slidesCount: priorSectionSlides || undefined,
+        slidesCount: planCount || undefined,
         projectName: presentationTitle,
         sectionKey
       });
       if (!gateApproved) return;
 
-      // The plan also runs before navigation: a planner failure keeps the
-      // project page in place with the error instead of a dead design stage.
-      showLoader(WFT('gen.preparing_presentation', 'إعداد عرض {label}', { label: wfTr(resolvedLabel) }),
-        'تحليل بيانات القسم وبناء الشرائح');
-      let planResponse = null;
-      try {
-        planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
-          applyLoaderJobProgress(job);
-        }, sectionKey);
-      } finally {
-        hideLoader();
-      }
-      if (!planResponse?.success || !planResponse.plan) {
-        // The gate already escrowed its hold — release it like the full-file
-        // run does, or the points stay reserved and the draft stays locked.
-        await settleGenerationRun(false, planResponse?.error || 'تعذر إعداد خطة القسم');
-        toast(planResponse?.error || 'تعذر إعداد عرض القسم');
-        return;
-      }
-
       clearTenantSlidesStage(WFT('gen.preparing_presentation_progress', 'جاري إعداد عرض {label}', { label: wfTr(resolvedLabel) }));
       setSlidesEditorInfo(presentationTitle, 0);
-      tenantSlidePlan = planResponse.plan;
-      tenantProjectData.tenantSlidePlan = tenantSlidePlan;
       tenantPresentationTitle = presentationTitle;
       await generateTenantSlides({
         sectionKey,
@@ -844,55 +819,33 @@
       const watermarkChoice = await askGenerationWatermarkPreference();
       if (watermarkChoice === null) return;
 
+      // The structure is assembled from the saved project data itself, so this
+      // answer is immediate: no planning call and no planning wait.
+      const planResponse = await requestTenantSlidePlan(tenantProjectData);
+      if (!planResponse?.success || !planResponse.plan) {
+        toast(planResponse?.error || 'تعذر تجهيز شرائح العرض');
+        return;
+      }
+      tenantSlidePlan = planResponse.plan;
+      tenantProjectData.tenantSlidePlan = tenantSlidePlan;
+      triggerAutoSaveDraft();
+      const planCount = (tenantSlidePlan.slides || []).length;
+
       // Gate 2 (t14 + d04): Preflight generation approval, cost estimate and atomic points reservation
       const gateApproved = await showGenerationApprovalModal({
         draftId: tenantProjectData.draftId || tenantProjectData.draft_id,
-        slidesCount: (tenantSlidePlan && (tenantSlidePlan.slides || []).length) || 10,
+        slidesCount: planCount || 10,
         projectName: tenantPresentationTitle,
       });
       if (!gateApproved) return;
 
       try {
-        // The plan finishes before the slides page opens: a failed planner or
-        // a dead provider keeps the user on this page with the error instead
-        // of stranding them on an empty design stage.
-        showLoader(WFT('gen.planning_structure', 'إعداد خطة وهيكل العرض الاستثماري'),
-        WFT('gen.planning_structure_detail', 'تحليل متطلبات المشروع والهيكل الأنسب'), undefined,
-        { stoppable: true });
-        const planResponse = await requestTenantSlidePlan(tenantProjectData, job => {
-          applyLoaderJobProgress(job);
-        }).finally(() => hideLoader());
-        if (tenantGenerationStopRequested) {
-          // The user stopped the plan: no slide may start after that.
-          await settleGenerationRun(false, 'أُلغيت مهمة التوليد');
-          toast(WFT('gen.stopped_toast', 'تم إيقاف التوليد'));
-          return;
-        }
-        if (planResponse.success && planResponse.plan) {
-          tenantSlidePlan = planResponse.plan;
-          tenantProjectData.tenantSlidePlan = tenantSlidePlan;
-          const planCount = (tenantSlidePlan.slides || []).length;
-          // A fallback plan is a failed planner, not a proposal: it always has the same generic
-          // titles and the same count, so it is stated instead of passing as the model's work.
-          if (tenantSlidePlan.source === 'fallback') {
-            toast('لم ينتج المحلل خطة لهذا المشروع، والهيكل المستخدم عام.');
-          }
-          triggerAutoSaveDraft();
-          // Open the stage only now that a plan exists to render on it.
-          showTenantPage('tenantSlidesPage');
-          clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض');
-          setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
-          setLiveGenBanner(true, 'تم إعداد خطة الشرائح', WFT('gen.slides_planned', '{n} شريحة — بدء التوليد المباشر', { n: planCount }), 0, true);
-        } else {
-          // The gate already escrowed the hold: a dead plan releases it and
-          // returns the draft from 'generating' instead of stranding both.
-          await settleGenerationRun(false, planResponse.error || 'تعذر إعداد خطة الشرائح');
-          const errorMessage = planResponse.error || 'تعذر إعداد خطة الشرائح';
-          console.error('[SLIDE PLAN]', planResponse);
-          toast(errorMessage);
-          return;
-        }
-
+        // The structure is already known, so the design stage opens and the
+        // first slide request follows immediately.
+        showTenantPage('tenantSlidesPage');
+        clearTenantSlidesStage(WFT('gen.slides_generating', 'جاري توليد الشرائح'));
+        setSlidesEditorInfo(tenantProjectData.project_name || tenantProjectData.projectName || '', 0);
+        setLiveGenBanner(true, WFT('gen.slides_started', 'بدء توليد الشرائح'), WFT('gen.slides_planned', '{n} شريحة — بدء التوليد المباشر', { n: planCount }), 0, true);
         await generateTenantSlides({ approvalGranted: true, watermark: watermarkChoice });
       } catch (generationError) {
         // A throw anywhere after approval must still close the gate: the hold

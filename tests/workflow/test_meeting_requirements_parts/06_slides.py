@@ -1895,30 +1895,31 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertEqual(fields['location_polygon_source'], 'auto')
         self.assertNotIn('land_area', fields)
 
-    def test_slide_plan_falls_back_when_ai_provider_is_unavailable(self):
+    def test_slide_plan_is_built_from_project_data_without_an_ai_call(self):
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_text_chat_parallel', side_effect=RuntimeError('AI unavailable')) as planner:
+        with patch.object(self.application_module, 'call_text_chat_parallel',
+                          side_effect=AssertionError('planning must not call AI')) as planner:
             response = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
                 'projectData': {'project_name': 'مشروع تجريبي', 'project_type': 'سكني'}
             })
 
         self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertTrue(response.get_json()['success'])
-        self.assertTrue(response.get_json()['plan']['slides'])
-        # A failed planner ships the generic structure, and that is stated rather than passing as
-        # the model's own proposal — every such file otherwise came out with identical titles.
-        self.assertEqual(response.get_json()['plan']['source'], 'fallback')
-        self.assertEqual(response.get_json()['planSource'], 'fallback')
-        self.assertEqual(planner.call_count, 1)
-        self.assertEqual(planner.call_args.kwargs['max_tokens'], 12000)
-        self.assertEqual(planner.call_args.kwargs['timeout'], 75)
-        self.assertEqual(planner.call_args.kwargs['model'], self.application_module.LUNA_TEXT_MODEL)
+        payload = response.get_json()
+        self.assertTrue(payload['success'])
+        self.assertTrue(payload['plan']['slides'])
+        self.assertEqual(payload['plan']['source'], 'deterministic')
+        self.assertEqual(payload['planSource'], 'deterministic')
+        self.assertNotIn('jobId', payload)
+        self.assertEqual(planner.call_count, 0)
+        self.assertEqual(payload['plan']['slides'][0]['type'], 'cover')
+        self.assertEqual(payload['plan']['slides'][1]['type'], 'index')
+        self.assertEqual(payload['plan']['slides'][-1]['type'], 'closing')
 
     def test_slide_count_has_no_upper_limit(self):
-        """The plan follows the amount of content: a stored max_slides used to trim the surplus."""
+        """The structure follows the content: a stored max_slides never trims it."""
         engine = self.application_module.slide_engine
-        # The count belongs to the planner: only the platform floor and open
-        # ceiling apply, and stored tenant values are ignored outright.
+        # Only the platform floor and open ceiling apply; stored tenant values
+        # are ignored outright.
         self.assertEqual(engine.resolve_slide_bounds({'min_slides': 8, 'max_slides': 30}),
                          (engine.PLAN_MIN_SLIDES, engine.SLIDE_COUNT_OPEN,
                           engine.PLAN_FALLBACK_SLIDE_COUNT))
@@ -1929,32 +1930,23 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         # Every one of the 117 content slides survives; the canonical section divider is added.
         long_plan = {'slides': (
             [{'title': 'الغلاف', 'type': 'cover'}, {'title': 'الفهرس', 'type': 'index'}]
-            + [{'title': f'محور {i}', 'type': 'content', 'bullets': ['1', '2', '3']} for i in range(117)]
+            + [{'title': f'محور {i}', 'type': 'content', 'section_key': 'overview',
+                'bullets': ['1', '2', '3']} for i in range(117)]
             + [{'title': 'الختام', 'type': 'closing'}]
         )}
-        with patch.object(self.application_module, 'call_text_chat_parallel', return_value={}), \
-                patch.object(self.application_module, 'extract_chat_content', return_value='{}'), \
-                patch.object(self.application_module, 'parse_slide_plan', return_value=long_plan), \
-                self.application_module.app.test_request_context():
-            self.application_module.g.tenant_id = self.tenant_a
-            result = self.application_module._execute_slide_plan(
-                {'project_name': 'THE VIEW'}, self.tenant_a, {'min_slides': 8, 'max_slides': 30})
-        self.assertEqual(len(result['plan']['slides']), 121)
-        self.assertEqual(sum(slide.get('type') == 'content' for slide in result['plan']['slides']), 117)
-        self.assertEqual(result['plan']['source'], 'model')
-        self.assertNotIn('Too many slides', ' '.join(result['validation']['issues']))
-
-        app_source = read_module_source('app.py')
-        self.assertIn('max_tokens=12000', app_source)
-        self.assertIn('timeout=75', app_source)
-        self.assertIn('model=LUNA_TEXT_MODEL', app_source)
-        self.assertNotIn('timeout=600', app_source)
-        self.assertNotIn('شريحة كحد أقصى)', app_source)
+        normalized = engine.normalize_presentation_plan(
+            json.loads(json.dumps(long_plan)), {'project_name': 'THE VIEW'}, {})
+        self.assertEqual(
+            sum(slide.get('type') == 'content' for slide in normalized['slides']), 117)
+        self.assertNotIn('Too many slides', ' '.join(
+            engine.validate_slide_plan(normalized, {'min_slides': 8, 'max_slides': 30})[1]))
 
         index_source = read_frontend_text()
-        # Regeneration always re-plans, and the previous deck is never displayed while it runs.
-        self.assertIn("clearTenantSlidesStage('جاري إعداد خطة وهيكل العرض')", index_source)
+        # The structure request is immediate, and the previous deck is never
+        # displayed while a regeneration runs.
         self.assertIn('const planResponse = await requestTenantSlidePlan(tenantProjectData', index_source)
+        self.assertNotIn('gen.planning_structure', index_source)
+        self.assertNotIn('/api/slide-plan/jobs/', index_source)
         self.assertNotIn('if (!tenantSlidePlan) {', index_source)
         self.assertNotIn('settingsMaxSlides', index_source)
 

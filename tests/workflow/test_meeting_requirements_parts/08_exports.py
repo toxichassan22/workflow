@@ -187,39 +187,26 @@ class MeetingRequirementsTestsPart07(MeetingRequirementsTests):
         self.assertIn('const GENERATION_MIN_FACTS = 6;', index_source)
         self.assertIn('const factCount = countProjectFacts(tenantProjectData);', index_source)
 
-    def test_slide_plan_runs_as_a_polled_job_so_the_proxy_cannot_drop_it(self):
-        """A full project needs minutes to plan, and the live proxy kills a request held that long."""
+    def test_slide_plan_answers_immediately_without_a_job(self):
+        """The structure is local work: no planning call and nothing to poll."""
         client = self.app.test_client()
-        with patch.object(self.application_module, 'call_text_chat_parallel', side_effect=RuntimeError('AI unavailable')):
-            queued = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
+        with patch.object(self.application_module, 'call_text_chat_parallel',
+                          side_effect=AssertionError('planning must not call AI')):
+            response = client.post('/api/slide-plan', headers=self._headers(self.token_a), json={
                 'projectData': {'project_name': 'مشروع تجريبي', 'project_type': 'سكني'},
                 'background': True,
             })
-            self.assertEqual(queued.status_code, 202, queued.get_json())
-            self.assertTrue(queued.get_json()['fallbackPlan']['slides'])
-            self.assertEqual(queued.get_json()['fallbackPlan']['source'], 'fallback')
-            job_id = queued.get_json()['jobId']
 
-            job = {}
-            for _ in range(80):
-                time.sleep(0.05)
-                polled = client.get('/api/slide-plan/jobs/' + job_id, headers=self._headers(self.token_a))
-                self.assertEqual(polled.status_code, 200, polled.get_json())
-                job = polled.get_json()
-                if job.get('status') in ('completed', 'failed'):
-                    break
-
-        self.assertEqual(job.get('status'), 'completed', job)
-        self.assertTrue(job['plan']['slides'])
-
-        missing = client.get('/api/slide-plan/jobs/00000000-0000-0000-0000-000000000000',
-                             headers=self._headers(self.token_a))
-        self.assertEqual(missing.status_code, 404)
-        self.assertEqual(missing.get_json()['failureReason'], 'job_not_found')
+        self.assertEqual(response.status_code, 200, response.get_json())
+        payload = response.get_json()
+        self.assertTrue(payload['success'])
+        self.assertTrue(payload['plan']['slides'])
+        self.assertEqual(payload['plan']['source'], 'deterministic')
+        self.assertNotIn('jobId', payload)
+        self.assertNotIn('fallbackPlan', payload)
         index_source = read_frontend_text()
-        self.assertIn('started < 2 * 60 * 1000', index_source)
-        self.assertIn('if (completed?.plan || !res.fallbackPlan) return completed;', index_source)
-        self.assertIn("plan: { ...res.fallbackPlan, source: 'fallback'", index_source)
+        self.assertNotIn('/api/slide-plan/jobs/', index_source)
+        self.assertNotIn('gen.planning_structure', index_source)
 
     def test_generation_job_idempotency_key_names_the_run_not_just_the_draft(self):
         """ISS-041: re-generating the same draft must register a new job —

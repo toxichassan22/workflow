@@ -21,7 +21,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PAID_PREFIXES = (
     '/api/generate-images',
     '/api/generate-slide-single',
-    '/api/slide-plan',
     '/api/visual-concept/',
     '/api/extract-croquis',
     '/api/site-analysis',
@@ -46,7 +45,6 @@ RUN_HANDLE_BY_JOB = {
     '/api/market-study/summary/chat': 'pollMarketStudyJob registers the run',
     '/api/market-study/summary/consolidate': 'pollMarketStudyJob registers the run',
     '/api/market-study/jobs/': 'the poll of an already registered run',
-    '/api/slide-plan': 'the plan job id is registered while it polls',
     '/api/generate-slide-single-job': 'the slide job id is registered by the deck loop',
     '/api/analyze-site': 'the site-analysis job id is registered while it polls',
 }
