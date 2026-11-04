@@ -105,6 +105,21 @@ class StagingIndexingProtectionTests(unittest.TestCase):
         self.assertTrue((assets_dir / 'site.webmanifest').exists())
         self.assertTrue((assets_dir / 'og-image.png').exists())
 
+    def test_brand_logo_and_emblem_geometry(self):
+        assets_dir = ROOT / 'assets'
+        svg_text = (assets_dir / 'favicon.svg').read_text(encoding='utf-8')
+        # Emblem must carry the primary white L and the top-aligned turquoise L (LL twin monogram)
+        self.assertIn('fill="#FFFFFF"', svg_text)
+        self.assertIn('stroke="#17C8E3"', svg_text)
+        self.assertIn('stroke-width="46"', svg_text)
+        # Disconnected square dot is replaced
+        self.assertNotIn('<rect x="305" y="110"', svg_text)
+        # Verify brand logos exist on disk and have valid payload
+        for name in ('logo.png', 'landloom-logo.png', 'landloom-logo-white.png', 'favicon-512.png', 'favicon-192.png', 'favicon.ico'):
+            p = assets_dir / name
+            self.assertTrue(p.exists(), f"{name} must exist")
+            self.assertGreater(p.stat().st_size, 500, f"{name} must not be empty")
+
     def test_all_public_pages_use_unified_favicon_suite(self):
         pages_to_check = [
             ROOT / 'index.html',
