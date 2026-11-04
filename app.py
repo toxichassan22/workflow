@@ -433,11 +433,6 @@ TEXT_REASONING_EFFORT = os.environ.get('TEXT_REASONING_EFFORT', 'high')
 DESIGNER_REASONING_EFFORT = os.environ.get('DESIGNER_REASONING_EFFORT', 'low')
 LUNA_TEXT_MODEL = GEMINI_TEXT_MODEL
 SLIDE_TEXT_MODEL = os.environ.get('SLIDE_TEXT_MODEL', 'openai/gpt-6.1-sol')
-# Slide reasoning effort is separate from the primary text model's effort: the
-# owner can move slide generation to another provider without changing the
-# rest of the text workflows. Empty keeps the provider default.
-SLIDE_TEXT_REASONING_EFFORT = (
-    os.environ.get('SLIDE_TEXT_REASONING_EFFORT') or '').strip() or None
 # Deck translation runs on its own model: re-writing an existing deck is a
 # mechanical job, and the owner picks what pays for it. Defaults to
 # deepseek/deepseek-v4.1-flash-1017; setting it empty makes the endpoint

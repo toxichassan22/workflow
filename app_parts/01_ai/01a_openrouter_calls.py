@@ -207,7 +207,7 @@ def call_text_chat(system_prompt, user_content, temperature=0.7, max_tokens=8000
     )
 
 
-def call_text_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None, image_references=None, usage_ctx=None, reasoning_effort=None):
+def call_text_chat_parallel(system_prompt, user_content, temperature=0.7, max_tokens=8000, attempts=2, timeout=300, model=None, image_references=None, usage_ctx=None):
     """
     Race multiple identical model calls in parallel and return the first valid response.
     Helps when a single model invocation is slow or returns malformed/empty content.
@@ -217,7 +217,7 @@ def call_text_chat_parallel(system_prompt, user_content, temperature=0.7, max_to
 
     def _attempt():
         try:
-            resp = call_text_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, reasoning_effort=reasoning_effort, model=model, image_references=image_references, usage_ctx=usage_ctx)
+            resp = call_text_chat(system_prompt, user_content, temperature, max_tokens, timeout=timeout, model=model, image_references=image_references, usage_ctx=usage_ctx)
             if _ai_fatal_error_dict(resp) is not None:
                 # A deterministic refusal (wallet/key/trial) cannot be raced
                 # around — every parallel attempt hits it identically.

@@ -584,11 +584,11 @@ def api_generate_slide_single():
         # Direct (non-job) calls keep the previous raced behaviour byte for byte.
         stream_job = getattr(g, '_slide_stream_job', None)
         if isinstance(stream_job, dict) and stream_job.get('job_id'):
-            response = call_text_chat_stream(sys_prompt, user_msg, max_tokens=max_tokens, model=SLIDE_TEXT_MODEL, reasoning_effort=SLIDE_TEXT_REASONING_EFFORT, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id), on_token=_slide_stream_progress(g.tenant_id, stream_job['job_id']))
+            response = call_text_chat_stream(sys_prompt, user_msg, max_tokens=max_tokens, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id), on_token=_slide_stream_progress(g.tenant_id, stream_job['job_id']))
             # A stopped run must not be retried and must not become a
             # deterministic fallback slide the user never asked for.
             return run_control.raise_if_cancelled(response)
-        response = call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=1, model=SLIDE_TEXT_MODEL, reasoning_effort=SLIDE_TEXT_REASONING_EFFORT, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
+        response = call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=1, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
         return run_control.raise_if_cancelled(response)
 
     # Apply the same ownership repair used by the full-plan normalizer before
@@ -825,7 +825,7 @@ def api_generate_slides():
     def call_text_fn(sys_prompt, user_msg, max_tokens=6000):
         if training_context:
             sys_prompt = f"{sys_prompt}\n\n## بيانات خاصة بالشركة\n{training_context}"
-        return call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL, reasoning_effort=SLIDE_TEXT_REASONING_EFFORT, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
+        return call_text_chat_parallel(sys_prompt, user_msg, max_tokens=max_tokens, attempts=2, model=SLIDE_TEXT_MODEL, usage_ctx=_usage_ctx('slide', data, presentation_id=presentation_id))
 
     try:
         htmls = generate_all_slides(
