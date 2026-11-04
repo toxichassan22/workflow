@@ -9,8 +9,10 @@ class TenantTopbarChromeTests(unittest.TestCase):
     def setUp(self):
         self.index_html = (ROOT / 'index.html').read_text(encoding='utf-8')
         self.topbar_css = (ROOT / 'assets' / 'css' / 'base' / '12_topbar_chrome.css').read_text(encoding='utf-8')
+        self.responsive_css = (ROOT / 'assets' / 'css' / 'base' / '04_export_responsive.css').read_text(encoding='utf-8')
         self.auth_boot_js = (ROOT / 'assets' / 'js' / '02-settings-branding' / '02_auth_boot.js').read_text(encoding='utf-8')
         self.routing_js = (ROOT / 'assets' / 'js' / '02-settings-branding' / '01_routing.js').read_text(encoding='utf-8')
+        self.i18n_js = (ROOT / 'assets' / 'i18n.js').read_text(encoding='utf-8')
         self.ar_dict = (ROOT / 'assets' / 'i18n' / '01_dict_ar.js').read_text(encoding='utf-8')
         self.en_dict = (ROOT / 'assets' / 'i18n' / '02_dict_en.js').read_text(encoding='utf-8')
         self.auth_users_py = (ROOT / 'app_parts' / '14_auth' / '14_auth_users.py').read_text(encoding='utf-8')
@@ -75,6 +77,33 @@ class TenantTopbarChromeTests(unittest.TestCase):
         for key in keys:
             self.assertIn(f'"{key}"', self.ar_dict, f"Missing {key} in Arabic dictionary")
             self.assertIn(f'"{key}"', self.en_dict, f"Missing {key} in English dictionary")
+
+    def test_logo_adaptive_tone_in_topbar(self):
+        """Topbar logo chip respects data-logo-tone dark background for light company logos."""
+        self.assertIn('.tenant-topbar-brand .tenant-brand-logo[data-logo-tone="dark"]', self.topbar_css)
+        self.assertIn('background: #0a1f31', self.topbar_css)
+
+    def test_points_cta_hover_contrast(self):
+        """Hovering over points pill turns CTA turquoise with navy text for high visibility."""
+        self.assertIn('.tenant-topbar-points-pill:hover .tenant-topbar-points-cta', self.topbar_css)
+        self.assertIn('var(--teal-bright)', self.topbar_css)
+        self.assertIn('#07182C', self.topbar_css)
+
+    def test_usermenu_language_label_and_hydration(self):
+        """User menu clearly displays current active language without confusing toggle button labels."""
+        self.assertIn('id="tenantMenuLang"', self.index_html)
+        self.assertIn("document.getElementById('tenantMenuLang')", self.i18n_js)
+
+    def test_api_me_primary_admin_manager_name(self):
+        """api_me fetches primary admin or account manager personal name instead of falling back to company name."""
+        self.assertIn('db.get_primary_admin_name', self.auth_users_py)
+        self.assertIn("'accountManagerName': primary_name", self.auth_users_py)
+
+    def test_tenant_bell_modern_outline(self):
+        """Bell notification icon is styled as a modern outline vector shape instead of solid chunky blocks."""
+        self.assertIn('.tenant-bell-shape', self.responsive_css)
+        self.assertIn('border: 1.6px solid currentColor', self.responsive_css)
+        self.assertIn('background: transparent', self.responsive_css)
 
 
 if __name__ == '__main__':

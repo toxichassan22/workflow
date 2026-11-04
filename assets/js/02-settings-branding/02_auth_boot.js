@@ -225,7 +225,7 @@
       tenantUser = me.tenant;
       // Store user info (role, name, permissions)
       if (me.user) {
-        tenantUser._userName = me.user.name;
+        tenantUser._userName = me.user.name || (me.tenant && (me.tenant.accountManagerName || me.tenant.account_manager_name)) || '';
         tenantUser._userRole = me.user.role;
         tenantUser._permissions = me.user.permissions || {};
         tenantUser._userId = me.user.id || null;
@@ -554,6 +554,9 @@
           logoEl.onload = () => adaptTenantLogoChip(logoEl, chipEl);
           const logoSrc = b.logo_path.startsWith('http') ? b.logo_path : b.logo_path + '?t=' + Date.now();
           logoEl.src = logoSrc;
+          if (logoEl.complete && logoEl.naturalWidth > 0) {
+            adaptTenantLogoChip(logoEl, chipEl);
+          }
           logoEl.classList.remove('hidden');
           if (markEl) markEl.classList.add('hidden');
         } else {

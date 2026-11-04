@@ -737,12 +737,15 @@ def api_me():
     """Get current tenant/user info."""
     t = g.tenant
     trial = db.tenant_trial_state(t)
+    primary_name = db.get_primary_admin_name(t['id']) or t.get('account_manager_name') or t.get('username') or ''
     result = {
         'success': True,
         'tenant': {
             'id': t['id'],
             'companyName': t['company_name'],
             'companyNameEn': t.get('company_name_en'),
+            'accountManagerName': primary_name or t.get('account_manager_name') or '',
+            'userName': t.get('username') or '',
             'email': t['email'],
             'isAdmin': bool(g.is_admin),
             'plan': t.get('plan', 'free'),
@@ -759,13 +762,13 @@ def api_me():
     if g.user_id:
         result['user'] = {
             'id': g.user_id,
-            'name': g.user_name,
+            'name': g.user_name or primary_name,
             'role': g.user_role,
             'permissions': g.user_permissions,
         }
     else:
         result['user'] = {
-            'name': t['company_name'],
+            'name': primary_name or t['company_name'],
             'role': 'company_admin',
             'permissions': {k: True for k in db.PERMISSION_KEYS},
         }

@@ -123,6 +123,10 @@
       for (var bi = 0; bi < btns.length; bi++) {
         btns[bi].textContent = (lang === 'ar') ? t('lang.switch_to_english') : t('lang.switch_to_arabic');
       }
+      var menuLangEl = document.getElementById('tenantMenuLang');
+      if (menuLangEl) {
+        menuLangEl.textContent = (lang === 'ar') ? 'العربية' : 'English';
+      }
     } catch (e) { /* button absent on some views */ }
     try {
       if (typeof document !== 'undefined' && document.title) {

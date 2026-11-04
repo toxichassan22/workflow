@@ -955,29 +955,35 @@
       display: inline-block;
       width: 18px;
       height: 18px;
+      color: inherit;
     }
 
     .tenant-bell-shape {
       position: absolute;
-      top: 2px;
+      top: 3px;
       left: 50%;
-      width: 13px;
-      height: 11px;
+      width: 12px;
+      height: 9px;
       transform: translateX(-50%);
-      background: currentColor;
-      border-radius: 7px 7px 3px 3px;
+      background: transparent;
+      border: 1.6px solid currentColor;
+      border-bottom: none;
+      border-radius: 6px 6px 1px 1px;
+      box-sizing: border-box;
     }
 
     .tenant-bell-shape::before {
       content: '';
       position: absolute;
-      top: -3px;
+      top: -3.5px;
       left: 50%;
       width: 4px;
       height: 4px;
       transform: translateX(-50%);
-      background: currentColor;
+      border: 1.6px solid currentColor;
       border-radius: 50%;
+      background: transparent;
+      box-sizing: border-box;
     }
 
     .tenant-bell::before {
@@ -985,23 +991,26 @@
       position: absolute;
       top: 12px;
       left: 50%;
-      width: 17px;
-      height: 3px;
+      width: 15px;
+      height: 1.6px;
       transform: translateX(-50%);
       background: currentColor;
-      border-radius: 2px;
+      border-radius: 1px;
     }
 
     .tenant-bell::after {
       content: '';
       position: absolute;
-      top: 16px;
+      top: 14px;
       left: 50%;
-      width: 4.5px;
-      height: 4.5px;
+      width: 4px;
+      height: 2.2px;
       transform: translateX(-50%);
-      background: currentColor;
-      border-radius: 50%;
+      border: 1.6px solid currentColor;
+      border-top: none;
+      border-radius: 0 0 3px 3px;
+      background: transparent;
+      box-sizing: border-box;
     }
 
     .tenant-bell-dot {

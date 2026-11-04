@@ -735,7 +735,7 @@
       // name, role, and the company line inside the dropdown.
       const chipCompany = wfBilingual(tenantUser && tenantUser.companyName,
         tenantUser && (tenantUser.companyNameEn || tenantUser.company_name_en)) || '';
-      const rawUserName = (tenantUser && tenantUser._userName) || '';
+      const rawUserName = (tenantUser && (tenantUser._userName || tenantUser.accountManagerName || tenantUser.account_manager_name)) || '';
       const chipName = (rawUserName && rawUserName.trim() !== chipCompany.trim())
         ? rawUserName.trim()
         : (isSagAdmin ? WFT('role.super_admin', 'سوبر أدمن') : WFT('role.account_manager', 'مدير الحساب'));
