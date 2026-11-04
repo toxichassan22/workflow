@@ -592,12 +592,48 @@
       syncTabs();
     }
 
+    function isParkingComponentRow(component) {
+      if (!component) return false;
+      if (component.useType === 'parking') return true;
+      return ['basement', 'openArea'].includes(component.useType)
+        && /مواقف|جراج|باركينج|\bparking\b|\bgarage\b/i.test(String(component.name || ''));
+    }
+
     function componentOriginNote(component) {
-      if (!component || !component.parkingPlanId || typeof financialParkingPlan !== 'function') return '';
+      if (!component || typeof financialParkingPlan !== 'function') return '';
       const plan = financialParkingPlan();
-      if (String(plan.id || '') !== String(component.parkingPlanId)) return '';
+      if (!plan.id) return '';
+      if (!component.parkingPlanId) {
+        // A parking row with no proposal stamp is the client's own, counted as
+        // existing spaces: it stays theirs and the proposal only fills the shortage.
+        return isParkingComponentRow(component) ? 'من إدخال العميل' : '';
+      }
+      if (String(plan.id) !== String(component.parkingPlanId)) return '';
       return financialParkingAbsorbed(plan)[String(component.id)]
         ? 'معبّأ من اقتراح المواقف' : 'مولّد من اقتراح المواقف';
+    }
+
+    function refreshComponentOrigins() {
+      // Rows that already sit in the table keep the marker they were drawn with,
+      // so approving or dropping a proposal has to relabel them in place.
+      document.querySelectorAll('#componentsTable tbody tr').forEach(tr => {
+        const cell = tr.querySelector('td[data-field="name"]');
+        if (!cell || typeof cell.querySelector !== 'function') return;
+        const note = componentOriginNote({
+          id: tr.dataset?.componentKey,
+          parkingPlanId: tr.dataset?.parkingPlanId || '',
+          useType: tr.querySelector('[data-field="useType"] select')?.value || '',
+          name: cell.querySelector('input')?.value || ''
+        });
+        let line = cell.querySelector('.component-origin');
+        if (!note) { if (line) line.remove(); return; }
+        if (!line) {
+          line = document.createElement('div');
+          line.className = 'component-origin';
+          cell.appendChild(line);
+        }
+        if (line.textContent !== note) line.textContent = note;
+      });
     }
 
     function addComponent(d = {}) {

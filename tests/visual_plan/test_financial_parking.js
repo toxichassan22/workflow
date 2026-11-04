@@ -252,6 +252,10 @@ test('a parking row states whether the proposal filled it or generated it', () =
   assert.equal(note({ id: 'parking_regulatory_surface', parkingPlanId: 'plan-1' }), 'مولّد من اقتراح المواقف');
   assert.equal(note({ id: 'manual-parking' }), '');
   assert.equal(note({ id: 'manual-parking', parkingPlanId: 'other-plan' }), '');
+  assert.equal(note({ id: 'manual-parking', useType: 'parking' }), 'من إدخال العميل');
+  assert.equal(note({ id: 'parking_surface', useType: 'openArea',
+    name: 'مواقف السيارات - من المساحات المفتوحة' }), 'من إدخال العميل');
+  assert.equal(note({ id: 'retail', useType: 'retail', name: 'محلات تجارية' }), '');
   f.realAddComponent({ id: 'manual-parking', name: 'مواقف قائمة', useType: 'parking',
     parkingLocation: 'basement', units: 64, unitArea: 30, builtArea: 1920, parkingPlanId: 'plan-1' });
   assert.match(f.rows.at(-1).innerHTML, /معبّأ من اقتراح المواقف/);
@@ -261,6 +265,52 @@ test('a parking row states whether the proposal filled it or generated it', () =
   assert.match(f.rows.at(-1).innerHTML, /مولّد من اقتراح المواقف/);
   f.context.tenantProjectData.financial_study_model.parkingPlan = null;
   assert.equal(note({ id: 'manual-parking', parkingPlanId: 'plan-1' }), '');
+});
+
+test('a parking row already in the table takes its origin marker in place', () => {
+  const f = fixture();
+  const plan = f.proposal(true);
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  const input = { value: 'مواقف قائمة' };
+  const cell = { line: null, querySelector: selector => selector === 'input' ? input : cell.line,
+    appendChild(node) { cell.line = node; } };
+  const useType = { value: 'parking' };
+  const row = { dataset: { componentKey: 'manual-parking', parkingPlanId: '' },
+    querySelector: selector => selector === 'td[data-field="name"]' ? cell
+      : selector === '[data-field="useType"] select' ? useType : null };
+  const original = f.context.document.querySelectorAll;
+  f.context.document.createElement = () => ({ className: '', textContent: '',
+    remove() { cell.line = null; } });
+  f.context.document.querySelectorAll = () => [row];
+  f.context.refreshComponentOrigins();
+  assert.equal(cell.line.className, 'component-origin');
+  assert.equal(cell.line.textContent, 'من إدخال العميل');
+  row.dataset.parkingPlanId = 'plan-1';
+  f.context.refreshComponentOrigins();
+  assert.equal(cell.line.textContent, 'مولّد من اقتراح المواقف');
+  f.context.tenantProjectData.financial_study_model.parkingPlan = null;
+  f.context.refreshComponentOrigins();
+  assert.equal(cell.line, null);
+  f.context.document.querySelectorAll = original;
+});
+
+test('an approved proposal that adds nothing counts the client parking rows', () => {
+  const f = fixture();
+  f.inputs.financialParkingPanel = { classList: classes(), setAttribute() {} };
+  f.inputs.financialParkingNotes = field('');
+  f.add({ ...clientParkingRow(), units: 130, builtArea: 3900 });
+  const plan = f.proposal(true);
+  Object.assign(plan, { components: [], existingSpaces: 130, additionalSpaces: 0 });
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  f.context.renderFinancialParking();
+  assert.equal(f.context.financialParkingPlan().additionalSpaces, 0);
+  assert.equal(f.context.financialParkingError(), '');
+  assert.doesNotMatch(f.inputs.financialParkingNotes.value, /أقل من المطلوب/);
+  f.rows.at(-1).querySelector('[data-field="units"] input').value = '100';
+  plan.sourceSnapshot = f.snapshot();
+  f.context.renderFinancialParking();
+  assert.equal(f.context.financialParkingError(), '');
+  assert.match(f.inputs.financialParkingNotes.value, /أقل من المطلوب/);
 });
 
 test('a late response does not replace newer manual edits or another open draft', () => {

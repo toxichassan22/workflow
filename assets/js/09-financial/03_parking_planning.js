@@ -131,6 +131,8 @@
         <div id="financialParkingDetails" hidden>
           <div class="grid four financial-parking-summary">
             <div><label for="parkingRequiredSpaces">إجمالي المواقف المطلوبة</label><input id="parkingRequiredSpaces" readonly></div>
+            <div><label for="parkingExistingSpaces">المواقف المسجلة في الجدول</label><input id="parkingExistingSpaces" readonly></div>
+            <div><label for="parkingAdditionalSpaces">مواقف إضافية مقترحة</label><input id="parkingAdditionalSpaces" readonly></div>
           </div>
           <div class="table-wrap"><table id="parkingRequirementsTable"><thead><tr><th>المكون</th><th>طريقة الاحتساب</th><th>الكمية المعتمدة</th><th>عدد المواقف المطلوبة</th><th>الاشتراط الموثق</th></tr></thead><tbody></tbody></table></div>
           <div class="financial-parking-notes"><div id="financialParkingNotesWrap"><label for="financialParkingNotes">ملاحظات اقتراح المواقف</label><textarea id="financialParkingNotes" readonly rows="4"></textarea></div></div>
@@ -187,12 +189,13 @@
       if (details) details.hidden = (!plan.id && !financialParkingBusy) || plan.approved === true;
       panel.classList?.toggle('busy', financialParkingBusy);
       panel.setAttribute?.('aria-busy', financialParkingBusy ? 'true' : 'false');
-      const generated = (typeof getComponentRowsData === 'function' ? getComponentRowsData() : []).filter(row => row.parkingPlanId);
       if (status) status.textContent = financialParkingText(financialParkingBusy ? 'جاري إعداد اقتراح المواقف...' : !plan.id ? 'لا يوجد اقتراح مواقف.'
         : stale ? 'تغيّرت بيانات المشروع أو الاشتراطات التي بُني عليها اقتراح المواقف.'
         : plan.approved && !error ? 'اقتراح المواقف معتمد.' : plan.canApply ? 'اقتراح المواقف بانتظار الاعتماد.' : 'اقتراح المواقف غير مكتمل.');
       const setValue = (id, value) => { const input = document.getElementById(id); if (input) input.value = !plan.id ? '' : value == null ? '—' : money(value); };
       setValue('parkingRequiredSpaces', plan.requiredSpaces);
+      setValue('parkingExistingSpaces', plan.existingSpaces);
+      setValue('parkingAdditionalSpaces', plan.additionalSpaces);
       const body = document.querySelector('#parkingRequirementsTable tbody');
       if (body) body.innerHTML = (plan.requirements || []).map(row => {
         const basis = { units: 'عدد الوحدات', builtArea: 'المساحة المبنية م²', revenueArea: 'المساحة البيعية / التأجيرية م²', landArea: 'مساحة الأرض م²' }[row.basis] || 'غير موثق';
@@ -203,7 +206,11 @@
       }).join('');
       const noteLines = [plan.areaBasis, ...(plan.missing || []), ...(plan.warnings || [])].filter(Boolean);
       if (plan.approved === true && !error && plan.requiredSpaces != null) {
-        const recorded = generated.reduce((sum, row) => sum + (financialParkingNumber(row.units) || 0), 0);
+        // The client's own parking rows count as existing spaces, so the shortage
+        // is measured on every parking row in the table, not on generated ones only.
+        const recorded = (typeof getComponentRowsData === 'function' ? getComponentRowsData() : [])
+          .filter(isParkingComponentRow)
+          .reduce((sum, row) => sum + (financialParkingNumber(row.units) || 0), 0);
         if (recorded < plan.requiredSpaces) noteLines.push('المواقف المسجلة في الجدول أقل من المطلوب بالاشتراط.');
       }
       const notes = document.getElementById('financialParkingNotes');
@@ -236,6 +243,7 @@
         ['section-financial-calc', 'section-visual-concept'].forEach(key => { if (tenantProjectSectionStatuses[key] === 'approved') updates[key] = 'draft'; });
         if (Object.keys(updates).length && typeof applySectionStatuses === 'function') applySectionStatuses(updates);
       }
+      if (typeof refreshComponentOrigins === 'function') refreshComponentOrigins();
       if (typeof refreshDynamicI18n === 'function') refreshDynamicI18n(panel);
       renderFinancialParkingChat();
     }
