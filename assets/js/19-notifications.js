@@ -476,7 +476,7 @@
       const ids = Array.from(notifSelectedIds);
       const data = await api('POST', '/api/notifications/read', { ids: ids }).catch(() => null);
       if (!data || !data.success) {
-        toast(WFT('notif.mark_read_failed', 'تعذر تحديث حالة الإشعارات'));
+        toast(WFT('notif.bulk_read_failed', 'تعذر تحديث حالة الإشعارات'));
         return;
       }
       notifSelectedIds.clear();
@@ -489,7 +489,7 @@
       const ids = Array.from(notifSelectedIds);
       const data = await api('POST', '/api/notifications/delete', { ids: ids }).catch(() => null);
       if (!data || !data.success) {
-        toast(WFT('notif.delete_failed', 'تعذر حذف الإشعارات'));
+        toast(WFT('notif.bulk_delete_failed', 'تعذر حذف الإشعارات'));
         return;
       }
       notifSelectedIds.clear();

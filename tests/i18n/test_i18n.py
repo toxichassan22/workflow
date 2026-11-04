@@ -121,6 +121,7 @@ FRONTEND_JS_ORDER = (
     '17-admin-boot/03_training_chat_sessions.js', '18-landloom-ops.js',
     '18-landloom-ops/01_package_slider.js',
     '18-landloom-ops/02_join_requests.js', '18-landloom-ops/03_legal_content.js',
+    '18-landloom-ops/04_wallet_ledger.js',
     '19-notifications.js',
     '20-live-collab/01_live_collab.js',
 )

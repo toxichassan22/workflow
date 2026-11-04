@@ -6,6 +6,23 @@
  * keep the I18N_EN_AUTO_BEGIN/END markers and JSON quoting (the Python
  * suite parses the block between them). Loaded before i18n.js. */
 window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN_AUTO_BEGIN*/{
+  "تصنيف الطلبات": "Request Categories",
+  "تصنيف الإشعارات": "Notification Categories",
+  "إيصال": "Receipt",
+  "فاتورة": "Invoice",
+  "اعتماد توليد": "Generation approval",
+  "اعتماد قسم:": "Section approval:",
+  "اعتماد ملف نهائي": "Final file approval",
+  "حساب منشأة معتمد": "Verified Company Account",
+  "سعر الصرف المعتمد:": "Exchange rate:",
+  "نظام الفوترة مشغل": "Billing Enforced",
+  "فوترة تجريبية": "Trial Billing",
+  "مشروع #": "Project #",
+  "معاملة": "Transaction",
+  "تم تحديد 0": "0 selected",
+  "تعذر تحديث حالة الإشعار": "Failed to update notification status",
+  "تعذر تحديث حالة الإشعارات": "Failed to update notifications status",
+  "تعذر حذف الإشعارات": "Failed to delete notifications",
   "إيصال التحويل": "Transfer receipt",
   "رصيد الاستخدام": "Usage credit",
   "اسم الباقة": "Package name",

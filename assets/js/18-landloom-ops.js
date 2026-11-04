@@ -67,6 +67,9 @@
           btn.classList.toggle('ghost', !isActive);
         }
       });
+      if (target === 'recharge' && typeof llRefreshWallet === 'function') {
+        llRefreshWallet();
+      }
       // The sidebar carries one link per tab, so its active marker follows
       // in-page tab switches too.
       const opsPage = document.getElementById('tenantLandloomOpsPage');
@@ -87,6 +90,9 @@
         // Prefetching the catalog keeps the recharge modal opening instant.
         llFetchPackages()
       ]);
+      if (typeof llRefreshWallet === 'function') {
+        await llRefreshWallet();
+      }
     }
 
     // ── Notifications ────────────────────────────────────────────────────
@@ -277,6 +283,9 @@
         return;
       }
       const requests = data.requests || [];
+      if (typeof llUpdateWalletStats === 'function') {
+        llUpdateWalletStats(requests);
+      }
       if (!requests.length) {
         box.innerHTML = '<p class="tenant-hint">لا توجد طلبات شحن بعد.</p>';
         return;

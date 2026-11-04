@@ -1682,7 +1682,7 @@
             <h2 data-i18n="wallet.title">المحفظة والشحن</h2>
           </div>
           <div class="tenant-actions">
-            <button type="button" class="btn small ghost" onclick="llRefreshWallet()" data-i18n="common.refresh">تحديث</button>
+            <button type="button" class="btn small ghost wallet-refresh-btn" onclick="llRefreshWallet()" aria-label="تحديث" title="تحديث"><span class="ws-icon" data-ws-icon="refresh"></span></button>
             <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="llOpenRechargeModal()" data-i18n="wallet.new_recharge">طلب شحن جديد</button>
           </div>
         </div>
@@ -1735,7 +1735,7 @@
             <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
               <h3 class="dash-section-title" style="margin:0" data-i18n="wallet.requests_title">سجل طلبات الشحن والفواتير</h3>
               <div class="tenant-actions">
-                <select id="llRechargeStatusFilter" onchange="llLoadRechargeRequests()" class="tenant-filter-select" aria-label="فلترة حسب الحالة">
+                <select id="llRechargeStatusFilter" onchange="llOnRechargeFilterChange()" class="tenant-filter-select" aria-label="فلترة حسب الحالة">
                   <option value="">كل الحالات</option>
                   <option value="pending">بانتظار المراجعة</option>
                   <option value="approved">معتمدة</option>
@@ -1743,7 +1743,7 @@
                 </select>
               </div>
             </div>
-            <div class="sag-tabs tenant-wallet-category-tabs" role="group" aria-label="تصنيف الطلبات">
+            <div class="sag-tabs tenant-wallet-category-tabs" role="group" aria-label="Request categories">
               <button type="button" class="btn small primary" data-wallet-category="all" onclick="setWalletCategory('all')" data-i18n="wallet.cat_all">الكل</button>
               <button type="button" class="btn small ghost" data-wallet-category="pending" onclick="setWalletCategory('pending')" data-i18n="wallet.cat_pending">قيد المراجعة</button>
               <button type="button" class="btn small ghost" data-wallet-category="approved" onclick="setWalletCategory('approved')" data-i18n="wallet.cat_approved">معتمدة</button>
@@ -1758,7 +1758,7 @@
                 <h3 class="dash-section-title" data-i18n="wallet.ledger_title">سجل المعاملات والفواتير</h3>
                 <span class="tenant-panel-subtitle" data-i18n="wallet.ledger_sub">قيود المحفظة والمستندات المالية</span>
               </div>
-              <button type="button" class="btn small ghost" onclick="llRefreshWallet()" data-i18n="common.refresh">تحديث</button>
+              <button type="button" class="btn small ghost wallet-refresh-btn" onclick="llRefreshWallet()" aria-label="تحديث" title="تحديث"><span class="ws-icon" data-ws-icon="refresh"></span></button>
             </div>
             <div class="tenant-wallet-ledger-wrap">
               <table class="tenant-table tenant-wallet-ledger-table" id="llLedgerTable">
@@ -1894,7 +1894,7 @@
         </div>
 
         <div class="notif-toolbar">
-          <div class="sag-tabs notif-category-tabs" role="group" aria-label="تصنيف الإشعارات"
+          <div class="sag-tabs notif-category-tabs" role="group" aria-label="Notification categories"
             data-i18n-aria="notif.category_label">
             <button type="button" class="btn small primary" data-notif-category="all"
               onclick="setNotifCategoryGroup('all')" data-i18n="notif.cat_all">الكل</button>

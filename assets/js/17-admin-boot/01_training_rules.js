@@ -663,7 +663,7 @@
                 '<span>' + (a.section_key
                   ? (typeof WFT === 'function' ? WFT('admin.section_gen_approval', 'اعتماد توليد قسم «{section}»', {
                       section: escapeHtml((typeof PROJECT_SECTION_PRESENTATION_TITLES !== 'undefined' && PROJECT_SECTION_PRESENTATION_TITLES[a.section_key]) || a.section_key)
-                    }) : ('اعتماد قسم: ' + a.section_key))
+                    }) : (WFT('approvals.section_approval_prefix', 'اعتماد قسم: ') + a.section_key))
                   : (typeof WFT === 'function' ? WFT('admin.generation_start_approval', 'اعتماد بدء التوليد') : 'اعتماد بدء التوليد')) +
                   ' — ' + (typeof WFT === 'function' ? WFT('admin.requested_by_suffix', 'طلب بواسطة:') : 'طلب بواسطة:') + ' ' + escapeHtml(a.requested_by_name || '—') + '</span>' +
                 '<span class="approval-meta-dot">•</span>' +
@@ -719,7 +719,7 @@
         histGen.forEach(g => {
           historyItems.push({
             type: 'generation',
-            title: g.draft_title ? (g.draft_title + (g.section_key ? ' (' + g.section_key + ')' : '')) : 'اعتماد توليد',
+            title: g.draft_title ? (g.draft_title + (g.section_key ? ' (' + g.section_key + ')' : '')) : WFT('approvals.generation_approval', 'اعتماد توليد'),
             status: g.status,
             reviewer: g.reviewed_by_name || g.approver_name || '—',
             date: g.reviewed_at || g.decided_at || g.requested_at || '',
@@ -730,7 +730,7 @@
         histFin.forEach(f => {
           historyItems.push({
             type: 'final_file',
-            title: f.presentation_title || 'اعتماد ملف نهائي',
+            title: f.presentation_title || WFT('approvals.final_file_approval', 'اعتماد ملف نهائي'),
             status: f.status,
             reviewer: f.reviewed_by_name || f.approver_name || '—',
             date: f.reviewed_at || f.decided_at || f.requested_at || '',
