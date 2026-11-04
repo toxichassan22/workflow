@@ -3,16 +3,19 @@
 Covers:
 1. Shell markup in index.html:
    - Header with kicker (`#notifPageKicker`), title (`page.notifications`), unread chip (`#notifUnreadCount`),
-     refresh button with `common.refresh` calling `renderNotificationsPage()`, and mark-all-read button.
+     refresh button with `data-ws-icon="refresh"` calling `renderNotificationsPage()`, and mark-all-read button.
    - 4-chip stats strip (`#notifStatsStrip`) with clickable filter targets (`notif-stat-clickable`).
+   - Unified toolbar with category group tabs, reading status tabs, search box (`#notifSearchInput`),
+     and time filter select (`#notifTimeFilter`).
    - Selection bar (`#notifSelectionBar`) with master checkbox (`#notifSelectAll`), select count,
      bulk mark read, bulk delete, and cancel.
    - Redundant preferences panel completely removed.
    - Centered container (`.tenant-notif-page-wrap`).
-   - Dual toolbar with category group tabs (`.notif-category-tabs`) and reading status tabs (`.notif-status-tabs`).
    - List container (`#tenantNotificationsList`).
 2. Frontend logic in assets/js/19-notifications.js:
    - Category group filter (`setNotifCategoryGroup`) and mappings (`NOTIF_GROUP_CATEGORIES`).
+   - Search filtering (`notifMatchesQuery`) and time range filtering (`notifMatchesTime`).
+   - Live debounced search input handler (`onNotifSearchInput`).
    - Number sanitization (`formatNotifNumberSanitized`) eliminating floating-point noise.
    - Direct contextual action buttons (`notifActionBtn`) for projects, approvals, wallet, and support tickets.
    - Individual single mark-read button (`notificationMarkSingleRead`) on unread cards.
@@ -25,6 +28,10 @@ Covers:
    - Container max-width and centering (`.tenant-notif-page-wrap`).
    - Responsive stats strip (`.notif-stats-strip`, `.notif-stat-chip`, `.notif-stat-clickable`).
    - Selection bar and bulk actions (`.notif-selection-bar`, `.notif-bulk-actions`, `.notif-card-checkbox`).
+   - Checkbox dimension reset (`min-height: unset !important`, `height: 18px !important`, `width: 18px !important`).
+   - Non-wrapping master label (`.notif-select-all-label` with `white-space: nowrap`).
+   - Refresh button (`.notif-refresh-btn`) with icon styling.
+   - Search box and time filter (`.notif-search-wrap`, `.notif-search-input`, `.notif-time-select`).
    - Revitalized card styling (`.tenant-notif-card-revamp`, `.unread` with turquoise accent, `.selected`).
    - Clean empty state without monogram logo box.
 4. i18n parity across assets/i18n/01_dict_ar.js and assets/i18n/02_dict_en.js.
@@ -36,6 +43,7 @@ Covers:
 
 import re
 import unittest
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -55,12 +63,13 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         return self.index_html.split('id="tenantNotificationsPage"')[1].split('</section>')[0]
 
     def test_page_heading_actions_and_refresh(self):
-        """Notifications page has unified heading, kicker, refresh button with key common.refresh, unread chip, and mark-all-read."""
+        """Notifications page has unified heading, kicker, refresh icon button with key common.refresh, unread chip, and mark-all-read."""
         block = self._get_page_block()
         self.assertIn('class="tenant-page-heading"', block)
         self.assertIn('id="notifPageKicker"', block)
         self.assertIn('data-i18n="page.notifications"', block)
-        self.assertIn('data-i18n="common.refresh"', block)
+        self.assertIn('data-ws-icon="refresh"', block)
+        self.assertIn('notif-refresh-btn', block)
         self.assertIn('renderNotificationsPage()', block)
         self.assertIn('id="notifUnreadCount"', block)
         self.assertIn('notificationsMarkAllRead()', block)
@@ -76,8 +85,8 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         self.assertIn('notif-stat-clickable', block)
         self.assertIn("setNotifStatusFilter('unread')", block)
 
-    def test_dual_toolbar_tabs(self):
-        """Toolbar includes category group tabs and read status tabs."""
+    def test_dual_toolbar_tabs_and_controls(self):
+        """Toolbar includes category group tabs, read status tabs, search box, and time filter."""
         block = self._get_page_block()
         self.assertIn('class="notif-toolbar"', block)
         self.assertIn('class="sag-tabs notif-category-tabs"', block)
@@ -89,6 +98,14 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         self.assertIn('setNotifStatusFilter(\'all\')', block)
         self.assertIn('setNotifStatusFilter(\'unread\')', block)
         self.assertIn('setNotifStatusFilter(\'read\')', block)
+        self.assertIn('id="notifSearchInput"', block)
+        self.assertIn('onNotifSearchInput()', block)
+        self.assertIn('data-i18n="common.search"', block)
+        self.assertIn('id="notifTimeFilter"', block)
+        self.assertIn('data-i18n="notif.time_all"', block)
+        self.assertIn('data-i18n="notif.time_today"', block)
+        self.assertIn('data-i18n="notif.time_week"', block)
+        self.assertIn('data-i18n="notif.time_month"', block)
 
     def test_selection_bar_and_bulk_actions_markup(self):
         """Notifications markup includes selection bar with master checkbox and bulk action triggers."""
@@ -125,6 +142,12 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         sample_text = 'تم استهلاك 36.71981688999991 نقطة في عملية توليد الخرائط'
         replaced = re.sub(pattern, lambda m: f"{float(m.group(0)):.2f}", sample_text)
         self.assertEqual(replaced, 'تم استهلاك 36.72 نقطة في عملية توليد الخرائط')
+
+    def test_js_search_and_time_filters(self):
+        """JS includes search matching and time range filtering functions."""
+        self.assertIn('function onNotifSearchInput()', self.notif_js)
+        self.assertIn('function notifMatchesQuery(n, q)', self.notif_js)
+        self.assertIn('function notifMatchesTime(createdAt, timeFilter)', self.notif_js)
 
     def test_js_action_buttons(self):
         """JS includes notifActionBtn helper generating contextual direct action buttons."""
@@ -170,7 +193,13 @@ class TenantNotificationsCenterTests(unittest.TestCase):
         self.assertIn('.notif-stat-chip', self.css_chrome)
         self.assertIn('.notif-stat-clickable', self.css_chrome)
         self.assertIn('.notif-selection-bar', self.css_chrome)
-        self.assertIn('.notif-card-checkbox', self.css_chrome)
+        self.assertIn('.notif-select-all-label', self.css_chrome)
+        self.assertIn('white-space: nowrap', self.css_chrome)
+        self.assertIn('min-height: unset !important', self.css_chrome)
+        self.assertIn('.notif-refresh-btn', self.css_chrome)
+        self.assertIn('.notif-search-wrap', self.css_chrome)
+        self.assertIn('.notif-search-input', self.css_chrome)
+        self.assertIn('.notif-time-select', self.css_chrome)
         self.assertIn('.tenant-notif-card-revamp', self.css_chrome)
         self.assertIn('.tenant-notif-card-revamp.selected', self.css_chrome)
         self.assertIn('.tenant-notif-empty-state', self.css_chrome)
@@ -179,14 +208,15 @@ class TenantNotificationsCenterTests(unittest.TestCase):
     def test_i18n_parity(self):
         """All notification and action keys are present in both Arabic and English dictionaries."""
         keys = [
-            'common.refresh', 'common.select_all', 'common.cancel',
+            'common.refresh', 'common.search', 'common.select_all', 'common.cancel',
             'notif.stat_total', 'notif.stat_unread', 'notif.stat_projects', 'notif.stat_system',
             'notif.cat_all', 'notif.cat_projects', 'notif.cat_finance', 'notif.cat_support',
             'notif.act_review_approval', 'notif.act_view_project', 'notif.act_view_wallet',
             'notif.act_view_ticket', 'notif.act_view_details',
             'notif.act_review_recharge', 'notif.act_review_ticket', 'notif.act_review_join',
             'notif.empty_title', 'notif.empty_desc', 'notif.empty_cta',
-            'notif.mark_read', 'notif.mark_selected_read', 'notif.delete_selected', 'notif.selected_count'
+            'notif.mark_read', 'notif.mark_selected_read', 'notif.delete_selected', 'notif.selected_count',
+            'notif.search_placeholder', 'notif.time_label', 'notif.time_all', 'notif.time_today', 'notif.time_week', 'notif.time_month'
         ]
         for k in keys:
             self.assertIn(f'"{k}"', self.ar_dict, f"Missing key {k} in Arabic dictionary")

@@ -16,6 +16,7 @@
     let notifCategoryGroup = 'all';
     let notifSelectedIds = new Set();
     let notifRenderedItems = [];
+    let notifSearchTimer = null;
     const NOTIF_GROUP_CATEGORIES = {
       projects: ['section_approval', 'generation_approval', 'final_approval', 'job'],
       finance: ['billing', 'recharge'],
@@ -223,6 +224,9 @@
     async function openNotificationsPage() {
       closeNotificationsDropdown();
       showTenantPage('tenantNotificationsPage');
+      if (typeof hydrateWorkspaceIcons === 'function') {
+        hydrateWorkspaceIcons(document.getElementById('tenantNotificationsPage'));
+      }
       // The page is shared between the super admin and company workspaces, so
       // its kicker follows the role instead of a static label.
       const isAdmin = Boolean(tenantUser && tenantUser.isAdmin);
@@ -268,6 +272,42 @@
       sel.dataset.filled = '1';
     }
 
+    function onNotifSearchInput() {
+      if (notifSearchTimer) clearTimeout(notifSearchTimer);
+      notifSearchTimer = setTimeout(() => {
+        renderNotificationsPage();
+      }, 200);
+    }
+
+    function notifMatchesQuery(n, q) {
+      if (!q) return true;
+      const query = q.trim().toLowerCase();
+      if (!query) return true;
+      const title = (n.title || '').toLowerCase();
+      const body = (n.body || '').toLowerCase();
+      return title.indexOf(query) !== -1 || body.indexOf(query) !== -1;
+    }
+
+    function notifMatchesTime(createdAt, timeFilter) {
+      if (!timeFilter || timeFilter === 'all') return true;
+      if (!createdAt) return false;
+      const itemDate = new Date(createdAt);
+      if (isNaN(itemDate.getTime())) return true;
+      const now = new Date();
+      if (timeFilter === 'today') {
+        return itemDate.toDateString() === now.toDateString();
+      }
+      if (timeFilter === 'week') {
+        const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        return itemDate >= weekAgo;
+      }
+      if (timeFilter === 'month') {
+        const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        return itemDate >= monthAgo;
+      }
+      return true;
+    }
+
     async function renderNotificationsPage() {
       const list = document.getElementById('tenantNotificationsList');
       if (!list) return;
@@ -310,6 +350,19 @@
         const allowed = NOTIF_GROUP_CATEGORIES[notifCategoryGroup];
         itemsToRender = itemsToRender.filter(x => allowed.indexOf(x.category) !== -1);
       }
+
+      // Filter by search query
+      const query = (document.getElementById('notifSearchInput') || {}).value || '';
+      if (query) {
+        itemsToRender = itemsToRender.filter(x => notifMatchesQuery(x, query));
+      }
+
+      // Filter by time
+      const timeVal = (document.getElementById('notifTimeFilter') || {}).value || 'all';
+      if (timeVal !== 'all') {
+        itemsToRender = itemsToRender.filter(x => notifMatchesTime(x.created_at, timeVal));
+      }
+
       notifRenderedItems = itemsToRender;
 
       if (!itemsToRender.length) {

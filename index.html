@@ -1676,19 +1676,98 @@
 
       <!-- Tab 2: Recharge & Wallet -->
       <div id="llTabPane_recharge" style="display:none">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
-          <h3 class="dash-section-title" style="margin:0">طلبات الشحن</h3>
-          <div style="display:flex;align-items:center;gap:8px">
-            <select id="llRechargeStatusFilter" onchange="llLoadRechargeRequests()" class="tenant-filter-select" aria-label="فلترة حسب الحالة">
-              <option value="">كل الحالات</option>
-              <option value="pending">بانتظار المراجعة</option>
-              <option value="approved">معتمدة</option>
-              <option value="rejected">مرفوضة</option>
-            </select>
-            <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="llOpenRechargeModal()">طلب شحن جديد</button>
+        <div class="tenant-page-heading">
+          <div>
+            <span class="tenant-page-kicker" data-i18n="wallet.kicker">المحفظة والعمليات المالية</span>
+            <h2 data-i18n="wallet.title">المحفظة والشحن</h2>
+          </div>
+          <div class="tenant-actions">
+            <button type="button" class="btn small ghost" onclick="llRefreshWallet()" data-i18n="common.refresh">تحديث</button>
+            <button type="button" class="btn primary small" id="llRechargeNewBtn" data-permission="billing" onclick="llOpenRechargeModal()" data-i18n="wallet.new_recharge">طلب شحن جديد</button>
           </div>
         </div>
-        <div id="llRechargeList" style="margin-bottom:24px"></div>
+
+        <div class="tenant-wallet-wrap">
+          <div class="tenant-wallet-hero" id="llWalletHero">
+            <div class="tenant-wallet-hero-main">
+              <p class="tenant-wallet-label" data-i18n="wallet.balance_available">الرصيد المتاح</p>
+              <div class="tenant-wallet-hero-row">
+                <h3 id="llWalletBalance">—</h3>
+                <span class="tenant-wallet-pill" id="llWalletPackageName"></span>
+              </div>
+              <div class="tenant-wallet-meta" id="llWalletMeta"></div>
+            </div>
+            <div class="tenant-wallet-hero-side">
+              <div class="tenant-wallet-mini-stat"><span data-i18n="wallet.reserved">المحجوز</span><strong id="llWalletReserved">—</strong></div>
+              <div class="tenant-wallet-mini-stat"><span data-i18n="wallet.expired">المنتهي</span><strong id="llWalletExpired">—</strong></div>
+              <div class="tenant-wallet-mini-stat"><span data-i18n="wallet.consumed">المستهلك</span><strong id="llWalletConsumed">—</strong></div>
+              <div class="tenant-wallet-transfer">
+                <div class="tenant-wallet-iban-box"><code id="llWalletIban" dir="ltr">SA9880000213608010009988</code>
+                <button type="button" class="btn small ghost" onclick="llCopyIban()" data-i18n="wallet.copy_iban">نسخ الآيبان</button></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tenant-wallet-stats-strip" id="llWalletStatsStrip">
+            <div class="tenant-wallet-stat-chip"><span class="tenant-wallet-stat-label" data-i18n="wallet.stat_total">إجمالي الطلبات</span><span class="tenant-wallet-stat-val" id="llWalletStatTotal">0</span></div>
+            <div class="tenant-wallet-stat-chip"><span class="tenant-wallet-stat-label" data-i18n="wallet.stat_pending">قيد المراجعة</span><span class="tenant-wallet-stat-val" id="llWalletStatPending" style="color:var(--teal,#0FA9C4)">0</span></div>
+            <div class="tenant-wallet-stat-chip"><span class="tenant-wallet-stat-label" data-i18n="wallet.stat_approved">معتمدة</span><span class="tenant-wallet-stat-val" id="llWalletStatApproved">0</span></div>
+            <div class="tenant-wallet-stat-chip"><span class="tenant-wallet-stat-label" data-i18n="wallet.stat_rejected">مرفوضة</span><span class="tenant-wallet-stat-val" id="llWalletStatRejected">0</span></div>
+          </div>
+
+          <div class="tenant-wallet-section">
+            <div class="tenant-panel-heading"><h3 class="dash-section-title" data-i18n="wallet.packages_title">باقات الشحن والترقية المتاحة</h3></div>
+            <div id="llWalletCatalog"></div>
+          </div>
+
+          <div class="tenant-wallet-bank-card">
+            <div class="tenant-panel-heading"><h3 class="dash-section-title" data-i18n="wallet.bank_title">بيانات التحويل البنكي</h3></div>
+            <div class="tenant-wallet-bank-content">
+              <div class="tenant-wallet-bank-info"><span data-i18n="wallet.bank_name">مصرف الراجحي</span>
+                <div class="tenant-wallet-iban-row"><code id="llWalletIbanMain" dir="ltr">SA9880000213608010009988</code>
+                <button type="button" class="btn small primary" onclick="llCopyIban()" data-i18n="wallet.copy_iban">نسخ الآيبان</button></div>
+              </div>
+              <p class="tenant-wallet-bank-note" data-i18n="wallet.bank_note">بعد التحويل، أرفق إشعار التحويل أو رقم الحوالة في نموذج طلب الشحن.</p>
+            </div>
+          </div>
+
+          <div class="tenant-wallet-section">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px;flex-wrap:wrap">
+              <h3 class="dash-section-title" style="margin:0" data-i18n="wallet.requests_title">سجل طلبات الشحن والفواتير</h3>
+              <div class="tenant-actions">
+                <select id="llRechargeStatusFilter" onchange="llLoadRechargeRequests()" class="tenant-filter-select" aria-label="فلترة حسب الحالة">
+                  <option value="">كل الحالات</option>
+                  <option value="pending">بانتظار المراجعة</option>
+                  <option value="approved">معتمدة</option>
+                  <option value="rejected">مرفوضة</option>
+                </select>
+              </div>
+            </div>
+            <div class="sag-tabs tenant-wallet-category-tabs" role="group" aria-label="تصنيف الطلبات">
+              <button type="button" class="btn small primary" data-wallet-category="all" onclick="setWalletCategory('all')" data-i18n="wallet.cat_all">الكل</button>
+              <button type="button" class="btn small ghost" data-wallet-category="pending" onclick="setWalletCategory('pending')" data-i18n="wallet.cat_pending">قيد المراجعة</button>
+              <button type="button" class="btn small ghost" data-wallet-category="approved" onclick="setWalletCategory('approved')" data-i18n="wallet.cat_approved">معتمدة</button>
+              <button type="button" class="btn small ghost" data-wallet-category="rejected" onclick="setWalletCategory('rejected')" data-i18n="wallet.cat_rejected">مرفوضة</button>
+            </div>
+            <div id="llRechargeList" style="margin-top:16px"></div>
+          </div>
+
+          <div class="tenant-wallet-section tenant-content-panel">
+            <div class="tenant-panel-heading">
+              <div>
+                <h3 class="dash-section-title" data-i18n="wallet.ledger_title">سجل المعاملات والفواتير</h3>
+                <span class="tenant-panel-subtitle" data-i18n="wallet.ledger_sub">قيود المحفظة والمستندات المالية</span>
+              </div>
+              <button type="button" class="btn small ghost" onclick="llRefreshWallet()" data-i18n="common.refresh">تحديث</button>
+            </div>
+            <div class="tenant-wallet-ledger-wrap">
+              <table class="tenant-table tenant-wallet-ledger-table" id="llLedgerTable">
+                <thead><tr><th data-i18n="wallet.col_date">التاريخ</th><th data-i18n="wallet.col_type">نوع العملية</th><th data-i18n="wallet.col_amount">المبلغ</th><th data-i18n="wallet.col_package">الباقة</th><th data-i18n="wallet.col_status">الحالة</th><th data-i18n="wallet.col_invoice">الفاتورة</th></tr></thead>
+                <tbody id="llLedgerBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Tab 3: Support Tickets -->
@@ -1786,8 +1865,8 @@
           <h2 data-i18n="page.notifications">الإشعارات</h2>
         </div>
         <div class="tenant-actions">
-          <button type="button" class="btn small ghost" onclick="renderNotificationsPage()"
-            data-i18n="common.refresh">تحديث</button>
+          <button type="button" class="btn small ghost is-icon notif-refresh-btn" onclick="renderNotificationsPage()"
+            data-ws-icon="refresh" title="تحديث" aria-label="تحديث" data-i18n-aria="common.refresh" data-i18n-title="common.refresh"></button>
           <span id="notifUnreadCount" class="notif-unread-chip" hidden></span>
           <button type="button" class="btn ghost" onclick="notificationsMarkAllRead()"
             data-i18n="admin.mark_all_read">تحديد الكل كمقروء</button>
@@ -1835,10 +1914,23 @@
             <button type="button" class="btn small ghost" data-notif-status="read"
               onclick="setNotifStatusFilter('read')" data-i18n="notif.status_read">مقروءة</button>
           </div>
-          <label class="notif-filter-field" style="display:none">
-            <span data-i18n="notif.category_label">التصنيف</span>
-            <select id="notifCategoryFilter" onchange="renderNotificationsPage()" class="tenant-filter-select"></select>
-          </label>
+          <div class="notif-controls-row">
+            <div class="notif-search-wrap">
+              <input type="text" id="notifSearchInput" class="notif-search-input"
+                placeholder="بحث في الإشعارات..." data-i18n-placeholder="notif.search_placeholder"
+                oninput="onNotifSearchInput()" onkeydown="if(event.key==='Enter')renderNotificationsPage()">
+              <button type="button" class="btn small ghost notif-search-btn" onclick="renderNotificationsPage()"
+                data-i18n="common.search">بحث</button>
+            </div>
+            <div class="notif-time-filter">
+              <select id="notifTimeFilter" class="tenant-filter-select notif-time-select" onchange="renderNotificationsPage()">
+                <option value="all" data-i18n="notif.time_all">كل الأوقات</option>
+                <option value="today" data-i18n="notif.time_today">اليوم</option>
+                <option value="week" data-i18n="notif.time_week">آخر 7 أيام</option>
+                <option value="month" data-i18n="notif.time_month">آخر 30 يوم</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <div class="notif-selection-bar" id="notifSelectionBar">
