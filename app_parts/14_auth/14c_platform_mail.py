@@ -62,7 +62,8 @@ def _platform_logo_images():
     if _LOGO_IMAGES is None:
         _LOGO_IMAGES = {}
         assets_dir = os.path.join(os.path.dirname(__file__), 'assets')
-        for filename, cid in (('landloom-logo.png', 'landloom-logo'),
+        for filename, cid in (('landloom-emblem.png', 'landloom-emblem'),
+                              ('landloom-logo.png', 'landloom-logo'),
                               ('landloom-logo-white.png', 'landloom-logo-white')):
             try:
                 with open(os.path.join(assets_dir, filename), 'rb') as fh:
