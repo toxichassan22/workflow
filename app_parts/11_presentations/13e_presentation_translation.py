@@ -111,10 +111,10 @@ def api_translate_presentation(pres_id):
         response = call_text_chat(
             slide_translator.translation_prompt(glossary),
             slide_translator.build_batch_payload(texts),
-            max_tokens=min(8000, 600 + len(texts) * 160),
+            max_tokens=min(2000, 400 + len(texts) * 120),
             response_format={'type': 'json_object'},
             model=model_name,
-            reasoning_effort='none',
+            reasoning_effort='low',
             usage_ctx={
                 'tenant_id': tenant_id,
                 'draft_id': draft_id,
@@ -132,7 +132,7 @@ def api_translate_presentation(pres_id):
         return slide_translator.parse_batch_response(content, len(texts))
 
     translated, stats = slide_translator.translate_slides(
-        slides, _translate_batch, target_lang=target_lang, glossary=glossary)
+        slides, _translate_batch, target_lang=target_lang, glossary=glossary, max_workers=10)
     if not stats['translated'] and not stats['titles']:
         return jsonify({
             'success': False,

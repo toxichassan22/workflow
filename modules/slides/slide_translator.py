@@ -298,68 +298,117 @@ def _recover_pieces(tokens, units, accepted, translator, glossary):
     return recovered
 
 
-def translate_slides(slides, translator, target_lang='en', glossary=None, max_workers=6):
-    """Translate a deck's slides in place-free fashion.
+def translate_single_slide(slide, translator, glossary=None):
+    """Translate one slide in a single isolated call.
 
-    ``translator`` is ``callable(list_of_strings) -> list_of_strings`` and owns
-    the model call. Every slide is copied, so the caller's Arabic deck is never
-    mutated. Returns ``(translated_slides, stats)``.
+    Gathers only this slide's Arabic elements (HTML units, title, index entries)
+    and sends them to the translator in one request. Returns (slide_copy, stats).
+    """
+    slide_copy = copy.deepcopy(slide)
+    stats = {'units': 0, 'translated': 0, 'skipped': 0, 'titles': 0}
+    if not isinstance(slide_copy, dict):
+        return slide_copy, stats
+
+    html = slide_copy.get('html')
+    tokens, units = collect_units(html) if (isinstance(html, str) and html.strip() and AR_RE.search(html)) else ([], [])
+    stats['units'] = len(units)
+
+    # Gather items to translate for this slide only
+    items_to_translate = []
+    # 1. HTML units
+    for u in units:
+        items_to_translate.append(('unit', u['template']))
+
+    # 2. Slide title
+    title = slide_copy.get('title')
+    title_idx = None
+    if isinstance(title, str) and AR_RE.search(title):
+        title_idx = len(items_to_translate)
+        items_to_translate.append(('title', title))
+
+    # 3. Slide indexEntries
+    entries = slide_copy.get('indexEntries')
+    entry_indices = []
+    if isinstance(entries, list):
+        for e_idx, entry in enumerate(entries):
+            if isinstance(entry, dict) and isinstance(entry.get('title'), str) and AR_RE.search(entry['title']):
+                entry_indices.append((e_idx, len(items_to_translate)))
+                items_to_translate.append(('entry', entry['title']))
+
+    # If nothing to translate on this slide, return immediately
+    if not items_to_translate:
+        return slide_copy, stats
+
+    # Single isolated call for this slide
+    texts = [item[1] for item in items_to_translate]
+    results = []
+    for batch in _chunks(texts):
+        results.extend(_translate_batch(batch, translator))
+
+    # Apply translated HTML units
+    accepted_units = []
+    for i, u in enumerate(units):
+        trans = results[i] if i < len(results) else None
+        if _accepted(u['template'], trans):
+            accepted_units.append(apply_glossary(trans, glossary))
+            stats['translated'] += 1
+        else:
+            accepted_units.append(None)
+    stats['skipped'] = len(units) - stats['translated']
+
+    if units and tokens:
+        slide_copy['html'] = _rebuild(tokens, units, accepted_units)
+
+    # Apply translated title
+    if title_idx is not None and title_idx < len(results):
+        t_trans = results[title_idx]
+        if _accepted(title, t_trans):
+            slide_copy['title'] = apply_glossary(t_trans, glossary)
+            stats['titles'] += 1
+
+    # Apply translated indexEntries
+    if entry_indices:
+        for e_idx, r_idx in entry_indices:
+            if r_idx < len(results):
+                e_trans = results[r_idx]
+                if _accepted(entries[e_idx]['title'], e_trans):
+                    slide_copy['indexEntries'][e_idx]['title'] = apply_glossary(e_trans, glossary)
+                    stats['titles'] += 1
+
+    return slide_copy, stats
+
+
+def translate_slides(slides, translator, target_lang='en', glossary=None, max_workers=10):
+    """Translate a deck's slides in parallel with complete slide isolation.
+
+    Each slide runs as an independent task that translates only its own text.
+    Concurrency defaults to 10 workers for maximum throughput.
     """
     if target_lang != 'en':
         raise ValueError('unsupported target language: %s' % target_lang)
-    translated_slides = copy.deepcopy(slides or [])
+    raw_slides = slides or []
     stats = {'slides': 0, 'units': 0, 'translated': 0, 'skipped': 0, 'titles': 0}
-    if not translated_slides:
-        return translated_slides, stats
+    if not raw_slides:
+        return [], stats
 
-    for slide in translated_slides:
-        if isinstance(slide, dict):
-            stats['slides'] += 1
+    valid_slides = [s for s in raw_slides if isinstance(s, dict)]
+    stats['slides'] = len(valid_slides)
+    if not valid_slides:
+        return copy.deepcopy(raw_slides), stats
 
-    # 1. Translate all plain text items (titles and index entries) in batch across the deck.
-    # Grouping them avoids dozens of roundtrips for 1-item lists.
-    plain_targets = []
-    for slide in translated_slides:
-        if not isinstance(slide, dict):
-            continue
-        title = slide.get('title')
-        if isinstance(title, str) and AR_RE.search(title):
-            plain_targets.append(('title', slide, title))
-        entries = slide.get('indexEntries')
-        if isinstance(entries, list):
-            for entry in entries:
-                if isinstance(entry, dict) and isinstance(entry.get('title'), str) and AR_RE.search(entry['title']):
-                    plain_targets.append(('entry', entry, entry['title']))
+    workers = min(max(len(valid_slides), 1), max(1, max_workers))
 
-    if plain_targets:
-        texts = [target[2] for target in plain_targets]
-        translated_texts = _plain(texts, translator, glossary)
-        for (target_type, target_obj, _), val in zip(plain_targets, translated_texts):
-            if val:
-                target_obj['title'] = val
-                stats['titles'] += 1
+    def _worker(slide):
+        return translate_single_slide(slide, translator, glossary=glossary)
 
-    # 2. Translate slide HTMLs in parallel using ThreadPoolExecutor.
-    slides_to_translate = []
-    for index, slide in enumerate(translated_slides):
-        if not isinstance(slide, dict):
-            continue
-        html = slide.get('html')
-        if isinstance(html, str) and html.strip() and AR_RE.search(html):
-            slides_to_translate.append((index, html))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(executor.map(_worker, raw_slides))
 
-    if slides_to_translate:
-        workers = min(max(len(slides_to_translate), 1), max(1, max_workers))
-        def _process_slide(item):
-            idx, html_content = item
-            new_html, s_stats = translate_html(html_content, translator, glossary)
-            return idx, new_html, s_stats
-
-        with ThreadPoolExecutor(max_workers=workers) as executor:
-            for idx, new_html, s_stats in executor.map(_process_slide, slides_to_translate):
-                translated_slides[idx]['html'] = new_html
-                for key in ('units', 'translated', 'skipped'):
-                    stats[key] += s_stats[key]
+    translated_slides = []
+    for slide_result, s_stats in results:
+        translated_slides.append(slide_result)
+        for key in ('units', 'translated', 'skipped', 'titles'):
+            stats[key] += s_stats.get(key, 0)
 
     return translated_slides, stats
 

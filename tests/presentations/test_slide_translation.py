@@ -347,12 +347,14 @@ class PresentationTranslationApiTests(unittest.TestCase):
             src,
         )
 
-    def test_translation_disables_reasoning_effort_for_fast_throughput(self):
+    def test_translation_uses_low_reasoning_effort_and_token_cap(self):
         created = self._create()
         recorded_efforts = []
+        recorded_max_tokens = []
 
         def capture_chat(*args, **kwargs):
             recorded_efforts.append(kwargs.get('reasoning_effort'))
+            recorded_max_tokens.append(kwargs.get('max_tokens'))
             return self._fake_chat(*args, **kwargs)
 
         with patch.object(self.module, 'call_text_chat', side_effect=capture_chat), \
@@ -363,7 +365,31 @@ class PresentationTranslationApiTests(unittest.TestCase):
                 headers=self.headers, json={'targetLang': 'en'})
         self.assertEqual(response.status_code, 201)
         self.assertTrue(len(recorded_efforts) > 0)
-        self.assertTrue(all(effort == 'none' for effort in recorded_efforts))
+        self.assertTrue(all(effort == 'low' for effort in recorded_efforts))
+        self.assertTrue(all(tokens <= 2000 for tokens in recorded_max_tokens))
+
+    def test_translate_slides_isolates_each_slide_in_single_call(self):
+        """Each slide is sent to the translator in its own isolated call containing only that slide's text."""
+        slides = [
+            {'title': 'الغلاف', 'html': '<p>مشروع مجمع سكني</p>'},
+            {'title': 'الموقع', 'html': '<p>مدينة جدة</p>'},
+        ]
+        calls = []
+
+        def tracking_translator(texts):
+            calls.append(texts)
+            return [MAP.get(t, t) for t in texts]
+
+        translated, stats = slide_translator.translate_slides(slides, tracking_translator, max_workers=2)
+        # Exactly 2 calls: one per slide, with no bleed-over between slides
+        self.assertEqual(len(calls), 2)
+        # Slide 0's call contains its unit and title, NOT Slide 1's
+        self.assertIn('مشروع مجمع سكني', calls[0])
+        self.assertNotIn('مدينة جدة', calls[0])
+        # Slide 1's call contains its unit and title, NOT Slide 0's
+        self.assertIn('مدينة جدة', calls[1])
+        self.assertNotIn('مشروع مجمع سكني', calls[1])
+        self.assertEqual(translated[0]['title'], 'Cover')
 
     def test_translation_without_a_configured_model_is_refused(self):
         created = self._create()
