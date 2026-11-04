@@ -1997,6 +1997,17 @@ def log_ai_rule_change(tenant_id, rule_category, rule_key, old_value, new_value,
     return log_id
 
 
+def get_last_ai_rule_change(tenant_id, rule_key):
+    """Newest log row for one rule key, or None."""
+    conn = get_db()
+    row = conn.execute(
+        'SELECT * FROM ai_rules_log WHERE tenant_id = ? AND rule_key = ? '
+        'ORDER BY created_at DESC LIMIT 1',
+        (tenant_id, rule_key)
+    ).fetchone()
+    return dict(row) if row else None
+
+
 def get_ai_rules_log(tenant_id, limit=50):
     """Get recent AI rule changes for a tenant."""
     conn = get_db()

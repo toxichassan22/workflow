@@ -180,68 +180,146 @@
 
     <!-- AI Rules -->
     <section id="tenantAIRulesPage" class="tenant-page">
-      <div
-        style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:16px">
-        <div>
-          <h2>قواعد الذكاء الاصطناعي</h2>
-        </div>
-      </div>
+      <div class="air-shell">
 
-      <div class="tenant-tabs" style="display:flex;gap:8px;border-bottom:1px solid #ddd;margin-bottom:16px;">
-        <button class="btn ghost" id="aiTabTraining" onclick="showAIRuleTab('training')">بيانات التدريب</button>
-        <button class="btn ghost" id="aiTabLog" onclick="showAIRuleTab('log')">سجل التدريب</button>
-      </div>
-
-      <div id="aiRulesTraining" class="ai-rule-tab">
-        <div style="display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap;">
-          <!-- Left Sidebar: Chat Sessions History -->
-          <div
-            style="width:260px;min-width:240px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;">
-            <button class="btn primary small" onclick="createNewChatSession('ai_rules')"
-              style="width:100%;justify-content:center;gap:6px;font-weight:600;padding:10px;">
-              محادثة جديدة
-            </button>
-            <div
-              style="display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e2e8f0;padding-bottom:6px;">
-              <span style="font-size:12px;font-weight:700;color:var(--accent);">سجل المحادثات</span>
-              <button class="btn small danger ghost" onclick="clearAllChatSessions('ai_rules')" title="مسح كل السجلات"
-                style="padding:2px 6px;font-size:11px;">مسح الكل</button>
-            </div>
-            <div id="aiRulesChatSessionsList"
-              style="display:flex;flex-direction:column;gap:6px;max-height:400px;overflow-y:auto;"></div>
+        <header class="air-head">
+          <div>
+            <div class="air-kicker" data-i18n="ai_rules.kicker">إعدادات المنشأة</div>
+            <h2 class="air-title" data-i18n="ai_rules.title">قواعد الذكاء الاصطناعي</h2>
+            <p class="air-sub" data-i18n="ai_rules.subtitle">نبرة العروض والمصطلحات التي يلتزم بها وكيل الإدارة في كل توليد لهذه المنشأة.</p>
           </div>
+          <span class="air-stamp"><i></i><span id="airRulesStampText"></span></span>
+        </header>
 
-          <!-- Main Chat Area -->
-          <div class="chatbox" style="flex:1;min-width:320px;margin-bottom:0;">
-            <div id="aiRulesChatLog" class="chatlog" style="height:350px;"></div>
+        <div class="air-rules-strip">
+          <span class="air-rules-label" data-i18n="ai_rules.strip_label">قواعد التوليد</span>
+          <span class="air-rules-summary" id="airRulesSummary"></span>
+          <button type="button" class="air-rules-edit" onclick="openAIRulesDrawer()" data-i18n="ai_rules.edit">تعديل</button>
+        </div>
 
-            <div style="display:flex;gap:10px;align-items:flex-end;margin-top:10px;">
-              <input type="file" id="trainingChatImageFile"
-                accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf,text/plain" style="display:none"
-                onchange="handleChatImageSelected(this)">
-              <button class="btn ghost" onclick="document.getElementById('trainingChatImageFile').click()"
-                title="إرفاق صورة للشات"
-                style="padding:10px 14px;font-size:16px;border:1px solid var(--line);border-radius:10px;background:#f9f9f9;">إرفاق
-                صورة</button>
-              <textarea id="aiRulesChatInput" placeholder="اكتب معلومات لتدريب AI أو أرفق صورة للاستفسار والتحليل..."
-                style="flex:1;min-height:56px;resize:none;"
-                onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendAIRulesChat();}"></textarea>
-              <button class="btn primary" onclick="sendAIRulesChat()" style="padding:10px 20px;">إرسال</button>
+        <div class="air-tabs">
+          <button type="button" class="air-tab primary" id="aiTabTraining" onclick="showAIRuleTab('training')" data-i18n="ai_rules.tab_training">بيانات التدريب</button>
+          <button type="button" class="air-tab" id="aiTabLog" onclick="showAIRuleTab('log')" data-i18n="ai_rules.tab_log">سجل التدريب</button>
+        </div>
+
+        <div id="aiRulesTraining" class="ai-rule-tab">
+          <div class="air-chat-layout">
+            <aside class="air-sessions">
+              <button type="button" class="air-new-chat" onclick="createNewChatSession('ai_rules')" data-i18n="ai_rules.new_chat">محادثة جديدة</button>
+              <div class="air-sessions-head">
+                <span class="air-sessions-title" data-i18n="ai_rules.sessions_title">سجل المحادثات</span>
+                <button type="button" class="air-sessions-clear" onclick="clearAllChatSessions('ai_rules')" data-i18n="ai_rules.clear_all">مسح الكل</button>
+              </div>
+              <div id="aiRulesChatSessionsList" class="air-sessions-list"></div>
+            </aside>
+
+            <div class="air-chat">
+              <div id="aiRulesChatLog" class="air-log"></div>
+              <div class="air-compose">
+                <input type="file" id="trainingChatImageFile"
+                  accept="image/png,image/jpeg,image/jpg,image/webp,application/pdf,text/plain" style="display:none"
+                  onchange="handleChatImageSelected(this)">
+                <button type="button" class="air-attach" onclick="document.getElementById('trainingChatImageFile').click()"
+                  data-i18n="ai_rules.attach">إرفاق صورة</button>
+                <textarea id="aiRulesChatInput" data-i18n-ph="ai_rules.chat_placeholder" placeholder="اكتب ما تريد تعديله في نبرة العروض أو مصطلحاتها..."
+                  onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();sendAIRulesChat();}"></textarea>
+                <button type="button" class="air-send" onclick="sendAIRulesChat()" data-i18n="ai_rules.send">إرسال</button>
+              </div>
+              <div class="air-chat-foot">
+                <button type="button" class="air-chat-save" onclick="saveLastAIRulesChatMessage()" data-i18n="ai_rules.save_last">حفظ آخر رسالة كبيانات تدريب</button>
+              </div>
+              <input type="checkbox" id="trainingChatImageConsent" checked style="display:none">
             </div>
-
-            <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap;">
-              <button class="btn small ghost" onclick="saveLastAIRulesChatMessage()">حفظ آخر رسالة كبيانات
-                تدريب</button>
-            </div>
-
-            <!-- Hidden consent input for background compatibility -->
-            <input type="checkbox" id="trainingChatImageConsent" checked style="display:none">
           </div>
         </div>
+
+        <div id="aiRulesLog" class="ai-rule-tab" style="display:none;">
+          <div id="aiRulesLogList"></div>
+        </div>
+
       </div>
-      <div id="aiRulesLog" class="ai-rule-tab" style="display:none;">
-        <div id="aiRulesLogList"></div>
+
+      <div class="air-drawer-overlay" id="aiRulesDrawer" hidden
+        onclick="if (event.target === this) closeAIRulesDrawer()">
+        <aside class="air-drawer" role="dialog" aria-modal="true" aria-labelledby="airDrawerTitle">
+          <div class="air-drawer-head">
+            <h3 class="air-drawer-title" id="airDrawerTitle" data-i18n="ai_rules.drawer_title">قواعد التوليد</h3>
+            <p class="air-drawer-desc" data-i18n="ai_rules.drawer_desc">ثلاث قواعد تكفي: النبرة، وما يُمنع، وما يُضاف إلى الأقسام.</p>
+          </div>
+          <div class="air-drawer-body">
+
+            <div class="air-field">
+              <span class="air-field-label" data-i18n="ai_rules.tone_label">النبرة</span>
+              <div class="air-seg" id="airRulesToneGroup">
+                <button type="button" data-tone="analytical" onclick="selectAIRulesTone('analytical')" data-i18n="ai_rules.tone_analytical">تحليلي تنفيذي</button>
+                <button type="button" data-tone="marketing" onclick="selectAIRulesTone('marketing')" data-i18n="ai_rules.tone_marketing">تسويقي راقٍ</button>
+                <button type="button" data-tone="engineering" onclick="selectAIRulesTone('engineering')" data-i18n="ai_rules.tone_engineering">هندسي دقيق</button>
+              </div>
+            </div>
+
+            <div class="air-field">
+              <span class="air-field-label" data-i18n="ai_rules.banned_label">مصطلحات ممنوعة</span>
+              <div class="air-chips" id="airRulesBannedChips"></div>
+              <div class="air-add-row">
+                <input type="text" id="airRulesBannedInput" data-i18n-ph="ai_rules.term_placeholder" placeholder="مصطلح جديد"
+                  onkeydown="if(event.key==='Enter'){event.preventDefault();addAIRulesTerm('banned');}">
+                <button type="button" onclick="addAIRulesTerm('banned')" data-i18n="ai_rules.add_term">إضافة</button>
+              </div>
+            </div>
+
+            <div class="air-field">
+              <button type="button" class="air-more-toggle" id="airRulesApprovedToggle" onclick="toggleAIRulesApproved()"
+                data-i18n="ai_rules.approved_toggle">المصطلحات المعتمدة</button>
+              <div id="airRulesApprovedWrap" hidden>
+                <div class="air-chips" id="airRulesApprovedChips"></div>
+                <div class="air-add-row">
+                  <input type="text" id="airRulesApprovedInput" data-i18n-ph="ai_rules.term_placeholder" placeholder="مصطلح جديد"
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();addAIRulesTerm('approved');}">
+                  <button type="button" onclick="addAIRulesTerm('approved')" data-i18n="ai_rules.add_term">إضافة</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="air-field">
+              <span class="air-field-label" data-i18n="ai_rules.directives_label">توجيهات إضافية للأقسام</span>
+              <textarea id="airRulesDirectivesInput" class="air-textarea" rows="4"
+                data-i18n-ph="ai_rules.directives_placeholder" placeholder="مثال: في دراسة السوق اعتمد القوة الشرائية في النطاق واذكر فجوة العرض بالأرقام."
+                oninput="markAIRulesDirty()"></textarea>
+            </div>
+
+            <p class="air-extra-note" id="airRulesExtraNote" hidden data-i18n="ai_rules.extra_note">توجد قواعد محفوظة من وكيل الإدارة، وتبقى كما هي عند الحفظ من هنا.</p>
+
+            <div class="air-more">
+              <button type="button" onclick="showAIRulesPromptPreview()" data-i18n="ai_rules.preview_link">عرض النص كما يصل للنموذج</button>
+            </div>
+
+            <div class="air-error" id="airRulesError" hidden></div>
+
+          </div>
+          <div class="air-drawer-foot">
+            <span class="air-dirty" id="airRulesDirty" hidden data-i18n="ai_rules.dirty">تغييرات غير محفوظة</span>
+            <div class="air-drawer-foot-actions">
+              <button type="button" class="air-btn" onclick="closeAIRulesDrawer()" data-i18n="common.cancel">إلغاء</button>
+              <button type="button" class="air-btn is-primary" id="airRulesSaveBtn" onclick="saveGenerationRules()" data-i18n="ai_rules.save">حفظ القواعد</button>
+            </div>
+          </div>
+        </aside>
+      </div>
+
+      <div class="air-modal-overlay" id="airRulesPromptModal" hidden
+        onclick="if (event.target === this) closeAIRulesPromptPreview()">
+        <div class="air-modal">
+          <div class="air-modal-head">
+            <h3 class="air-modal-title" data-i18n="ai_rules.prompt_title">النص كما يصل للنموذج</h3>
+            <p class="air-modal-desc" data-i18n="ai_rules.prompt_desc">هذا ما يُضاف إلى كل برومبت توليد لهذه المنشأة.</p>
+          </div>
+          <div class="air-modal-body">
+            <pre class="air-prompt" id="airRulesPromptText"></pre>
+          </div>
+          <div class="air-modal-foot">
+            <button type="button" class="air-btn" onclick="closeAIRulesPromptPreview()" data-i18n="common.close">إغلاق</button>
+          </div>
+        </div>
       </div>
 
     </section>
-
