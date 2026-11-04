@@ -1,0 +1,401 @@
+/* Landing-only styles, part 1: the cinematic half — the transparent topbar,
+   the auto-played opening, orbs, the hero and the
+   product mockup. Loaded after site.css on
+   landing.html only; sections, join form and motion live in
+   site-sections.css. */
+
+/* ── Transparent top bar over the dark hero ──────────────────────────────── */
+
+.site-topbar.on-dark {
+  position: absolute;
+  inset-inline: 0;
+  background: transparent;
+  border-bottom: 0;
+  backdrop-filter: none;
+}
+
+.site-topbar.on-dark .brand-beta { color: rgba(255, 255, 255, .55); }
+
+.site-topbar.on-dark .site-nav a { color: #DCE8F2; }
+.site-topbar.on-dark .site-nav a:hover { color: #fff; }
+
+.site-topbar.on-dark .lang-toggle {
+  background: rgba(255, 255, 255, .08);
+  border-color: rgba(255, 255, 255, .25);
+  color: #fff;
+}
+
+.site-topbar.on-dark .lang-toggle:hover { border-color: rgba(255, 255, 255, .55); }
+
+/* ── Opening: auto-played cinematic intro ─────────────────────────────────
+   On entry the camera pushes in over the map while the Saudi border draws
+   itself, marker pins rain down across it — the last lands on Riyadh —
+   and LANDLOOM collapses out of a wide
+   tracking blur into its lockup — then the whole overlay zooms through and
+   hands off to the hero. site.js initOpening() scrubs the timeline on a
+   rAF clock; click or Escape skips; body.intro-done fires the exit. The
+   overlay only exists with JS (body.js gates display) so a scriptless load
+   lands straight on the page, and reduced motion drops it entirely (rule
+   at the bottom of site-sections.css). */
+
+html.intro-lock { overflow: hidden; scrollbar-gutter: stable; }
+
+.intro {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  perspective: 1200px;
+  overflow: hidden;
+  background:
+    radial-gradient(1100px 540px at 78% -12%, rgba(15, 169, 196, .14) 0%, transparent 55%),
+    radial-gradient(820px 480px at 10% 112%, rgba(18, 59, 109, .6) 0%, transparent 62%),
+    linear-gradient(160deg, #0A2038 0%, var(--ink) 55%, #04101F 100%);
+}
+
+body.js .intro { display: flex; }
+
+/* pointer-events die with intro-done so the exiting overlay never swallows
+   clicks, and initOpening removes the node outright once the exit plays. */
+body.intro-done .intro {
+  pointer-events: none;
+  animation: introExit .85s cubic-bezier(.55, 0, .8, .4) .05s forwards;
+}
+
+@keyframes introExit {
+  to { transform: scale(1.14); opacity: 0; filter: blur(10px); }
+}
+
+.intro-stage {
+  position: relative;
+  width: min(84vw, calc(74vh * 1.375));
+  aspect-ratio: 880 / 640;
+}
+
+.intro-cam {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* The map shifts up-right so the falling pins land in clear space around
+   the wordmark instead of behind it, and the southern border bleeds off
+   below the slogan. */
+.intro-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  transform: translate(5%, -16%) scale(1.03);
+}
+
+.intro-map path { vector-effect: non-scaling-stroke; }
+
+.intro-sweep {
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  width: 34%;
+  left: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(105deg, transparent 15%, rgba(160, 235, 255, .13) 48%, rgba(255, 255, 255, .05) 55%, transparent 85%);
+  transform: translateX(-140%);
+  will-change: transform;
+}
+
+/* Marker pins: teardrop bodies that JS drops onto the drawn map — the
+   fall, squash and ground ring are all driven from initOpening's clock.
+   Only the Riyadh marker keeps a persistent pulse (the .show rings). */
+.intro-pin { opacity: 0; }
+.pin-drop { fill: var(--teal-bright); filter: drop-shadow(0 0 9px rgba(23, 200, 227, .5)); }
+.pin-hole { fill: var(--ink); opacity: .92; }
+.pin-shadow { fill: #020A14; opacity: 0; }
+.pin-hit { fill: none; stroke: var(--teal-bright); stroke-width: 2; opacity: 0; }
+.intro-pin-ring, .intro-pin-ring2 {
+  fill: none;
+  stroke: var(--teal-bright);
+  stroke-width: 2.5;
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.intro-pin.show .intro-pin-ring { animation: pinPulse 2.1s ease-out infinite; }
+.intro-pin.show .intro-pin-ring2 { animation: pinPulse 2.1s ease-out .6s infinite; }
+
+@keyframes pinPulse {
+  0% { transform: scale(.6); opacity: .9; }
+  80% { opacity: 0; }
+  100% { transform: scale(3.4); opacity: 0; }
+}
+
+.intro-brand {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 3;
+  margin: 0;
+  color: #fff;
+  font-weight: 800;
+  font-size: clamp(3rem, 9vw, 6.4rem);
+  letter-spacing: .85em;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  will-change: filter;
+}
+
+.intro-underline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  display: flex;
+  justify-content: center;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.intro-underline i {
+  display: block;
+  width: min(430px, 52vw);
+  height: 3px;
+  margin-top: calc(clamp(3rem, 9vw, 6.4rem) * .8);
+  background: linear-gradient(90deg, transparent, var(--teal-bright), transparent);
+  transform: scaleX(0);
+  border-radius: 3px;
+}
+
+.intro-slogan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  display: flex;
+  justify-content: center;
+  z-index: 3;
+  margin: 0;
+  pointer-events: none;
+}
+
+.intro-slogan-in {
+  display: inline-block;
+  margin-top: calc(clamp(3rem, 9vw, 6.4rem) * 1.06);
+  font-size: clamp(1rem, 2.1vw, 1.45rem);
+  font-weight: 300;
+  color: var(--teal-soft);
+  opacity: 0;
+  transform: translateY(16px);
+}
+
+/* ── Orbs: blurred teal glows + rising micro-bubbles ───────────────────────
+   Shared by the opening, the hero and the join band so the deep-navy world
+   reads as one continuous space. Positions/sizes come from nth-of-type
+   presets; JS is not involved. */
+
+.orbs { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+
+.orbs i, .orbs b { position: absolute; display: block; border-radius: 50%; }
+
+.orbs i {
+  width: var(--sz, 340px);
+  height: var(--sz, 340px);
+  background: radial-gradient(circle, rgba(15, 169, 196, .18) 0%, rgba(15, 169, 196, .05) 48%, transparent 70%);
+  filter: blur(44px);
+}
+
+.orbs i:nth-of-type(1) { --sz: 470px; inset-inline-start: -9%; top: -18%; }
+.orbs i:nth-of-type(2) { --sz: 330px; inset-inline-end: -6%; top: 4%; }
+.orbs i:nth-of-type(3) { --sz: 390px; inset-inline-start: 20%; bottom: -26%; background: radial-gradient(circle, rgba(109, 163, 195, .3) 0%, rgba(109, 163, 195, .1) 48%, transparent 70%); }
+.orbs i:nth-of-type(4) { --sz: 230px; inset-inline-end: 27%; top: 36%; }
+.orbs i:nth-of-type(5) { --sz: 200px; inset-inline-start: 46%; top: -12%; }
+.orbs i:nth-of-type(6) { --sz: 300px; inset-inline-end: 6%; bottom: -16%; }
+
+.orbs b {
+  bottom: -40px;
+  width: var(--sz, 10px);
+  height: var(--sz, 10px);
+  background: radial-gradient(circle at 32% 30%, rgba(255, 255, 255, .7), rgba(23, 200, 227, .35) 48%, rgba(15, 169, 196, .1) 82%);
+  box-shadow: 0 0 14px rgba(23, 200, 227, .22);
+  opacity: 0;
+}
+
+.orbs b:nth-of-type(1) { --sz: 9px;  inset-inline-start: 7%;  --dur: 12s;   --del: -1s;  --sway: 24px; }
+.orbs b:nth-of-type(2) { --sz: 6px;  inset-inline-start: 16%; --dur: 15s;   --del: -7s;  --sway: -18px; }
+.orbs b:nth-of-type(3) { --sz: 13px; inset-inline-start: 26%; --dur: 11s;   --del: -4s;  --sway: 30px; }
+.orbs b:nth-of-type(4) { --sz: 7px;  inset-inline-start: 38%; --dur: 16s;   --del: -10s; --sway: -26px; }
+.orbs b:nth-of-type(5) { --sz: 10px; inset-inline-start: 50%; --dur: 13s;   --del: -6s;  --sway: 20px; }
+.orbs b:nth-of-type(6) { --sz: 6px;  inset-inline-start: 60%; --dur: 17s;   --del: -12s; --sway: -30px; }
+.orbs b:nth-of-type(7) { --sz: 12px; inset-inline-start: 70%; --dur: 12.5s; --del: -3s;  --sway: 22px; }
+.orbs b:nth-of-type(8) { --sz: 8px;  inset-inline-start: 80%; --dur: 14.5s; --del: -9s;  --sway: -20px; }
+.orbs b:nth-of-type(9) { --sz: 14px; inset-inline-start: 91%; --dur: 11.5s; --del: -5s;  --sway: 28px; }
+
+.orbs.soft i { opacity: .45; }
+.orbs.dim i { opacity: .3; }
+.orbs.dim b:nth-of-type(n+4) { display: none; }
+
+/* ── Hero ────────────────────────────────────────────────────────────────── */
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 460px at 80% -10%, rgba(15, 169, 196, .14) 0%, transparent 55%),
+    radial-gradient(1100px 500px at 85% -10%, rgba(109, 163, 195, .16) 0%, transparent 55%),
+    radial-gradient(700px 420px at 8% 110%, rgba(18, 59, 109, .5) 0%, transparent 60%),
+    linear-gradient(160deg, #0A2038 0%, var(--ink) 55%, #04101F 100%);
+  color: #fff;
+  padding: 148px 0 96px;
+}
+
+.hero .wrap {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1.05fr .95fr;
+  gap: 48px;
+  align-items: center;
+}
+
+.hero .kicker {
+  display: inline-block;
+  color: var(--teal-bright);
+  background: rgba(15, 169, 196, .1);
+  border: 1px solid rgba(15, 169, 196, .3);
+  border-radius: 999px;
+  padding: 5px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 22px;
+}
+
+.hero h1 {
+  font-size: 46px;
+  line-height: 1.3;
+  margin: 0 0 20px;
+  color: #fff;
+  font-weight: 800;
+}
+
+.hero h1 .hl {
+  font-style: normal;
+  background: linear-gradient(90deg, var(--teal-bright), #8FD4F2);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.hero p.lead {
+  font-size: 18.5px;
+  color: #AFC4D6;
+  max-width: 560px;
+  margin: 0 0 14px;
+}
+
+.hero p.sub-lead {
+  font-size: 15px;
+  color: #8AA0B5;
+  max-width: 580px;
+  margin: 0 0 32px;
+  line-height: 1.85;
+}
+
+.hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+
+.hero .trust {
+  font-size: 13.5px;
+  color: #7E96AB;
+  margin: 0;
+}
+
+/* ── Product mockup (a generated slide, pure markup — no imagery) ────────── */
+
+.hero-visual { position: relative; min-height: 360px; }
+
+.deck-card {
+  position: relative;
+  width: min(460px, 100%);
+  aspect-ratio: 16 / 10;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: var(--shadow-deep), 0 0 70px rgba(15, 169, 196, .08);
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  color: var(--ink);
+  transform: rotate(-2.5deg);
+}
+
+.deck-card.back {
+  position: absolute;
+  inset: 26px -18px auto auto;
+  height: 100%;
+  background: #E9F1F7;
+  transform: rotate(2deg);
+  box-shadow: 0 18px 45px rgba(4, 16, 31, .28);
+  z-index: -1;
+}
+
+.deck-head { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.deck-logo {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: var(--p); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 14px;
+}
+.deck-brand { font-size: 11.5px; font-weight: 700; color: var(--muted); }
+
+.deck-card h4 { margin: 0 0 2px; font-size: 19px; color: var(--ink); font-weight: 800; }
+.deck-sub { margin: 0 0 14px; font-size: 11px; color: var(--muted); }
+
+.deck-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+.deck-metrics > div {
+  border: 1px solid var(--line); border-radius: 9px;
+  padding: 8px 10px;
+}
+.deck-metrics b { display: block; font-size: 16px; color: var(--p); font-weight: 800; }
+.deck-metrics span { font-size: 9.5px; color: var(--muted); }
+
+.deck-lines { display: flex; flex-direction: column; gap: 7px; margin-top: auto; }
+.deck-lines i {
+  display: block; height: 7px; border-radius: 4px;
+  background: #E7EEF4;
+}
+.deck-lines i:nth-child(1) { width: 88%; }
+.deck-lines i:nth-child(2) { width: 64%; }
+.deck-lines i:nth-child(3) { width: 76%; }
+
+.deck-foot {
+  margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--line);
+  display: flex; justify-content: space-between; align-items: center;
+}
+.deck-foot span { font-size: 9px; color: var(--muted); }
+.deck-foot b { font-size: 10px; color: var(--p); }
+
+.float-chip {
+  position: absolute;
+  background: rgba(255, 255, 255, .96);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 15px;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 12px 28px rgba(4, 16, 31, .3);
+}
+
+.chip-a { top: 6%; inset-inline-start: 2%; --ci: 0s; }
+.chip-b { bottom: 10%; inset-inline-end: 0%; --ci: .6s; }
+.chip-c { bottom: -2%; inset-inline-start: 14%; --ci: 1.2s; }
+
+@keyframes chipFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}

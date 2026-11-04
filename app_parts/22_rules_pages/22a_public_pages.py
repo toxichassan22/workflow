@@ -22,6 +22,18 @@ def public_landing():
     return _serve_public_page('landing.html')
 
 
+@app.route('/old-landing')
+def public_old_landing():
+    """Isolated preview route for the historical cinematic landing page."""
+    return _serve_public_page('old-landing.html')
+
+
+@app.route('/scroll-landing')
+def public_scroll_landing():
+    """Isolated preview route for the historical scroll-scrubbed landing page."""
+    return _serve_public_page('scroll-landing.html')
+
+
 @app.route('/sitemap.xml')
 def public_sitemap():
     """Official sitemap for search engines on the production domain."""
