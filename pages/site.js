@@ -211,8 +211,8 @@
       document.dispatchEvent(new CustomEvent('ll:intro-done'));
       return;
     }
-    var len = path.getTotalLength();
-    path.style.strokeDasharray = len;
+    var len = Math.ceil(path.getTotalLength()) + 60;
+    path.style.strokeDasharray = len + ' ' + len;
     path.style.strokeDashoffset = len;
 
     function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
@@ -231,7 +231,13 @@
         'scale(' + lerp(1.55, 1, cp).toFixed(4) + ')';
 
       var draw = eio(seg(t, 350, 2700));
-      path.style.strokeDashoffset = len * (1 - draw);
+      if (draw >= 1) {
+        path.style.strokeDasharray = 'none';
+        path.style.strokeDashoffset = '0';
+      } else {
+        path.style.strokeDasharray = len + ' ' + len;
+        path.style.strokeDashoffset = (len * (1 - draw)).toFixed(2);
+      }
       path.style.fillOpacity = (.07 * seg(t, 2400, 3000)).toFixed(3);
 
       // One diagonal light pass crosses the stage mid-draw.
@@ -286,6 +292,8 @@
     function finish() {
       if (done) return;
       done = true;
+      path.style.strokeDasharray = 'none';
+      path.style.strokeDashoffset = '0';
       document.documentElement.classList.remove('intro-lock');
       document.body.classList.add('intro-done');
       document.dispatchEvent(new CustomEvent('ll:intro-done'));

@@ -53,6 +53,11 @@ class TestOldLandingPreview(unittest.TestCase):
         text = resp.get_data(as_text=True)
         self.assertIn('intro-brand-logo', text)
         self.assertIn('landloom-wordmark-white', text)
+        self.assertIn('L45.6 163.4 L36.5 138.3 Z', text)
+
+        nav_about_idx = text.find('href="/about"')
+        nav_features_idx = text.find('href="/#features"')
+        self.assertTrue(0 <= nav_about_idx < nav_features_idx, "'من نحن' must appear first in site navigation")
 
         css_resp = self.client.get('/pages/site-landing.css')
         self.assertEqual(css_resp.status_code, 200)
