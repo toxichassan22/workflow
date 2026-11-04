@@ -762,6 +762,74 @@ class OpsSectionTests(unittest.TestCase):
             (emp_id,)).fetchone()
         self.assertIsNone(row)
 
+    # ── Support FAQs ──────────────────────────────────────────────────────────
+
+    def test_client_get_support_faqs_defaults(self):
+        resp = self.client.get('/api/support/faqs')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.get_json()
+        self.assertTrue(data.get('success'))
+        faqs = data.get('faqs')
+        self.assertIsInstance(faqs, list)
+        self.assertGreaterEqual(len(faqs), 1)
+        first = faqs[0]
+        self.assertIn('question_ar', first)
+        self.assertIn('question_en', first)
+        self.assertIn('answer_ar', first)
+        self.assertIn('answer_en', first)
+        self.assertTrue(first.get('is_active'))
+
+    def test_admin_support_faqs_crud_and_permissions(self):
+        # Client cannot call admin routes
+        forbidden_get = self.client.get('/api/admin/support/faqs', headers=self.headers(self.token))
+        self.assertEqual(forbidden_get.status_code, 403)
+        forbidden_put = self.client.put('/api/admin/support/faqs', headers=self.headers(self.token), json={'faqs': []})
+        self.assertEqual(forbidden_put.status_code, 403)
+
+        admin = self._admin_token()
+        # Admin can get list
+        admin_get = self.client.get('/api/admin/support/faqs', headers=self.headers(admin))
+        self.assertEqual(admin_get.status_code, 200)
+        self.assertTrue(admin_get.get_json().get('success'))
+
+        # Admin saves new FAQs (1 active, 1 inactive)
+        new_items = [
+            {
+                'id': 'faq_test_1',
+                'question_ar': 'سؤال تجريبي نشط',
+                'question_en': 'Active Test Question',
+                'answer_ar': 'جواب تجريبي',
+                'answer_en': 'Test Answer',
+                'is_active': True,
+                'order': 1,
+            },
+            {
+                'id': 'faq_test_2',
+                'question_ar': 'سؤال تجريبي غير نشط',
+                'question_en': 'Inactive Test Question',
+                'answer_ar': 'جواب غير نشط',
+                'answer_en': 'Inactive Answer',
+                'is_active': False,
+                'order': 2,
+            },
+        ]
+        save_resp = self.client.put('/api/admin/support/faqs', headers=self.headers(admin), json={'faqs': new_items})
+        self.assertEqual(save_resp.status_code, 200)
+        self.assertEqual(len(save_resp.get_json().get('faqs')), 2)
+
+        # Admin route returns both
+        admin_list = self.client.get('/api/admin/support/faqs', headers=self.headers(admin)).get_json().get('faqs')
+        self.assertEqual(len(admin_list), 2)
+
+        # Client route returns only active
+        client_list = self.client.get('/api/support/faqs').get_json().get('faqs')
+        self.assertEqual(len(client_list), 1)
+        self.assertEqual(client_list[0]['id'], 'faq_test_1')
+
+        # Invalid payload validation
+        bad_req = self.client.put('/api/admin/support/faqs', headers=self.headers(admin), json={'faqs': 'not-a-list'})
+        self.assertEqual(bad_req.status_code, 400)
+
 
 if __name__ == '__main__':
     unittest.main()

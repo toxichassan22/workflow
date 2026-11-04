@@ -117,6 +117,7 @@ function llRenderTicketsList() {
 async function llLoadTickets() {
   const box = document.getElementById('llTicketsList');
   if (!box) return;
+  llLoadSupportFaqs();
   if (!hasPermission('support_tickets')) {
     box.innerHTML = '';
     return;
@@ -337,6 +338,7 @@ async function openAdminTicketsPage() {
   showTenantPage('tenantAdminTicketsPage');
   const detail = document.getElementById('adminTicketDetail');
   if (detail) detail.style.display = 'none';
+  adminSwitchSupportDeskTab('tickets');
   await adminLoadTickets();
 }
 
@@ -548,5 +550,243 @@ async function adminSetTicketStatus(id, status) {
 function llToggleFaq(btn) {
   if (!btn) return;
   const item = btn.closest('.support-faq-item');
-  if (item) item.classList.toggle('open');
+  if (!item) return;
+  const isOpen = item.classList.toggle('open');
+  const label = btn.querySelector('.support-faq-toggle-label');
+  if (label) {
+    label.textContent = isOpen ? WFT('common.hide', 'إخفاء') : WFT('common.show', 'عرض');
+  }
+}
+
+async function llLoadSupportFaqs() {
+  const container = document.getElementById('llClientFaqList');
+  if (!container) return;
+  const res = await api('GET', '/api/support/faqs').catch(() => null);
+  if (!res || !res.success || !Array.isArray(res.faqs) || res.faqs.length === 0) {
+    container.innerHTML = '<div style="padding:12px 0;text-align:center;"><span class="tenant-hint">' +
+      llEscape(WFT('tickets.faq_empty', 'لا توجد أسئلة شائعة حالياً')) + '</span></div>';
+    return;
+  }
+  container.innerHTML = res.faqs.map(function (faq) {
+    const q = (typeof wfBilingual === 'function' ? wfBilingual(faq.question_ar, faq.question_en) : faq.question_ar) || faq.question_ar || faq.question_en || '';
+    const a = (typeof wfBilingual === 'function' ? wfBilingual(faq.answer_ar, faq.answer_en) : faq.answer_ar) || faq.answer_ar || faq.answer_en || '';
+    return '<div class="support-faq-item">' +
+      '<button type="button" class="support-faq-q" onclick="llToggleFaq(this)">' +
+        '<span>' + llEscape(q) + '</span>' +
+        '<span class="support-faq-toggle-label">' + llEscape(WFT('common.show', 'عرض')) + '</span>' +
+      '</button>' +
+      '<div class="support-faq-a">' + llEscape(a) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+/* ── Super Admin FAQ Desk ────────────────────────────────────────────────── */
+
+var adminFaqsCache = [];
+
+function adminSwitchSupportDeskTab(tab) {
+  const isTickets = (tab === 'tickets');
+  const btnTickets = document.getElementById('adminSupportSubTabTickets');
+  const btnFaq = document.getElementById('adminSupportSubTabFaq');
+  const paneTickets = document.getElementById('adminSupportPaneTickets');
+  const paneFaq = document.getElementById('adminSupportPaneFaq');
+  const headingActions = document.getElementById('adminTicketsHeadingActions');
+
+  if (btnTickets) btnTickets.classList.toggle('active', isTickets);
+  if (btnFaq) btnFaq.classList.toggle('active', !isTickets);
+  if (paneTickets) paneTickets.style.display = isTickets ? '' : 'none';
+  if (paneFaq) paneFaq.style.display = !isTickets ? '' : 'none';
+  if (headingActions) headingActions.style.display = isTickets ? '' : 'none';
+
+  if (!isTickets) {
+    adminLoadFaqs();
+  }
+}
+
+async function adminLoadFaqs() {
+  const container = document.getElementById('adminFaqListContainer');
+  if (!container) return;
+  container.innerHTML = '<div class="support-table-card" style="padding:24px;text-align:center"><p class="tenant-hint">' +
+    llEscape(WFT('common.loading', 'جاري التحميل...')) + '</p></div>';
+
+  const res = await api('GET', '/api/admin/support/faqs').catch(() => null);
+  if (!res || !res.success) {
+    container.innerHTML = '<div class="support-table-card" style="padding:24px;text-align:center"><p class="tenant-hint">' +
+      llEscape(WFT('admin.faq_save_failed', 'تعذر حفظ الأسئلة الشائعة')) + '</p></div>';
+    return;
+  }
+  adminFaqsCache = res.faqs || [];
+  adminRenderFaqsList();
+}
+
+function adminRenderFaqsList() {
+  const container = document.getElementById('adminFaqListContainer');
+  if (!container) return;
+  if (!adminFaqsCache.length) {
+    container.innerHTML = '<div class="support-table-card" style="padding:32px;text-align:center"><p class="tenant-hint">' +
+      llEscape(WFT('admin.faq_empty', 'لا توجد أسئلة شائعة مضافة حالياً')) + '</p></div>';
+    return;
+  }
+
+  container.innerHTML = '<div class="admin-faq-list">' + adminFaqsCache.map(function (faq, idx) {
+    const isFirst = (idx === 0);
+    const isLast = (idx === adminFaqsCache.length - 1);
+    const statusBadge = faq.is_active
+      ? '<span class="admin-faq-status-badge active">' + llEscape(WFT('admin.faq_active', 'نشط للعملاء')) + '</span>'
+      : '<span class="admin-faq-status-badge inactive">' + llEscape(WFT('admin.faq_inactive', 'معطل مؤقتاً')) + '</span>';
+
+    return '<div class="admin-faq-item-card ' + (faq.is_active ? '' : 'is-inactive') + '">' +
+      '<div class="admin-faq-item-head">' +
+        '<div class="admin-faq-item-tags">' +
+          '<span class="admin-faq-order-tag">' + (idx + 1) + '</span>' +
+          statusBadge +
+        '</div>' +
+        '<div class="admin-faq-item-actions">' +
+          '<button type="button" class="btn small ghost" onclick="adminMoveFaq(' + idx + ', -1)" ' + (isFirst ? 'disabled style="opacity:0.4"' : '') + '>' +
+            llEscape(WFT('admin.faq_order_up', 'أعلى')) +
+          '</button>' +
+          '<button type="button" class="btn small ghost" onclick="adminMoveFaq(' + idx + ', 1)" ' + (isLast ? 'disabled style="opacity:0.4"' : '') + '>' +
+            llEscape(WFT('admin.faq_order_down', 'أسفل')) +
+          '</button>' +
+          '<button type="button" class="btn small ghost" onclick="adminToggleFaqActive(' + idx + ')">' +
+            llEscape(faq.is_active ? WFT('admin.faq_deactivate', 'تعطيل') : WFT('admin.faq_activate', 'تفعيل')) +
+          '</button>' +
+          '<button type="button" class="btn small ghost" onclick="adminOpenFaqModal(' + idx + ')">' +
+            llEscape(WFT('common.edit', 'تعديل')) +
+          '</button>' +
+          '<button type="button" class="btn small danger" onclick="adminDeleteFaq(' + idx + ')">' +
+            llEscape(WFT('common.delete', 'حذف')) +
+          '</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="admin-faq-item-body">' +
+        '<div class="admin-faq-col">' +
+          '<span class="admin-faq-col-label">العربية</span>' +
+          '<div class="admin-faq-col-q">' + llEscape(faq.question_ar || '—') + '</div>' +
+          '<div class="admin-faq-col-a">' + llEscape(faq.answer_ar || '—') + '</div>' +
+        '</div>' +
+        '<div class="admin-faq-col">' +
+          '<span class="admin-faq-col-label">English</span>' +
+          '<div class="admin-faq-col-q">' + llEscape(faq.question_en || '—') + '</div>' +
+          '<div class="admin-faq-col-a">' + llEscape(faq.answer_en || '—') + '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+function adminOpenFaqModal(index) {
+  const editIdxInput = document.getElementById('adminFaqEditIndex');
+  const qArInput = document.getElementById('adminFaqQuestionAr');
+  const qEnInput = document.getElementById('adminFaqQuestionEn');
+  const aArInput = document.getElementById('adminFaqAnswerAr');
+  const aEnInput = document.getElementById('adminFaqAnswerEn');
+  const activeInput = document.getElementById('adminFaqIsActive');
+  const errEl = document.getElementById('adminFaqError');
+  const titleEl = document.getElementById('adminFaqModalTitle');
+  const submitBtn = document.getElementById('adminFaqSubmitBtn');
+
+  if (errEl) errEl.textContent = '';
+
+  const isEdit = (typeof index === 'number' && index >= 0 && index < adminFaqsCache.length);
+  if (isEdit) {
+    const item = adminFaqsCache[index];
+    if (editIdxInput) editIdxInput.value = index;
+    if (qArInput) qArInput.value = item.question_ar || '';
+    if (qEnInput) qEnInput.value = item.question_en || '';
+    if (aArInput) aArInput.value = item.answer_ar || '';
+    if (aEnInput) aEnInput.value = item.answer_en || '';
+    if (activeInput) activeInput.checked = !!item.is_active;
+    if (titleEl) titleEl.textContent = WFT('admin.faq_update_btn', 'تحديث السؤال');
+    if (submitBtn) submitBtn.textContent = WFT('admin.faq_update_btn', 'تحديث السؤال');
+  } else {
+    if (editIdxInput) editIdxInput.value = '-1';
+    if (qArInput) qArInput.value = '';
+    if (qEnInput) qEnInput.value = '';
+    if (aArInput) aArInput.value = '';
+    if (aEnInput) aEnInput.value = '';
+    if (activeInput) activeInput.checked = true;
+    if (titleEl) titleEl.textContent = WFT('admin.faq_add_btn', 'إضافة سؤال جديد');
+    if (submitBtn) submitBtn.textContent = WFT('admin.faq_add_btn', 'إضافة سؤال جديد');
+  }
+
+  openLlModal('adminFaqModal');
+}
+
+async function adminSubmitFaqForm() {
+  const editIdx = parseInt((document.getElementById('adminFaqEditIndex') || {}).value, 10);
+  const qAr = ((document.getElementById('adminFaqQuestionAr') || {}).value || '').trim();
+  const qEn = ((document.getElementById('adminFaqQuestionEn') || {}).value || '').trim();
+  const aAr = ((document.getElementById('adminFaqAnswerAr') || {}).value || '').trim();
+  const aEn = ((document.getElementById('adminFaqAnswerEn') || {}).value || '').trim();
+  const isActive = !!(document.getElementById('adminFaqIsActive') || {}).checked;
+  const errEl = document.getElementById('adminFaqError');
+
+  if (!qAr && !qEn) {
+    if (errEl) errEl.textContent = WFT('admin.faq_empty_q', 'يجب إدخال السؤال بالعربية أو الإنجليزية على الأقل');
+    return;
+  }
+  if (!aAr && !aEn) {
+    if (errEl) errEl.textContent = WFT('admin.faq_empty_a', 'يجب إدخال الإجابة بالعربية أو الإنجليزية على الأقل');
+    return;
+  }
+
+  if (editIdx >= 0 && editIdx < adminFaqsCache.length) {
+    adminFaqsCache[editIdx].question_ar = qAr;
+    adminFaqsCache[editIdx].question_en = qEn;
+    adminFaqsCache[editIdx].answer_ar = aAr;
+    adminFaqsCache[editIdx].answer_en = aEn;
+    adminFaqsCache[editIdx].is_active = isActive;
+  } else {
+    adminFaqsCache.push({
+      id: 'faq_' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
+      question_ar: qAr,
+      question_en: qEn,
+      answer_ar: aAr,
+      answer_en: aEn,
+      is_active: isActive,
+      order: adminFaqsCache.length + 1
+    });
+  }
+
+  closeLlModal('adminFaqModal');
+  await adminPersistFaqs();
+}
+
+async function adminMoveFaq(index, dir) {
+  const target = index + dir;
+  if (target < 0 || target >= adminFaqsCache.length) return;
+  const temp = adminFaqsCache[index];
+  adminFaqsCache[index] = adminFaqsCache[target];
+  adminFaqsCache[target] = temp;
+  adminFaqsCache.forEach(function (f, i) { f.order = i + 1; });
+  await adminPersistFaqs();
+}
+
+async function adminToggleFaqActive(index) {
+  if (index < 0 || index >= adminFaqsCache.length) return;
+  adminFaqsCache[index].is_active = !adminFaqsCache[index].is_active;
+  await adminPersistFaqs();
+}
+
+async function adminDeleteFaq(index) {
+  if (index < 0 || index >= adminFaqsCache.length) return;
+  const ok = confirm(WFT('admin.faq_delete_confirm', 'هل أنت متأكد من حذف هذا السؤال؟'));
+  if (!ok) return;
+  adminFaqsCache.splice(index, 1);
+  adminFaqsCache.forEach(function (f, i) { f.order = i + 1; });
+  await adminPersistFaqs();
+}
+
+async function adminPersistFaqs() {
+  adminRenderFaqsList();
+  const res = await api('PUT', '/api/admin/support/faqs', { faqs: adminFaqsCache }).catch(e => e);
+  if (!res || !res.success) {
+    toast((res && res.error) || WFT('admin.faq_save_failed', 'تعذر حفظ الأسئلة الشائعة'));
+    return;
+  }
+  toast(WFT('admin.faq_save_success', 'تم حفظ الأسئلة الشائعة بنجاح'));
+  adminFaqsCache = res.faqs || adminFaqsCache;
+  adminRenderFaqsList();
+  llLoadSupportFaqs();
 }

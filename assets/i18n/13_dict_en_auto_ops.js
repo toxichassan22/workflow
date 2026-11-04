@@ -192,6 +192,20 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "موضوع التذكرة": "Ticket Subject",
   "ملخص المشكلة أو الاستفسار": "Summary of the issue or inquiry",
   "التفاصيل الكاملة": "Full Details",
-  "اكتب تفاصيل التذكرة بدقة...": "Write ticket details precisely..."
+  "اكتب تفاصيل التذكرة بدقة...": "Write ticket details precisely...",
+  "إدارة الأسئلة الشائعة": "FAQ Management",
+  "تذاكر الدعم الفني": "Support Tickets",
+  "السؤال بالعربية": "Question in Arabic",
+  "السؤال بالإنجليزية": "Question in English",
+  "الإجابة بالعربية": "Answer in Arabic",
+  "الإجابة بالإنجليزية": "Answer in English",
+  "إضافة سؤال جديد": "Add New Question",
+  "تحديث السؤال": "Update Question",
+  "نشط للعملاء": "Active for clients",
+  "معطل مؤقتاً": "Temporarily disabled",
+  "تبديل الحالة": "Toggle status",
+  "جاري تحميل الأسئلة الشائعة...": "Loading FAQ...",
+  "لا توجد أسئلة شائعة حالياً": "No FAQs currently available",
+  "لا توجد أسئلة شائعة مضافة حالياً": "No FAQ items currently added"
 }
 /*I18N_EN_AUTO_END*/);

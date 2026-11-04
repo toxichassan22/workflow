@@ -213,3 +213,100 @@ def set_support_ticket_priority(ticket_id, priority):
     )
     conn.commit()
     return dict(conn.execute('SELECT * FROM support_tickets WHERE id = ?', (ticket_id,)).fetchone())
+
+
+# ── Support FAQs (Platform Settings) ──────────────────────────────────────
+
+DEFAULT_SUPPORT_FAQS = [
+    {
+        'id': 'faq_1',
+        'question_ar': 'كم يستغرق الرد على التذاكر؟',
+        'question_en': 'How long does it take to respond to tickets?',
+        'answer_ar': 'يقوم فريق الدعم الفني بمراجعة التذاكر العادية خلال 4 ساعات عمل، والتذاكر العاجلة خلال ساعة واحدة.',
+        'answer_en': 'The technical support team reviews regular tickets within 4 business hours, and urgent tickets within 1 hour.',
+        'is_active': True,
+        'order': 1,
+    },
+    {
+        'id': 'faq_2',
+        'question_ar': 'كيف يتم احتساب استهلاك الرصيد؟',
+        'question_en': 'How is usage balance deducted?',
+        'answer_ar': 'يتم استقطاع التكلفة المباشرة لعمليات التوليد والخرائط بالريال السعودي عند اكتمال العملية بنجاح فقط.',
+        'answer_en': 'The direct cost of generation and mapping in SAR is deducted only upon successful completion.',
+        'is_active': True,
+        'order': 2,
+    },
+    {
+        'id': 'faq_3',
+        'question_ar': 'هل يمكن إعادة فتح تذكرة مغلقة؟',
+        'question_en': 'Can a closed ticket be reopened?',
+        'answer_ar': 'عند إغلاق التذكرة بنجاح، يفضل فتح تذكرة جديدة لأي استفسار مستجد لضمان سرعة المتابعة.',
+        'answer_en': 'Once a ticket is resolved, please open a new ticket for new inquiries to ensure fast follow-up.',
+        'is_active': True,
+        'order': 3,
+    },
+]
+
+
+def get_support_faqs(active_only=False):
+    """List of FAQ items stored in platform settings, with fallback to defaults."""
+    raw = get_platform_setting('support_faqs', None)
+    if not isinstance(raw, list):
+        raw = DEFAULT_SUPPORT_FAQS
+    faqs = []
+    for idx, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        fid = str(item.get('id') or f'faq_{idx+1}').strip()
+        q_ar = str(item.get('question_ar') or '').strip()
+        q_en = str(item.get('question_en') or '').strip()
+        a_ar = str(item.get('answer_ar') or '').strip()
+        a_en = str(item.get('answer_en') or '').strip()
+        is_active = bool(item.get('is_active', True))
+        order = int(item.get('order', idx + 1))
+        if active_only and not is_active:
+            continue
+        faqs.append({
+            'id': fid,
+            'question_ar': q_ar,
+            'question_en': q_en,
+            'answer_ar': a_ar,
+            'answer_en': a_en,
+            'is_active': is_active,
+            'order': order,
+        })
+    faqs.sort(key=lambda x: x.get('order', 999))
+    return faqs
+
+
+def save_support_faqs(items):
+    """Replace the FAQ list stored in platform settings (up to 50 entries)."""
+    if not isinstance(items, list):
+        raise ValueError('Invalid FAQs list')
+    clean = []
+    seen_ids = set()
+    for idx, it in enumerate(items[:50]):
+        if not isinstance(it, dict):
+            continue
+        fid = str(it.get('id') or '').strip()[:64]
+        if not fid or fid in seen_ids:
+            fid = 'faq_' + uuid.uuid4().hex[:10]
+        seen_ids.add(fid)
+        q_ar = str(it.get('question_ar') or '').strip()[:500]
+        q_en = str(it.get('question_en') or '').strip()[:500]
+        a_ar = str(it.get('answer_ar') or '').strip()[:5000]
+        a_en = str(it.get('answer_en') or '').strip()[:5000]
+        if not q_ar and not q_en:
+            continue
+        clean.append({
+            'id': fid,
+            'question_ar': q_ar,
+            'question_en': q_en,
+            'answer_ar': a_ar,
+            'answer_en': a_en,
+            'is_active': bool(it.get('is_active', True)),
+            'order': int(it.get('order', idx + 1)),
+        })
+    clean.sort(key=lambda x: x['order'])
+    set_platform_setting('support_faqs', clean)
+    return clean

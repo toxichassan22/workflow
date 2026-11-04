@@ -447,3 +447,141 @@
   color: var(--muted, #64748B);
   text-align: center;
 }
+
+/* ── FAQ Management (Super Admin & Desk) ─────────────────────────────────── */
+
+.admin-support-nav-bar {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--line, #e2e8f0);
+  padding-bottom: 8px;
+}
+
+.admin-faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-faq-item-card {
+  background: #ffffff;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.admin-faq-item-card:hover {
+  border-color: rgba(23, 200, 227, 0.4);
+  box-shadow: 0 2px 8px rgba(7, 24, 44, 0.05);
+}
+
+.admin-faq-item-card.is-inactive {
+  background: #fcfcfd;
+  opacity: 0.8;
+  border-style: dashed;
+}
+
+.admin-faq-item-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.admin-faq-item-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.admin-faq-order-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  background: #07182C;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.admin-faq-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.admin-faq-status-badge.active {
+  background: #DFF6FB;
+  color: #0A829B;
+  border: 1px solid rgba(23, 200, 227, 0.35);
+}
+
+.admin-faq-status-badge.inactive {
+  background: #f1f5f9;
+  color: #64748B;
+  border: 1px solid #cbd5e1;
+}
+
+.admin-faq-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.admin-faq-item-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 12px;
+}
+
+@media (max-width: 768px) {
+  .admin-faq-item-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+.admin-faq-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-faq-col-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.admin-faq-col-q {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #07182C;
+  line-height: 1.4;
+}
+
+.admin-faq-col-a {
+  font-size: 12.5px;
+  color: #334155;
+  line-height: 1.5;
+  margin-top: 4px;
+  background: #f8fafc;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #eef2f6;
+}

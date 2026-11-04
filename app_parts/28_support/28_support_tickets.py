@@ -234,3 +234,35 @@ def api_admin_assign_support_ticket(ticket_id):
     _record_audit_event('support_ticket.assigned', 'support_ticket', ticket_id,
                         new_value=data.get('assigneeId'))
     return jsonify({'success': True, 'ticket': row})
+
+
+# ── Support FAQs ──────────────────────────────────────────────────────────
+
+@app.route('/api/support/faqs', methods=['GET'])
+def api_support_faqs():
+    """Active FAQ questions & answers in both languages for clients."""
+    return jsonify({'success': True, 'faqs': db.get_support_faqs(active_only=True)})
+
+
+@app.route('/api/admin/support/faqs', methods=['GET'])
+@require_permission('sag_admin_panel')
+def api_admin_support_faqs():
+    """All FAQ items for the desk/platform settings."""
+    return jsonify({'success': True, 'faqs': db.get_support_faqs(active_only=False)})
+
+
+@app.route('/api/admin/support/faqs', methods=['PUT'])
+@require_permission('sag_admin_panel')
+def api_admin_save_support_faqs():
+    """Save/replace the FAQs list."""
+    data = request.json or {}
+    faqs = data.get('faqs')
+    if not isinstance(faqs, list):
+        return jsonify({'error': 'قائمة الأسئلة مطلوبة', 'error_code': 'faqs_required'}), 400
+    try:
+        saved = db.save_support_faqs(faqs)
+    except Exception as e:
+        return jsonify({'error': str(e), 'error_code': 'invalid_faqs'}), 400
+    _record_audit_event('support_faqs.updated', 'platform_settings', 'support_faqs',
+                        metadata={'count': len(saved)})
+    return jsonify({'success': True, 'faqs': saved})
