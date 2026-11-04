@@ -138,10 +138,8 @@
   function initTopbar() {
     var bar = document.querySelector('.site-topbar.on-dark');
     if (!bar) return;
-    var intro = document.getElementById('intro');
     var onScroll = function () {
-      var threshold = (intro && document.body.contains(intro)) ? Math.max(intro.offsetHeight - 80, 40) : 40;
-      bar.classList.toggle('scrolled', window.scrollY > threshold);
+      bar.classList.toggle('scrolled', window.scrollY > 40);
     };
     window.addEventListener('scroll', onScroll, { passive: true });
     onScroll();

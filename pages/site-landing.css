@@ -10,10 +10,15 @@
    and docks at the top. Never overlays the cinematic. */
 
 .site-topbar.on-dark {
+  position: fixed;
+  top: 0;
+  inset-inline: 0;
+  z-index: 70;
   background: transparent;
-  border-bottom: 0;
+  border-bottom: 1px solid transparent;
   backdrop-filter: none;
-  transition: background .3s ease, border-color .3s ease, backdrop-filter .3s ease;
+  -webkit-backdrop-filter: none;
+  transition: background .3s ease, border-color .3s ease, backdrop-filter .3s ease, -webkit-backdrop-filter .3s ease;
 }
 
 .site-topbar.on-dark .brand-beta { color: rgba(255, 255, 255, .55); }
