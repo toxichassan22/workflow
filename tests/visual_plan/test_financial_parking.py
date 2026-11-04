@@ -69,18 +69,84 @@ class FinancialParkingTests(unittest.TestCase):
         self.rules['rules'][1].update(basis='units', per=50)
         self.assertFalse(self.build()['canApply'])
 
-    def test_existing_manual_parking_is_preserved_without_double_counting(self):
-        manual = {'id': 'manual-parking', 'name': 'مواقف قائمة', 'useType': 'parking',
-                  'parkingLocation': 'basement', 'units': 10, 'unitArea': 30,
-                  'builtArea': 300, 'revenueArea': 0, 'investmentModel': 'nonRevenue'}
-        self.project['financial_study_model']['dynamicRows']['components'].append(manual)
+    def manual_parking_row(self, **overrides):
+        row = {'id': 'manual-parking', 'name': 'مواقف قائمة', 'useType': 'parking',
+               'parkingLocation': 'basement', 'units': 10, 'unitArea': 30,
+               'builtArea': 300, 'revenueArea': 0, 'investmentModel': 'nonRevenue'}
+        row.update(overrides)
+        return row
+
+    def approved(self, plan):
+        return dict(plan, approved=True, approvedBy=7, approvedAt='2026-11-04T00:00:00+00:00')
+
+    def test_approval_fills_the_clients_parking_row_instead_of_a_duplicate(self):
+        self.project['financial_study_model']['dynamicRows']['components'].append(
+            self.manual_parking_row())
         plan = self.build()
         self.assertEqual(plan['existingSpaces'], 10)
         self.assertEqual(plan['additionalSpaces'], 120)
+        self.assertEqual({row['parkingLocation']: row['units'] for row in plan['components']},
+                         {'basement': 54, 'surface': 66})
         applied = financial_parking.apply_parking_plan(self.project['financial_study_model'], plan)
         rows = applied['dynamicRows']['components']
-        self.assertIn(manual, rows)
+        parking = [row for row in rows if row.get('parkingPlanId')]
+        # The row the client typed takes the basement allocation on top of the ten
+        # spaces it already declared, so nothing is counted twice and nothing duplicates.
+        self.assertEqual([row['id'] for row in parking], ['manual-parking', 'parking_regulatory_surface'])
+        self.assertEqual(parking[0]['units'], 64)
+        self.assertEqual(parking[0]['name'], 'مواقف قائمة')
+        self.assertEqual(parking[0]['builtArea'], 1920)
+        self.assertEqual(parking[0]['floorRange'], 'بدروم 1')
         self.assertEqual(sum(row['units'] for row in rows if row['useType'] == 'parking'), 130)
+        self.assertEqual([item['id'] for item in applied['parkingPlan']['absorbedRows']],
+                         ['manual-parking'])
+
+    def test_filling_a_client_row_keeps_the_recorded_snapshot_matching(self):
+        self.project['financial_study_model']['dynamicRows']['components'].append(
+            self.manual_parking_row())
+        plan = self.approved(self.build())
+        project = copy.deepcopy(self.project)
+        project['financial_study_model'] = financial_parking.apply_parking_plan(
+            project['financial_study_model'], plan)
+        model = project['financial_study_model']
+        model['parkingSnapshot'] = financial_parking.parking_snapshot(
+            dict(project, financial_study_model=model))
+        # Approving must not be reported as «تغيّرت بيانات المشروع» right afterwards.
+        self.assertIsNone(financial_parking.parking_plan_error(project))
+        snapshot = financial_parking.parking_snapshot(project)
+        self.assertIn(self.manual_parking_row(), snapshot['components'])
+        self.assertNotIn('parking_regulatory_surface', [row['id'] for row in snapshot['components']])
+
+    def test_unapproval_gives_the_client_their_own_row_back(self):
+        self.project['financial_study_model']['dynamicRows']['components'].append(
+            self.manual_parking_row())
+        plan = self.approved(self.build())
+        model = financial_parking.apply_parking_plan(
+            self.project['financial_study_model'], plan)
+        removed = financial_parking.remove_parking_plan(model)
+        parking = [row for row in removed['dynamicRows']['components']
+                   if row['useType'] == 'parking']
+        self.assertEqual(parking, [self.manual_parking_row()])
+
+    def test_approval_creates_the_rows_when_the_client_typed_none(self):
+        plan = self.approved(self.build())
+        model = financial_parking.apply_parking_plan(
+            copy.deepcopy(self.project['financial_study_model']), plan)
+        parking = [row for row in model['dynamicRows']['components']
+                   if row.get('parkingPlanId')]
+        self.assertEqual(sum(row['units'] for row in parking), 130)
+        self.assertEqual(model['parkingPlan']['absorbedRows'], [])
+
+    def test_a_parking_row_without_location_takes_the_allocation(self):
+        self.project['financial_study_model']['dynamicRows']['components'].append(
+            self.manual_parking_row(parkingLocation='', builtArea=0))
+        plan = self.build()
+        applied = financial_parking.apply_parking_plan(self.project['financial_study_model'], plan)
+        parking = [row for row in applied['dynamicRows']['components']
+                   if row.get('parkingPlanId')]
+        self.assertEqual(sum(row['units'] for row in parking), 130)
+        self.assertIn('manual-parking', [row['id'] for row in parking])
+        self.assertEqual([row['parkingLocation'] for row in parking], ['basement', 'surface'])
 
     def test_basement_extension_is_an_explicit_proposal_not_a_regulatory_fact(self):
         self.project['approved_coverage_ratio'] = 100

@@ -37,6 +37,15 @@
       return component.useType === 'basement' ? 'basement' : component.useType === 'openArea' ? 'surface' : 'aboveGround';
     }
 
+    function financialParkingAbsorbed(plan) {
+      const entries = financialParkingObject(plan).absorbedRows;
+      const absorbed = {};
+      (Array.isArray(entries) ? entries : []).forEach(entry => {
+        if (entry && entry.id && entry.original && typeof entry.original === 'object') absorbed[String(entry.id)] = entry.original;
+      });
+      return absorbed;
+    }
+
     function financialParkingSnapshot() {
       const model = financialParkingObject(tenantProjectData.financial_study_model);
       const inputs = financialParkingObject(model.inputs);
@@ -52,10 +61,14 @@
       const rows = document.getElementById('componentsTable') && typeof getComponentRowsData === 'function'
         ? getComponentRowsData() : (model.dynamicRows?.components || []);
       let basement = financialParkingNumber(readInput('basementArea')) || 0;
+      // A row the proposal filled in stands for what the client wrote before
+      // approval, so the proposal keeps matching its own recorded snapshot.
+      const absorbed = financialParkingAbsorbed(plan);
       if (rows.some(row => row.parkingPlanId) && [plan.basementAreaTarget, plan.previousBasementAreaTarget].includes(basement)) {
         basement = financialParkingNumber(plan.baseBasementArea) || 0;
       }
-      const components = rows.filter(row => !row.parkingPlanId).map(row => {
+      const components = rows.filter(row => !row.parkingPlanId || absorbed[String(row.id)])
+        .map(row => absorbed[String(row.id)] || row).map(row => {
         const component = {};
         ['id', 'name', 'useType', 'investmentModel', 'parkingLocation'].forEach(key => { component[key] = String(row[key] || '').trim(); });
         ['units', 'unitArea', 'builtArea', 'revenueArea'].forEach(key => { component[key] = financialParkingNumber(row[key]); });
@@ -244,7 +257,10 @@
       if (fresh) {
         window.__batchLoading = true;
         try {
-          document.querySelectorAll('#componentsTable tbody tr').forEach(row => { if (row.dataset.parkingPlanId) row.remove(); });
+          const absorbedIds = Object.keys(financialParkingAbsorbed(financialParkingPlan()));
+          document.querySelectorAll('#componentsTable tbody tr').forEach(row => {
+            if (row.dataset.parkingPlanId || absorbedIds.includes(String(row.dataset.componentKey))) row.remove();
+          });
           (model.dynamicRows?.components || []).filter(row => row.parkingPlanId).forEach(addComponent);
           const basement = document.getElementById('basementArea');
           if (basement && model.inputs?.basementArea != null) basement.value = String(model.inputs.basementArea);

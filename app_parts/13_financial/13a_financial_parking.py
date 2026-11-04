@@ -445,6 +445,7 @@ def api_approve_financial_parking():
     else:
         model = financial_parking.remove_parking_plan(model)
         plan['approved'] = False
+        plan.pop('absorbedRows', None)
         plan.pop('approvedBy', None)
         plan.pop('approvedAt', None)
         model['parkingPlan'] = plan

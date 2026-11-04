@@ -198,6 +198,50 @@ test('approval applies only parking rows and the proposed basement area', () => 
   assert.equal(f.rows.length, 3);
 });
 
+const clientParkingRow = () => ({ id: 'manual-parking', name: 'مواقف قائمة', useType: 'parking',
+  parkingLocation: 'basement', units: 10, unitArea: 30, builtArea: 300,
+  revenueArea: 0, investmentModel: 'nonRevenue' });
+
+test('a parking row the proposal filled in reads as the client wrote it', () => {
+  const f = fixture();
+  const row = f.add(clientParkingRow());
+  const plan = f.proposal(true);
+  plan.absorbedRows = [{ id: 'manual-parking', original: clientParkingRow() }];
+  f.context.tenantProjectData.financial_study_model.parkingPlan = plan;
+  row.dataset.parkingPlanId = 'plan-1';
+  row.querySelector('[data-field="units"] input').value = '64';
+  row.querySelector('[data-field="builtArea"] input').value = '1920';
+  const manual = f.snapshot().components.find(component => component.id === 'manual-parking');
+  assert.deepEqual(manual, { id: 'manual-parking', name: 'مواقف قائمة', useType: 'parking',
+    investmentModel: 'nonRevenue', parkingLocation: 'basement', units: 10, unitArea: 30,
+    builtArea: 300, revenueArea: 0 });
+  assert.equal(f.context.financialParkingError(), '');
+});
+
+test('approval fills the clients parking row instead of adding a second one', () => {
+  const f = fixture();
+  f.add(clientParkingRow());
+  const plan = f.proposal(true);
+  plan.absorbedRows = [{ id: 'manual-parking', original: clientParkingRow() }];
+  const snapshot = f.context.financialParkingStable(f.snapshot());
+  const response = { success: true, draftId: 'draft-1', revision: 2, financialModel: {
+    inputs: { basementArea: 3900 }, parkingPlan: plan, dynamicRows: { components: [
+      { ...clientParkingRow(), units: 64, builtArea: 1920, parkingPlanId: 'plan-1',
+        floorRange: 'بدروم 1' },
+      { ...plan.components[0], id: 'parking_regulatory_surface',
+        name: 'مواقف السيارات — سطحية', parkingLocation: 'surface', units: 66,
+        builtArea: 1980, floorRange: 'مساحة مفتوحة' }] } } };
+  assert.equal(f.context.financialParkingReceive(response, snapshot, 'draft-1'), true);
+  const rows = plain(f.context.getComponentRowsData());
+  assert.deepEqual(rows.map(row => row.id).sort(),
+    ['housing', 'manual-parking', 'parking_regulatory_surface', 'retail']);
+  const manual = rows.find(row => row.id === 'manual-parking');
+  assert.equal(manual.units, 64);
+  assert.equal(manual.parkingLocation, 'basement');
+  assert.equal(rows.filter(row => row.useType === 'parking').reduce((total, row) => total + row.units, 0), 130);
+  assert.equal(f.context.financialParkingError(), '');
+});
+
 test('a late response does not replace newer manual edits or another open draft', () => {
   const f = fixture();
   const plan = f.proposal(true);

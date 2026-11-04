@@ -203,6 +203,29 @@ class FinancialParkingApiTests(unittest.TestCase):
         self.assertEqual(again.get_json()['financialModel']['dynamicRows']['components'], model['dynamicRows']['components'])
         self.assertIsNone(financial_parking.parking_plan_error(self.draft()['draft_data']))
 
+    def test_approval_fills_the_parking_row_the_client_typed(self):
+        payload = copy.deepcopy(self.draft()['draft_data'])
+        payload['financial_study_model']['dynamicRows']['components'].append({
+            'id': 'client-parking', 'name': 'مواقف قائمة', 'useType': 'parking',
+            'parkingLocation': 'basement', 'units': 10, 'unitArea': 30, 'builtArea': 300,
+            'revenueArea': 0, 'investmentModel': 'nonRevenue'})
+        self.assertEqual(self.save_draft(payload).status_code, 200)
+        response, _ = self.suggest()
+        plan = response['financialModel']['parkingPlan']
+        approved = self.approve(plan)
+        body = approved.get_json()
+        self.assertEqual(approved.status_code, 200, body)
+        rows = body['financialModel']['dynamicRows']['components']
+        self.assertEqual([row['id'] for row in rows].count('client-parking'), 1)
+        client_row = next(row for row in rows if row['id'] == 'client-parking')
+        self.assertEqual(client_row['parkingPlanId'], plan['id'])
+        self.assertEqual(client_row['parkingLocation'], 'basement')
+        self.assertEqual(client_row['units'], 64)
+        parking = [row for row in rows if row.get('parkingPlanId')]
+        self.assertEqual(sum(row['units'] for row in parking), 130)
+        self.assertEqual(self.stored_plan()['absorbedRows'][0]['id'], 'client-parking')
+        self.assertIsNone(financial_parking.parking_plan_error(self.draft()['draft_data']))
+
     def test_approval_preserves_client_edits_to_generated_rows(self):
         response, _ = self.suggest()
         plan = response['financialModel']['parkingPlan']
