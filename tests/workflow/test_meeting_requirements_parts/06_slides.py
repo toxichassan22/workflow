@@ -1950,6 +1950,21 @@ class MeetingRequirementsTestsPart05(MeetingRequirementsTests):
         self.assertNotIn('if (!tenantSlidePlan) {', index_source)
         self.assertNotIn('settingsMaxSlides', index_source)
 
+    def test_slide_reasoning_effort_is_configured_and_forwarded(self):
+        application = self.application_module
+        seen = {}
+
+        def fake_call(*args, **kwargs):
+            seen.update(kwargs)
+            return {'choices': [{'message': {'content': 'ok'}}]}
+
+        with patch.object(application, 'call_text_chat', side_effect=fake_call):
+            application.call_text_chat_parallel(
+                'sys', 'user', attempts=1, reasoning_effort='xhigh')
+        self.assertEqual(seen.get('reasoning_effort'), 'xhigh')
+        source = read_module_source('app.py')
+        self.assertIn('reasoning_effort=SLIDE_TEXT_REASONING_EFFORT', source)
+
     def test_slide_renumbering_updates_legacy_footers_totals_and_index(self):
         engine = self.application_module.slide_engine
         branding = {

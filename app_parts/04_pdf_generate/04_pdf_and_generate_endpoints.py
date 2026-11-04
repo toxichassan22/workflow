@@ -852,7 +852,7 @@ def generate_single_slide(system_prompt, slide_num, tenant_id=None, max_retries=
                     "ولا تتوقف قبل اكتماله. لا تكتب أي شرح أو markdown."
                 )
             print(f"[SLIDE-{slide_num}] Attempt {attempt}: {slide_title}")
-            response = call_text_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL, usage_ctx=usage_ctx or _usage_ctx('slide'))
+            response = call_text_chat(system_prompt, user_msg, max_tokens=7000, model=SLIDE_TEXT_MODEL, reasoning_effort=SLIDE_TEXT_REASONING_EFFORT, usage_ctx=usage_ctx or _usage_ctx('slide'))
             fatal = _ai_fatal_error_dict(response)
             if fatal is not None:
                 raise FatalAICallError(
