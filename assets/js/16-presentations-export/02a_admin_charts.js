@@ -269,8 +269,7 @@
     }
 
     function sagLineChart(labels, series) {
-      const W = 880, H = 260, padL = 46, padR = 46, padT = 20, padB = 40;
-      const innerW = W - padL - padR, innerH = H - padT - padB;
+      const W = 880, H = 260, padT = 20, padB = 40;
       const n = labels.length;
 
       // Detect dual-axis needs when series have radically different units/magnitudes
@@ -285,6 +284,19 @@
 
       const sc0 = sagNiceScale(max0);
       const sc1 = isDual ? sagNiceScale(max1) : sc0;
+
+      // The gutter is measured from the tick labels themselves: «1,500 points» is
+      // wider than «1,500 نقطة», and the fixed 46-unit gutter clipped the English axis.
+      const tickGutter = (s, step, top) => {
+        let widest = 0;
+        for (let g = 0; g <= 3; g++) {
+          widest = Math.max(widest, sagTickWidth((s.fmt || sagTickText)(step * g, top)));
+        }
+        return Math.ceil(widest) + 14;
+      };
+      const padL = Math.max(46, tickGutter(series[0] || {}, sc0.step, sc0.top));
+      const padR = Math.max(46, (isDual && series[1]) ? tickGutter(series[1], sc1.step, sc1.top) : 0);
+      const innerW = W - padL - padR, innerH = H - padT - padB;
 
       const x = i => padL + (n <= 1 ? innerW / 2 : i * innerW / (n - 1));
       const yFor = (v, sIdx) => {

@@ -90,6 +90,21 @@ class TenantDashboardRevitalizationTests(unittest.TestCase):
         # Circles only drawn on non-zero values to avoid 24-dot zero baseline clutter
         self.assertIn('if ((s.values[i] || 0) > 0)', self.charts_js)
 
+    def test_chart_axis_gutter_fits_the_measured_tick_labels(self):
+        """The fixed 46-unit gutter clipped «1,500 points» in English while the shorter
+        Arabic label fit. The gutter must come from the measured tick text instead."""
+        self.assertIn('function sagTickWidth(text)', self.charts_js)
+        pad_l = re.search(r'const padL = ([^;]+);', self.charts_js)
+        pad_r = re.search(r'const padR = ([^;]+);', self.charts_js)
+        self.assertIsNotNone(pad_l, 'padL must stay a named constant')
+        self.assertIsNotNone(pad_r, 'padR must stay a named constant')
+        self.assertIn('tickGutter(', pad_l.group(1))
+        self.assertIn('tickGutter(', pad_r.group(1))
+        self.assertIn('tickGutter(series[0]', self.charts_js)
+        self.assertIn('sagTickWidth((s.fmt || sagTickText)', self.charts_js)
+        self.assertNotRegex(
+            self.charts_js, r'const W = \d+, H = \d+, padL = 46, padR = 46')
+
     def test_balance_pill_max_width_prevents_badge_truncation(self):
         """Package badge pill allows at least 65% width to prevent '...' truncation."""
         match = re.search(r'\.tenant-balance-pill\s*\{[^}]*max-width:\s*(\d+)%', self.css_responsive)
