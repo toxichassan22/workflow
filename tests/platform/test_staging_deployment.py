@@ -501,6 +501,26 @@ class StagingWorkflowTests(unittest.TestCase):
         self.assertLess(ready, switch)
         self.assertLess(switch, stop)
 
+    def test_watchdog_healthy_exit_is_silent_when_non_interactive(self):
+        for script_name in ('start_server.sh', 'start_server-staging.sh'):
+            source = (ROOT / script_name).read_text(encoding='utf-8')
+            self.assertIn('[ -t 1 ] || [ -n "${VERBOSE:-}" ]', source)
+            self.assertIn('>> "$WATCHDOG_LOG"', source)
+
+            stubs = (
+                'PORT=8001\nHEALTH_PATH=/health\nWATCHDOG_LOG="$(mktemp)"\n'
+                'curl() { printf \'{"deployed_commit":"test"}\'; }\n'
+                'log() { printf "%s\\n" "$1"; }\n'
+            )
+            check_start = source.index('if [ "$1" != "--force" ] && curl -fsS')
+            check_end = source.index('fi\n\nlog "WARN:', check_start) + 3
+            block = source[check_start:check_end]
+            script = stubs + block
+            result = subprocess.run(['bash', '-s'], input=script, text=True,
+                                    capture_output=True, check=True)
+            self.assertEqual(result.stdout, '', f'{script_name} must produce zero stdout on healthy non-interactive run')
+            self.assertEqual(result.stderr, '', f'{script_name} must produce zero stderr on healthy non-interactive run')
+
 
 if __name__ == '__main__':
     unittest.main()

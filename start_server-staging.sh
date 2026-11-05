@@ -2,7 +2,7 @@
 # Staging watchdog / (re)start script for cPanel shared hosting.
 # Mirrors start_server.sh but scoped to the staging copy only, so a staging
 # restart can never kill the production gunicorn next to it.
-# Safe to run from cron every minute alongside the production entry.
+# Safe to run from cron every minute: * * * * * ~/proposal-generator-staging/start_server-staging.sh >/dev/null 2>&1
 # Usage: /home/landloom/proposal-generator-staging/start_server-staging.sh
 
 set -e
@@ -121,7 +121,11 @@ done
 
 # Already healthy on the live staging port? (bypassed if --force is passed)
 if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null | grep -q '"deployed_commit"'; then
-  log "OK: staging gunicorn already healthy on port $PORT"
+  if [ -t 1 ] || [ -n "${VERBOSE:-}" ]; then
+    log "OK: staging gunicorn already healthy on port $PORT"
+  else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') OK: staging gunicorn already healthy on port $PORT" >> "$WATCHDOG_LOG"
+  fi
   exit 0
 fi
 

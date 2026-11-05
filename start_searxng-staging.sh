@@ -10,7 +10,7 @@
 #   ~/searxng-venv/bin/pip install -U pip setuptools wheel
 #   ~/searxng-venv/bin/pip install -e ~/searxng-src
 #   mkdir -p ~/searxng   # then place settings.yml there (json format on)
-# Cron: * * * * * /home/landloom/proposal-generator-staging/start_searxng-staging.sh
+# Cron: * * * * * /home/landloom/proposal-generator-staging/start_searxng-staging.sh >/dev/null 2>&1
 
 set -e
 
@@ -36,8 +36,11 @@ if curl -fsS -m 3 "http://$HOST:$PORT/search?q=healthcheck&format=json" -o /dev/
 fi
 
 if [ ! -x "$VENV/bin/searxng-run" ]; then
-    echo "searxng-run missing — install SearXNG into $VENV first" >&2
-    exit 1
+    echo "$(date '+%Y-%m-%d %H:%M:%S') searxng-run missing — install SearXNG into $VENV first" >> "$LOG"
+    if [ -t 1 ] || [ -n "${VERBOSE:-}" ]; then
+        echo "searxng-run missing — install SearXNG into $VENV first" >&2
+    fi
+    exit 0
 fi
 
 export SEARXNG_SETTINGS_PATH="$SETTINGS"
@@ -46,4 +49,8 @@ export SEARXNG_PORT="$PORT"
 cd "$BASE"
 nohup "$VENV/bin/searxng-run" >>"$LOG" 2>&1 &
 echo $! > "$PIDFILE"
-echo "searxng started pid $(cat "$PIDFILE") on $HOST:$PORT"
+if [ -t 1 ] || [ -n "${VERBOSE:-}" ]; then
+    echo "searxng started pid $(cat "$PIDFILE") on $HOST:$PORT"
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') searxng started pid $(cat "$PIDFILE") on $HOST:$PORT" >> "$LOG"
+fi

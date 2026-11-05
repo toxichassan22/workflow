@@ -1,6 +1,6 @@
 #!/bin/bash
 # Lightweight watchdog / (re)start script for cPanel shared hosting.
-# Safe to run from cron every minute.
+# Safe to run from cron every minute: * * * * * /home/landloom/proposal-generator/start_server.sh >/dev/null 2>&1
 # Usage: /home/landloom/proposal-generator/start_server.sh
 
 set -e
@@ -86,7 +86,11 @@ write_deployment_marker() {
 # The "commit" marker proves the responder is OUR app, not a neighbor's app that
 # happens to answer /health on the same port.
 if [ "$1" != "--force" ] && curl -fsS -m 5 "http://127.0.0.1:${PORT}${HEALTH_PATH}" 2>/dev/null | grep -q '"deployed_commit"'; then
-  log "OK: gunicorn already healthy on port $PORT"
+  if [ -t 1 ] || [ -n "${VERBOSE:-}" ]; then
+    log "OK: gunicorn already healthy on port $PORT"
+  else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') OK: gunicorn already healthy on port $PORT" >> "$WATCHDOG_LOG"
+  fi
   exit 0
 fi
 
