@@ -112,8 +112,9 @@ testPresenceIsWiredIntoTheLoops();
 testGoogleDocsPresenceHighlight();
 testSetLocalValueAndPreserveInputOnBind();
 testBindingHealsAfterUnlock();
+testBindingFollowsTheWinningText();
 console.log('Live collaboration harness passed: bytes, diff, caret, field eligibility,'
-  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight, local value preservation, unlock heal.');
+  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight, local value preservation, unlock heal, map winner.');
 
 function testRoundTripBytes() {
   const bytes = new Uint8Array([0, 1, 2, 250, 255]);
@@ -237,18 +238,18 @@ function testPresenceHeartbeatWhileTheTabIsOpen() {
   assert.ok(heartbeat < ttl, 'the heartbeat must fire before the presence expires');
 
   const session = { stopped: false, lastPresenceSentAt: 1000 };
-  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 5000), false,
+  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 1000 + heartbeat - 1), false,
     'a just-sent presence is not repeated');
-  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 11000), true,
+  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 1000 + heartbeat + 1), true,
     'an open, idle tab has to say it is still here');
 
   context.document.visibilityState = 'hidden';
-  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 11000), false,
+  assert.equal(context.liveCollabPresenceHeartbeatDue(session, 1000 + heartbeat + 1), false,
     'a hidden tab stops reporting');
   context.document.visibilityState = 'visible';
 
-  assert.equal(context.liveCollabPresenceHeartbeatDue({ stopped: true }, 11000), false);
-  assert.equal(context.liveCollabPresenceHeartbeatDue(null, 11000), false);
+  assert.equal(context.liveCollabPresenceHeartbeatDue({ stopped: true }, 1000 + heartbeat + 1), false);
+  assert.equal(context.liveCollabPresenceHeartbeatDue(null, 1000 + heartbeat + 1), false);
 }
 
 function testPresenceLineNamesTheField() {
@@ -457,6 +458,64 @@ function testBindingHealsAfterUnlock() {
   context.liveCollabBindFields(session);
   assert.equal(input.value, 'remote text',
     'the unlocked field must heal from the CRDT without a refresh');
+
+  context.document.getElementById = originalGetElementById;
+  context.liveCollabSession = null;
+}
+
+function testBindingFollowsTheWinningText() {
+  // Two tabs opening the same file at once each create a Y.Text; Yjs keeps one
+  // and detaches the other. The binding must move to the winner or the input
+  // watches a type that no longer receives remote edits.
+  const doc = new context.Y.Doc();
+  const session = {
+    doc,
+    fields: doc.getMap('fields'),
+    bindings: new Map(),
+    pending: [],
+    localFieldKey: '',
+    localOrigin: { liveCollab: 'local' },
+    remoteOrigin: { liveCollab: 'remote' },
+    applyingRemote: false,
+    composing: null,
+    stopped: false,
+    presence: [],
+  };
+  context.liveCollabSession = session;
+
+  const key = 'plot_number_croquis';
+  const winner = new context.Y.Text();
+  winner.insert(0, 'winner');
+  session.fields.set(key, winner);
+  const loser = new context.Y.Text();
+  loser.insert(0, 'loser');
+  const loserObserver = () => {};
+  loser.observe(loserObserver);
+  const input = {
+    tagName: 'INPUT',
+    type: 'text',
+    dataset: { key },
+    value: 'loser',
+    disabled: false,
+    readOnly: false,
+    closest: () => null,
+    dispatchEvent() {},
+    classList: { add() {}, remove() {} },
+    style: {},
+    getClientRects: () => [],
+    offsetParent: null,
+  };
+  session.bindings.set(key, { input, text: loser, observer: loserObserver });
+  const originalGetElementById = context.document.getElementById;
+  context.document.getElementById = id => (id === 'tenantProjectForm' ? {
+    querySelectorAll: () => [input],
+  } : null);
+
+  context.liveCollabBindFields(session);
+  assert.equal(session.bindings.get(key).text, winner,
+    'the binding must follow the Y.Text that won the map conflict');
+  assert.equal(input.value, 'winner',
+    'the input must show the winning text, not the detached one');
 
   context.document.getElementById = originalGetElementById;
   context.liveCollabSession = null;

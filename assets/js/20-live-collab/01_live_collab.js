@@ -16,12 +16,12 @@
  * slower cadence when the tab is idle.
  */
 
-const LIVE_COLLAB_ACTIVE_POLL_MS = 800;
+const LIVE_COLLAB_ACTIVE_POLL_MS = 300;
 const LIVE_COLLAB_SOLO_POLL_MS = 8000;
 const LIVE_COLLAB_IDLE_POLL_MS = 4000;
 const LIVE_COLLAB_IDLE_AFTER_MS = 120000;
-const LIVE_COLLAB_FLUSH_MS = 350;
-const LIVE_COLLAB_HEARTBEAT_MS = 3000;
+const LIVE_COLLAB_FLUSH_MS = 60;
+const LIVE_COLLAB_HEARTBEAT_MS = 2000;
 const LIVE_COLLAB_SNAPSHOT_MS = 90000;
 const LIVE_COLLAB_SNAPSHOT_UPDATES = 120;
 const LIVE_COLLAB_PRESENCE_TTL_MS = 20000;
@@ -32,7 +32,7 @@ const LIVE_COLLAB_LOCK_TTL_MS = 15000;
 // The server drops a presence row after 20 seconds. An open tab therefore has
 // to repeat "still here" while the person reads or thinks instead of typing,
 // or they vanish from the others' screen mid-session.
-const LIVE_COLLAB_PRESENCE_HEARTBEAT_MS = 10000;
+const LIVE_COLLAB_PRESENCE_HEARTBEAT_MS = 3000;
 
 let liveCollabSession = null;
 let liveCollabClientIdValue = '';
@@ -283,6 +283,20 @@ function liveCollabObserveForm(session) {
   }
 }
 
+function liveCollabFieldObserver(session, input, text) {
+  return (event, transaction) => {
+    if (transaction.origin === session.localOrigin) return;
+    if (liveCollabFieldLocked(input)) return;
+    const value = text.toString();
+    if (session.composing === input) {
+      session.deferredRemote = { input, text };
+      return;
+    }
+    if (input.value === value) return;
+    liveCollabApplyRemoteValue(input, value);
+  };
+}
+
 function liveCollabBindFields(optionalSession) {
   const session = optionalSession || liveCollabSession;
   if (!session || session.stopped) return;
@@ -297,6 +311,25 @@ function liveCollabBindFields(optionalSession) {
     seen.add(key);
     const existing = session.bindings.get(key);
     if (existing && existing.input === input) {
+      // Two tabs that open the same file at once can each create a Y.Text for
+      // this key; Yjs keeps one and detaches the other. Follow the winner, or
+      // every remote edit lands in a type this input no longer watches.
+      const mapText = session.fields.get(key);
+      if (mapText instanceof Y.Text && mapText !== existing.text) {
+        try { existing.text.unobserve(existing.observer); } catch (e) {}
+        existing.text = mapText;
+        existing.observer = liveCollabFieldObserver(session, input, mapText);
+        mapText.observe(existing.observer);
+        const liveValue = mapText.toString();
+        if (!liveValue && input.value) {
+          session.localFieldKey = key;
+          try { liveApplyTextDiff(mapText, input.value, session.localOrigin); }
+          finally { session.localFieldKey = ''; }
+        } else if (liveValue && input.value !== liveValue && input !== document.activeElement) {
+          liveCollabSetInputValue(input, liveValue, true);
+        }
+        return;
+      }
       // A remote update that arrived while the field was locked (an approved
       // section) stayed in the CRDT but was not written to the input. After
       // the unlock, the next poll must heal it instead of leaving the field
@@ -325,17 +358,7 @@ function liveCollabBindFields(optionalSession) {
         session.localFieldKey = '';
       }
     }
-    const observer = (event, transaction) => {
-      if (transaction.origin === session.localOrigin) return;
-      if (liveCollabFieldLocked(input)) return;
-      const value = text.toString();
-      if (session.composing === input) {
-        session.deferredRemote = { input, text };
-        return;
-      }
-      if (input.value === value) return;
-      liveCollabApplyRemoteValue(input, value);
-    };
+    const observer = liveCollabFieldObserver(session, input, text);
     text.observe(observer);
     session.bindings.set(key, { input, text, observer });
     if (input.value !== text.toString()) {
@@ -429,7 +452,21 @@ function liveCollabInstallListeners(session) {
     if (!input || !input.dataset || !input.dataset.key) return;
     if (liveCollabFieldLocked(input)) return;
     const binding = current.bindings.get(input.dataset.key);
-    if (!binding || binding.input !== input) return;
+    if (!binding) return;
+    if (binding.input !== input) {
+      // A rebuilt form can leave the binding on a detached element of the same
+      // key. The value being typed is still the field's value, so send it
+      // instead of dropping the keystroke into a dead input.
+      if (binding.input.isConnected) return;
+      current.localFieldKey = input.dataset.key;
+      try {
+        liveApplyTextDiff(binding.text, input.value, current.localOrigin);
+      } finally {
+        current.localFieldKey = '';
+      }
+      liveCollabPresenceSoon();
+      return;
+    }
     if (current.composing === input) return;
     current.lastActivityAt = Date.now();
     current.localFieldKey = input.dataset.key;
@@ -485,6 +522,26 @@ function liveCollabInstallListeners(session) {
     }
     liveCollabPresenceSoon();
   }, true);
+  add(document, 'focusout', event => {
+    const current = liveCollabSession;
+    if (!current || current !== session) return;
+    const target = event.target;
+    if (!target || !target.dataset || !target.dataset.key) return;
+    // focusout fires before the next focusin. Let the new focus settle, then
+    // clear only a lock that still belongs to the field being left; a click
+    // outside the form must drop the outline at once, not on the 3s heartbeat.
+    setTimeout(() => {
+      if (current !== liveCollabSession || current.stopped) return;
+      const active = document.activeElement;
+      const activeKey = active && active.dataset ? active.dataset.key : '';
+      if (activeKey !== target.dataset.key && current.lockFieldKey === target.dataset.key) {
+        current.lockFieldKey = '';
+        current.lockTakeover = false;
+      }
+      current.lastActivityAt = Date.now();
+      liveCollabPresenceSoon();
+    }, 0);
+  }, true);
   add(document, 'selectionchange', () => {
     const current = liveCollabSession;
     if (!current || current !== session) return;
@@ -538,7 +595,7 @@ function liveCollabPresenceSoon() {
   session.presenceTimer = setTimeout(() => {
     session.presenceTimer = null;
     liveCollabFlush(true);
-  }, 250);
+  }, 100);
 }
 
 function liveCollabScheduleFlush() {
