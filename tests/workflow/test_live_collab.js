@@ -113,8 +113,9 @@ testGoogleDocsPresenceHighlight();
 testSetLocalValueAndPreserveInputOnBind();
 testBindingHealsAfterUnlock();
 testBindingFollowsTheWinningText();
+testMultiClientLiveTypingSyncWithoutRefresh();
 console.log('Live collaboration harness passed: bytes, diff, caret, field eligibility,'
-  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight, local value preservation, unlock heal, map winner.');
+  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight, local value preservation, unlock heal, map winner, live typing sync.');
 
 function testRoundTripBytes() {
   const bytes = new Uint8Array([0, 1, 2, 250, 255]);
@@ -366,7 +367,7 @@ function testSetLocalValueAndPreserveInputOnBind() {
 
   // 1. liveCollabSetLocalValue updates CRDT text
   context.liveCollabSetLocalValue('site_analysis', 'تحليل الموقع الأولي', session);
-  let text = session.fields.get('site_analysis');
+  let text = context.liveCollabGetFieldText(session, 'site_analysis');
   assert.ok(text instanceof Y.Text, 'field must be created as Y.Text');
   assert.equal(text.toString(), 'تحليل الموقع الأولي');
 
@@ -392,7 +393,7 @@ function testSetLocalValueAndPreserveInputOnBind() {
   context.liveCollabBindFields(session);
   assert.equal(dummyInput.value, 'محتوى محلي غير فارغ',
     'local input value must not be erased when CRDT text was empty');
-  const emptyText = session.fields.get(emptyKey);
+  const emptyText = context.liveCollabGetFieldText(session, emptyKey);
   assert.equal(emptyText.toString(), 'محتوى محلي غير فارغ',
     'CRDT must adopt local input value instead of wiping it');
 
@@ -519,4 +520,57 @@ function testBindingFollowsTheWinningText() {
 
   context.document.getElementById = originalGetElementById;
   context.liveCollabSession = null;
+}
+function testMultiClientLiveTypingSyncWithoutRefresh() {
+  const docA = new Y.Doc({ clientID: 100 });
+  const docB = new Y.Doc({ clientID: 200 });
+
+  const inputA = {
+    tagName: 'INPUT',
+    type: 'text',
+    dataset: { key: 'project_name' },
+    value: '',
+    disabled: false,
+    readOnly: false,
+    closest: () => null,
+    dispatchEvent() {},
+    classList: { add() {}, remove() {} },
+    style: {},
+  };
+
+  const inputB = {
+    tagName: 'INPUT',
+    type: 'text',
+    dataset: { key: 'project_name' },
+    value: '',
+    disabled: false,
+    readOnly: false,
+    closest: () => null,
+    dispatchEvent() {},
+    classList: { add() {}, remove() {} },
+    style: {},
+  };
+
+  const textA = docA.getText('project_name');
+  const textB = docB.getText('project_name');
+
+  textA.observe(() => { inputA.value = textA.toString(); });
+  textB.observe(() => { inputB.value = textB.toString(); });
+
+  // 1. User A types in project_name
+  textA.insert(0, 'مشروع الأمل');
+  const uA = Y.encodeStateAsUpdate(docA);
+  Y.applyUpdate(docB, uA);
+
+  assert.equal(inputB.value, 'مشروع الأمل',
+    'User B must see User A text in real time without refreshing');
+
+  // 2. User B types additional characters
+  textB.insert(textB.length, ' - الرياض');
+  const uB = Y.encodeStateAsUpdate(docB);
+  Y.applyUpdate(docA, uB);
+
+  assert.equal(inputA.value, 'مشروع الأمل - الرياض',
+    'User A must see User B typing in real time without refreshing');
+  assert.equal(inputB.value, 'مشروع الأمل - الرياض');
 }

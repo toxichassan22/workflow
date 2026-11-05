@@ -130,7 +130,12 @@ function startLiveCollaboration(draftId) {
   const session = {
     draftId: String(draftId),
     doc,
-    fields: doc.getMap('fields'),
+    fields: {
+      get(k) { return doc.getText(k); },
+      set(k, v) {},
+      has(k) { return true; },
+      delete(k) {},
+    },
     clientId: liveCollabClientId(),
     bindings: new Map(),
     pending: [],
@@ -160,9 +165,11 @@ function startLiveCollaboration(draftId) {
   liveCollabObserveForm(session);
   doc.on('update', (update, origin) => {
     if (origin === session.remoteOrigin) return;
+    const fieldKey = session.localFieldKey || '';
+    if (!fieldKey) return;
     session.pending.push({
       payload: liveCollabBytesToBase64(update),
-      fieldKey: session.localFieldKey || '',
+      fieldKey: fieldKey,
     });
     session.localUpdateCount += 1;
     liveCollabScheduleFlush();
@@ -297,6 +304,21 @@ function liveCollabFieldObserver(session, input, text) {
   };
 }
 
+function liveCollabGetFieldText(session, key) {
+  if (!session || !key) return null;
+  if (session.fields && typeof session.fields.has === 'function' && session.fields.has(key)) {
+    const fromMap = session.fields.get(key);
+    if (fromMap instanceof Y.Text) return fromMap;
+  }
+  if (session.doc && typeof session.doc.getText === 'function') {
+    return session.doc.getText(key);
+  }
+  if (session.fields && typeof session.fields.get === 'function') {
+    return session.fields.get(key);
+  }
+  return null;
+}
+
 function liveCollabBindFields(optionalSession) {
   const session = optionalSession || liveCollabSession;
   if (!session || session.stopped) return;
@@ -310,24 +332,16 @@ function liveCollabBindFields(optionalSession) {
     if (!key) return;
     seen.add(key);
     const existing = session.bindings.get(key);
+    const text = liveCollabGetFieldText(session, key);
+    if (!(text instanceof Y.Text)) return;
     if (existing && existing.input === input) {
-      // Two tabs that open the same file at once can each create a Y.Text for
-      // this key; Yjs keeps one and detaches the other. Follow the winner, or
-      // every remote edit lands in a type this input no longer watches.
-      const mapText = session.fields.get(key);
-      if (mapText instanceof Y.Text && mapText !== existing.text) {
+      if (existing.text !== text) {
         try { existing.text.unobserve(existing.observer); } catch (e) {}
-        existing.text = mapText;
-        existing.observer = liveCollabFieldObserver(session, input, mapText);
-        mapText.observe(existing.observer);
-        const liveValue = mapText.toString();
-        if (!liveValue && input.value) {
-          session.localFieldKey = key;
-          try { liveApplyTextDiff(mapText, input.value, session.localOrigin); }
-          finally { session.localFieldKey = ''; }
-        } else if (liveValue && input.value !== liveValue && input !== document.activeElement) {
-          liveCollabSetInputValue(input, liveValue, true);
-        }
+        existing.text = text;
+        existing.observer = liveCollabFieldObserver(session, input, text);
+        text.observe(existing.observer);
+        const liveVal = text.toString();
+        if (liveVal) liveCollabSetInputValue(input, liveVal, true);
         return;
       }
       // A remote update that arrived while the field was locked (an approved
@@ -346,17 +360,6 @@ function liveCollabBindFields(optionalSession) {
     }
     if (existing && existing.observer) {
       try { existing.text.unobserve(existing.observer); } catch (e) {}
-    }
-    let text = session.fields.get(key);
-    if (!(text instanceof Y.Text)) {
-      text = new Y.Text();
-      session.localFieldKey = key;
-      try {
-        if (input.value) text.insert(0, input.value);
-        session.fields.set(key, text);
-      } finally {
-        session.localFieldKey = '';
-      }
     }
     const observer = liveCollabFieldObserver(session, input, text);
     text.observe(observer);
@@ -451,21 +454,11 @@ function liveCollabInstallListeners(session) {
     if (!current || current !== session || current.applyingRemote) return;
     if (!input || !input.dataset || !input.dataset.key) return;
     if (liveCollabFieldLocked(input)) return;
-    const binding = current.bindings.get(input.dataset.key);
-    if (!binding) return;
-    if (binding.input !== input) {
-      // A rebuilt form can leave the binding on a detached element of the same
-      // key. The value being typed is still the field's value, so send it
-      // instead of dropping the keystroke into a dead input.
-      if (binding.input.isConnected) return;
-      current.localFieldKey = input.dataset.key;
-      try {
-        liveApplyTextDiff(binding.text, input.value, current.localOrigin);
-      } finally {
-        current.localFieldKey = '';
-      }
-      liveCollabPresenceSoon();
-      return;
+    let binding = current.bindings.get(input.dataset.key);
+    if (!binding || binding.input !== input) {
+      liveCollabBindFields(current);
+      binding = current.bindings.get(input.dataset.key);
+      if (!binding) return;
     }
     if (current.composing === input) return;
     current.lastActivityAt = Date.now();
@@ -707,7 +700,7 @@ async function liveCollabFlush(forcePresence) {
       snapshot = null;
     }
   }
-  const allUpdates = session.pending.splice(0);
+  const allUpdates = session.pending.splice(0).filter(item => item && item.fieldKey);
   const updates = allUpdates.slice(0, 64);
   if (allUpdates.length > updates.length) {
     // The server accepts 64 updates per request. The rest goes in the next
@@ -744,6 +737,10 @@ async function liveCollabFlush(forcePresence) {
         // The project moved to a lifecycle state that refuses edits. The
         // session has nothing legal to send until it is unlocked again.
         stopLiveCollaboration();
+        return;
+      }
+      if (resp && resp.error && (resp.error.indexOf('fieldKey') >= 0 || resp.error.indexOf('invalid') >= 0)) {
+        if (snapshot) session.lastSnapshotAt = 0;
         return;
       }
       // A failed batch stays queued for the next flush instead of losing text.
@@ -810,6 +807,7 @@ async function liveCollabPoll() {
       hasMore = Boolean(resp.hasMore);
       session.selfPresence = resp.selfPresence || null;
       liveCollabRenderPresence(resp.presence || []);
+      liveCollabBindFields(session);
     }
   } catch (e) {
     // A poll that could not go through is retried on the next tick.
@@ -1172,18 +1170,19 @@ function liveCollabSetLocalValue(key, value, optionalSession) {
   const session = optionalSession || liveCollabSession;
   if (!session || session.stopped || !key) return;
   const strVal = String(value == null ? '' : value);
-  let text = session.fields.get(key);
+  let text = liveCollabGetFieldText(session, key);
   if (!(text instanceof Y.Text)) {
-    text = new Y.Text();
-    session.localFieldKey = key;
-    try {
-      if (strVal) text.insert(0, strVal);
-      session.fields.set(key, text);
-    } finally { session.localFieldKey = ''; }
-  } else {
-    session.localFieldKey = key;
-    try { liveApplyTextDiff(text, strVal, session.localOrigin); }
-    finally { session.localFieldKey = ''; }
+    if (session.doc && typeof session.doc.getText === 'function') {
+      text = session.doc.getText(key);
+    } else {
+      text = new Y.Text();
+    }
+  }
+  session.localFieldKey = key;
+  try {
+    liveApplyTextDiff(text, strVal, session.localOrigin);
+  } finally {
+    session.localFieldKey = '';
   }
 }
 
@@ -1192,4 +1191,5 @@ if (typeof window !== 'undefined') {
   window.stopLiveCollaboration = stopLiveCollaboration;
   window.liveApplySessionToForm = liveCollabApplySessionToForm;
   window.liveCollabSetLocalValue = liveCollabSetLocalValue;
+  window.liveCollabGetFieldText = liveCollabGetFieldText;
 }

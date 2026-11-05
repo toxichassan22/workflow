@@ -138,11 +138,12 @@
         ? liveCollabSession.bindings : null;
       const active = document.activeElement;
       let changed = false;
+      const collabActive = typeof liveCollabSession !== 'undefined' && liveCollabSession && !liveCollabSession.stopped;
       document.querySelectorAll('#tenantProjectForm [data-key]').forEach(input => {
         const key = input.getAttribute('data-key');
         if (!key || (bound && bound.has(key))) return;
         if (input === active || (active && active.contains && active.contains(input))) return;
-        if (typeof liveCollabFieldEligible === 'function' && liveCollabFieldEligible(input)) return;
+        if (collabActive && typeof liveCollabFieldEligible === 'function' && liveCollabFieldEligible(input)) return;
         if (!Object.prototype.hasOwnProperty.call(draftData, key)) return;
         const value = draftData[key];
         if (value === null || typeof value === 'object') return;

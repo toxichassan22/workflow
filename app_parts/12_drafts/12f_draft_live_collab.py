@@ -156,7 +156,7 @@ def api_draft_live_read(draft_id):
         })
     document = dict(document)
     state_seq = int(document.get('state_seq') or 0)
-    reset = since < state_seq
+    reset = since < state_seq or (since == 0 and bool(document.get('state')))
     if reset:
         since = state_seq
     rows = conn.execute(
