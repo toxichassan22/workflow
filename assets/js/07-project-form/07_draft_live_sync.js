@@ -295,6 +295,11 @@
         }
         applySectionStatuses(statuses);
       }
+      // A section that was approved while somebody typed is unlocked here; its
+      // CRDT text must land in the input now, not on the next refresh.
+      if (typeof liveCollabApplySessionToForm === 'function') {
+        liveCollabApplySessionToForm({ markDirty: false });
+      }
       if (typeof tenantDraftDirty !== 'undefined' && tenantDraftDirty) {
         showDraftPendingChangeBadge();
       }

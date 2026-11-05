@@ -111,8 +111,9 @@ testPresenceLineNamesTheField();
 testPresenceIsWiredIntoTheLoops();
 testGoogleDocsPresenceHighlight();
 testSetLocalValueAndPreserveInputOnBind();
+testBindingHealsAfterUnlock();
 console.log('Live collaboration harness passed: bytes, diff, caret, field eligibility,'
-  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight, local value preservation.');
+  + ' concurrent typing, presence identity, field coverage, heartbeat, rail text, google docs highlight, local value preservation, unlock heal.');
 
 function testRoundTripBytes() {
   const bytes = new Uint8Array([0, 1, 2, 250, 255]);
@@ -393,6 +394,69 @@ function testSetLocalValueAndPreserveInputOnBind() {
   const emptyText = session.fields.get(emptyKey);
   assert.equal(emptyText.toString(), 'محتوى محلي غير فارغ',
     'CRDT must adopt local input value instead of wiping it');
+
+  context.document.getElementById = originalGetElementById;
+  context.liveCollabSession = null;
+}
+
+function testBindingHealsAfterUnlock() {
+  // A remote update that arrives while an approved section is locked stays in
+  // the CRDT but is not written to the disabled input. After the unlock, the
+  // next bind pass must write it instead of leaving the field stale.
+  const doc = new context.Y.Doc();
+  const session = {
+    doc,
+    fields: doc.getMap('fields'),
+    bindings: new Map(),
+    pending: [],
+    localFieldKey: '',
+    localOrigin: { liveCollab: 'local' },
+    remoteOrigin: { liveCollab: 'remote' },
+    applyingRemote: false,
+    composing: null,
+    stopped: false,
+    presence: [],
+  };
+  context.liveCollabSession = session;
+
+  const key = 'plot_number_croquis';
+  const text = new context.Y.Text();
+  text.insert(0, 'old');
+  session.fields.set(key, text);
+  const input = {
+    tagName: 'INPUT',
+    type: 'text',
+    dataset: { key },
+    value: 'old',
+    disabled: false,
+    readOnly: false,
+    closest: () => null,
+    dispatchEvent() {},
+    classList: { add() {}, remove() {} },
+    style: {},
+    getClientRects: () => [],
+    offsetParent: null,
+  };
+  const originalGetElementById = context.document.getElementById;
+  context.document.getElementById = id => (id === 'tenantProjectForm' ? {
+    querySelectorAll: () => [input],
+  } : null);
+
+  context.liveCollabBindFields(session);
+  assert.equal(input.value, 'old', 'the first bind takes the CRDT text');
+
+  input.disabled = true;
+  text.doc.transact(() => {
+    text.delete(0, text.length);
+    text.insert(0, 'remote text');
+  }, session.remoteOrigin);
+  assert.equal(input.value, 'old', 'a locked field must not receive the remote value');
+  assert.equal(text.toString(), 'remote text', 'the CRDT keeps the remote text');
+
+  input.disabled = false;
+  context.liveCollabBindFields(session);
+  assert.equal(input.value, 'remote text',
+    'the unlocked field must heal from the CRDT without a refresh');
 
   context.document.getElementById = originalGetElementById;
   context.liveCollabSession = null;

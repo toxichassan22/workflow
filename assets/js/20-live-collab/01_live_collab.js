@@ -120,8 +120,7 @@ function liveTransformCaretByChange(oldValue, newValue, caret) {
 }
 
 function startLiveCollaboration(draftId) {
-  if (!draftId || !liveCollabEnabled()) return;
-  if (liveCollabSession && liveCollabSession.draftId === draftId && !liveCollabSession.stopped) {
+  if (!draftId || !liveCollabEnabled()) return;  if (liveCollabSession && liveCollabSession.draftId === draftId && !liveCollabSession.stopped) {
     liveCollabBindFields();
     liveCollabSchedulePoll(0);
     return;
@@ -158,6 +157,7 @@ function startLiveCollaboration(draftId) {
     listeners: null,
   };
   liveCollabSession = session;
+  liveCollabObserveForm(session);
   doc.on('update', (update, origin) => {
     if (origin === session.remoteOrigin) return;
     session.pending.push({
@@ -181,6 +181,10 @@ function stopLiveCollaboration() {
   session.pollTimer = null;
   session.flushTimer = null;
   session.presenceTimer = null;
+  if (session.formObserver) {
+    try { session.formObserver.disconnect(); } catch (e) {}
+    session.formObserver = null;
+  }
   if (session.listeners) {
     session.listeners.forEach(item => {
       try { item.target.removeEventListener(item.type, item.handler, item.options); } catch (e) {}
@@ -259,9 +263,30 @@ function liveCollabFieldLocked(input) {
   return Boolean(section && section.classList && section.classList.contains('section-locked'));
 }
 
+// The overlay is measured against the field's box. Opening another section or
+// resizing the window changes that box without a presence update, so the
+// outline kept the size it had when the section was hidden.
+function liveCollabObserveForm(session) {
+  if (!session || session.formObserver || typeof ResizeObserver !== 'function'
+      || typeof document === 'undefined') return;
+  const form = document.getElementById('tenantProjectForm');
+  if (!form) return;
+  try {
+    session.formObserver = new ResizeObserver(() => {
+      if (!session.stopped && session.presence && session.presence.length) {
+        liveCollabRenderCarets();
+      }
+    });
+    session.formObserver.observe(form);
+  } catch (e) {
+    session.formObserver = null;
+  }
+}
+
 function liveCollabBindFields(optionalSession) {
   const session = optionalSession || liveCollabSession;
   if (!session || session.stopped) return;
+  liveCollabObserveForm(session);
   const form = document.getElementById('tenantProjectForm');
   if (!form || !form.querySelectorAll) return;
   const seen = new Set();
@@ -271,7 +296,21 @@ function liveCollabBindFields(optionalSession) {
     if (!key) return;
     seen.add(key);
     const existing = session.bindings.get(key);
-    if (existing && existing.input === input) return;
+    if (existing && existing.input === input) {
+      // A remote update that arrived while the field was locked (an approved
+      // section) stayed in the CRDT but was not written to the input. After
+      // the unlock, the next poll must heal it instead of leaving the field
+      // stale until a refresh.
+      if (!liveCollabFieldLocked(input)
+          && input !== document.activeElement
+          && session.composing !== input) {
+        const liveValue = existing.text.toString();
+        if (input.value !== liveValue) {
+          liveCollabSetInputValue(input, liveValue, true);
+        }
+      }
+      return;
+    }
     if (existing && existing.observer) {
       try { existing.text.unobserve(existing.observer); } catch (e) {}
     }
@@ -940,15 +979,22 @@ function liveCollabRenderFieldCarets(targetEl, entries, options = {}) {
   const parentRect = typeof parent.getBoundingClientRect === 'function'
     ? parent.getBoundingClientRect()
     : { left: 0, top: 0, width: 0, height: 0 };
-  const left = targetRect.left - parentRect.left;
-  const top = targetRect.top - parentRect.top;
+  // The workspace can sit inside a scaled ancestor: getBoundingClientRect is
+  // visual while an absolute offset is layout. Using the visual width made the
+  // outline narrower than its field on the scaled project form.
+  const parentScale = (parentRect.width && parent.offsetWidth)
+    ? parent.offsetWidth / parentRect.width : 1;
+  const left = (targetRect.left - parentRect.left) * parentScale;
+  const top = (targetRect.top - parentRect.top) * parentScale;
+  const targetWidth = targetEl.offsetWidth || targetRect.width * parentScale;
+  const targetHeight = targetEl.offsetHeight || targetRect.height * parentScale;
 
   const layer = document.createElement('div');
   layer.className = 'live-caret-overlay';
   layer.style.left = left + 'px';
   layer.style.top = top + 'px';
-  layer.style.width = targetRect.width + 'px';
-  layer.style.height = targetRect.height + 'px';
+  layer.style.width = targetWidth + 'px';
+  layer.style.height = targetHeight + 'px';
 
   const primaryEntry = entries[0];
   const primaryColor = liveCollabUserColor(primaryEntry.user_name);
