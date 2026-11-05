@@ -226,16 +226,21 @@ def _section_version_label(section_key):
 
 def _versioned_draft_or_404(draft_id):
     """The draft version flows act on — the owner's, or one the caller is
-    assigned to edit — or a not-found error dict."""
+    assigned or permitted to edit — or a not-found error dict."""
     draft = db.get_project_draft_by_id(g.tenant_id, draft_id) if draft_id else None
     if not draft:
         return None, {'error': 'No project draft found'}
-    if draft.get('user_id') != _project_draft_actor_id() \
-            and not db.user_is_assigned_editor(g.tenant_id, g.user_id, draft.get('id')):
-        return None, {'error': 'No project draft found'}
     if not db.user_may_access_draft(g.user_id, draft):
         return None, {'error': 'No project draft found'}
-    return draft, None
+    if _landloom_actor_is_admin():
+        return draft, None
+    if str(draft.get('user_id') or '') == str(_project_draft_actor_id() or ''):
+        return draft, None
+    if db.user_is_assigned_editor(g.tenant_id, g.user_id, draft.get('id')):
+        return draft, None
+    if _landloom_can('create_presentation'):
+        return draft, None
+    return None, {'error': 'No project draft found'}
 
 
 def _has_approvals_permission():
@@ -256,7 +261,7 @@ def _has_approvals_permission():
 
 
 def _versioned_draft_for_read(draft_id):
-    """Draft visible to its owner or to a caller with the approvals permission.
+    """Draft visible to its owner or to a caller with approvals or edit permission.
 
     Project-scoped users stay inside their scope either way (t20): a granted
     approvals permission never widens the project list an invite fixed."""
@@ -265,9 +270,13 @@ def _versioned_draft_for_read(draft_id):
         return None, {'error': 'No project draft found'}
     if not db.user_may_access_draft(g.user_id, draft):
         return None, {'error': 'No project draft found'}
-    if draft.get('user_id') == _project_draft_actor_id():
+    if _landloom_actor_is_admin():
+        return draft, None
+    if str(draft.get('user_id') or '') == str(_project_draft_actor_id() or ''):
         return draft, None
     if _has_approvals_permission():
+        return draft, None
+    if _landloom_can('create_presentation'):
         return draft, None
     # The draft's assigned approver reviews it even without the global
     # approvals permission — the assignment IS the approver role. Its

@@ -517,6 +517,48 @@ class SectionVersionApiTests(unittest.TestCase):
         self.assertEqual(saved_after_edit.status_code, 200)
         self.assertEqual(saved_after_edit.get_json()['sectionStatuses'].get('basic'), 'draft')
 
+    def test_admin_and_collaborator_can_send_and_read_section_version_on_draft(self):
+        client = self.app.test_client()
+        with self.app.app_context():
+            tenant_id = self.tenant if isinstance(self.tenant, str) else self.tenant['id']
+            emp_user_id = db.create_user(tenant_id, 'Hassan', 'emp@example.test', 'hash-emp', role='employee')
+            draft_id = db.save_project_draft(
+                tenant_id, emp_user_id,
+                {'project_name': 'مشروع حسن', 'project_type': 'تجاري', 'city': 'جدة'},
+                {'basic': 'draft', 'land_croquis': 'draft'},
+                'draft', draft_id='draft-emp-1'
+            )
+
+        admin_sent = client.post('/api/project-draft/section-version',
+                                 headers=self.headers(),
+                                 json={'draftId': draft_id, 'sectionKey': 'basic'})
+        self.assertEqual(admin_sent.status_code, 200, admin_sent.get_json())
+        version = admin_sent.get_json()['version']
+        self.assertEqual(version['version_number'], 1)
+        self.assertEqual(version['status'], 'pending')
+
+        admin_decided = client.post('/api/project-draft/section-version/decision',
+                                    headers=self.headers(),
+                                    json={'versionId': version['id'], 'decision': 'approved'})
+        self.assertEqual(admin_decided.status_code, 200, admin_decided.get_json())
+
+        emp_token = auth.create_token(
+            self.tenant, 'emp@example.test', user_id=emp_user_id, user_name='Hassan', user_role='employee'
+        )
+        emp_headers = {'Authorization': f'Bearer {emp_token}'}
+
+        emp_sent = client.post('/api/project-draft/section-version',
+                               headers=emp_headers,
+                               json={'draftId': draft_id, 'sectionKey': 'basic', 'supersede': True})
+        self.assertEqual(emp_sent.status_code, 200, emp_sent.get_json())
+        emp_version = emp_sent.get_json()['version']
+        self.assertEqual(emp_version['version_number'], 2)
+        self.assertEqual(emp_version['status'], 'pending')
+
+        history = client.get(f'/api/project-draft/section-versions?sectionKey=basic&draftId={draft_id}',
+                             headers=emp_headers).get_json()['versions']
+        self.assertEqual(len(history), 2)
+
 
 class SectionVersionDiffApiTests(unittest.TestCase):
     """GET /api/project-draft/section-versions/<id>/diff (t13 comparison)."""
