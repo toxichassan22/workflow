@@ -12,6 +12,9 @@
 
     let draftLiveSyncTimer = null;
     let draftLiveSyncId = '';
+    // Section approvals live in their own column and do not bump the payload
+    // revision, so updatedAt is the signal that a badge changed.
+    let draftLiveSyncUpdatedAt = '';
     // A save of our own is on the wire: the revision it will produce is not
     // known yet, so the poll waits instead of reading our own write as a
     // change by somebody else.
@@ -23,6 +26,7 @@
         draftLiveSyncTimer = null;
       }
       draftLiveSyncId = '';
+      draftLiveSyncUpdatedAt = '';
       draftLocalSavePending = false;
       if (typeof stopLiveCollaboration === 'function') stopLiveCollaboration();
     }
@@ -42,6 +46,7 @@
         stopLiveCollaboration();
       }
       draftLiveSyncId = draftId;
+      draftLiveSyncUpdatedAt = '';
       // The baseline is set, not raised: a file opened with a lower revision
       // than the last one followed is followed from its own start.
       const value = Number(revision);
@@ -87,11 +92,26 @@
       try {
         const data = await api('GET', '/api/project-draft/' + encodeURIComponent(draftId) +
           '/state?since=' + since);
-        if (data && data.success && Number(data.revision) > since) {
-          // The revision is consumed only after the change was applied (or
-          // deliberately deferred). A failed fetch is retried by the next poll.
-          const handled = await handleDraftLiveChange(data);
-          if (handled) draftLiveSyncRevision = Number(data.revision) || draftLiveSyncRevision;
+        if (data && data.success) {
+          const nextRevision = Number(data.revision) || 0;
+          const nextUpdatedAt = String(data.updatedAt || '');
+          const revisionMoved = nextRevision > since;
+          const statusMoved = Boolean(nextUpdatedAt)
+            && nextUpdatedAt !== draftLiveSyncUpdatedAt;
+          if (revisionMoved) {
+            // The revision is consumed only after the change was applied (or
+            // deliberately deferred). A failed fetch is retried by the next poll.
+            const handled = await handleDraftLiveChange(data);
+            if (handled) {
+              if (nextRevision > 0) draftLiveSyncRevision = nextRevision;
+              draftLiveSyncUpdatedAt = nextUpdatedAt;
+            }
+          } else if (statusMoved) {
+            // Approving or unapproving a section does not touch the payload
+            // revision; applying its badges here is what removes the refresh.
+            handleDraftStatusChange(data);
+            draftLiveSyncUpdatedAt = nextUpdatedAt;
+          }
         }
       } catch (error) {
         // A poll that could not go through is not something to read about.
@@ -264,10 +284,28 @@
       }
     }
 
+    function handleDraftStatusChange(data) {
+      if (!data || !data.draftId) return false;
+      const inProject = typeof tenantProjectMode === 'undefined' || tenantProjectMode === 'draft';
+      if (!inProject) return false;
+      const statuses = data.sectionStatuses;
+      if (statuses && typeof statuses === 'object' && typeof applySectionStatuses === 'function') {
+        if (typeof tenantProjectSectionStatuses !== 'undefined') {
+          tenantProjectSectionStatuses = { ...tenantProjectSectionStatuses, ...statuses };
+        }
+        applySectionStatuses(statuses);
+      }
+      if (typeof tenantDraftDirty !== 'undefined' && tenantDraftDirty) {
+        showDraftPendingChangeBadge();
+      }
+      return true;
+    }
+
     function handleDraftLiveChange(data) {
       if (!data || !data.draftId) return Promise.resolve(false);
       const inProject = typeof tenantProjectMode === 'undefined' || tenantProjectMode === 'draft';
       if (!inProject) return Promise.resolve(false);
+      handleDraftStatusChange(data);
       return applyLiveDraftSync(data.draftId, data.revision);
     }
 

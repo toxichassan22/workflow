@@ -146,6 +146,24 @@ class DraftLiveCollabApiTests(unittest.TestCase):
         self.assertEqual(theirs['presence'][0]['field_key'], 'activity_class')
         self.assertTrue(theirs['presence'][0]['lock_at'])
 
+    def test_a_section_status_change_moves_updated_at_without_a_new_revision(self):
+        """The badge poll follows updated_at; a status change must not need a save."""
+        import time
+        state_url = '/api/project-draft/%s/state?since=1' % self.draft_id
+        before = self.client.get(state_url, headers=self.headers()).get_json()
+        time.sleep(0.02)
+        approved = self.client.post('/api/project-draft/section-status',
+                                    headers=self.headers(), json={
+                                        'draftId': self.draft_id,
+                                        'sectionKey': 'basic',
+                                        'sectionStatus': 'approved',
+                                    })
+        self.assertEqual(approved.status_code, 200, approved.get_json())
+        after = self.client.get(state_url, headers=self.headers()).get_json()
+        self.assertEqual(after['revision'], before['revision'])
+        self.assertNotEqual(after['updatedAt'], before['updatedAt'])
+        self.assertEqual(after['sectionStatuses'].get('basic'), 'approved')
+
     def test_leave_drops_client_presence_immediately(self):
         self.post_live({
             'clientId': 'client-aaaa1111',
