@@ -249,6 +249,36 @@ class DraftLiveCollabApiTests(unittest.TestCase):
         })
         self.assertEqual(foreign_write.status_code, 404)
 
+    def test_sequence_desync_recovery(self):
+        # Even if draft_live_documents.seq is artificially reset or behind
+        # draft_live_updates, the server must never fail with a UNIQUE constraint error (500).
+        first = self.post_live({
+            'clientId': 'client-aaaa1111',
+            'updates': [self.update(b'step-1')],
+        })
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.get_json()['seq'], 1)
+
+        # Artificially set document seq back to 0
+        with self.app.app_context():
+            conn = db.get_db()
+            conn.execute('UPDATE draft_live_documents SET seq = 0 WHERE id = ?', (self.draft_id,))
+            conn.commit()
+
+        # Writing step-2 must advance past max update seq (1) to 2 without crashing
+        second = self.post_live({
+            'clientId': 'client-aaaa1111',
+            'updates': [self.update(b'step-2')],
+            'presence': {
+                'fieldKey': 'project_name',
+                'sectionKey': 'basic',
+                'caretStart': 3,
+                'caretEnd': 3,
+            }
+        })
+        self.assertEqual(second.status_code, 200, second.get_json())
+        self.assertEqual(second.get_json()['seq'], 2)
+
 
 if __name__ == '__main__':
     unittest.main()

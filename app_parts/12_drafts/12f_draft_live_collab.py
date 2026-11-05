@@ -260,25 +260,40 @@ def api_draft_live_write(draft_id):
         ).fetchone()
         if not document:
             conn.execute(
-                '''INSERT INTO draft_live_documents
+                '''INSERT OR IGNORE INTO draft_live_documents
                    (id, tenant_id, state, state_seq, seq, base_revision, updated_at)
                    VALUES (?, ?, '', 0, 0, ?, ?)''',
                 (draft_id, g.tenant_id, int(draft.get('revision') or 0),
                  db._utcnow().isoformat())
             )
-            base_seq = 0
-            state = ''
-            state_seq = 0
+            document = conn.execute(
+                'SELECT seq, state, state_seq, base_revision FROM draft_live_documents '
+                'WHERE id = ? AND tenant_id = ?',
+                (draft_id, g.tenant_id)
+            ).fetchone()
+            document = dict(document) if document else {}
+            base_seq = int(document.get('seq') or 0)
+            state = document.get('state') or ''
+            state_seq = int(document.get('state_seq') or 0)
         else:
             document = dict(document)
             base_seq = int(document.get('seq') or 0)
             state = document.get('state') or ''
             state_seq = int(document.get('state_seq') or 0)
+
+        # High-concurrency sequence allocation: always advance beyond any existing seq in updates
+        max_row = conn.execute(
+            'SELECT COALESCE(MAX(seq), 0) AS max_seq FROM draft_live_updates WHERE document_id = ?',
+            (draft_id,)
+        ).fetchone()
+        max_update_seq = int(max_row['max_seq'] if max_row and max_row['max_seq'] is not None else 0)
+        base_seq = max(base_seq, max_update_seq)
+
         next_seq = base_seq
         for payload, field_key in updates:
             next_seq += 1
             conn.execute(
-                '''INSERT INTO draft_live_updates
+                '''INSERT OR REPLACE INTO draft_live_updates
                    (document_id, tenant_id, seq, payload, field_key,
                     author_id, author_name, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
@@ -326,22 +341,23 @@ def api_draft_live_write(draft_id):
                     now if presence.get('lockAt') else None,
                     now,
                 )
-                changed = conn.execute(
-                    '''UPDATE draft_live_presence
-                       SET tenant_id = ?, user_id = ?, user_name = ?, field_key = ?,
-                           section_key = ?, caret_start = ?, caret_end = ?,
-                           lock_at = COALESCE(?, lock_at), updated_at = ?
-                       WHERE document_id = ? AND client_id = ?''',
-                    (g.tenant_id, _live_actor(), _live_actor_name()) + values + (draft_id, client_id)
-                ).rowcount
-                if not changed:
-                    conn.execute(
-                        '''INSERT INTO draft_live_presence
-                           (document_id, client_id, tenant_id, user_id, user_name,
-                            field_key, section_key, caret_start, caret_end, lock_at, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                        (draft_id, client_id, g.tenant_id, _live_actor(), _live_actor_name()) + values
-                    )
+                conn.execute(
+                    '''INSERT INTO draft_live_presence
+                       (document_id, client_id, tenant_id, user_id, user_name,
+                        field_key, section_key, caret_start, caret_end, lock_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(document_id, client_id) DO UPDATE SET
+                           tenant_id = excluded.tenant_id,
+                           user_id = excluded.user_id,
+                           user_name = excluded.user_name,
+                           field_key = excluded.field_key,
+                           section_key = excluded.section_key,
+                           caret_start = excluded.caret_start,
+                           caret_end = excluded.caret_end,
+                           lock_at = COALESCE(excluded.lock_at, draft_live_presence.lock_at),
+                           updated_at = excluded.updated_at''',
+                    (draft_id, client_id, g.tenant_id, _live_actor(), _live_actor_name()) + values
+                )
         conn.commit()
     except Exception as exc:
         try:
@@ -351,7 +367,11 @@ def api_draft_live_write(draft_id):
         app.logger.warning(
             '[DRAFT LIVE] could not append updates for tenant=%s draft=%s: %s',
             g.tenant_id, draft_id, exc)
-        return jsonify({'error': 'تعذر تحديث جلسة التحرير', 'error_code': 'LIVE_WRITE_FAILED'}), 500
+        return jsonify({
+            'error': 'تعذر تحديث جلسة التحرير',
+            'error_code': 'LIVE_WRITE_FAILED',
+            'detail': str(exc)
+        }), 500
     return jsonify({
         'success': True,
         'draftId': draft_id,
