@@ -82,6 +82,31 @@ html[lang="en"] .live-collab-badge-container {
   background-color: rgba(23, 200, 227, 0.08);
 }
 
+/* The badge container ignores pointer events so it never blocks the field.
+   The takeover control is the one thing inside it that must be clickable. */
+.live-collab-takeover {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px 4px 0 0;
+  background: #07182C;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+}
+
+.live-collab-takeover:hover {
+  background: #0A829B;
+}
+
 .live-presence-rail {
   display: none !important;
 }

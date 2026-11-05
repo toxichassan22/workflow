@@ -249,6 +249,8 @@ def _run_housekeeping_tick():
         ('cap_resync', _resync_pending_tenant_caps),
         ('trial_watch', _trial_watch_sweep),
         ('stale_cancel_markers', run_control.sweep_stale_cancel_markers),
+        ('draft_snapshots', lambda: db.snapshot_active_drafts(limit=30)),
+        ('draft_history_retention', lambda: db.prune_draft_history(limit=100)),
     )
     for name, fn in steps:
         try:

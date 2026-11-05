@@ -5,6 +5,10 @@
  * the user away from their current section.
  */
     const DRAFT_LIVE_SYNC_INTERVAL_MS = 4000;
+    const DRAFT_LIVE_SYNC_SOLO_MS = 20000;
+    // A lone editor has nobody to follow: polling the draft every four seconds
+    // only burns a request. The live presence poll detects the second person,
+    // and the next schedule falls back to the fast interval.
 
     let draftLiveSyncTimer = null;
     let draftLiveSyncId = '';
@@ -62,7 +66,13 @@
     function scheduleDraftLiveSync() {
       if (!draftLiveSyncId) return;
       if (draftLiveSyncTimer) clearTimeout(draftLiveSyncTimer);
-      draftLiveSyncTimer = setTimeout(pollDraftLiveState, DRAFT_LIVE_SYNC_INTERVAL_MS);
+      const alone = typeof liveCollabSession === 'undefined' || !liveCollabSession
+        || !Array.isArray(liveCollabSession.presence)
+        || liveCollabSession.presence.length === 0;
+      draftLiveSyncTimer = setTimeout(
+        pollDraftLiveState,
+        alone ? DRAFT_LIVE_SYNC_SOLO_MS : DRAFT_LIVE_SYNC_INTERVAL_MS
+      );
     }
 
     async function pollDraftLiveState() {
@@ -96,6 +106,48 @@
       badge.style.background = '#fef3c7';
       badge.style.color = '#92400e';
       badge.innerHTML = WFT('draft_live.pending', 'المسودة اتغيّرت من مستخدم آخر');
+    }
+
+    // A field another person changed in a section this tab is not typing in.
+    // With autosave the whole form must not be rebuilt on every revision: that
+    // moved focus, the caret and every open widget. Text fields are already
+    // handled by the CRDT session; the other controls are written in place.
+    function applyRemoteDraftValues(draftData) {
+      if (!draftData || typeof document === 'undefined' || !document.querySelectorAll) return false;
+      const bound = (typeof liveCollabSession !== 'undefined' && liveCollabSession && liveCollabSession.bindings)
+        ? liveCollabSession.bindings : null;
+      const active = document.activeElement;
+      let changed = false;
+      document.querySelectorAll('#tenantProjectForm [data-key]').forEach(input => {
+        const key = input.getAttribute('data-key');
+        if (!key || (bound && bound.has(key))) return;
+        if (input === active || (active && active.contains && active.contains(input))) return;
+        if (typeof liveCollabFieldEligible === 'function' && liveCollabFieldEligible(input)) return;
+        if (!Object.prototype.hasOwnProperty.call(draftData, key)) return;
+        const value = draftData[key];
+        if (value === null || typeof value === 'object') return;
+        if (input.type === 'radio') return;
+        if (typeof draftApplyingRemote !== 'undefined') draftApplyingRemote = true;
+        try {
+          if (input.type === 'checkbox') {
+            const checked = value === true || value === 'true' || value === 1 || value === '1';
+            if (input.checked === checked) return;
+            input.checked = checked;
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            changed = true;
+            return;
+          }
+          const nextValue = String(value);
+          if (String(input.value) === nextValue) return;
+          input.value = nextValue;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          changed = true;
+        } finally {
+          if (typeof draftApplyingRemote !== 'undefined') draftApplyingRemote = false;
+        }
+      });
+      return changed;
     }
 
     async function applyLiveDraftSync(draftId, newRevision, options = {}) {
@@ -136,6 +188,7 @@
             tenantProjectData.tenantCreativeImages = tenantCreativeImages;
           }
         }
+        const slidesBefore = JSON.stringify(typeof tenantSlidesData !== 'undefined' ? tenantSlidesData : []);
         if (Array.isArray(draftData.tenantSlidesData) && typeof tenantSlidesData !== 'undefined') {
           tenantSlidesData = draftData.tenantSlidesData;
         }
@@ -146,8 +199,15 @@
 
         // Rebuild every section from the incoming payload, not just the plain
         // inputs: the market, financial, timeline, team and visual widgets read
-        // their own state and used to keep showing the previous file.
-        if (typeof hydrateTenantProjectForm === 'function') {
+        // their own state and used to keep showing the previous file. With
+        // autosave the file moves every couple of seconds, so a full rebuild
+        // would steal the focus and the caret on every poll; text already flows
+        // through the CRDT, and the remaining controls are written in place.
+        const autosaveEnabled = typeof DRAFT_AUTOSAVE_ENABLED !== 'undefined'
+          && DRAFT_AUTOSAVE_ENABLED;
+        if (autosaveEnabled) {
+          applyRemoteDraftValues(draftData);
+        } else if (typeof hydrateTenantProjectForm === 'function') {
           hydrateTenantProjectForm(draftData);
         }
 
@@ -164,7 +224,8 @@
           liveApplySessionToForm({ markDirty: false });
         }
 
-        if (typeof renderTenantSlides === 'function') {
+        if (typeof renderTenantSlides === 'function'
+            && JSON.stringify(typeof tenantSlidesData !== 'undefined' ? tenantSlidesData : []) !== slidesBefore) {
           renderTenantSlides();
         }
         if (typeof getTenantNavigationState === 'function'

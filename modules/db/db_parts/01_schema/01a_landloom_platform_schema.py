@@ -303,6 +303,7 @@ def _create_landloom_tables(conn):
         skipped_keys TEXT NOT NULL DEFAULT '[]',
         skipped_digests TEXT NOT NULL DEFAULT '{}',
         patch TEXT NOT NULL DEFAULT '{}',
+        pinned INTEGER NOT NULL DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now'))
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_commits_draft ON draft_commits(draft_id, revision DESC, created_at DESC)')
@@ -370,10 +371,28 @@ def _create_landloom_tables(conn):
         section_key TEXT,
         caret_start INTEGER,
         caret_end INTEGER,
+        lock_at TEXT,
         updated_at TEXT,
         PRIMARY KEY (document_id, client_id)
     )''')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_live_presence_doc ON draft_live_presence(document_id, updated_at)')
+
+    # The open autosave window of a project file. Live patches write the draft
+    # row continuously, but the history keeps one commit per window instead of
+    # one per patch: from_values holds the value each changed key had when the
+    # window opened, so the commit that closes it carries the whole difference.
+    conn.execute('''CREATE TABLE IF NOT EXISTS draft_autosave_windows (
+        draft_id TEXT PRIMARY KEY REFERENCES project_drafts(id) ON DELETE CASCADE,
+        tenant_id TEXT NOT NULL,
+        base_revision INTEGER NOT NULL DEFAULT 0,
+        author_id TEXT,
+        author_name TEXT,
+        changed_keys TEXT NOT NULL DEFAULT '[]',
+        from_values TEXT NOT NULL DEFAULT '{}',
+        started_at TEXT NOT NULL,
+        last_save_at TEXT NOT NULL
+    )''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_draft_autosave_windows_tenant ON draft_autosave_windows(tenant_id, last_save_at)')
 
 
 def _ensure_landloom_columns(conn):
@@ -390,6 +409,13 @@ def _ensure_landloom_columns(conn):
 
     _add('users', 'last_login_at', 'last_login_at TEXT')
     _add('tenants', 'last_login_at', 'last_login_at TEXT')
+
+    # A pinned commit is never pruned: approved versions and the states
+    # immediately before/after an AI generation stay restorable forever.
+    _add('draft_commits', 'pinned', 'pinned INTEGER NOT NULL DEFAULT 0')
+    # The soft lock of a non-text control rides the presence row: lock_at is
+    # set on focus/takeover and survives the heartbeat that refreshes updated_at.
+    _add('draft_live_presence', 'lock_at', 'lock_at TEXT')
 
     # t21: an invite carries the pre-assigned identity and scope, plus the
     # delivery state of its email so a failed send can be retried.

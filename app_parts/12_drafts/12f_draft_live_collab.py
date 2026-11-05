@@ -86,7 +86,7 @@ def _live_decode_payload(value, max_bytes=LIVE_MAX_UPDATE_BYTES):
 def _live_presence_rows(conn, document_id, client_id):
     rows = conn.execute(
         '''SELECT client_id, user_id, user_name, field_key, section_key,
-                  caret_start, caret_end, updated_at
+                  caret_start, caret_end, lock_at, updated_at
            FROM draft_live_presence
            WHERE document_id = ? AND tenant_id = ? AND updated_at >= ?
            ORDER BY updated_at DESC''',
@@ -100,6 +100,26 @@ def _live_presence_rows(conn, document_id, client_id):
         item.pop('client_id', None)
         presence.append(item)
     return presence
+
+
+def _live_self_presence(conn, document_id, client_id):
+    """The caller's own row, so a lock holder can outrank an older lock."""
+    if not client_id:
+        return None
+    row = conn.execute(
+        '''SELECT client_id, user_id, user_name, field_key, section_key,
+                  caret_start, caret_end, lock_at, updated_at
+           FROM draft_live_presence
+           WHERE document_id = ? AND tenant_id = ? AND client_id = ?
+             AND updated_at >= ?''',
+        (document_id, g.tenant_id, client_id, _live_cutoff())
+    ).fetchone()
+    if not row:
+        return None
+    item = dict(row)
+    item.pop('client_id', None)
+    item['self'] = True
+    return item
 
 
 @app.route('/api/project-draft/<draft_id>/live', methods=['GET'])
@@ -131,6 +151,7 @@ def api_draft_live_read(draft_id):
             'baseRevision': int(draft.get('revision') or 0),
             'updates': [],
             'presence': [],
+            'selfPresence': None,
             'hasMore': False,
         })
     document = dict(document)
@@ -161,6 +182,7 @@ def api_draft_live_read(draft_id):
         'updatedAt': document.get('updated_at') or '',
         'updates': updates,
         'presence': _live_presence_rows(conn, draft_id, client_id),
+        'selfPresence': _live_self_presence(conn, draft_id, client_id),
         'hasMore': has_more,
     })
 
@@ -301,12 +323,14 @@ def api_draft_live_write(draft_id):
                     str(presence.get('sectionKey') or '')[:120] or None,
                     _live_clamped_int(presence.get('caretStart')),
                     _live_clamped_int(presence.get('caretEnd')),
+                    now if presence.get('lockAt') else None,
                     now,
                 )
                 changed = conn.execute(
                     '''UPDATE draft_live_presence
                        SET tenant_id = ?, user_id = ?, user_name = ?, field_key = ?,
-                           section_key = ?, caret_start = ?, caret_end = ?, updated_at = ?
+                           section_key = ?, caret_start = ?, caret_end = ?,
+                           lock_at = COALESCE(?, lock_at), updated_at = ?
                        WHERE document_id = ? AND client_id = ?''',
                     (g.tenant_id, _live_actor(), _live_actor_name()) + values + (draft_id, client_id)
                 ).rowcount
@@ -314,8 +338,8 @@ def api_draft_live_write(draft_id):
                     conn.execute(
                         '''INSERT INTO draft_live_presence
                            (document_id, client_id, tenant_id, user_id, user_name,
-                            field_key, section_key, caret_start, caret_end, updated_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                            field_key, section_key, caret_start, caret_end, lock_at, updated_at)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
                         (draft_id, client_id, g.tenant_id, _live_actor(), _live_actor_name()) + values
                     )
         conn.commit()
@@ -340,6 +364,7 @@ def api_draft_live_write(draft_id):
                             (document.get('base_revision') if document else 0) or 0),
         'updates': [],
         'presence': [],
+        'selfPresence': _live_self_presence(conn, draft_id, client_id),
     })
 
 

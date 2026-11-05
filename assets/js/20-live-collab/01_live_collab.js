@@ -17,6 +17,7 @@
  */
 
 const LIVE_COLLAB_ACTIVE_POLL_MS = 800;
+const LIVE_COLLAB_SOLO_POLL_MS = 8000;
 const LIVE_COLLAB_IDLE_POLL_MS = 4000;
 const LIVE_COLLAB_IDLE_AFTER_MS = 120000;
 const LIVE_COLLAB_FLUSH_MS = 350;
@@ -24,6 +25,10 @@ const LIVE_COLLAB_HEARTBEAT_MS = 3000;
 const LIVE_COLLAB_SNAPSHOT_MS = 90000;
 const LIVE_COLLAB_SNAPSHOT_UPDATES = 120;
 const LIVE_COLLAB_PRESENCE_TTL_MS = 20000;
+// A non-text control (select, number, date, checkbox) cannot merge two values
+// the way the CRDT merges text, so the newest focus owns it. The lock rides the
+// presence row: lock_at is written on focus/takeover, updated_at keeps it alive.
+const LIVE_COLLAB_LOCK_TTL_MS = 15000;
 // The server drops a presence row after 20 seconds. An open tab therefore has
 // to repeat "still here" while the person reads or thinks instead of typing,
 // or they vanish from the others' screen mid-session.
@@ -227,6 +232,7 @@ async function liveCollabLoadInitialState(session) {
     }
     liveCollabBindFields();
     liveCollabApplySessionToForm({ markDirty: Boolean(resp.hasSession) });
+    session.selfPresence = resp.selfPresence || null;
     liveCollabRenderPresence(resp.presence || []);
   } catch (e) {
     liveCollabBindFields();
@@ -351,7 +357,8 @@ function liveCollabApplyRemoteValue(input, value) {
   }
   input.classList.add('live-field-updated');
   setTimeout(() => { try { input.classList.remove('live-field-updated'); } catch (e) {} }, 900);
-  if (typeof setDraftDirty === 'function') setDraftDirty(true);
+  // A remote edit belongs to the session that typed it. Marking it dirty here
+  // made the receiver autosave the same text back, which echoed between tabs.
 }
 
 function liveCollabApplySessionToForm(options = {}) {
@@ -426,7 +433,17 @@ function liveCollabInstallListeners(session) {
   add(document, 'focusin', event => {
     const current = liveCollabSession;
     if (!current || current !== session) return;
+    const target = event.target;
     current.lastActivityAt = Date.now();
+    if (target && target.dataset && target.dataset.key && liveCollabPresenceEligible(target)) {
+      if (current.bindings.has(target.dataset.key)) {
+        current.lockFieldKey = '';
+        current.lockTakeover = false;
+      } else {
+        current.lockFieldKey = target.dataset.key;
+        current.lockTakeover = true;
+      }
+    }
     liveCollabPresenceSoon();
   }, true);
   add(document, 'selectionchange', () => {
@@ -526,7 +543,8 @@ function liveCollabCurrentPresence(session) {
     const section = active.closest('.tenant-form-section');
     if (section && section.dataset) sectionKey = section.dataset.section || '';
   }
-  return { fieldKey, sectionKey, caretStart, caretEnd };
+  const lockAt = Boolean(fieldKey && session.lockFieldKey === fieldKey && session.lockTakeover);
+  return { fieldKey, sectionKey, caretStart, caretEnd, lockAt };
 }
 
 // The visible name of the field, so the rail says what the person is working
@@ -638,6 +656,8 @@ async function liveCollabFlush(forcePresence) {
       return;
     }
     session.lastPresenceSentAt = now;
+    if (session.lockTakeover) session.lockTakeover = false;
+    if (resp.selfPresence) session.selfPresence = resp.selfPresence;
     if (resp.baseRevision && Number(resp.baseRevision) > 0) {
       session.serverBaseRevision = Number(resp.baseRevision);
     }
@@ -692,6 +712,7 @@ async function liveCollabPoll() {
       const nextSeq = Number(resp.seq) || 0;
       if (nextSeq > session.lastSeq) session.lastSeq = nextSeq;
       hasMore = Boolean(resp.hasMore);
+      session.selfPresence = resp.selfPresence || null;
       liveCollabRenderPresence(resp.presence || []);
     }
   } catch (e) {
@@ -708,7 +729,10 @@ async function liveCollabPoll() {
     return;
   }
   const idle = Date.now() - session.lastActivityAt > LIVE_COLLAB_IDLE_AFTER_MS;
-  liveCollabSchedulePoll(idle ? LIVE_COLLAB_IDLE_POLL_MS : LIVE_COLLAB_ACTIVE_POLL_MS);
+  const alone = !session.presence.length;
+  const delay = idle ? LIVE_COLLAB_IDLE_POLL_MS
+    : (alone ? LIVE_COLLAB_SOLO_POLL_MS : LIVE_COLLAB_ACTIVE_POLL_MS);
+  liveCollabSchedulePoll(delay);
 }
 
 function liveCollabUserColor(name) {
@@ -811,6 +835,35 @@ function liveCollabIsSelfActive(targetEl, entry) {
   return false;
 }
 
+function liveCollabUtcTime(value) {
+  const text = String(value || '');
+  if (!text) return 0;
+  return Date.parse(/[zZ]|[+-]\d\d:\d\d$/.test(text) ? text : text + 'Z');
+}
+
+function liveCollabIsSelfEntry(entry) {
+  const myName = (typeof tenantUser !== 'undefined' && tenantUser
+    && (tenantUser._userName || tenantUser.companyName)) || '';
+  if (!myName || !entry || !entry.user_name) return false;
+  return String(entry.user_name).trim().toLowerCase() === String(myName).trim().toLowerCase();
+}
+
+function liveCollabTakeover(fieldKey) {
+  const session = liveCollabSession;
+  if (!session || session.stopped || !fieldKey) return;
+  const input = liveCollabFindFieldInput(session, fieldKey);
+  if (input) {
+    input.disabled = false;
+    input.removeAttribute('data-live-locked');
+    try { input.focus(); } catch (e) {}
+  }
+  session.lockFieldKey = fieldKey;
+  session.lockTakeover = true;
+  // Send the new lock_at at once: waiting for the debounce lets the next poll
+  // re-disable the field under the person who just asked for it.
+  liveCollabFlush(true);
+}
+
 function liveCollabRenderCarets() {
   const session = liveCollabSession;
   if (!session || session.stopped) return;
@@ -821,6 +874,10 @@ function liveCollabRenderCarets() {
     document.querySelectorAll('.live-field-collaborator').forEach(node => {
       node.classList.remove('live-field-collaborator');
       if (node.style && node.style.removeProperty) node.style.removeProperty('--collab-tint');
+    });
+    document.querySelectorAll('[data-live-locked="1"]').forEach(node => {
+      node.disabled = false;
+      node.removeAttribute('data-live-locked');
     });
   }
 
@@ -838,15 +895,40 @@ function liveCollabRenderCarets() {
     const targetEl = liveCollabGetTargetElement(rawInput);
     if (!targetEl || !targetEl.isConnected) return;
 
-    // Filter out presence from self if currently focused on this exact field
     const entries = byField[key].filter(entry => !liveCollabIsSelfActive(targetEl, entry));
-    if (!entries.length) return;
+    const isText = session.bindings.has(key);
+    let lockOwner = null;
+    let lockedByOther = false;
+    if (!isText) {
+      const now = Date.now();
+      const candidates = byField[key]
+        .filter(entry => entry.lock_at
+          && (now - liveCollabUtcTime(entry.updated_at)) < LIVE_COLLAB_LOCK_TTL_MS);
+      // This tab's own row is filtered out of the shared presence list, so it
+      // has to join the arbitration explicitly — otherwise a takeover would
+      // lose to the lock it just replaced.
+      const selfRow = session.selfPresence;
+      if (selfRow && selfRow.field_key === key && selfRow.lock_at
+          && (now - liveCollabUtcTime(selfRow.updated_at)) < LIVE_COLLAB_LOCK_TTL_MS) {
+        candidates.push(selfRow);
+      }
+      candidates.sort((a, b) => liveCollabUtcTime(b.lock_at) - liveCollabUtcTime(a.lock_at));
+      lockOwner = candidates[0] || null;
+      lockedByOther = Boolean(lockOwner && !lockOwner.self && !liveCollabIsSelfEntry(lockOwner));
+    }
+    if (lockedByOther) {
+      rawInput.disabled = true;
+      rawInput.setAttribute('data-live-locked', '1');
+    }
+    if (!entries.length && !lockedByOther) return;
 
-    liveCollabRenderFieldCarets(targetEl, entries);
+    liveCollabRenderFieldCarets(targetEl, entries, {
+      isText, lockOwner, lockedByOther, fieldKey: key
+    });
   });
 }
 
-function liveCollabRenderFieldCarets(targetEl, entries) {
+function liveCollabRenderFieldCarets(targetEl, entries, options = {}) {
   const parent = targetEl.parentElement;
   if (!parent) return;
   const computed = typeof getComputedStyle === 'function' ? getComputedStyle(parent) : null;
@@ -908,6 +990,20 @@ function liveCollabRenderFieldCarets(targetEl, entries) {
     badge.textContent = name;
     badgeContainer.appendChild(badge);
   });
+  if (!options.isText && options.lockedByOther && options.fieldKey) {
+    const takeover = document.createElement('button');
+    takeover.type = 'button';
+    takeover.className = 'live-collab-takeover';
+    takeover.textContent = (typeof WFT === 'function')
+      ? WFT('draft_live.takeover', 'سحب التعديل')
+      : 'سحب التعديل';
+    takeover.addEventListener('click', event => {
+      event.preventDefault();
+      event.stopPropagation();
+      liveCollabTakeover(options.fieldKey);
+    });
+    badgeContainer.appendChild(takeover);
+  }
   if (badgeContainer.hasChildNodes && badgeContainer.hasChildNodes()) {
     layer.appendChild(badgeContainer);
   }

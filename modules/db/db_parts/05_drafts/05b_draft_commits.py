@@ -27,6 +27,7 @@ draft, empty overwrite, revision conflict) leaves no commit behind.
 import base64
 import hashlib
 import zlib
+from datetime import datetime, timedelta
 
 # A value above this size is compressed before it enters the history. The old
 # rule skipped it outright, so the study model, the market data and the visual
@@ -143,7 +144,8 @@ def draft_commit_patch(old_data, new_data):
 
 def record_draft_commit(tenant_id, draft_id, revision, patch, skipped=None,
                         author_id=None, author_name=None, message=None,
-                        kind='save', parent_id=None, skipped_digests=None):
+                        kind='save', parent_id=None, skipped_digests=None,
+                        pinned=False):
     """Store one commit of a draft and return its id."""
     conn = get_db()
     if parent_id is None:
@@ -158,14 +160,15 @@ def record_draft_commit(tenant_id, draft_id, revision, patch, skipped=None,
         '''INSERT INTO draft_commits
            (id, tenant_id, draft_id, parent_id, revision, kind, message,
             author_id, author_name, changed_keys, skipped_keys, skipped_digests,
-            patch, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            patch, pinned, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
         (commit_id, tenant_id, draft_id, parent_id, int(revision or 0), kind or 'save',
          (message or '').strip() or None, author_id or None, author_name or None,
          json.dumps(sorted(patch.keys()), ensure_ascii=False),
          json.dumps(sorted(skipped or []), ensure_ascii=False),
          json.dumps(skipped_digests or {}, ensure_ascii=False),
-         json.dumps(patch, ensure_ascii=False), _utcnow().isoformat())
+         json.dumps(patch, ensure_ascii=False), 1 if pinned else 0,
+         _utcnow().isoformat())
     )
     conn.commit()
     return commit_id
@@ -175,7 +178,7 @@ def list_draft_commits(tenant_id, draft_id, limit=100):
     """The commit chain of a draft, newest first (the patch is left out)."""
     rows = get_db().execute(
         '''SELECT id, parent_id, revision, kind, message, author_id, author_name,
-                  changed_keys, skipped_keys, created_at
+                  changed_keys, skipped_keys, pinned, created_at
            FROM draft_commits WHERE tenant_id = ? AND draft_id = ?
            ORDER BY revision DESC, created_at DESC, rowid DESC LIMIT ?''',
         (tenant_id, draft_id, int(limit))
@@ -216,7 +219,7 @@ def get_draft_commit(tenant_id, draft_id, commit_id):
 def draft_commit_chain(tenant_id, draft_id):
     """Every commit of a draft, oldest first — the order a replay follows."""
     rows = get_db().execute(
-        '''SELECT id, revision, patch, skipped_keys, skipped_digests FROM draft_commits
+        '''SELECT id, revision, kind, patch, skipped_keys, skipped_digests FROM draft_commits
            WHERE tenant_id = ? AND draft_id = ?
            ORDER BY revision ASC, created_at ASC, rowid ASC''',
         (tenant_id, draft_id)
@@ -258,6 +261,12 @@ def draft_state_at_commit(tenant_id, draft_id, commit_id):
     exact = {}
     digests = {}
     for item in chain[:target_index + 1]:
+        if item.get('kind') == 'snapshot':
+            # A snapshot is a new base: replay starts from it, so the deltas
+            # before it are no longer needed to rebuild this version.
+            state.clear()
+            exact.clear()
+            digests.clear()
         for key, change in (item.get('patch') or {}).items():
             _draft_commit_apply(state, key, change.get('to'))
             exact[key] = True
@@ -267,6 +276,8 @@ def draft_state_at_commit(tenant_id, draft_id, commit_id):
             digests[key] = (hashes or {}).get('to') or DRAFT_COMMIT_ABSENT_DIGEST
     seen_after = set()
     for item in chain[target_index + 1:]:
+        if item.get('kind') == 'snapshot':
+            continue
         for key, change in (item.get('patch') or {}).items():
             if key in exact or key in seen_after:
                 continue
@@ -360,10 +371,17 @@ def save_project_draft(*args, **kwargs):
     The commit is written only after the save succeeded, so a refused write
     never shows up in the history. A failure to write the history never fails
     the save: the project file matters more than its log.
+
+    ``defer_commit=True`` is for the autosave patch path: the row is written
+    now, and the commit is left to the open autosave window so a save every
+    few seconds cannot mint a commit every few seconds.
     """
+    defer_commit = bool(kwargs.pop('defer_commit', False))
     meta = {key: kwargs.pop(key) for key in _COMMIT_META_KEYS if key in kwargs}
     before_data, before_id = _draft_state_before_save(args, kwargs)
     result = _save_project_draft_impl(*args, **kwargs)
+    if defer_commit:
+        return result
     try:
         _record_save_commit(args, kwargs, meta, before_data, before_id, result)
     except Exception as exc:  # history must never break a save
@@ -426,3 +444,279 @@ def _record_save_commit(args, kwargs, meta, before_data, before_id, result):
         kind=meta.get('commit_kind') or 'save',
         skipped_digests=skipped_digests,
     )
+
+
+# ── The autosave window ─────────────────────────────────────────────────────
+# The draft row is written every few seconds while people type. History is not:
+# one window collects the difference, and the commit that closes it is the one
+# version the team can restore. A window closes after 60 seconds of active
+# saving, after 30 seconds without a save, or when the client says it went idle.
+
+AUTOSAVE_WINDOW_ACTIVE_SECONDS = 60
+AUTOSAVE_WINDOW_IDLE_SECONDS = 30
+
+
+def _autosave_window_row(tenant_id, draft_id):
+    return get_db().execute(
+        'SELECT * FROM draft_autosave_windows WHERE draft_id = ? AND tenant_id = ?',
+        (draft_id, tenant_id)
+    ).fetchone()
+
+
+def _autosave_window_expired(row, now=None):
+    """A window older than its active life, or idle for too long, is closed."""
+    now = now or _utcnow()
+    try:
+        started = datetime.fromisoformat(str(row.get('started_at')))
+        last = datetime.fromisoformat(str(row.get('last_save_at')))
+    except (TypeError, ValueError):
+        return True
+    return ((now - started).total_seconds() >= AUTOSAVE_WINDOW_ACTIVE_SECONDS
+            or (now - last).total_seconds() >= AUTOSAVE_WINDOW_IDLE_SECONDS)
+
+
+def _autosave_from_value(data, key):
+    if key in data:
+        return _draft_commit_encode(data[key])
+    return {DRAFT_COMMIT_DELETED: True}
+
+
+def autosave_window_begin(tenant_id, draft_id, base_revision, previous_data,
+                          patch_keys, author_id=None, author_name=None):
+    """Open or extend the commit window; returns the window and any closed one."""
+    now = _utcnow()
+    conn = get_db()
+    row = _autosave_window_row(tenant_id, draft_id)
+    closed = None
+    if row and _autosave_window_expired(dict(row), now):
+        closed = autosave_window_close(tenant_id, draft_id, kind='autosave')
+        row = None
+    previous_data = previous_data if isinstance(previous_data, dict) else {}
+    keys = sorted({str(key) for key in (patch_keys or []) if key})
+    if not row:
+        from_values = {key: _autosave_from_value(previous_data, key) for key in keys}
+        conn.execute(
+            '''INSERT INTO draft_autosave_windows
+               (draft_id, tenant_id, base_revision, author_id, author_name,
+                changed_keys, from_values, started_at, last_save_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+            (draft_id, tenant_id, int(base_revision or 0), author_id, author_name,
+             json.dumps(keys, ensure_ascii=False),
+             json.dumps(from_values, ensure_ascii=False),
+             now.isoformat(), now.isoformat()))
+        conn.commit()
+        return {'opened': True, 'changedKeys': keys, 'closed': closed}
+    from_values = _json_object(row['from_values'])
+    for key in keys:
+        if key not in from_values:
+            from_values[key] = _autosave_from_value(previous_data, key)
+    keys = sorted(set(_draft_commit_json_list(row['changed_keys'])) | set(keys))
+    conn.execute(
+        '''UPDATE draft_autosave_windows
+           SET changed_keys = ?, from_values = ?, last_save_at = ?,
+               author_id = COALESCE(?, author_id), author_name = COALESCE(?, author_name)
+           WHERE draft_id = ? AND tenant_id = ?''',
+        (json.dumps(keys, ensure_ascii=False), json.dumps(from_values, ensure_ascii=False),
+         now.isoformat(), author_id, author_name, draft_id, tenant_id))
+    conn.commit()
+    return {'opened': False, 'changedKeys': keys, 'closed': closed}
+
+
+def autosave_window_close(tenant_id, draft_id, kind='autosave', message=None, pinned=False):
+    """Close the open window and write its one commit (or nothing if unchanged)."""
+    row = _autosave_window_row(tenant_id, draft_id)
+    if not row:
+        return None
+    row = dict(row)
+    draft = get_project_draft_by_id(tenant_id, draft_id)
+    if not draft:
+        return None
+    current = draft.get('draft_data') or {}
+    from_values = _json_object(row.get('from_values'))
+    keys = _draft_commit_json_list(row.get('changed_keys'))
+    patch = {}
+    before = {}
+    after = {}
+    for key in keys:
+        from_present = key in from_values
+        stored_from = from_values.get(key)
+        before_value = _draft_commit_decode(stored_from) if from_present else None
+        to_present = key in current
+        after_value = current.get(key) if to_present else None
+        if from_present == to_present and (not from_present or before_value == after_value):
+            continue
+        patch[key] = {
+            'from': stored_from if from_present else {DRAFT_COMMIT_DELETED: True},
+            'to': _draft_commit_encode(after_value) if to_present
+                  else {DRAFT_COMMIT_DELETED: True},
+        }
+        if from_present:
+            before[key] = before_value
+        if to_present:
+            after[key] = after_value
+    result = {
+        'changedKeys': sorted(patch.keys()),
+        'before': before,
+        'after': after,
+        'revision': int(draft.get('revision') or 0),
+        'commitId': None,
+    }
+    if patch:
+        result['commitId'] = record_draft_commit(
+            tenant_id, draft_id, result['revision'], patch,
+            author_id=row.get('author_id'), author_name=row.get('author_name'),
+            message=message, kind=kind or 'autosave', pinned=pinned)
+    get_db().execute(
+        'DELETE FROM draft_autosave_windows WHERE draft_id = ? AND tenant_id = ?',
+        (draft_id, tenant_id))
+    get_db().commit()
+    return result
+
+
+def publish_live_base_revision(tenant_id, draft_id, revision):
+    """Expose the saved revision to the live GET so a second poll is unnecessary."""
+    conn = get_db()
+    conn.execute(
+        'UPDATE draft_live_documents SET base_revision = ? WHERE id = ? AND tenant_id = ?',
+        (int(revision or 0), draft_id, tenant_id)
+    )
+    conn.commit()
+
+
+# ── Daily snapshots and retention ───────────────────────────────────────────
+# A snapshot is a full-state commit: replay resets to it, so the deltas before
+# it can be dropped without breaking any version at or after the snapshot.
+
+DRAFT_SNAPSHOT_HOURS = 24
+DRAFT_HISTORY_DETAILED_DAYS = 7
+DRAFT_HISTORY_SNAPSHOT_DAYS = 30
+
+
+def write_draft_snapshot(tenant_id, draft_id, kind='snapshot', message=None, pinned=False):
+    """Write the current payload as one full-state commit."""
+    draft = get_project_draft_by_id(tenant_id, draft_id)
+    if not draft:
+        return None
+    data = draft.get('draft_data') or {}
+    patch = {}
+    skipped = []
+    skipped_digests = {}
+    for key, value in data.items():
+        if key in DRAFT_COMMIT_EXCLUDED_KEYS:
+            continue
+        encoded = _draft_commit_encode(value)
+        size = len(_draft_commit_json(encoded).encode('utf-8'))
+        if size > DRAFT_COMMIT_MAX_STORED_BYTES:
+            skipped.append(key)
+            skipped_digests[key] = {
+                'from': DRAFT_COMMIT_ABSENT_DIGEST,
+                'to': _draft_commit_digest(value),
+            }
+            continue
+        patch[key] = {
+            'from': {DRAFT_COMMIT_DELETED: True},
+            'to': encoded,
+        }
+    if not patch and not skipped:
+        return None
+    return record_draft_commit(
+        tenant_id, draft_id, int(draft.get('revision') or 0), patch, skipped,
+        message=message, kind=kind or 'snapshot', pinned=pinned,
+        skipped_digests=skipped_digests)
+
+
+def draft_snapshot_due(tenant_id, draft_id, now=None, hours=DRAFT_SNAPSHOT_HOURS):
+    row = get_db().execute(
+        '''SELECT created_at FROM draft_commits
+           WHERE tenant_id = ? AND draft_id = ? AND kind = 'snapshot'
+           ORDER BY created_at DESC, rowid DESC LIMIT 1''',
+        (tenant_id, draft_id)
+    ).fetchone()
+    if not row:
+        return True
+    try:
+        last = datetime.fromisoformat(str(row['created_at']))
+    except (TypeError, ValueError):
+        return True
+    return (now or _utcnow()) - last >= timedelta(hours=hours)
+
+
+def snapshot_active_drafts(limit=50):
+    """Give every draft touched in the last day a daily restore point."""
+    cutoff = (_utcnow() - timedelta(hours=DRAFT_SNAPSHOT_HOURS)).isoformat()
+    rows = get_db().execute(
+        '''SELECT id, tenant_id FROM project_drafts
+           WHERE updated_at >= ? ORDER BY updated_at DESC LIMIT ?''',
+        (cutoff, int(limit))
+    ).fetchall()
+    written = 0
+    for row in rows:
+        try:
+            if draft_snapshot_due(row['tenant_id'], row['id']):
+                if write_draft_snapshot(row['tenant_id'], row['id'], kind='snapshot',
+                                        message='نسخة يومية'):
+                    written += 1
+        except Exception as exc:
+            print(f'[DRAFT SNAPSHOT] could not snapshot {row["id"]}: {exc}')
+    return written
+
+
+def prune_draft_history(retain_detailed_days=DRAFT_HISTORY_DETAILED_DAYS,
+                        retain_snapshot_days=DRAFT_HISTORY_SNAPSHOT_DAYS,
+                        limit=200):
+    """Drop detailed deltas older than the window, keeping a snapshot base.
+
+    Commits at or after the oldest pinned commit are never touched, and the
+    newest snapshot older than the detailed window stays as the replay base.
+    """
+    now = _utcnow()
+    detailed_cutoff = now - timedelta(days=retain_detailed_days)
+    snapshot_cutoff = now - timedelta(days=retain_snapshot_days)
+    conn = get_db()
+    drafts = conn.execute(
+        'SELECT DISTINCT tenant_id, draft_id FROM draft_commits LIMIT ?',
+        (int(limit),)
+    ).fetchall()
+    deleted = 0
+    for row in drafts:
+        tenant_id = row['tenant_id']
+        draft_id = row['draft_id']
+        pinned = conn.execute(
+            '''SELECT MIN(created_at) FROM draft_commits
+               WHERE tenant_id = ? AND draft_id = ? AND pinned = 1''',
+            (tenant_id, draft_id)
+        ).fetchone()
+        keep_from = pinned[0] if pinned and pinned[0] else None
+        base = conn.execute(
+            '''SELECT id, created_at FROM draft_commits
+               WHERE tenant_id = ? AND draft_id = ? AND kind = 'snapshot'
+                 AND created_at <= ?
+               ORDER BY created_at DESC, rowid DESC LIMIT 1''',
+            (tenant_id, draft_id, detailed_cutoff.isoformat())
+        ).fetchone()
+        if not base:
+            continue
+        params = [tenant_id, draft_id, base['created_at']]
+        sql = ('''DELETE FROM draft_commits
+                  WHERE tenant_id = ? AND draft_id = ? AND kind <> 'snapshot'
+                    AND pinned = 0 AND created_at < ?''')
+        if keep_from:
+            sql += ' AND created_at < ?'
+            params.append(keep_from)
+        deleted += conn.execute(sql, params).rowcount
+        old_snapshots = conn.execute(
+            '''SELECT id, created_at FROM draft_commits
+               WHERE tenant_id = ? AND draft_id = ? AND kind = 'snapshot'
+                 AND pinned = 0 AND created_at < ? AND id <> ?
+               ORDER BY created_at ASC''',
+            (tenant_id, draft_id, snapshot_cutoff.isoformat(), base['id'])
+        ).fetchall()
+        for snapshot in old_snapshots:
+            if keep_from and snapshot['created_at'] >= keep_from:
+                continue
+            deleted += conn.execute(
+                'DELETE FROM draft_commits WHERE id = ? AND tenant_id = ? AND draft_id = ?',
+                (snapshot['id'], tenant_id, draft_id)
+            ).rowcount
+    conn.commit()
+    return deleted

@@ -151,6 +151,19 @@ def api_save_project_draft():
             'error_code': 'DRAFT_REVISION_REQUIRED',
             'currentRevision': int(previous.get('revision') or 0),
         }), 409
+    # An open autosave window closes before the full save writes its own commit,
+    # or the same work would appear in two versions with overlapping diffs.
+    if save_draft_id:
+        try:
+            autosave_closed = db.autosave_window_close(
+                g.tenant_id, save_draft_id, kind='autosave')
+            if autosave_closed and autosave_closed.get('commitId'):
+                _record_draft_save_change(
+                    save_draft_id, autosave_closed.get('before') or {},
+                    autosave_closed.get('after') or {}, {}, {},
+                    {'id': save_draft_id})
+        except Exception:
+            pass
     try:
         draft_id = db.save_project_draft(
             g.tenant_id, _project_draft_actor_id(), draft_data, section_statuses, status,
@@ -219,6 +232,10 @@ def api_save_project_draft():
         (draft_id, g.tenant_id)).fetchone()
     if saved_row:
         saved_revision = int(saved_row['revision'] or 0)
+        try:
+            db.publish_live_base_revision(g.tenant_id, draft_id, saved_revision)
+        except Exception:
+            pass
         # The stored map is the truth after snapshot staleness voided an
         # approval — sending it back lets the caller's badges catch up instead
         # of still showing a section as approved until the next reload.

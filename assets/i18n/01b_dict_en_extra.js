@@ -32,6 +32,7 @@ window.__WFI18N_EN = Object.assign(window.__WFI18N_EN || {}, /*I18N_EN_BEGIN*/{
   "draft_merge.keep_mine": "My version",
   "draft_live.updated": "Project file updated",
   "draft_live.pending": "Another user changed the file",
+  "draft_live.takeover": "Take over editing",
   "draft_live.pending_toast": "Someone else changed the file — your save will merge with theirs",
   "draft_versions.title": "Project versions",
   "draft_versions.button": "Versions",

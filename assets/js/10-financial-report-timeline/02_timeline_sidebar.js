@@ -137,30 +137,247 @@
       if (ib && !ib.classList.contains('tgr-hidden')) renderGlobalRailInputs();
     }
 
+    const DRAFT_AUTOSAVE_ENABLED = true;
+    const DRAFT_AUTOSAVE_DEBOUNCE_MS = 1200;
+    const DRAFT_AUTOSAVE_IDLE_MS = 30000;
+    const DRAFT_AUTOSAVE_RETRY_MS = 10000;
+    // Slides, the designer chat and the derived page map have their own save
+    // flows; autosaving them every couple of seconds would send the deck with
+    // every keystroke for no benefit.
+    const DRAFT_AUTOSAVE_EXCLUDED_KEYS = new Set([
+      'draftId', 'draft_id', 'tenantSlidesData', 'tenantSlidePlan',
+      'slide_generation_checkpoint', 'designerChat', 'pageDrafts'
+    ]);
+    let draftAutosaveTimer = null;
+    let draftAutosaveIdleTimer = null;
+    let draftAutosaveRetryTimer = null;
+    let draftAutosaveInFlight = false;
+    let draftAutosaveAgain = false;
+    let draftAutosaveFailed = false;
+    let draftApplyingRemote = false;
+
     function triggerAutoSaveDraft() {
+      if (typeof liveCollabSession !== 'undefined' && liveCollabSession
+          && liveCollabSession.applyingRemote) return;
+      if (draftApplyingRemote) return;
+      const form = document.getElementById('tenantProjectForm');
+      if (form && form.dataset && form.dataset.projectFormFilled !== '1') return;
       setDraftDirty(true);
+      scheduleDraftAutosave();
     }
 
     // Nothing is saved silently any more, so warn before the tab is closed with pending edits.
+    // With autosave the window is a second at most, and a text edit already lives in the
+    // live session, so a prompt on every tab close would only punish the normal flow.
     window.addEventListener('beforeunload', event => {
-      if (!tenantDraftDirty) return;
+      if (!tenantDraftDirty || DRAFT_AUTOSAVE_ENABLED) return;
       event.preventDefault();
       event.returnValue = '';
       return '';
     });
+
+    function scheduleDraftAutosave() {
+      if (!DRAFT_AUTOSAVE_ENABLED) return;
+      if (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation') return;
+      if (!document.getElementById('tenantProjectForm')) return;
+      clearTimeout(draftAutosaveTimer);
+      draftAutosaveTimer = setTimeout(() => {
+        draftAutosaveTimer = null;
+        runDraftAutosave();
+      }, DRAFT_AUTOSAVE_DEBOUNCE_MS);
+      clearTimeout(draftAutosaveIdleTimer);
+      draftAutosaveIdleTimer = setTimeout(() => {
+        draftAutosaveIdleTimer = null;
+        closeDraftAutosaveWindow();
+      }, DRAFT_AUTOSAVE_IDLE_MS);
+    }
+
+    async function runDraftAutosave() {
+      if (draftAutosaveInFlight || !tenantDraftDirty) return;
+      if (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation') return;
+      draftAutosaveInFlight = true;
+      try {
+        const ok = await saveProjectAsDraft(true, false, false, null, { autosavePatch: true });
+        draftAutosaveFailed = !ok;
+      } catch (error) {
+        draftAutosaveFailed = true;
+        console.error('[DRAFT AUTOSAVE]', error);
+      } finally {
+        draftAutosaveInFlight = false;
+        if (draftAutosaveAgain) {
+          draftAutosaveAgain = false;
+          scheduleDraftAutosave();
+        } else if (draftAutosaveFailed && tenantDraftDirty) {
+          clearTimeout(draftAutosaveRetryTimer);
+          draftAutosaveRetryTimer = setTimeout(() => {
+            draftAutosaveRetryTimer = null;
+            runDraftAutosave();
+          }, DRAFT_AUTOSAVE_RETRY_MS);
+        }
+      }
+    }
+
+    async function closeDraftAutosaveWindow() {
+      if (!DRAFT_AUTOSAVE_ENABLED || tenantDraftDirty || draftAutosaveInFlight) return;
+      const draftId = tenantProjectData && (tenantProjectData.draftId || tenantProjectData.draft_id);
+      if (!draftId) return;
+      draftAutosaveInFlight = true;
+      try {
+        await api('POST', '/api/project-draft/autosave', {
+          draftId,
+          baseRevision: tenantDraftRevision,
+          patch: {},
+          idle: true
+        });
+      } catch (error) {
+        // The next save closes an expired window on the server instead.
+      } finally {
+        draftAutosaveInFlight = false;
+        if (draftAutosaveAgain) {
+          draftAutosaveAgain = false;
+          scheduleDraftAutosave();
+        }
+      }
+    }
+
+    function draftAutosaveValueIsEmpty(value, depth = 0) {
+      if (value === null || value === undefined || value === '') return true;
+      if (typeof value === 'number') return value === 0;
+      if (typeof value === 'boolean') return value === false;
+      if (Array.isArray(value)) return value.every(item => draftAutosaveValueIsEmpty(item, depth + 1));
+      if (typeof value === 'object') {
+        const keys = Object.keys(value);
+        if (!keys.length) return true;
+        return keys.every(key => draftAutosaveValueIsEmpty(value[key], depth + 1));
+      }
+      if (typeof value === 'string') {
+        const text = value.trim();
+        if (!text || text === '[]' || text === '{}') return true;
+        if ((text[0] === '{' || text[0] === '[') && depth < 3) {
+          try {
+            return draftAutosaveValueIsEmpty(JSON.parse(text), depth + 1);
+          } catch (error) {
+            return false;
+          }
+        }
+      }
+      return false;
+    }
+
+    async function performDraftAutosavePatch(snapshot, payloadClearKeys, silent) {
+      const loaded = (typeof tenantDraftLoadedSnapshot === 'object' && tenantDraftLoadedSnapshot)
+        ? tenantDraftLoadedSnapshot : {};
+      const patch = {};
+      Object.keys(snapshot).forEach(key => {
+        if (DRAFT_AUTOSAVE_EXCLUDED_KEYS.has(key)) return;
+        const nextValue = snapshot[key];
+        const oldValue = loaded[key];
+        if (nextValue === oldValue) return;
+        const oldPresent = Object.prototype.hasOwnProperty.call(loaded, key);
+        // A workspace loaded with a few keys builds a full snapshot of defaults
+        // (empty tables, zeroed models). Writing those as changes would turn the
+        // first keystroke into a commit of eighty keys.
+        if (!oldPresent && draftAutosaveValueIsEmpty(nextValue)) return;
+        let same = false;
+        try {
+          same = JSON.stringify(nextValue) === JSON.stringify(oldValue);
+        } catch (error) {
+          same = false;
+        }
+        if (!same) patch[key] = nextValue;
+      });
+      const clearKeys = (payloadClearKeys || []).filter(key => !DRAFT_AUTOSAVE_EXCLUDED_KEYS.has(key));
+      if (!Object.keys(patch).length && !clearKeys.length) {
+        if (silent) setDraftDirty(false);
+        return true;
+      }
+      const savedEditCounter = draftEditCounter;
+      const draftId = tenantProjectData.draftId || '';
+      if (typeof beginDraftLocalSave === 'function') beginDraftLocalSave();
+      let resp;
+      try {
+        resp = await api('POST', '/api/project-draft/autosave', {
+          draftId,
+          baseRevision: tenantDraftRevision,
+          patch,
+          clearKeys
+        });
+      } finally {
+        if (typeof endDraftLocalSave === 'function') endDraftLocalSave();
+      }
+      if (resp && resp.success) {
+        if (resp.draftId) {
+          tenantProjectData.draftId = resp.draftId;
+          if (typeof syncTenantBrowserHistory === 'function') {
+            syncTenantBrowserHistory('tenantProjectPage', {
+              draftId: resp.draftId,
+              activeSection: tenantActiveProjectSection || 'basic'
+            }, true);
+          }
+          if (typeof startDraftLiveSync === 'function') {
+            startDraftLiveSync(resp.draftId, Number(resp.revision) || 0);
+          }
+        }
+        setTenantDraftRevision(resp.revision);
+        if (draftEditCounter === savedEditCounter) {
+          const nextLoaded = JSON.parse(JSON.stringify(tenantDraftLoadedSnapshot || {}));
+          Object.keys(patch).forEach(key => { nextLoaded[key] = snapshot[key]; });
+          clearKeys.forEach(key => { delete nextLoaded[key]; });
+          tenantDraftLoadedSnapshot = nextLoaded;
+          setDraftDirty(false);
+          const badge = document.getElementById('draftSyncBadge');
+          if (badge && !silent) {
+            const timeStr = wfTime(Date.now(), { hour: '2-digit', minute: '2-digit' });
+            badge.style.background = '#edf7f3';
+            badge.style.color = '#126247';
+            badge.innerHTML = WFT('timeline.saved_at', 'محفوظ ({time})', { time: timeStr });
+          }
+        }
+        return true;
+      }
+      if (resp && (resp.error_code === 'DRAFT_REVISION_CONFLICT'
+          || resp.error_code === 'DRAFT_MERGE_CONFLICTS'
+          || resp.error_code === 'DRAFT_REVISION_REQUIRED')) {
+        const badge = document.getElementById('draftSyncBadge');
+        if (badge) {
+          badge.style.background = '#fef3c7';
+          badge.style.color = '#92400e';
+          badge.innerHTML = WFT('draft_live.pending', 'المسودة اتغيّرت من مستخدم آخر');
+        }
+        return false;
+      }
+      const badge = document.getElementById('draftSyncBadge');
+      if (badge) {
+        badge.style.background = '#fee2e2';
+        badge.style.color = '#991b1b';
+        badge.innerHTML = 'فشل الحفظ — التغييرات ما زالت غير محفوظة';
+      }
+      return false;
+    }
+
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      const draftAutosaveOnEdit = event => {
+        const target = event.target;
+        if (!target || !target.closest || !target.closest('#tenantProjectForm')) return;
+        triggerAutoSaveDraft();
+      };
+      document.addEventListener('input', draftAutosaveOnEdit, true);
+      document.addEventListener('change', draftAutosaveOnEdit, true);
+    }
+
 
     let draftSaveChain = Promise.resolve();
 
     // One chain owns every draft write: a save launched while another is still
     // in flight would send the same expectedRevision and collide with the first
     // one's CAS update. Nothing calls saveProjectAsDraftNow directly.
-    function saveProjectAsDraft(silent = false, syncPresentation = true, slideCheckpoint = false, checkpointProjectData = null) {
-      const task = () => saveProjectAsDraftNow(silent, syncPresentation, slideCheckpoint, checkpointProjectData);
+    function saveProjectAsDraft(silent = false, syncPresentation = true, slideCheckpoint = false, checkpointProjectData = null, options = {}) {
+      const task = () => saveProjectAsDraftNow(silent, syncPresentation, slideCheckpoint, checkpointProjectData, options);
       draftSaveChain = draftSaveChain.catch(() => undefined).then(task);
       return draftSaveChain;
     }
 
-    async function saveProjectAsDraftNow(silent = false, syncPresentation = true, slideCheckpoint = false, checkpointProjectData = null) {
+    async function saveProjectAsDraftNow(silent = false, syncPresentation = true, slideCheckpoint = false, checkpointProjectData = null, options = {}) {
       try {
         if (typeof tenantProjectMode !== 'undefined' && tenantProjectMode === 'presentation' && !slideCheckpoint) {
           // When viewing or editing an existing presentation, the workspace is scoped
@@ -305,6 +522,9 @@
         // only an interactive save may land on top of it. An interactive save
         // asks the server to merge instead: the newer work comes in, and only
         // the fields both sides changed need a decision.
+        if (options && options.autosavePatch) {
+          return performDraftAutosavePatch(snapshot, payloadClearKeys, silent);
+        }
         let resp = null;
         let expectedRev = tenantDraftRevision;
         let mergeRequested = false;

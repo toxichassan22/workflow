@@ -55,6 +55,12 @@ def api_update_section_status():
         _record_change('draft', draft_id or _resolve_draft_id(), 'اعتماد الأقسام',
                        change_tracking.describe_section_status_changes(
                            (before or {}).get('section_statuses') if isinstance(before, dict) else {}, bulk))
+        if draft_id and any(value == 'approved' for value in bulk.values()):
+            try:
+                db.write_draft_snapshot(g.tenant_id, draft_id, kind='snapshot',
+                                        message='اعتماد الأقسام', pinned=True)
+            except Exception as exc:
+                app.logger.warning('[DRAFT SNAPSHOT] approval snapshot failed: %s', exc)
         return jsonify({'success': True})
     section_key = data.get('sectionKey')
     section_status = data.get('sectionStatus')
@@ -99,6 +105,12 @@ def api_update_section_status():
                    change_tracking.describe_section_status_changes(
                        (before or {}).get('section_statuses') if isinstance(before, dict) else {},
                        {section_key: section_status}))
+    if section_status == 'approved' and draft_id:
+        try:
+            db.write_draft_snapshot(g.tenant_id, draft_id, kind='snapshot',
+                                    message='اعتماد قسم: ' + section_key, pinned=True)
+        except Exception as exc:
+            app.logger.warning('[DRAFT SNAPSHOT] approval snapshot failed: %s', exc)
     return jsonify({'success': True})
 
 

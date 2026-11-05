@@ -127,6 +127,25 @@ class DraftLiveCollabApiTests(unittest.TestCase):
         self.assertEqual(theirs['presence'][0]['caret_start'], 4)
         self.assertEqual(theirs['presence'][0]['user_name'], 'Live Admin')
 
+    def test_a_field_lock_is_visible_to_others_and_kept_for_its_owner(self):
+        written = self.post_live({
+            'clientId': 'client-aaaa1111',
+            'updates': [],
+            'presence': {'fieldKey': 'activity_class', 'sectionKey': 'basic',
+                         'caretStart': 0, 'caretEnd': 0, 'lockAt': True},
+        })
+        self.assertEqual(written.status_code, 200, written.get_json())
+        mine = self.client.get(
+            self.live_url(since=0, clientId='client-aaaa1111'), headers=self.headers()).get_json()
+        self.assertTrue(mine['selfPresence']['self'])
+        self.assertEqual(mine['selfPresence']['field_key'], 'activity_class')
+        self.assertTrue(mine['selfPresence']['lock_at'])
+        theirs = self.client.get(
+            self.live_url(since=0, clientId='client-bbbb2222'), headers=self.headers()).get_json()
+        self.assertEqual(len(theirs['presence']), 1)
+        self.assertEqual(theirs['presence'][0]['field_key'], 'activity_class')
+        self.assertTrue(theirs['presence'][0]['lock_at'])
+
     def test_leave_drops_client_presence_immediately(self):
         self.post_live({
             'clientId': 'client-aaaa1111',
