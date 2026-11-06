@@ -615,7 +615,10 @@ def _diagnostic_request_is_admin():
     if not payload or not payload.get('sub'):
         return False
     tenant = db.get_tenant_by_id(payload['sub'])
-    if not tenant:
+    if not tenant or not tenant.get('is_active'):
+        return False
+    user_row, user_error = _load_token_user(payload, tenant)
+    if user_error or _session_state_error(payload, tenant, user_row):
         return False
     return bool(_is_platform_admin_session(tenant, payload))
 
@@ -634,20 +637,21 @@ def api_build():
     return jsonify(body)
 
 
-@app.route('/api/deploy-webhook', methods=['GET', 'POST'])
+@app.route('/api/deploy-webhook', methods=['POST'])
 def deploy_webhook():
-    """Endpoint for GitHub or cPanel webhook to trigger automated deployment after commits."""
+    """Endpoint for GitHub or cPanel webhook to trigger automated deployment after commits.
+
+    The secret travels only in the X-Deploy-Secret header: a query-string secret
+    lands in access logs and proxy history."""
     env_secret = os.environ.get('DEPLOY_WEBHOOK_SECRET')
     if not env_secret:
         return jsonify({'error': 'DEPLOY_WEBHOOK_SECRET not configured in environment'}), 403
 
-    secret = request.args.get('secret') or request.headers.get('X-Deploy-Secret') or (request.json.get('secret') if (request.is_json and request.json) else None)
-    if not secret or secret != env_secret:
+    secret = request.headers.get('X-Deploy-Secret', '')
+    if not secret or not secrets.compare_digest(secret.encode(), env_secret.encode()):
         return jsonify({'error': 'Unauthorized'}), 401
 
-    requested_commit = request.args.get('commit') or (
-        request.json.get('commit') if (request.is_json and request.json) else None
-    )
+    requested_commit = request.args.get('commit')
     if requested_commit and not re.fullmatch(r'[0-9a-fA-F]{40}', str(requested_commit)):
         return jsonify({'error': 'Invalid deployment commit'}), 400
     

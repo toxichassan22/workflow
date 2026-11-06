@@ -205,20 +205,17 @@ def api_auth_login_resend_otp():
     if not challenge_token:
         return jsonify({'error': 'معرّف التحدي مطلوب'}), 400
 
-    conn = db.get_db()
-    row = conn.execute(
-        'SELECT * FROM auth_otp_codes WHERE challenge_token = ?',
-        (challenge_token,)
-    ).fetchone()
+    # Only an active challenge (not consumed, not expired, attempts left) may be renewed
+    row = db.get_otp_challenge(challenge_token)
     if not row:
-        return jsonify({'error': 'جلسة التحقق غير صالحة'}), 400
+        return jsonify({'error': 'جلسة التحقق منتهية الصلاحية أو غير صالحة'}), 400
 
     new_otp = generate_login_otp()
     new_challenge = db.create_otp_challenge(
         row['tenant_id'],
         row['email'],
         new_otp,
-        user_id=row['user_id'],
+        user_id=row.get('user_id'),
         expiry_minutes=10,
     )
     email_sent = send_login_otp_email(row['email'], new_otp)

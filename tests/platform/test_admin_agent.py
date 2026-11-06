@@ -266,6 +266,18 @@ class AdminAgentTests(unittest.TestCase):
                 if user:
                     db.delete_user(user['id'])
 
+    def test_agent_read_tools_are_gated_by_their_dedicated_permission(self):
+        """Regression: list_fields, list_sections, list_team and get_generation_rules
+        reached company data with only `training_data`. Each must now be mapped."""
+        mapping = self.application_module.AGENT_TOOL_PERMISSIONS
+        self.assertEqual(mapping['list_fields'], 'custom_fields')
+        self.assertEqual(mapping['list_sections'], 'custom_fields')
+        self.assertEqual(mapping['list_team'], 'company_settings')
+        self.assertEqual(mapping['get_generation_rules'], 'company_settings')
+
+        result = self._run('get_generation_rules')
+        self.assertEqual(result['status'], 'success', result.get('message'))
+
     # ── Retired company settings are ignored, not written ─────────────────
 
     def test_agent_ignores_retired_branding_keys(self):

@@ -64,6 +64,7 @@ import market_study
 import executive_content
 import population_service
 import slide_engine
+from slide_html_sanitizer import sanitize_slide_html_for_share
 import slide_translator
 import change_tracking
 import presentation_assets
@@ -185,6 +186,20 @@ def block_leaked_staging_directory():
 MAX_DECOMPRESSED_BODY_BYTES = 25 * 1024 * 1024
 
 
+def _bounded_gzip_decompress(raw, limit=None):
+    """Gunzip ``raw`` but refuse to inflate past ``limit`` bytes (gzip-bomb guard)."""
+    import zlib
+    limit = MAX_DECOMPRESSED_BODY_BYTES if limit is None else limit
+    inflater = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    data = inflater.decompress(raw, limit + 1)
+    if len(data) > limit or inflater.unconsumed_tail:
+        raise ValueError('decompressed body exceeds the size limit')
+    data += inflater.flush()
+    if len(data) > limit:
+        raise ValueError('decompressed body exceeds the size limit')
+    return data
+
+
 @app.before_request
 def decompress_gzip_request_body():
     # The client gzips large JSON bodies because the hosting proxy corrupts
@@ -281,7 +296,7 @@ def reassemble_chunked_request_body():
     raw = b''.join(parts)
     if use_gzip:
         try:
-            raw = _gzip.decompress(raw)
+            raw = _bounded_gzip_decompress(raw)
         except Exception as err:
             app.logger.warning(f"[CHUNK] Could not decompress chunked body for {upload_id} (len={len(raw)}): {err}")
             return jsonify({'error': 'Could not decompress chunked body'}), 400

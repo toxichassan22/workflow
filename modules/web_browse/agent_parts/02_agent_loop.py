@@ -244,7 +244,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
                     _ann = _ann if isinstance(_ann, dict) else {}
                     _cit = _ann.get('url_citation') or {}
                     _url = str(_cit.get('url') or _ann.get('url') or '').strip()
-                    if allowed_hosts is not None and not _source_url_allowed(_url, allowed_hosts):
+                    if not _source_url_allowed(_url, allowed_hosts):
                         continue
                     if _url and _url not in pages:
                         _title = str(_cit.get('title') or _ann.get('title') or '')
@@ -376,7 +376,7 @@ def run_browse_agent(task, max_steps=None, usage_ctx=None, search_budget=None,
         _cit = _ann.get('url_citation')
         _cit = _cit if isinstance(_cit, dict) else {}
         _url = str(_cit.get('url') or _ann.get('url') or '').strip()
-        if allowed_hosts is not None and not _source_url_allowed(_url, allowed_hosts):
+        if not _source_url_allowed(_url, allowed_hosts):
             continue
         if _url and _url not in _seen_urls:
             _seen_urls.add(_url)

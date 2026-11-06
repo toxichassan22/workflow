@@ -8,7 +8,7 @@ def _staging_deploy_app_dir():
     return os.environ.get('STAGING_APP_DIR') or '/home/landloom/proposal-generator-staging'
 
 
-@app.route('/api/deploy-webhook-staging', methods=['GET', 'POST'])
+@app.route('/api/deploy-webhook-staging', methods=['POST'])
 def deploy_webhook_staging():
     """Staging counterpart of deploy_webhook: deploys origin/lab into the
     separate proposal-generator-staging directory. Production paths are never
@@ -17,13 +17,10 @@ def deploy_webhook_staging():
     if not env_secret:
         return jsonify({'error': 'DEPLOY_WEBHOOK_SECRET not configured in environment'}), 403
 
-    secret = request.args.get('secret') or request.headers.get('X-Deploy-Secret') or (request.json.get('secret') if (request.is_json and request.json) else None)
-    if not secret or not secrets.compare_digest(str(secret).encode(), env_secret.encode()):
+    if not _staging_deploy_authorized():
         return jsonify({'error': 'Unauthorized'}), 401
 
-    requested_commit = request.args.get('commit') or (
-        request.json.get('commit') if (request.is_json and request.json) else None
-    )
+    requested_commit = request.args.get('commit')
     if requested_commit and not re.fullmatch(r'[0-9a-fA-F]{40}', str(requested_commit)):
         return jsonify({'error': 'Invalid deployment commit'}), 400
     request_id = request.headers.get('X-Deploy-Request-ID') or _uuid.uuid4().hex

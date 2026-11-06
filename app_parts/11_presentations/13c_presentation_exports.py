@@ -87,8 +87,7 @@ def api_export():
                         parts.append(part_fh.read())
                 raw = b''.join(parts)
                 if fallback_gzip:
-                    import gzip as _gzip
-                    raw = _gzip.decompress(raw)
+                    raw = _bounded_gzip_decompress(raw)
                 data = json.loads(raw.decode('utf-8'))
                 import shutil as _shutil
                 _shutil.rmtree(chunk_dir, ignore_errors=True)

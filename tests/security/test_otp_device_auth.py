@@ -120,6 +120,21 @@ class OtpDeviceAuthTests(unittest.TestCase):
         self.assertFalse(db.is_device_trusted('tenant-otp-1', 'dev-diff', token))
         self.assertFalse(db.is_device_trusted('tenant-otp-1', 'dev-abc', 'wrong-token'))
 
+    def test_trusted_device_token_is_bound_to_its_identity(self):
+        # A tenant-direct trust token must not open a member's session on the same device.
+        tenant_token = db.create_trusted_device('tenant-otp-1', 'dev-shared')
+        self.assertTrue(db.is_device_trusted('tenant-otp-1', 'dev-shared', tenant_token))
+        self.assertFalse(db.is_device_trusted(
+            'tenant-otp-1', 'dev-shared', tenant_token, user_id='member-1'))
+
+        member_token = db.create_trusted_device(
+            'tenant-otp-1', 'dev-member', user_id='member-1')
+        self.assertTrue(db.is_device_trusted(
+            'tenant-otp-1', 'dev-member', member_token, user_id='member-1'))
+        self.assertFalse(db.is_device_trusted('tenant-otp-1', 'dev-member', member_token))
+        self.assertFalse(db.is_device_trusted(
+            'tenant-otp-1', 'dev-member', member_token, user_id='member-2'))
+
     # ── API Endpoints & E2E Flow ─────────────────────────────────────────────
 
     @patch.object(landloom_app, 'send_login_otp_email', return_value=True)

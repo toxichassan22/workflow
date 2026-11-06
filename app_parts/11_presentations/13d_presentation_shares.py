@@ -349,7 +349,7 @@ def public_share_viewer_js():
 @require_permission('create_presentation')
 def api_list_presentation_shares(pres_id):
     presentation = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not presentation:
+    if not presentation or not _presentation_in_scope(presentation):
         return jsonify({'success': False, 'error': 'العرض غير موجود'}), 404
     shares = db.list_presentation_shares(g.tenant_id, pres_id)
     return jsonify({'success': True, 'shares': [_share_owner_payload(item) for item in shares]})
@@ -359,7 +359,7 @@ def api_list_presentation_shares(pres_id):
 @require_permission('create_presentation')
 def api_create_presentation_share(pres_id):
     presentation = db.get_presentation(pres_id, tenant_id=g.tenant_id)
-    if not presentation:
+    if not presentation or not _presentation_in_scope(presentation):
         return jsonify({'success': False, 'error': 'العرض غير موجود'}), 404
     data = request.json or {}
     if not isinstance(data, dict):
@@ -385,6 +385,9 @@ def api_create_presentation_share(pres_id):
 @app.route('/api/presentations/<pres_id>/shares/<share_id>/revoke', methods=['POST'])
 @require_permission('create_presentation')
 def api_revoke_presentation_share(pres_id, share_id):
+    presentation = db.get_presentation(pres_id, tenant_id=g.tenant_id)
+    if not presentation or not _presentation_in_scope(presentation):
+        return jsonify({'success': False, 'error': 'الرابط غير موجود أو ملغى مسبقًا'}), 404
     revoked = db.revoke_presentation_share(g.tenant_id, pres_id, share_id)
     if not revoked:
         return jsonify({'success': False, 'error': 'الرابط غير موجود أو ملغى مسبقًا'}), 404
@@ -409,7 +412,7 @@ def api_public_share(token):
         if not isinstance(slide, dict):
             continue
         public_slides.append({
-            'html': _rewrite_share_urls(slide.get('html') or '', token),
+            'html': sanitize_slide_html_for_share(_rewrite_share_urls(slide.get('html') or '', token)),
             'type': slide.get('type') or 'content',
             # The owner asked for slide notes to reach whoever opens the deck.
             'notes': str(slide.get('notes') or '').strip(),

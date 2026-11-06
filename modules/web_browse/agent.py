@@ -113,14 +113,36 @@ def _agent_preamble(budget, research_mode=False):
         'فافتح أفضل ما وجدت أو أجب بما لديك.\n\n')
 
 
-def _source_url_allowed(url, allowed_hosts):
-    """True when a browser URL belongs to an explicitly allowed source host."""
-    if allowed_hosts is None:
-        return True
+def _url_targets_public_host(url):
+    """SSRF guard: False for non-HTTP(S) URLs and for loopback, private,
+    link-local, reserved or multicast targets (IP literals and local names)."""
+    import ipaddress
     try:
         parsed = urlsplit(str(url or '').strip())
         if parsed.scheme.lower() not in ('http', 'https') or not parsed.hostname:
             return False
+        host = parsed.hostname.lower().rstrip('.')
+    except Exception:
+        return False
+    if host == 'localhost' or host.endswith('.localhost') or host.endswith('.local'):
+        return False
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return '.' in host
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def _source_url_allowed(url, allowed_hosts):
+    """True when a browser URL may be opened: always a public host, and, when
+    an explicit source list is given, a host on that list."""
+    if not _url_targets_public_host(url):
+        return False
+    if allowed_hosts is None:
+        return True
+    try:
+        parsed = urlsplit(str(url or '').strip())
         host = parsed.hostname.lower().rstrip('.').removeprefix('www.')
     except Exception:
         return False
@@ -681,7 +703,8 @@ def _run_inspect_page(session, args, trace, pages, evidence_pool=None,
 def _run_page_action(session, name, args, trace, pages, evidence_pool=None,
                      allowed_hosts=None, current_url=None):
     """click_element / type_text / scroll_page on the worker's live page."""
-    if not _source_url_allowed(current_url, allowed_hosts):
+    if ((current_url or allowed_hosts is not None)
+            and not _source_url_allowed(current_url, allowed_hosts)):
         return {'url': current_url or '', 'error': 'no_allowed_page_open'}
     fn = _tool_callable(session, name)
     if fn is None:

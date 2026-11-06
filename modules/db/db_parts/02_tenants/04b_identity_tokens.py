@@ -409,9 +409,15 @@ def is_device_trusted(tenant_id, device_id, raw_token, user_id=None, fingerprint
                  AND is_revoked = 0 AND expires_at > ?'''
     params = [tenant_id, str(device_id).strip(), token_hash, now]
 
+    # A device trusted for one identity must not pass for another: a team member's
+    # login matches only that member's device, and a tenant-direct login (no user)
+    # matches only a tenant-level device. The old OR-NULL clause let a tenant-level
+    # token clear the OTP for any member.
     if user_id:
-        query += ' AND (user_id = ? OR user_id IS NULL)'
+        query += ' AND user_id = ?'
         params.append(user_id)
+    else:
+        query += ' AND user_id IS NULL'
 
     row = conn.execute(query, params).fetchone()
     if not row:

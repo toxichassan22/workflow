@@ -16,6 +16,7 @@ jobs:
       - name: Trigger Server Deployment Webhook
         env:
           PROD_BASE_URL: ${{ secrets.PROD_BASE_URL }}
+          DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
         run: |
           set -euo pipefail
           if [ -z "${PROD_BASE_URL:-}" ]; then
@@ -23,7 +24,7 @@ jobs:
             exit 1
           fi
           base="${PROD_BASE_URL%/}"
-          curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 15 --max-time 120 -X POST --data '' "$base/api/deploy-webhook?secret=${{ secrets.DEPLOY_WEBHOOK_SECRET }}&commit=${{ github.sha }}"
+          curl --fail-with-body --silent --show-error --retry 5 --retry-all-errors --retry-delay 5 --connect-timeout 15 --max-time 120 -X POST --data '' -H "X-Deploy-Secret: ${DEPLOY_WEBHOOK_SECRET}" "$base/api/deploy-webhook?commit=${{ github.sha }}"
 
       - name: Verify deployed commit
         env:
