@@ -380,7 +380,6 @@
       let latInput = null;
       let lngInput = null;
       let locationSection = null;
-      let locationMapsCard = null;
 
       function renderFormSection(sectionKey) {
         const sectionFields = grouped[sectionKey];
@@ -418,50 +417,13 @@
           sectionDiv.appendChild(cardVision);
 
           basicIdentityGrid = cardIdentity.querySelector('#basicIdentityGrid');
-        }
-
-        let locationIdentityGrid = null;
-        let locationTablesCard = null;
-        if (sectionKey === 'location') {
-          sectionDiv.classList.add('location-form-section-v2');
-
-          const cardIdentity = document.createElement('div');
-          cardIdentity.className = 'project-form-card location-card-identity';
-          cardIdentity.innerHTML = '<div class="project-form-card-head"><div class="project-form-card-head-content">' +
-            '<span class="project-form-card-kicker">المحددات المكانية</span>' +
-            '<h4 class="project-form-card-title">الموقع الجغرافي وبيانات الأرض</h4>' +
-            '<p class="project-form-card-sub">رابط Google Maps، المدينة، الحي، رقم المخطط وإحداثيات الموقع</p>' +
-            '</div></div><div class="project-form-card-body" id="locationIdentityGrid"></div>';
-
-          const cardMaps = document.createElement('div');
-          cardMaps.className = 'project-form-card location-card-maps';
-          cardMaps.innerHTML = '<div class="project-form-card-head"><div class="project-form-card-head-content">' +
-            '<span class="project-form-card-kicker">التحليل المكاني والخرائط</span>' +
-            '<h4 class="project-form-card-title">معاينة الخرائط المولدة والتحكم البصري</h4>' +
-            '<p class="project-form-card-sub">الخريطة العامة، محاور الوصول، المعالم القريبة، ونطاق التأثير</p>' +
-            '</div></div><div class="project-form-card-body location-maps-body" id="locationMapsBody"></div>';
-
-          const cardTables = document.createElement('div');
-          cardTables.className = 'project-form-card location-card-tables';
-          cardTables.innerHTML = '<div class="project-form-card-head"><div class="project-form-card-head-content">' +
-            '<span class="project-form-card-kicker">الوصولية والمعالم</span>' +
-            '<h4 class="project-form-card-title">شبكة الطرق والمحاور والمعالم الحيوية</h4>' +
-            '<p class="project-form-card-sub">بيانات محاور الوصول، أوقات القيادة، ومسافات المعالم القريبة ونطاق التأثير</p>' +
-            '</div></div><div class="project-form-card-body location-tables-body" id="locationTablesBody"></div>';
-
-          sectionDiv.appendChild(cardIdentity);
-          sectionDiv.appendChild(cardTables);
-          sectionDiv.appendChild(cardMaps);
-
-          locationIdentityGrid = cardIdentity.querySelector('#locationIdentityGrid');
-          locationMapsCard = cardMaps.querySelector('#locationMapsBody');
-          locationTablesCard = cardTables.querySelector('#locationTablesBody');
+          basicVisionGrid = cardVision.querySelector('#basicVisionGrid');
         }
 
         sectionFields.forEach(f => {
           if (LOCATION_TABLE_FIELDS[f.fieldKey]) {
             const currentTableValue = (tenantProjectData && tenantProjectData[f.fieldKey]) || f.defaultValue || '';
-            (locationTablesCard || sectionDiv).appendChild(createLocationTableField(f.fieldKey, tenantProjectFieldLabel(f) + (f.isRequired ? ' *' : ''), currentTableValue));
+            sectionDiv.appendChild(createLocationTableField(f.fieldKey, tenantProjectFieldLabel(f) + (f.isRequired ? ' *' : ''), currentTableValue));
             return;
           }
           const div = document.createElement('div');
@@ -471,10 +433,6 @@
           if (sectionKey === 'basic') {
             const basicOrderMap = { project_name: 1, project_language: 2, project_type: 3, project_subtype: 4, activity_class: 5, project_level: 5, project_stage: 6, project_logo: 7, target_audience: 1, project_idea: 2 };
             if (basicOrderMap[f.fieldKey]) div.style.order = String(basicOrderMap[f.fieldKey]);
-          }
-          if (sectionKey === 'location') {
-            const locationOrderMap = { city: 1, district: 2, plot_number: 3, location_lat: 4, location_lng: 5, location_address: 6, location_data_fetched_at: 7 };
-            if (locationOrderMap[f.fieldKey]) div.style.order = String(locationOrderMap[f.fieldKey]);
           }
           const isClientEnteredLandField = sectionKey === 'land_croquis' && TENANT_CLIENT_ENTERED_LAND_FIELDS.has(f.fieldKey);
           if (isClientEnteredLandField) div.classList.add('tenant-client-required-field');
@@ -822,7 +780,7 @@
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'btn ghost';
-            btn.textContent = 'تحليل الموقع بالذكاء الاصطناعي';
+            btn.textContent = 'تحليل رابط الموقع';
             btn.style.marginTop = '8px';
             btn.onclick = () => analyzeTenantSite();
             div.appendChild(btn);
@@ -835,8 +793,6 @@
             } else {
               basicIdentityGrid.appendChild(div);
             }
-          } else if (sectionKey === 'location' && locationIdentityGrid) {
-            locationIdentityGrid.appendChild(div);
           } else {
             sectionDiv.appendChild(div);
           }
@@ -898,7 +854,7 @@
           <div id="siteAnalysisWarnings" hidden style="margin-top:10px;padding:11px 13px;border-radius:12px;background:#fff0f0;border:1px solid #efb3b3;color:#9c1d1d;font-weight:700;font-size:13px;line-height:1.6"></div>
           <div id="landmarksPreview" style="margin-top:10px;display:none;"></div>
         `;
-        (locationMapsCard || locationSection || form).appendChild(previewDiv);
+        (locationSection || form).appendChild(previewDiv);
         (locationSection || form).querySelectorAll('[data-key]').forEach(control => {
           if (LOCATION_DATA_KEYS.has(control.dataset.key)) {
             control.addEventListener('input', releaseLocationSectionApproval);
