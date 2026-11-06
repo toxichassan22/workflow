@@ -97,5 +97,15 @@ class TestBasicInfoUI(unittest.TestCase):
         self.assertIn('الرؤية والشرائح', dict_source)
 
 
+    def test_dropdown_styles_modernized_and_branded(self):
+        """Dropdowns and multi-select elements must use brand tokens and modern radii."""
+        css = self._read_file('assets/css/project-form/01b_project_basic.css')
+        self.assertIn('.project-form-card .project-multi-select', css)
+        self.assertIn('.project-form-card .project-multi-select-menu', css)
+        self.assertIn('.project-form-card .project-multi-select-option.selected', css)
+        self.assertIn('var(--teal, #0FA9C4)', css)
+        self.assertNotIn('var(--p)', css)
+
+
 if __name__ == '__main__':
     unittest.main()
