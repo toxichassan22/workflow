@@ -16,6 +16,9 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الارتداد": "Setback",
   "الارتدادات": "Setbacks",
   "الاسم": "Name",
+  "الاسم المعتمد، لغة العرض، التصنيف والنشاط العقاري": "Approved name, presentation language, classification, and real estate activity",
+  "الرؤية والشرائح": "Vision & Demographics",
+  "الرؤية والجمهور المستهدف": "Vision & Target Audience",
   "التصور البصري": "Visual Conception",
   "التكلفة": "Cost",
   "الجدول الزمني": "Project Timeline",
@@ -27,9 +30,11 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الشركة": "Company",
   "الغاء الاعتماد": "Revoke approval",
   "الفئة المستهدفة": "Target Audience",
+  "الفكرة الاستثمارية والشرائح المستفيدة من المشروع": "Investment concept and target beneficiaries",
   "القيمة": "Value",
   "القيود التنظيمية": "Regulatory constraints",
   "المبلغ": "Amount",
+  "المحددات الأساسية": "Core Parameters",
   "المحتوى التنفيذي": "Executive Content",
   "المدة": "Duration",
   "المرحلة": "Phase",
@@ -183,5 +188,6 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الشمالي": "North",
   "الغربي": "West",
   "جانبي": "Side",
-  "محدّث تلقائيًا": "Updated automatically"
+  "محدّث تلقائيًا": "Updated automatically",
+  "هوية وتصنيف المشروع": "Project Identity & Classification"
 }/*I18N_EN_AUTO_END*/);

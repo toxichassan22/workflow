@@ -392,6 +392,34 @@
         sectionDiv.id = 'project-section-' + sectionKey;
         sectionDiv.appendChild(createProjectSectionHeader(sectionKey, sectionMap[sectionKey] || 'عام'));
 
+        let basicIdentityGrid = null;
+        let basicVisionGrid = null;
+        if (sectionKey === 'basic') {
+          sectionDiv.classList.add('basic-form-section-v2');
+
+          const cardIdentity = document.createElement('div');
+          cardIdentity.className = 'project-form-card basic-card-identity';
+          cardIdentity.innerHTML = '<div class="project-form-card-head"><div class="project-form-card-head-content">' +
+            '<span class="project-form-card-kicker">المحددات الأساسية</span>' +
+            '<h4 class="project-form-card-title">هوية وتصنيف المشروع</h4>' +
+            '<p class="project-form-card-sub">الاسم المعتمد، لغة العرض، التصنيف والنشاط العقاري</p>' +
+            '</div></div><div class="project-form-card-body" id="basicIdentityGrid"></div>';
+
+          const cardVision = document.createElement('div');
+          cardVision.className = 'project-form-card basic-card-vision';
+          cardVision.innerHTML = '<div class="project-form-card-head"><div class="project-form-card-head-content">' +
+            '<span class="project-form-card-kicker">الرؤية والشرائح</span>' +
+            '<h4 class="project-form-card-title">الرؤية والجمهور المستهدف</h4>' +
+            '<p class="project-form-card-sub">الفكرة الاستثمارية والشرائح المستفيدة من المشروع</p>' +
+            '</div></div><div class="project-form-card-body" id="basicVisionGrid"></div>';
+
+          sectionDiv.appendChild(cardIdentity);
+          sectionDiv.appendChild(cardVision);
+
+          basicIdentityGrid = cardIdentity.querySelector('#basicIdentityGrid');
+          basicVisionGrid = cardVision.querySelector('#basicVisionGrid');
+        }
+
         sectionFields.forEach(f => {
           if (LOCATION_TABLE_FIELDS[f.fieldKey]) {
             const currentTableValue = (tenantProjectData && tenantProjectData[f.fieldKey]) || f.defaultValue || '';
@@ -399,7 +427,13 @@
             return;
           }
           const div = document.createElement('div');
-          div.className = 'tenant-field' + (f.fieldType === 'textarea' || f.fieldKey === 'location_address' || f.fieldKey === 'project_type' ? ' full' : '');
+          const isBasicFull = sectionKey === 'basic' && (f.fieldType === 'textarea' || f.fieldKey === 'project_type' || f.fieldKey === 'project_subtype' || f.fieldKey === 'target_audience' || f.fieldKey === 'project_logo');
+          div.className = 'tenant-field' + (f.fieldType === 'textarea' || f.fieldKey === 'location_address' || f.fieldKey === 'project_type' || isBasicFull ? ' full' : '');
+          if (f.fieldKey === 'project_logo') div.classList.add('field-project-logo');
+          if (sectionKey === 'basic') {
+            const basicOrderMap = { project_name: 1, project_language: 2, project_type: 3, project_subtype: 4, activity_class: 5, project_level: 5, project_stage: 6, project_logo: 7, target_audience: 1, project_idea: 2 };
+            if (basicOrderMap[f.fieldKey]) div.style.order = String(basicOrderMap[f.fieldKey]);
+          }
           const isClientEnteredLandField = sectionKey === 'land_croquis' && TENANT_CLIENT_ENTERED_LAND_FIELDS.has(f.fieldKey);
           if (isClientEnteredLandField) div.classList.add('tenant-client-required-field');
           const rawLabel = (f.fieldKey === 'main_roads') ? 'الطرق الرئيسية المحيطة' :
@@ -753,7 +787,15 @@
 
           }
 
-          sectionDiv.appendChild(div);
+          if (sectionKey === 'basic' && basicIdentityGrid && basicVisionGrid) {
+            if (f.fieldKey === 'target_audience' || f.fieldKey === 'project_idea') {
+              basicVisionGrid.appendChild(div);
+            } else {
+              basicIdentityGrid.appendChild(div);
+            }
+          } else {
+            sectionDiv.appendChild(div);
+          }
         });
 
         if (sectionKey === 'land_croquis') {

@@ -1,0 +1,246 @@
+/* assets/css/project-form/01b_project_basic.css — Project Basic Info (Section 1) Card Layout */
+
+/* Shell override for Section 1 when active: release flat 2-col grid into cohesive cards */
+.project-form-content .tenant-form-section.basic-form-section-v2.active,
+#tenantProjectForm .tenant-form-section.basic-form-section-v2.active,
+#project-section-basic.tenant-form-section.active {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 20px !important;
+  background: transparent !important;
+  border: none !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+  grid-template-columns: none !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Command Header Bar */
+.basic-form-section-v2 .tenant-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: #ffffff;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 16px;
+  padding: 14px 22px;
+  margin: 0;
+  box-shadow: 0 1px 3px rgba(7, 24, 44, 0.04);
+}
+
+.basic-form-section-v2 .tenant-section-title .project-section-title-label {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--navy, #07182C);
+}
+
+.basic-form-section-v2 .section-status-badge {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 4px 11px;
+  border-radius: 6px;
+  margin-inline-end: 10px;
+}
+
+.basic-form-section-v2 .section-status-badge.draft {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+
+.basic-form-section-v2 .section-status-badge.approved {
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #bbf7d0;
+}
+
+.basic-form-section-v2 .section-presentation-btn {
+  background: var(--navy, #07182C);
+  color: #ffffff;
+  border: 1px solid var(--navy, #07182C);
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.basic-form-section-v2 .section-presentation-btn:hover {
+  background: #0f2d4f;
+  border-color: #0f2d4f;
+}
+
+.basic-form-section-v2 .section-approve-btn:not(.section-presentation-btn) {
+  background: #f8fafc;
+  color: var(--navy, #07182C);
+  border: 1px solid #cbd5e1;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.basic-form-section-v2 .section-approve-btn:not(.section-presentation-btn):hover {
+  background: #e2e8f0;
+  border-color: #94a3b8;
+}
+
+/* Master Card Container */
+.project-form-card {
+  background: #ffffff;
+  border: 1px solid var(--line, #e2e8f0);
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(7, 24, 44, 0.04);
+  overflow: hidden;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.project-form-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 12px rgba(7, 24, 44, 0.06);
+}
+
+/* Card Header */
+.project-form-card-head {
+  padding: 16px 22px;
+  background: #fafbfc;
+  border-bottom: 1px solid #f1f5f9;
+  border-inline-start: 4px solid var(--teal-bright, #17C8E3);
+}
+
+.project-form-card-kicker {
+  display: block;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--teal, #0FA9C4);
+  margin-bottom: 2px;
+}
+
+.project-form-card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--navy, #07182C);
+}
+
+.project-form-card-sub {
+  margin: 3px 0 0;
+  font-size: 12.5px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+/* Card Body Grid */
+.project-form-card-body {
+  padding: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+/* Field Group Styling inside Card Body */
+.project-form-card .tenant-field {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.project-form-card .tenant-field.full {
+  grid-column: 1 / -1;
+}
+
+.project-form-card .tenant-field:hover {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.project-form-card .tenant-field label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--navy, #07182C);
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.project-form-card .tenant-field input:not([type="hidden"]):not([type="file"]):not([type="checkbox"]):not([type="radio"]),
+.project-form-card .tenant-field select,
+.project-form-card .tenant-field textarea {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--ink, #07182c);
+  font-family: inherit;
+  font-size: 13.5px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.project-form-card .tenant-field input:focus,
+.project-form-card .tenant-field select:focus,
+.project-form-card .tenant-field textarea:focus {
+  outline: none;
+  border-color: var(--teal-bright, #17C8E3);
+  box-shadow: 0 0 0 3px rgba(23, 200, 227, 0.15);
+}
+
+.project-form-card .tenant-field textarea {
+  min-height: 105px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+/* Logo Upload Zone */
+.project-form-card .tenant-field.field-project-logo {
+  grid-column: 1 / -1;
+  background: #f8fafc;
+  border: 1.5px dashed #cbd5e1;
+  border-radius: 14px;
+  padding: 18px 20px;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.project-form-card .tenant-field.field-project-logo:hover {
+  border-color: var(--teal-bright, #17C8E3);
+  background: #f0fdfa;
+}
+
+.project-form-card .tenant-field.field-project-logo input[type="file"] {
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+  font-size: 12.5px;
+  color: #475569;
+}
+
+/* Responsive adjustments */
+@media (max-width: 840px) {
+  .project-form-card-body {
+    grid-template-columns: 1fr;
+    gap: 14px;
+    padding: 16px;
+  }
+
+  .basic-form-section-v2 .tenant-section-title {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+}

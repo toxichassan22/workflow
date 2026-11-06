@@ -50,6 +50,7 @@ FRONTEND_CSS_ORDER = (
     'base/17_ai_rules.css',
     'project-form/01_sections_changelog.css',
     'project-form/01a_location_maps.css',
+    'project-form/01b_project_basic.css',
     'project-form/02_fields_tables_rail.css',
     'project-form/03_timeline_board.css', 'project-form/04_financial_parking.css',
     'project-form/05_best_use.css', 'project-form/05a_market_summary_chat.css',
