@@ -1,3 +1,111 @@
+    /* ===== Section 2: Location & Maps Card Layout ===== */
+    .project-form-content .tenant-form-section.location-form-section-v2.active,
+    #tenantProjectForm .tenant-form-section.location-form-section-v2.active,
+    #project-section-location.tenant-form-section.active {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 20px !important;
+      background: transparent !important;
+      border: none !important;
+      padding: 0 !important;
+      box-shadow: none !important;
+      grid-template-columns: none !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+    }
+
+    .location-form-section-v2 .project-form-card,
+    .location-card-identity,
+    .location-card-maps,
+    .location-card-tables {
+      background: #ffffff;
+      border: 1px solid var(--line, #e2e8f0);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(7, 24, 44, 0.04);
+    }
+
+    .location-form-section-v2 .location-maps-body,
+    .location-form-section-v2 .location-tables-body {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      padding: 22px;
+    }
+
+    #locationIdentityGrid {
+      padding: 22px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    #locationIdentityGrid .tenant-field {
+      padding: 0;
+      border: none;
+      background: transparent;
+      box-shadow: none;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+    }
+
+    #locationIdentityGrid .tenant-field.full {
+      grid-column: 1 / -1;
+    }
+
+    #locationIdentityGrid .tenant-field label {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--navy, #07182C);
+      margin-bottom: 2px;
+    }
+
+    #locationIdentityGrid .tenant-field input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      background: #ffffff;
+      color: var(--ink, #07182c);
+      font-family: inherit;
+      font-size: 13.5px;
+      box-sizing: border-box;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    #locationIdentityGrid .tenant-field input:focus {
+      outline: none;
+      border-color: var(--teal-bright, #17C8E3);
+      box-shadow: 0 0 0 3px rgba(23, 200, 227, 0.15);
+    }
+
+    #locationIdentityGrid .tenant-field.full button.btn.ghost {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      align-self: flex-start;
+      padding: 8px 18px;
+      border-radius: 8px;
+      border: 1px solid #cbd5e1;
+      background: #f8fafc;
+      color: var(--navy, #07182C);
+      font-weight: 700;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      margin-top: 8px;
+    }
+
+    #locationIdentityGrid .tenant-field.full button.btn.ghost:hover {
+      border-color: var(--teal-bright, #17C8E3);
+      background: #f0fdfa;
+      color: var(--teal-dark, #0A829B);
+    }
+
     /* ===== Google Maps Link Field ===== */
     .maps-link-field {
       position: relative;
@@ -25,27 +133,33 @@
     }
 
     .fin-table th {
-      background: var(--p);
+      background: var(--navy, #07182C);
       color: #fff;
-      padding: 8px 12px;
+      padding: 10px 14px;
       font-weight: 700;
       white-space: nowrap;
       text-align: right;
+      border-bottom: 2px solid var(--teal-bright, #17C8E3);
     }
 
     .fin-table td {
-      padding: 6px 10px;
-      border-bottom: 1px solid var(--line);
+      padding: 8px 12px;
+      border-bottom: 1px solid #f1f5f9;
+      color: var(--navy, #07182C);
     }
 
     .fin-table tr:nth-child(even) td {
-      background: #f8f6f4;
+      background: #fafbfc;
+    }
+
+    .fin-table tr:hover td {
+      background: #f0fdfa;
     }
 
     .fin-table .total-row td {
       font-weight: 800;
-      background: var(--soft);
-      border-top: 2px solid var(--p);
+      background: var(--teal-soft, #DFF6FB);
+      border-top: 2px solid var(--teal-bright, #17C8E3);
     }
 
     .fin-table input {
@@ -159,7 +273,7 @@
 
     .map-active-controls-title {
       margin-bottom: 8px;
-      color: var(--p);
+      color: var(--navy, #07182C);
       font-weight: 800;
     }
 
@@ -175,7 +289,7 @@
       align-items: center;
       gap: 7px;
       margin: 0 !important;
-      color: var(--p) !important;
+      color: var(--navy, #07182C) !important;
       font-size: 12px !important;
     }
 

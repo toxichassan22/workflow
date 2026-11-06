@@ -4,8 +4,8 @@
     }
 
     .tenant-map-preview-card.active {
-      border-color: var(--p) !important;
-      box-shadow: 0 0 0 2px rgba(0, 95, 120, .12);
+      border-color: var(--teal, #0FA9C4) !important;
+      box-shadow: 0 0 0 3px rgba(23, 200, 227, 0.2);
     }
 
     .land-documents-actions {

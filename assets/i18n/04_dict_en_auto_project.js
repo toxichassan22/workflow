@@ -189,5 +189,14 @@ window.__WFI18N_EN_AUTO = Object.assign(window.__WFI18N_EN_AUTO || {}, /*I18N_EN
   "الغربي": "West",
   "جانبي": "Side",
   "محدّث تلقائيًا": "Updated automatically",
-  "هوية وتصنيف المشروع": "Project Identity & Classification"
+  "هوية وتصنيف المشروع": "Project Identity & Classification",
+  "المحددات المكانية": "Spatial Parameters",
+  "الموقع الجغرافي وبيانات الأرض": "Geographic Location & Plot Coordinates",
+  "رابط Google Maps، المدينة، الحي، رقم المخطط وإحداثيات الموقع": "Google Maps link, city, district, plot number, and site coordinates",
+  "التحليل المكاني والخرائط": "Spatial Analysis & Maps",
+  "معاينة الخرائط المولدة والتحكم البصري": "Generated Maps & Viewport Controls",
+  "الخريطة العامة، محاور الوصول، المعالم القريبة، ونطاق التأثير": "Overview, access axes, nearby landmarks, and catchment area",
+  "الوصولية والمعالم": "Accessibility & Surroundings",
+  "شبكة الطرق والمحاور والمعالم الحيوية": "Roads Network & Vital Landmarks",
+  "بيانات محاور الوصول، أوقات القيادة، ومسافات المعالم القريبة ونطاق التأثير": "Access axes data, driving times, nearby landmarks distances, and catchment area"
 }/*I18N_EN_AUTO_END*/);
