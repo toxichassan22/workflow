@@ -450,8 +450,8 @@
             '</div></div><div class="project-form-card-body location-tables-body" id="locationTablesBody"></div>';
 
           sectionDiv.appendChild(cardIdentity);
-          sectionDiv.appendChild(cardMaps);
           sectionDiv.appendChild(cardTables);
+          sectionDiv.appendChild(cardMaps);
 
           locationIdentityGrid = cardIdentity.querySelector('#locationIdentityGrid');
           locationMapsCard = cardMaps.querySelector('#locationMapsBody');
@@ -471,6 +471,10 @@
           if (sectionKey === 'basic') {
             const basicOrderMap = { project_name: 1, project_language: 2, project_type: 3, project_subtype: 4, activity_class: 5, project_level: 5, project_stage: 6, project_logo: 7, target_audience: 1, project_idea: 2 };
             if (basicOrderMap[f.fieldKey]) div.style.order = String(basicOrderMap[f.fieldKey]);
+          }
+          if (sectionKey === 'location') {
+            const locationOrderMap = { city: 1, district: 2, plot_number: 3, location_lat: 4, location_lng: 5, location_address: 6, location_data_fetched_at: 7 };
+            if (locationOrderMap[f.fieldKey]) div.style.order = String(locationOrderMap[f.fieldKey]);
           }
           const isClientEnteredLandField = sectionKey === 'land_croquis' && TENANT_CLIENT_ENTERED_LAND_FIELDS.has(f.fieldKey);
           if (isClientEnteredLandField) div.classList.add('tenant-client-required-field');
@@ -818,7 +822,7 @@
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'btn ghost';
-            btn.textContent = 'تحليل رابط الموقع';
+            btn.textContent = 'تحليل الموقع بالذكاء الاصطناعي';
             btn.style.marginTop = '8px';
             btn.onclick = () => analyzeTenantSite();
             div.appendChild(btn);

@@ -62,6 +62,15 @@ class TestLocationMapsUI(unittest.TestCase):
         self.assertIn("(locationTablesCard || sectionDiv).appendChild(createLocationTableField", js_source)
         self.assertIn("(locationMapsCard || locationSection || form).appendChild(previewDiv)", js_source)
 
+        # Verify maps is the LAST card appended (after tables)
+        tables_idx = js_source.index("sectionDiv.appendChild(cardTables);")
+        maps_idx = js_source.index("sectionDiv.appendChild(cardMaps);")
+        self.assertLess(tables_idx, maps_idx, "cardTables must come before cardMaps; maps must be last")
+
+        # Verify location field order places site data before AI site analysis
+        self.assertIn("locationOrderMap", js_source)
+        self.assertIn("تحليل الموقع بالذكاء الاصطناعي", js_source)
+
     def test_brand_palette_and_no_legacy_p_in_location_css(self):
         """Ensure Landloom brand colors (Navy #07182C, Teal #17C8E3 / #0FA9C4) and ZERO var(--p)."""
         css = self._read_file('assets/css/project-form/01a_location_maps.css')
